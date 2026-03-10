@@ -54,9 +54,11 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: open-leaks-secrets
-                  key: OPENAI_API_KEY
+                  key: LITELLM_API_KEY
             - name: LLM_PROVIDER
               value: openai
+            - name: LLM_BASE_URL
+              value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
           resources:
             requests:
               cpu: 100m
