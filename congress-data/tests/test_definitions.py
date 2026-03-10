@@ -5,7 +5,7 @@ from congress_data import defs
 
 def test_definitions_load():
     """Verify all 8 assets are registered."""
-    assets = list(defs.get_asset_graph().all_asset_keys)
+    assets = list(defs.resolve_asset_graph().get_all_asset_keys())
     assert len(assets) == 8
 
 

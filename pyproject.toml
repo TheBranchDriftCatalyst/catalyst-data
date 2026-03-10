@@ -10,3 +10,4 @@ test = ["pytest>=8.0", "pytest-cov", "dagster>=1.9", "pydantic>=2.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "congress-data/tests", "media-ingest/tests", "open-leaks/tests"]
+addopts = "--import-mode=importlib"

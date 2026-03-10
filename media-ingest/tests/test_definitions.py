@@ -5,7 +5,7 @@ from media_ingest import defs
 
 def test_definitions_load():
     """Verify all 5 assets are registered."""
-    assets = list(defs.get_asset_graph().all_asset_keys)
+    assets = list(defs.resolve_asset_graph().get_all_asset_keys())
     assert len(assets) == 5
 
 
