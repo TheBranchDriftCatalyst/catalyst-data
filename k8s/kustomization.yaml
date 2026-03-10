@@ -1,0 +1,31 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: catalyst-data
+
+resources:
+  # Namespace
+  - namespace.yaml
+  # Secrets (consolidated — one set for entire namespace)
+  - secrets/externalsecret-s3.yaml
+  - secrets/externalsecret-congress.yaml
+  - secrets/externalsecret-openai.yaml
+  # Storage
+  - storage/nfs-media-volumes.yaml
+  # Platform (webserver, daemon, postgres)
+  - platform/rbac.yaml
+  - platform/pvc.yaml
+  - platform/postgres.yaml
+  - platform/dagster-instance.yaml
+  - platform/workspace.yaml
+  - platform/deployment.yaml
+  - platform/service.yaml
+  - platform/ingressroute.yaml
+  # Code locations
+  - congress-data/deployment.yaml
+  - congress-data/service.yaml
+  - media-ingest/deployment.yaml
+  - media-ingest/service.yaml
+  - open-leaks/deployment.yaml
+  - open-leaks/service.yaml

@@ -1,0 +1,75 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-instance
+  labels:
+    app: dagster
+    app.kubernetes.io/name: dagster
+data:
+  dagster.yaml: |
+    storage:
+      postgres:
+        postgres_db:
+          username:
+            env: DAGSTER_POSTGRES_USER
+          password:
+            env: DAGSTER_POSTGRES_PASSWORD
+          hostname:
+            env: DAGSTER_POSTGRES_HOST
+          db_name:
+            env: DAGSTER_POSTGRES_DB
+          port:
+            env: DAGSTER_POSTGRES_PORT
+
+    run_coordinator:
+      module: dagster.core.run_coordinator
+      class: QueuedRunCoordinator
+      config:
+        max_concurrent_runs: 5
+
+    run_launcher:
+      module: dagster_k8s
+      class: K8sRunLauncher
+      config:
+        instance_config_map: dagster-instance
+        service_account_name: dagster
+        load_incluster_config: true
+        job_namespace: catalyst-data
+        run_k8s_config:
+          container_config:
+            env:
+              - name: DAGSTER_POSTGRES_HOST
+                value: dagster-postgres.catalyst-data.svc.cluster.local
+              - name: DAGSTER_POSTGRES_PORT
+                value: "5432"
+              - name: DAGSTER_POSTGRES_USER
+                value: dagster
+              - name: DAGSTER_POSTGRES_PASSWORD
+                value: dagster-homelab
+              - name: DAGSTER_POSTGRES_DB
+                value: dagster
+            envFrom:
+              - secretRef:
+                  name: dagster-s3-credentials
+            volume_mounts:
+              - name: metube-downloads
+                mountPath: /data/metube
+                readOnly: true
+              - name: tubesync-downloads
+                mountPath: /data/tubesync
+                readOnly: true
+          pod_spec_config:
+            service_account_name: dagster
+            volumes:
+              - name: metube-downloads
+                persistentVolumeClaim:
+                  claimName: metube-downloads
+              - name: tubesync-downloads
+                persistentVolumeClaim:
+                  claimName: tubesync-downloads
+          job_spec_config:
+            ttl_seconds_after_finished: 3600
+
+    telemetry:
+      enabled: false

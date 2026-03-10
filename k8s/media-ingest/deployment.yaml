@@ -1,0 +1,83 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: media-ingest
+  labels:
+    app: media-ingest
+    app.kubernetes.io/name: media-ingest
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: media-ingest
+  template:
+    metadata:
+      labels:
+        app: media-ingest
+        app.kubernetes.io/name: media-ingest
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: code-server
+          image: ghcr.io/thebranchdriftcatalyst/media-ingest:latest
+          ports:
+            - name: grpc
+              containerPort: 4000
+              protocol: TCP
+          env:
+            - name: DAGSTER_CURRENT_IMAGE
+              value: ghcr.io/thebranchdriftcatalyst/media-ingest:latest
+            - name: DAGSTER_S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_ENDPOINT_URL
+            - name: DAGSTER_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_ACCESS_KEY
+            - name: DAGSTER_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_SECRET_KEY
+            - name: DAGSTER_S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_BUCKET
+          volumeMounts:
+            - name: metube-downloads
+              mountPath: /data/metube
+              readOnly: true
+            - name: tubesync-downloads
+              mountPath: /data/tubesync
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: metube-downloads
+          persistentVolumeClaim:
+            claimName: metube-downloads
+        - name: tubesync-downloads
+          persistentVolumeClaim:
+            claimName: tubesync-downloads

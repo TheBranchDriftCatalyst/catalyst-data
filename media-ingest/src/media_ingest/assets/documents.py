@@ -1,0 +1,65 @@
+"""Stage 3: Transform media metadata into Document objects."""
+
+import os
+from typing import Any
+
+from dagster import AssetExecutionContext, MetadataValue, Output, asset
+from pydantic import BaseModel, Field
+
+
+class MediaDocument(BaseModel):
+    """Document model for media files."""
+
+    id: str = Field(description="Unique document identifier")
+    title: str = Field(description="Filename-derived title")
+    source_path: str = Field(description="Original file path")
+    source: str = Field(description="Source directory (metube/tubesync)")
+    document_type: str = Field(default="media_file")
+    domain: str = Field(default="media_ingest")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def _file_to_document(file_info: dict[str, Any]) -> MediaDocument:
+    """Convert enriched file info to a MediaDocument."""
+    filename = file_info["filename"]
+    title = os.path.splitext(filename)[0]
+    source = "metube" if "metube" in file_info["source_dir"] else "tubesync"
+
+    return MediaDocument(
+        id=f"media-{source}-{title}",
+        title=title,
+        source_path=file_info["path"],
+        source=source,
+        metadata={
+            "extension": file_info["extension"],
+            "size_bytes": file_info["size_bytes"],
+            **file_info.get("metadata", {}),
+        },
+    )
+
+
+@asset(
+    group_name="media_ingest",
+    description="Transform media metadata into Document objects",
+    compute_kind="transform",
+    metadata={"layer": "silver"},
+)
+def media_documents(
+    context: AssetExecutionContext,
+    media_metadata: list[dict[str, Any]],
+) -> Output[list[MediaDocument]]:
+    documents = [_file_to_document(f) for f in media_metadata]
+
+    by_source: dict[str, int] = {}
+    for doc in documents:
+        by_source[doc.source] = by_source.get(doc.source, 0) + 1
+
+    context.log.info(f"Produced {len(documents)} documents")
+
+    return Output(
+        documents,
+        metadata={
+            "total_documents": len(documents),
+            "by_source": MetadataValue.json(by_source),
+        },
+    )

@@ -1,0 +1,17 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: congress-data
+  labels:
+    app: congress-data
+    app.kubernetes.io/name: congress-data
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: 4000
+      targetPort: grpc
+      protocol: TCP
+  selector:
+    app: congress-data

@@ -1,0 +1,76 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-leaks
+  labels:
+    app: open-leaks
+    app.kubernetes.io/name: open-leaks
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: open-leaks
+  template:
+    metadata:
+      labels:
+        app: open-leaks
+        app.kubernetes.io/name: open-leaks
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: code-server
+          image: ghcr.io/thebranchdriftcatalyst/open-leaks:latest
+          ports:
+            - name: grpc
+              containerPort: 4000
+              protocol: TCP
+          env:
+            - name: DAGSTER_CURRENT_IMAGE
+              value: ghcr.io/thebranchdriftcatalyst/open-leaks:latest
+            - name: DAGSTER_S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_ENDPOINT_URL
+            - name: DAGSTER_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_ACCESS_KEY
+            - name: DAGSTER_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_SECRET_KEY
+            - name: DAGSTER_S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_BUCKET
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: open-leaks-secrets
+                  key: OPENAI_API_KEY
+            - name: LLM_PROVIDER
+              value: openai
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 30
+            periodSeconds: 30

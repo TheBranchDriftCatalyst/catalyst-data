@@ -1,0 +1,67 @@
+---
+# NFS PV/PVCs for media file access (metube + tubesync downloads)
+# Single set in catalyst-data namespace — used by both media-ingest code server
+# and K8sRunLauncher jobs via dagster-instance.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: catalyst-data-metube-downloads
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadOnlyMany
+  nfs:
+    server: 192.168.1.36
+    path: /volume1/appdata/downloads/metube-downloads
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+    - noatime
+    - nodiratime
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: metube-downloads
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  volumeName: catalyst-data-metube-downloads
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: catalyst-data-tubesync-downloads
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadOnlyMany
+  nfs:
+    server: 192.168.1.36
+    path: /volume1/appdata/downloads/tubesync-downloads
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+    - noatime
+    - nodiratime
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tubesync-downloads
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  volumeName: catalyst-data-tubesync-downloads
+  resources:
+    requests:
+      storage: 10Gi

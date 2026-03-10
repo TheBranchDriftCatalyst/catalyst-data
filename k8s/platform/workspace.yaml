@@ -1,0 +1,23 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-workspace
+  labels:
+    app: dagster
+    app.kubernetes.io/name: dagster
+data:
+  workspace.yaml: |
+    load_from:
+      - grpc_server:
+          host: congress-data.catalyst-data.svc.cluster.local
+          port: 4000
+          location_name: congress_data
+      - grpc_server:
+          host: media-ingest.catalyst-data.svc.cluster.local
+          port: 4000
+          location_name: media_ingest
+      - grpc_server:
+          host: open-leaks.catalyst-data.svc.cluster.local
+          port: 4000
+          location_name: open_leaks

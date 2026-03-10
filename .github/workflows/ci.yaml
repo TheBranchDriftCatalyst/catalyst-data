@@ -1,0 +1,34 @@
+name: Catalyst Data CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install -e dagster-io
+          pip install -e congress-data
+          pip install -e media-ingest
+          pip install -e open-leaks
+          pip install pytest pytest-cov
+      - run: pytest --tb=short
+
+  build:
+    needs: test
+    strategy:
+      matrix:
+        app: [congress-data, media-ingest, open-leaks]
+    uses: ./.github/workflows/build-image.yaml
+    with:
+      app: ${{ matrix.app }}
+    permissions:
+      contents: read
+      packages: write

@@ -1,0 +1,7 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: catalyst-data
+  labels:
+    app.kubernetes.io/part-of: catalyst-data

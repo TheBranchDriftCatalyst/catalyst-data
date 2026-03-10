@@ -1,0 +1,17 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-leaks
+  labels:
+    app: open-leaks
+    app.kubernetes.io/name: open-leaks
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: 4000
+      targetPort: grpc
+      protocol: TCP
+  selector:
+    app: open-leaks

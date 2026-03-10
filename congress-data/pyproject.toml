@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "congress-data"
+version = "0.1.0"
+description = "Congress.gov data pipeline — Dagster code location"
+requires-python = ">=3.12"
+dependencies = [
+    "dagster>=1.9",
+    "dagster-k8s>=0.25",
+    "dagster-postgres>=0.25",
+    "dagster-io",
+    "pydantic>=2.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "dagster-webserver>=1.9",
+    "pytest>=8.0",
+    "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/congress_data"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
