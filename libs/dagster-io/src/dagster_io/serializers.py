@@ -109,19 +109,41 @@ def _extract_schema(obj: Any) -> dict:
     return {}
 
 
-def deserialize(payload: bytes, extension: str, metadata: dict) -> Any:
+def deserialize(payload: bytes, extension: str, metadata: dict, type_hint: type | None = None) -> Any:
     """Deserialize bytes back to Python objects.
 
     JSONL -> list[dict], JSON -> dict, Pickle -> original type.
+    When type_hint is provided and indicates Pydantic models, dicts are
+    reconstructed into the expected model class.
     """
     fmt = metadata.get("format", extension.lstrip("."))
 
     if fmt == "jsonl":
         lines = payload.decode("utf-8").strip().split("\n")
-        return [json.loads(line) for line in lines if line]
+        items = [json.loads(line) for line in lines if line]
+
+        # Reconstruct Pydantic models if the input type hint says so
+        model_cls = _get_list_item_type(type_hint)
+        if model_cls and _is_pydantic_model(model_cls):
+            return [model_cls.model_validate(item) if isinstance(item, dict) else item for item in items]
+        return items
 
     if fmt == "json":
-        return json.loads(payload.decode("utf-8"))
+        data = json.loads(payload.decode("utf-8"))
+        if type_hint and _is_pydantic_model(type_hint) and isinstance(data, dict):
+            return type_hint.model_validate(data)
+        return data
 
     # Pickle
     return pickle.loads(payload)  # noqa: S301
+
+
+def _get_list_item_type(tp: type | None) -> type | None:
+    """Extract the item type from list[X] type hints."""
+    if tp is None:
+        return None
+    origin = typing.get_origin(tp)
+    if origin is list:
+        args = typing.get_args(tp)
+        return args[0] if args else None
+    return None

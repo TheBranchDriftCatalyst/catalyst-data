@@ -148,6 +148,15 @@ class MinioIOManager(ConfigurableIOManager):
             }
         )
 
+    def _get_input_type_hint(self, context: InputContext) -> type | None:
+        try:
+            th = context.dagster_type.typing_type
+            if th is typing.Any:
+                return None
+            return th
+        except Exception:
+            return None
+
     def _load_single(
         self, context: InputContext, partition_key=None
     ) -> typing.Any:
@@ -156,7 +165,8 @@ class MinioIOManager(ConfigurableIOManager):
         metadata = json.loads(meta_bytes)
         ext = "." + metadata["format"]
         payload = self.client.get_object(f"{prefix}/data{ext}")
-        return deserialize(payload, ext, metadata)
+        type_hint = self._get_input_type_hint(context)
+        return deserialize(payload, ext, metadata, type_hint=type_hint)
 
     def load_input(self, context: InputContext) -> typing.Any:
         if context.has_asset_partitions:
