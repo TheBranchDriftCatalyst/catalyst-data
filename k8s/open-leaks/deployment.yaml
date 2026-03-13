@@ -50,14 +50,19 @@ spec:
                 secretKeyRef:
                   name: dagster-s3-credentials
                   key: DAGSTER_S3_BUCKET
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-credentials
+                  key: LLM_API_KEY
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: open-leaks-secrets
-                  key: LITELLM_API_KEY
-            - name: LLM_PROVIDER
-              value: openai
+                  name: llm-credentials
+                  key: LLM_API_KEY
             - name: LLM_BASE_URL
+              value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+            - name: EMBEDDING_BASE_URL
               value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
           resources:
             requests:

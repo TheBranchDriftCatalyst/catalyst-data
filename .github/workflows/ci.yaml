@@ -14,10 +14,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: |
-          pip install -e dagster-io
-          pip install -e congress-data
-          pip install -e media-ingest
-          pip install -e open-leaks
+          pip install -e libs/dagster-io
+          pip install -e packages/congress-data
+          pip install -e packages/media-ingest
+          pip install -e packages/open-leaks
           pip install pytest pytest-cov
       - run: pytest --tb=short
 

@@ -49,9 +49,20 @@ data:
                 value: dagster-homelab
               - name: DAGSTER_POSTGRES_DB
                 value: dagster
+              - name: LLM_BASE_URL
+                value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+              - name: EMBEDDING_BASE_URL
+                value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+              - name: OPENAI_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: llm-credentials
+                    key: LLM_API_KEY
             envFrom:
               - secretRef:
                   name: dagster-s3-credentials
+              - secretRef:
+                  name: llm-credentials
             volume_mounts:
               - name: metube-downloads
                 mountPath: /data/metube

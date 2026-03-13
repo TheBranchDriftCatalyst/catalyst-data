@@ -10,7 +10,7 @@ resources:
   # Secrets (consolidated — one set for entire namespace)
   - secrets/externalsecret-s3.yaml
   - secrets/externalsecret-congress.yaml
-  - secrets/externalsecret-openai.yaml
+  - secrets/externalsecret-llm.yaml
   # Storage
   - storage/nfs-media-volumes.yaml
   # Platform (webserver, daemon, postgres)

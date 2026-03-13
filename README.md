@@ -14,23 +14,23 @@ Dagster data platform for the catalyst homelab. Three code locations processing 
 
 ```bash
 # Install all packages
-pip install -e dagster-io -e congress-data -e media-ingest -e open-leaks
+pip install -e libs/dagster-io -e packages/congress-data -e packages/media-ingest -e packages/open-leaks
 
 # Run tests
 pip install pytest
 pytest
 
 # Run Dagster dev UI (pick a code location)
-cd congress-data && dagster dev -m congress_data
+cd packages/congress-data && dagster dev -m congress_data
 ```
 
 ## Docker Build
 
 ```bash
 # Build context is repo root (Dockerfiles reference sibling dirs)
-docker build -f congress-data/Dockerfile -t congress-data:latest .
-docker build -f media-ingest/Dockerfile -t media-ingest:latest .
-docker build -f open-leaks/Dockerfile -t open-leaks:latest .
+docker build -f packages/congress-data/Dockerfile -t congress-data:latest .
+docker build -f packages/media-ingest/Dockerfile -t media-ingest:latest .
+docker build -f packages/open-leaks/Dockerfile -t open-leaks:latest .
 ```
 
 ## K8s Deployment
