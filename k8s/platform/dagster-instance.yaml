@@ -38,6 +38,7 @@ data:
         job_namespace: catalyst-data
         run_k8s_config:
           container_config:
+            image_pull_policy: Always
             env:
               - name: DAGSTER_POSTGRES_HOST
                 value: dagster-postgres.catalyst-data.svc.cluster.local
