@@ -8,8 +8,10 @@ import streamlit as st
 
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
+from data_explorer.streamlit.theme import apply_theme, get_plotly_template
 
 st.set_page_config(page_title="Entity Viewer", page_icon=":material/hub:", layout="wide")
+apply_theme()
 st.header("Entity & Proposition Viewer")
 
 
@@ -137,20 +139,24 @@ with tab_graph:
                         edge_x.extend([node_x[s], node_x[o], None])
                         edge_y.extend([node_y[s], node_y[o], None])
 
+                tmpl = get_plotly_template()["layout"]
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=edge_x, y=edge_y, mode="lines",
-                    line=dict(width=0.5, color="#888"), hoverinfo="none",
+                    line=dict(width=0.5, color="#27272a"), hoverinfo="none",
                 ))
                 fig.add_trace(go.Scatter(
                     x=node_x, y=node_y, mode="markers+text",
                     text=[str(n)[:20] for n in nodes],
                     textposition="top center",
-                    marker=dict(size=8, color="#1f77b4"),
+                    textfont=dict(color="#a1a1aa", size=9, family="Space Mono, monospace"),
+                    marker=dict(size=8, color="#00fcd6"),
                     hovertext=nodes,
                 ))
                 fig.update_layout(
                     showlegend=False, height=600,
+                    paper_bgcolor=tmpl["paper_bgcolor"],
+                    plot_bgcolor=tmpl["plot_bgcolor"],
                     xaxis=dict(visible=False), yaxis=dict(visible=False),
                     margin=dict(t=20, b=20, l=20, r=20),
                 )

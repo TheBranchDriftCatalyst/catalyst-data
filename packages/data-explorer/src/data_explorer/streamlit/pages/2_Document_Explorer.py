@@ -7,8 +7,10 @@ import streamlit as st
 
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
+from data_explorer.streamlit.theme import apply_theme
 
 st.set_page_config(page_title="Document Explorer", page_icon=":material/description:", layout="wide")
+apply_theme()
 st.header("Document Explorer")
 
 

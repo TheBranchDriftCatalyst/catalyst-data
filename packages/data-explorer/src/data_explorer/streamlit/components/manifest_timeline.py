@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import plotly.express as px
+import plotly.io as pio
 import streamlit as st
 from dagster_io.manifest import AssetManifest
+
+from data_explorer.streamlit.theme import get_plotly_template
 
 
 def render_manifest_timeline(manifest: AssetManifest) -> None:
@@ -36,7 +39,7 @@ def render_manifest_timeline(manifest: AssetManifest) -> None:
         title=f"Materializations — {manifest.asset}",
         labels={"timestamp": "Time", "count": "Row Count", "size_mb": "Size (MB)"},
     )
-    fig.update_layout(height=350, margin=dict(t=40, b=20))
+    fig.update_layout(height=350, margin=dict(t=40, b=20), **get_plotly_template()["layout"])
     st.plotly_chart(fig, use_container_width=True)
 
     with st.expander(f"History ({len(records)} records)"):

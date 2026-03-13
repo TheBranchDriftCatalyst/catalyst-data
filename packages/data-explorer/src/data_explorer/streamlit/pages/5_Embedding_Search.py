@@ -10,8 +10,10 @@ from openai import OpenAI
 
 from data_explorer.streamlit.config import get_llm_config, get_s3_config
 from data_explorer.streamlit.data_client import DataClient
+from data_explorer.streamlit.theme import apply_theme, get_plotly_template
 
 st.set_page_config(page_title="Embedding Search", page_icon=":material/search:", layout="wide")
+apply_theme()
 st.header("Embedding Search")
 
 
@@ -127,8 +129,9 @@ if query:
                         "PC2": projected[:, 1],
                         "label": labels,
                     })
-                    fig = px.scatter(viz_df, x="PC1", y="PC2", hover_data=["label"], title="Embedding Space (PCA)")
-                    fig.update_layout(height=500)
+                    fig = px.scatter(viz_df, x="PC1", y="PC2", hover_data=["label"], title="Embedding Space (PCA)",
+                                     color_discrete_sequence=["#00fcd6", "#c026d3", "#ff6ec7", "#00d4ff"])
+                    fig.update_layout(height=500, **get_plotly_template()["layout"])
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.warning("Not enough embeddings for visualization.")

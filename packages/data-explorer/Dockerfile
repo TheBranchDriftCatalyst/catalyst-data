@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir /tmp/dagster-io/ && rm -rf /tmp/dagster-io/
 
 COPY packages/data-explorer/pyproject.toml .
 COPY packages/data-explorer/src/ src/
+COPY packages/data-explorer/.streamlit/ .streamlit/
 RUN pip install --no-cache-dir .
 
 EXPOSE 8501

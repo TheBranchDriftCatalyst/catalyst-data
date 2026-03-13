@@ -10,8 +10,10 @@ import streamlit as st
 
 from data_explorer.streamlit.config import get_media_config, get_s3_config
 from data_explorer.streamlit.data_client import DataClient
+from data_explorer.streamlit.theme import apply_theme
 
 st.set_page_config(page_title="Media Player", page_icon=":material/play_circle:", layout="wide")
+apply_theme()
 st.header("Media Player")
 
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mkv", ".avi"}

@@ -6,6 +6,7 @@ import streamlit as st
 
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
+from data_explorer.streamlit.theme import apply_theme
 
 st.set_page_config(
     page_title="Data Explorer",
@@ -13,6 +14,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+apply_theme()
 
 
 @st.cache_resource

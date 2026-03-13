@@ -10,8 +10,10 @@ from data_explorer.streamlit.components.manifest_timeline import render_manifest
 from data_explorer.streamlit.components.metadata_panel import render_metadata_panel
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
+from data_explorer.streamlit.theme import apply_theme
 
 st.set_page_config(page_title="Asset Browser", page_icon=":material/folder_open:", layout="wide")
+apply_theme()
 st.header("Asset Browser")
 
 
