@@ -323,7 +323,7 @@ def _fetch_epstein_api(
                         title=item.get("title", item.get("slug", "")),
                         case_number=item.get("case_number", ""),
                         document_type=item.get("document_type", ""),
-                        date_filed=item.get("document_date", ""),
+                        date_filed=item.get("document_date") or "",
                         content=item.get("excerpt", ""),
                         page_count=int(item.get("page_count", 0) or 0),
                         source_url=item.get("source_url", item.get("file_url", None)),

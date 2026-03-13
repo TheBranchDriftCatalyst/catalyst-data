@@ -74,6 +74,8 @@ data:
                 readOnly: true
           pod_spec_config:
             service_account_name: dagster
+            image_pull_secrets:
+              - name: ghcr-secret
             volumes:
               - name: metube-downloads
                 persistentVolumeClaim:
