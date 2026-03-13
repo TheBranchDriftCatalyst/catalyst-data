@@ -99,7 +99,7 @@ class Member(BaseEntity):
             last_name=data.get("lastName"),
             party=data.get("partyName", "")[:1] if data.get("partyName") else None,
             state=data.get("state"),
-            district=data.get("district"),
+            district=str(data["district"]) if data.get("district") is not None else None,
             chamber=current_term.get("chamber"),
             terms_served=len(terms),
             current_term_start=_parse_year(current_term.get("startYear"), 1, 1),
