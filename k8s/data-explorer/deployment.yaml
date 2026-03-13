@@ -1,0 +1,97 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-explorer
+  labels:
+    app: data-explorer
+    app.kubernetes.io/name: data-explorer
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-explorer
+  template:
+    metadata:
+      labels:
+        app: data-explorer
+        app.kubernetes.io/name: data-explorer
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: streamlit
+          image: ghcr.io/thebranchdriftcatalyst/data-explorer:latest
+          ports:
+            - name: http
+              containerPort: 8501
+              protocol: TCP
+          env:
+            - name: DAGSTER_S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_ENDPOINT_URL
+            - name: DAGSTER_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_ACCESS_KEY
+            - name: DAGSTER_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_SECRET_KEY
+            - name: DAGSTER_S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_BUCKET
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-credentials
+                  key: LLM_API_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-credentials
+                  key: LLM_API_KEY
+            - name: LLM_BASE_URL
+              value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+            - name: EMBEDDING_BASE_URL
+              value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+          volumeMounts:
+            - name: metube-downloads
+              mountPath: /data/metube
+              readOnly: true
+            - name: tubesync-downloads
+              mountPath: /data/tubesync
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: metube-downloads
+          persistentVolumeClaim:
+            claimName: metube-downloads
+        - name: tubesync-downloads
+          persistentVolumeClaim:
+            claimName: tubesync-downloads

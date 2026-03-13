@@ -42,6 +42,14 @@ class S3Client:
         resp = self._client.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
         return [obj["Key"] for obj in resp.get("Contents", [])]
 
+    def list_all_objects(self, prefix: str) -> list[str]:
+        """Paginated listing that returns all keys under a prefix."""
+        paginator = self._client.get_paginator("list_objects_v2")
+        keys: list[str] = []
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            keys.extend(obj["Key"] for obj in page.get("Contents", []))
+        return keys
+
     def head_object(self, key: str) -> dict | None:
         try:
             return self._client.head_object(Bucket=self.bucket, Key=key)

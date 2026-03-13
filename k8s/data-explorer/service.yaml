@@ -1,0 +1,17 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-explorer
+  labels:
+    app: data-explorer
+    app.kubernetes.io/name: data-explorer
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8501
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: data-explorer

@@ -29,3 +29,7 @@ resources:
   - media-ingest/service.yaml
   - open-leaks/deployment.yaml
   - open-leaks/service.yaml
+  # Data Explorer (Streamlit UI)
+  - data-explorer/deployment.yaml
+  - data-explorer/service.yaml
+  - data-explorer/ingressroute.yaml

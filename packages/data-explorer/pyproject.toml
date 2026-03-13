@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "data-explorer"
+version = "0.1.0"
+description = "Streamlit data asset viewer for catalyst-data pipelines"
+requires-python = ">=3.12"
+dependencies = [
+    "dagster-io",
+    "streamlit>=1.40",
+    "pandas>=2.0",
+    "plotly>=5.0",
+    "numpy>=1.26",
+    "openai>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/data_explorer"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
