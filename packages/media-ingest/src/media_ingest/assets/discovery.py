@@ -17,8 +17,8 @@ NFS_VOLUMES_CONFIG = {
         },
         "pod_spec_config": {
             "volumes": [
-                {"name": "metube-downloads", "persistentVolumeClaim": {"claimName": "media-ingest-metube-downloads"}},
-                {"name": "tubesync-downloads", "persistentVolumeClaim": {"claimName": "media-ingest-tubesync-downloads"}},
+                {"name": "metube-downloads", "persistentVolumeClaim": {"claimName": "metube-downloads"}},
+                {"name": "tubesync-downloads", "persistentVolumeClaim": {"claimName": "tubesync-downloads"}},
             ]
         },
     }

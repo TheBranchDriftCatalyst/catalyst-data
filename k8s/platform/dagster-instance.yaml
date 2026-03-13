@@ -63,6 +63,8 @@ data:
                   name: dagster-s3-credentials
               - secretRef:
                   name: llm-credentials
+              - secretRef:
+                  name: congress-data-secrets
             volume_mounts:
               - name: metube-downloads
                 mountPath: /data/metube
