@@ -14,20 +14,21 @@ from knowledge_graph.resources import GraphDBResource
 # The assets module does not import from __init__
 
 # Source assets from other code locations (gold layer inputs)
+# Keys must match the actual asset keys in their respective code locations
 _congress_entity_candidates = SourceAsset(
-    key=["congress", "congress_entity_candidates"],
+    key="congress_entity_candidates",
     description="Entity candidates from congress_data code location",
 )
 _leak_entity_candidates = SourceAsset(
-    key=["leaks", "leak_entity_candidates"],
+    key="leak_entity_candidates",
     description="Entity candidates from open_leaks code location",
 )
 _congress_assertions = SourceAsset(
-    key=["congress", "congress_assertions"],
+    key="congress_assertions",
     description="Assertions from congress_data code location",
 )
 _leak_assertions = SourceAsset(
-    key=["leaks", "leak_assertions"],
+    key="leak_assertions",
     description="Assertions from open_leaks code location",
 )
 
