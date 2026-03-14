@@ -20,6 +20,7 @@ class MaterializationRecord(BaseModel):
     count: int
     size_bytes: int
     config_key: str | None = None
+    content_hash: str | None = None
 
 
 class AssetManifest(BaseModel):
@@ -69,6 +70,7 @@ def make_record(
     size_bytes: int,
     partition: str | None = None,
     config_key: str | None = None,
+    content_hash: str | None = None,
 ) -> MaterializationRecord:
     return MaterializationRecord(
         run_id=run_id,
@@ -78,4 +80,5 @@ def make_record(
         count=count,
         size_bytes=size_bytes,
         config_key=config_key,
+        content_hash=content_hash,
     )

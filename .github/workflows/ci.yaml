@@ -18,6 +18,7 @@ jobs:
           pip install -e packages/congress-data
           pip install -e packages/media-ingest
           pip install -e packages/open-leaks
+          pip install -e packages/knowledge-graph
           pip install -e packages/data-explorer
           pip install pytest pytest-cov
       - run: pytest --tb=short
@@ -26,7 +27,7 @@ jobs:
     needs: test
     strategy:
       matrix:
-        app: [congress-data, media-ingest, open-leaks, data-explorer]
+        app: [congress-data, media-ingest, open-leaks, knowledge-graph, data-explorer]
     uses: ./.github/workflows/build-image.yaml
     with:
       app: ${{ matrix.app }}

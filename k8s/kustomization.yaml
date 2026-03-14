@@ -22,6 +22,9 @@ resources:
   - platform/deployment.yaml
   - platform/service.yaml
   - platform/ingressroute.yaml
+  # Knowledge graph infrastructure
+  - platform/postgres-knowledge.yaml
+  - platform/neo4j.yaml
   # Code locations
   - congress-data/deployment.yaml
   - congress-data/service.yaml
@@ -29,6 +32,8 @@ resources:
   - media-ingest/service.yaml
   - open-leaks/deployment.yaml
   - open-leaks/service.yaml
+  - knowledge-graph/deployment.yaml
+  - knowledge-graph/service.yaml
   # Data Explorer (Streamlit UI)
   - data-explorer/deployment.yaml
   - data-explorer/service.yaml

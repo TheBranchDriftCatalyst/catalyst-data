@@ -1,0 +1,100 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knowledge-graph
+  labels:
+    app: knowledge-graph
+    app.kubernetes.io/name: knowledge-graph
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: knowledge-graph
+  template:
+    metadata:
+      labels:
+        app: knowledge-graph
+        app.kubernetes.io/name: knowledge-graph
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: code-server
+          image: ghcr.io/thebranchdriftcatalyst/knowledge-graph:latest
+          ports:
+            - name: grpc
+              containerPort: 4000
+              protocol: TCP
+          env:
+            - name: DAGSTER_CURRENT_IMAGE
+              value: ghcr.io/thebranchdriftcatalyst/knowledge-graph:latest
+            - name: DAGSTER_S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_ENDPOINT_URL
+            - name: DAGSTER_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_ACCESS_KEY
+            - name: DAGSTER_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_SECRET_KEY
+            - name: DAGSTER_S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_BUCKET
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-credentials
+                  key: LLM_API_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-credentials
+                  key: LLM_API_KEY
+            - name: LLM_BASE_URL
+              value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+            - name: EMBEDDING_BASE_URL
+              value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+            # Knowledge graph database connections
+            - name: KG_PG_HOST
+              value: postgres-knowledge.catalyst-data.svc.cluster.local
+            - name: KG_PG_PORT
+              value: "5432"
+            - name: KG_PG_DATABASE
+              value: knowledge_graph
+            - name: KG_PG_USER
+              value: kg
+            - name: KG_PG_PASSWORD
+              value: kg-homelab
+            - name: NEO4J_URI
+              value: bolt://neo4j.catalyst-data.svc.cluster.local:7687
+            - name: NEO4J_USER
+              value: neo4j
+            - name: NEO4J_PASSWORD
+              value: neo4j-homelab
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 30
+            periodSeconds: 30

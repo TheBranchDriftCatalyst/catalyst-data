@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import typing
@@ -127,6 +128,25 @@ class MinioIOManager(ConfigurableIOManager):
         type_hint = self._get_type_hint(context)
         payload, ext, ser_meta = serialize(obj, type_hint)
 
+        # Content-hash dedup: skip write if payload unchanged from last materialization
+        payload_hash = hashlib.sha256(payload).hexdigest()
+        asset_root = build_asset_root(context, config_key=config_key)
+        manifest_key = f"{asset_root}/_manifest.json"
+        layer = asset_root.split("/")[0]
+        code_location = asset_root.split("/")[1] if "/" in asset_root else "unknown"
+        asset_name = context.asset_key.to_user_string()
+
+        manifest = load_or_create_manifest(
+            self.client.get_object, manifest_key, asset_name, code_location, layer
+        )
+        if (
+            manifest.materializations
+            and manifest.materializations[-1].content_hash == payload_hash
+        ):
+            context.log.info("Content unchanged (hash=%s) — skipping write", payload_hash[:12])
+            context.add_output_metadata({"skipped": True, "reason": "content_unchanged"})
+            return
+
         # Write data (overwrite in place — MinIO versioning preserves history)
         data_key = f"{prefix}/data{ext}"
         self.client.put_object(data_key, payload)
@@ -142,16 +162,7 @@ class MinioIOManager(ConfigurableIOManager):
             json.dumps(metadata, indent=2).encode("utf-8"),
         )
 
-        # Update manifest at asset root (config-aware)
-        asset_root = build_asset_root(context, config_key=config_key)
-        manifest_key = f"{asset_root}/_manifest.json"
-        layer = asset_root.split("/")[0]
-        code_location = asset_root.split("/")[1] if "/" in asset_root else "unknown"
-        asset_name = context.asset_key.to_user_string()
-
-        manifest = load_or_create_manifest(
-            self.client.get_object, manifest_key, asset_name, code_location, layer
-        )
+        # Update manifest at asset root (config-aware) — reuse already-loaded manifest
         partition_str = str(context.asset_partition_key) if context.has_asset_partitions else None
         record = make_record(
             run_id=context.run_id,
@@ -160,6 +171,7 @@ class MinioIOManager(ConfigurableIOManager):
             size_bytes=len(payload),
             partition=partition_str,
             config_key=config_key,
+            content_hash=payload_hash,
         )
         manifest.add_materialization(record)
         self.client.put_object(manifest_key, manifest.to_bytes())

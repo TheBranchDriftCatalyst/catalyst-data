@@ -4,9 +4,9 @@ from open_leaks import defs
 
 
 def test_definitions_load():
-    """Verify all 10 assets are registered."""
+    """Verify all 13 assets are registered (10 original + 3 EDC gold layer)."""
     assets = list(defs.resolve_asset_graph().get_all_asset_keys())
-    assert len(assets) == 10
+    assert len(assets) == 13
 
 
 def test_definitions_has_io_manager():

@@ -1,0 +1,155 @@
+"""Gold: Qualified assertion extraction via LLM — replaces flat propositions.
+
+Produces structured Assertion objects with qualifiers (time, location, condition),
+negation/hedging detection, and predicate normalization for leaked documents.
+"""
+
+from dagster import AssetExecutionContext, Output, asset
+from dagster_io import (
+    Assertion,
+    LLMResource,
+    Provenance,
+    TextChunk,
+)
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
+
+ASSERTION_SYSTEM_PROMPT = """\
+You are a knowledge-graph extraction system specialized in leaked documents analysis.
+Given a text chunk, extract qualified Subject-Predicate-Object assertions.
+
+Focus on factual, verifiable claims. Omit vague or opinion-based statements.
+
+For each assertion, provide:
+- subject: the entity performing or being described
+- predicate: the relationship or action (use normalized verb forms: "owns", "directs", "transfers_to", "registered_in", "associated_with", "reports_to", "finances")
+- object: the target entity or value
+- confidence: score 0-1 indicating how clearly the text supports this assertion
+- negated: true if the assertion is negated ("did not", "denied", "no evidence of")
+- hedged: true if the assertion is uncertain ("may", "could", "reportedly", "is believed to", "allegedly")
+- qualifiers: optional dict with keys:
+  - time: when this occurred (date, period)
+  - location: where (jurisdiction, country, embassy)
+  - condition: under what condition
+  - manner: how ("secretly", "through intermediaries")
+  - source_attribution: who says so ("according to cable", "per ICIJ records")
+
+Be precise with predicates. Prefer canonical forms over variations."""
+
+
+class QualifiedAssertion(BaseModel):
+    """A single qualified assertion extracted by the LLM."""
+
+    subject: str = Field(description="Entity performing or being described")
+    predicate: str = Field(description="Normalized relationship or action")
+    object: str = Field(description="Target entity or value")
+    confidence: float = Field(default=0.8, ge=0, le=1)
+    negated: bool = Field(default=False, description="Is this a negative assertion?")
+    hedged: bool = Field(default=False, description="Is this uncertain/hedged?")
+    qualifiers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Keys: time, location, condition, manner, source_attribution",
+    )
+
+
+class AssertionExtractionResult(BaseModel):
+    """Structured output from assertion extraction."""
+
+    assertions: list[QualifiedAssertion] = Field(default_factory=list)
+
+
+def _normalize_predicate(predicate: str) -> str:
+    """Basic predicate normalization for leaked documents domain."""
+    norm = predicate.lower().strip()
+    mappings = {
+        "is owned by": "owned_by",
+        "owns": "owns",
+        "directed": "directs",
+        "directs": "directs",
+        "transferred to": "transfers_to",
+        "transferred funds to": "transfers_to",
+        "is registered in": "registered_in",
+        "registered in": "registered_in",
+        "incorporated in": "registered_in",
+        "associated with": "associated_with",
+        "is associated with": "associated_with",
+        "linked to": "associated_with",
+        "reports to": "reports_to",
+        "financed": "finances",
+        "finances": "finances",
+        "funded": "finances",
+    }
+    return mappings.get(norm, norm)
+
+
+@asset(
+    group_name="leaks",
+    description="Extract qualified assertions from leak document chunks via LLM (EDC gold layer)",
+    compute_kind="llm",
+    metadata={"layer": "gold"},
+    op_tags={
+        "dagster-k8s/config": {
+            "container_config": {
+                "resources": {
+                    "requests": {"cpu": "500m", "memory": "2Gi"},
+                    "limits": {"cpu": "2", "memory": "4Gi"},
+                }
+            }
+        }
+    },
+)
+def leak_assertions(
+    context: AssetExecutionContext,
+    llm: LLMResource,
+    leak_chunks: list[TextChunk],
+) -> Output[list[Assertion]]:
+    chain = llm.with_structured_output(AssertionExtractionResult)
+    all_assertions: list[Assertion] = []
+
+    for i, chunk in enumerate(leak_chunks):
+        result: AssertionExtractionResult = chain.invoke([
+            SystemMessage(content=ASSERTION_SYSTEM_PROMPT),
+            HumanMessage(
+                content=f"Extract qualified assertions from this text:\n\n{chunk.text}"
+            ),
+        ])
+
+        for ext in result.assertions:
+            assertion = Assertion(
+                subject_text=ext.subject,
+                predicate=ext.predicate,
+                predicate_canonical=_normalize_predicate(ext.predicate),
+                object_text=ext.object,
+                qualifiers=ext.qualifiers,
+                confidence=ext.confidence,
+                negated=ext.negated,
+                hedged=ext.hedged,
+                provenance=Provenance(
+                    source_document_id=chunk.document_id,
+                    chunk_id=chunk.chunk_id,
+                    extraction_model=llm.model,
+                    confidence=ext.confidence,
+                    code_location="open_leaks",
+                ),
+            )
+            all_assertions.append(assertion)
+
+        if (i + 1) % 50 == 0:
+            context.log.info(
+                f"Processed {i + 1}/{len(leak_chunks)} chunks — {len(all_assertions)} assertions so far"
+            )
+
+    negated_count = sum(1 for a in all_assertions if a.negated)
+    hedged_count = sum(1 for a in all_assertions if a.hedged)
+    context.log.info(
+        f"Extracted {len(all_assertions)} assertions from {len(leak_chunks)} chunks "
+        f"({negated_count} negated, {hedged_count} hedged)"
+    )
+    return Output(
+        all_assertions,
+        metadata={
+            "assertion_count": len(all_assertions),
+            "negated_count": negated_count,
+            "hedged_count": hedged_count,
+        },
+    )

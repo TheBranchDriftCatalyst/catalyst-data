@@ -21,3 +21,7 @@ data:
           host: open-leaks.catalyst-data.svc.cluster.local
           port: 4000
           location_name: open_leaks
+      - grpc_server:
+          host: knowledge-graph.catalyst-data.svc.cluster.local
+          port: 4000
+          location_name: knowledge_graph
