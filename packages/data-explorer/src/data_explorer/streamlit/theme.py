@@ -36,12 +36,17 @@ CATALYST_CSS = """
 }
 
 /* ===== Global Typography ===== */
-html, body, [class*="st-"] {
+html, body,
+.stApp, .stApp p, .stApp span, .stApp div, .stApp label, .stApp li,
+[data-testid="stSidebar"], [data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span, [data-testid="stSidebar"] label {
     font-family: "Rajdhani", "Inter", ui-sans-serif, system-ui, sans-serif !important;
 }
 
 h1, h2, h3, h4, h5, h6,
-[data-testid="stHeading"] * {
+[data-testid="stHeading"] h1,
+[data-testid="stHeading"] h2,
+[data-testid="stHeading"] h3 {
     font-family: "Orbitron", "Arial Black", ui-sans-serif, system-ui, sans-serif !important;
     letter-spacing: 0.05em;
     text-transform: uppercase;
@@ -50,6 +55,28 @@ h1, h2, h3, h4, h5, h6,
 code, pre, [data-testid="stCode"] *,
 .stCodeBlock, .stDataFrame th {
     font-family: "Space Mono", ui-monospace, monospace !important;
+}
+
+/* ===== Fix: Restore Material Symbols for Streamlit icon ligatures ===== */
+/* Expander toggle icons */
+[data-testid="stExpander"] summary > div > div:first-child,
+[data-testid="stExpander"] summary > span > span:first-child,
+/* Sidebar collapse/expand button */
+[data-testid="collapsedControl"] span,
+[data-testid="stSidebarCollapsedControl"] span,
+button[kind="headerNoPadding"] span,
+[data-testid="stBaseButton-headerNoPadding"] span,
+/* Broad catch: any element Streamlit renders as an icon */
+[data-testid*="Icon"] span,
+[data-testid*="icon"] span {
+    font-family: "Material Symbols Rounded" !important;
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24 !important;
+    -webkit-text-fill-color: initial !important;
+    background: none !important;
+    -webkit-background-clip: initial !important;
+    background-clip: initial !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
 }
 
 /* ===== Header — neon gradient text ===== */
@@ -73,6 +100,7 @@ code, pre, [data-testid="stCode"] *,
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, #0d0d14 0%, #0a0a0f 100%) !important;
     border-right: 1px solid var(--cat-border) !important;
+    position: relative;
 }
 
 [data-testid="stSidebar"]::after {
@@ -83,11 +111,26 @@ code, pre, [data-testid="stCode"] *,
     width: 1px;
     height: 100%;
     background: linear-gradient(180deg, var(--cat-neon-cyan), var(--cat-neon-purple), transparent);
-    opacity: 0.4;
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: 10;
 }
 
 [data-testid="stSidebar"] [data-testid="stHeading"] * {
     font-size: 0.85rem;
+}
+
+/* Hide deploy button for cleaner look */
+[data-testid="stAppDeployButton"],
+button[data-testid="stAppDeployButton"],
+.stDeployButton,
+header[data-testid="stHeader"] button:has(> div:only-child) {
+    display: none !important;
+}
+
+/* Hide the top-right menu dots */
+#MainMenu, button[kind="header"] {
+    visibility: hidden;
 }
 
 /* ===== Main content area ===== */
@@ -151,7 +194,8 @@ code, pre, [data-testid="stCode"] *,
     border-color: rgba(0,252,214,0.25) !important;
 }
 
-[data-testid="stExpander"] summary span {
+[data-testid="stExpander"] summary p,
+[data-testid="stExpander"] summary span p {
     font-family: "Rajdhani", sans-serif !important;
     font-weight: 600 !important;
 }
@@ -235,7 +279,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(> div[data-testid="stVertica
 
 /* ===== Tabs ===== */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 0;
+    gap: 1rem !important;
     border-bottom: 1px solid var(--cat-border);
 }
 
@@ -243,10 +287,16 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(> div[data-testid="stVertica
     font-family: "Rajdhani", sans-serif !important;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+    font-size: 0.9rem;
     color: var(--cat-muted-fg) !important;
     border-bottom: 2px solid transparent;
+    padding: 0.6rem 1rem !important;
     transition: all 0.2s ease;
+}
+
+.stTabs [data-baseweb="tab"]:hover {
+    color: var(--cat-fg) !important;
 }
 
 .stTabs [aria-selected="true"] {
@@ -346,19 +396,35 @@ hr {
 }
 
 /* ===== Page nav links ===== */
+[data-testid="stSidebar"] ul li a,
 [data-testid="stSidebarNav"] a {
     font-family: "Rajdhani", sans-serif !important;
-    font-weight: 600;
+    font-weight: 600 !important;
     letter-spacing: 0.04em;
+    color: var(--cat-muted-fg) !important;
+    transition: all 0.2s ease !important;
+    border-left: 2px solid transparent !important;
+    padding-left: 0.5rem !important;
 }
 
+[data-testid="stSidebar"] ul li a:hover,
 [data-testid="stSidebarNav"] a:hover {
     color: var(--cat-primary) !important;
+    background: rgba(0,252,214,0.05) !important;
+    border-left-color: rgba(0,252,214,0.4) !important;
 }
 
+[data-testid="stSidebar"] ul li a[aria-current="page"],
 [data-testid="stSidebarNav"] a[aria-current="page"] {
     color: var(--cat-primary) !important;
-    border-left-color: var(--cat-primary) !important;
+    background: rgba(0,252,214,0.08) !important;
+    border-left: 2px solid var(--cat-primary) !important;
+    font-weight: 700 !important;
+}
+
+/* Active page nav link p text */
+[data-testid="stSidebar"] ul li a[aria-current="page"] p {
+    color: var(--cat-primary) !important;
 }
 </style>
 """
