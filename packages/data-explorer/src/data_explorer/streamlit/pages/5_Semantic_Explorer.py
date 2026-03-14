@@ -8,6 +8,7 @@ import streamlit as st
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
 from data_explorer.streamlit.llm_client import get_llm_client
+from data_explorer.streamlit.components.model_selector import embedding_model_selector
 from data_explorer.streamlit.navigation import get_nav_params, navigate_to, render_breadcrumbs
 from data_explorer.streamlit.theme import apply_theme
 from data_explorer.streamlit.components.embedding_scatter import (
@@ -88,6 +89,7 @@ with st.sidebar:
     selected_key = st.selectbox("Embedding source", list(asset_options.keys()))
     selected_asset = asset_options[selected_key]
 
+    embedding_model = embedding_model_selector(key="semantic_embedding_model")
     top_k = st.slider("Top K results", 5, 50, 10, step=5)
     score_threshold = st.slider("Score threshold", 0.0, 1.0, 0.5, step=0.05)
 

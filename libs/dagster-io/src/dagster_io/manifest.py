@@ -19,6 +19,7 @@ class MaterializationRecord(BaseModel):
     format: str  # jsonl, json, pkl
     count: int
     size_bytes: int
+    config_key: str | None = None
 
 
 class AssetManifest(BaseModel):
@@ -67,6 +68,7 @@ def make_record(
     count: int,
     size_bytes: int,
     partition: str | None = None,
+    config_key: str | None = None,
 ) -> MaterializationRecord:
     return MaterializationRecord(
         run_id=run_id,
@@ -75,4 +77,5 @@ def make_record(
         format=fmt,
         count=count,
         size_bytes=size_bytes,
+        config_key=config_key,
     )

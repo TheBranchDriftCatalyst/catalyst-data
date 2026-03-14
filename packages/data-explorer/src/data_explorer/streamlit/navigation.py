@@ -18,6 +18,7 @@ PAGE_LABELS: dict[str, str] = {
     "pages/6_Cross_Source_Linker.py": "Cross-Source Linker",
     "pages/7_Data_Chat.py": "Data Chat",
     "pages/8_Entity_Concordance.py": "Entity Concordance",
+    "pages/9_Config_Comparison.py": "Config Comparison",
 }
 
 ENTITY_COLORS: dict[str, str] = {

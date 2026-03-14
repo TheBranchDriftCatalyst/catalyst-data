@@ -408,6 +408,67 @@ class DataClient:
         propositions = self.load_propositions(source, partition)
         return [p for p in propositions if p.get("source_doc_id") == document_id]
 
+    # ------------------------------------------------------------------
+    # Config discovery
+    # ------------------------------------------------------------------
+
+    def list_configs(self, asset_root: str) -> list[str]:
+        """Scan S3 prefixes under *asset_root* for ``config=`` segments.
+
+        Returns a list like ``["default", "cs500_co100_te3s", ...]``.
+        Assets without a config segment are listed as ``"default"``.
+        """
+        keys = self.s3.list_all_objects(asset_root + "/")
+        configs: set[str] = set()
+        has_bare_data = False
+
+        for k in keys:
+            suffix = k[len(asset_root):].lstrip("/")
+            parts = suffix.split("/")
+            for p in parts:
+                if p.startswith("config="):
+                    configs.add(p.split("=", 1)[1])
+                    break
+            else:
+                if "data." in suffix or "_metadata.json" in suffix:
+                    has_bare_data = True
+
+        result = []
+        if has_bare_data or not configs:
+            result.append("default")
+        result.extend(sorted(configs))
+        return result
+
+    def load_config_metadata(self, asset_root: str, config_key: str) -> dict | None:
+        """Load ``_metadata.json`` for a specific config variant."""
+        if config_key == "default":
+            prefix = asset_root
+        else:
+            prefix = f"{asset_root}/config={config_key}"
+        try:
+            raw = self.s3.get_object(f"{prefix}/_metadata.json")
+            return json.loads(raw)
+        except Exception:
+            return None
+
+    def search_embeddings_with_config(
+        self,
+        query_vec: list[float],
+        asset_root: str,
+        config_key: str = "default",
+        top_k: int = 10,
+    ) -> list[dict]:
+        """Search embeddings under a specific config variant."""
+        if config_key == "default":
+            prefix = asset_root
+        else:
+            prefix = f"{asset_root}/config={config_key}"
+        return self.search_embeddings(query_vec, prefix, top_k=top_k)
+
+    # ------------------------------------------------------------------
+    # Cross-asset queries
+    # ------------------------------------------------------------------
+
     def build_entity_cooccurrence(
         self,
         entity_texts: list[str],

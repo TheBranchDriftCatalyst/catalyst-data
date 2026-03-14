@@ -11,6 +11,7 @@ from data_explorer.streamlit.llm_client import (
     build_rag_context,
     get_llm_client,
 )
+from data_explorer.streamlit.components.model_selector import chat_model_selector
 from data_explorer.streamlit.navigation import render_breadcrumbs
 from data_explorer.streamlit.theme import apply_theme
 
@@ -64,11 +65,7 @@ with st.sidebar:
     selected_key = st.selectbox("Embedding source", list(asset_options.keys()))
     selected_asset = asset_options[selected_key]
 
-    model = st.selectbox(
-        "Model",
-        ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
-        index=0,
-    )
+    model = chat_model_selector(key="data_chat_model")
 
     temperature = st.slider("Temperature", 0.0, 1.0, 0.3, step=0.05)
 

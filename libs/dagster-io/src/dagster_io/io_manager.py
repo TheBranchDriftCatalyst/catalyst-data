@@ -52,6 +52,24 @@ class MinioIOManager(ConfigurableIOManager):
         except Exception:
             return None
 
+    def _extract_config_key(self, context: OutputContext) -> str | None:
+        """Extract config_key from EmbeddingConfigResource or asset definition metadata.
+
+        Precedence:
+        1. ``context.resources.embedding_config`` (runtime resource)
+        2. ``context.definition_metadata["config_key"]`` (static asset metadata)
+        """
+        # Try the EmbeddingConfigResource first (dynamic, set per code location)
+        try:
+            return context.resources.embedding_config.config_key  # type: ignore[union-attr]
+        except (AttributeError, Exception):
+            pass
+        # Fallback: static metadata on the asset definition
+        try:
+            return (context.definition_metadata or {}).get("config_key")
+        except Exception:
+            return None
+
     def _build_metadata(
         self,
         context: OutputContext,
@@ -60,9 +78,10 @@ class MinioIOManager(ConfigurableIOManager):
         size_bytes: int,
         type_hint: type | None,
         obj: typing.Any,
+        config_key: str | None = None,
     ) -> dict:
         """Build enhanced _metadata.json sidecar content."""
-        asset_root = build_asset_root(context)
+        asset_root = build_asset_root(context, config_key=config_key)
         layer = asset_root.split("/")[0]
         code_location = asset_root.split("/")[1] if "/" in asset_root else "unknown"
 
@@ -79,7 +98,7 @@ class MinioIOManager(ConfigurableIOManager):
         except Exception:
             pass
 
-        return {
+        meta = {
             "format": fmt,
             "type": str(type_hint) if type_hint else "unknown",
             "count": count,
@@ -93,13 +112,18 @@ class MinioIOManager(ConfigurableIOManager):
             "layer": layer,
             "upstream_assets": upstream,
         }
+        if config_key:
+            meta["config_key"] = config_key
+        return meta
 
     def handle_output(self, context: OutputContext, obj: typing.Any) -> None:
         if obj is None:
             context.log.warning("Skipping S3 write — output is None")
             return
 
-        prefix = build_output_prefix(context)
+        config_key = self._extract_config_key(context)
+
+        prefix = build_output_prefix(context, config_key=config_key)
         type_hint = self._get_type_hint(context)
         payload, ext, ser_meta = serialize(obj, type_hint)
 
@@ -110,15 +134,16 @@ class MinioIOManager(ConfigurableIOManager):
         # Write enhanced metadata sidecar
         count = ser_meta.get("count", 0)
         metadata = self._build_metadata(
-            context, ser_meta["format"], count, len(payload), type_hint, obj
+            context, ser_meta["format"], count, len(payload), type_hint, obj,
+            config_key=config_key,
         )
         self.client.put_object(
             f"{prefix}/_metadata.json",
             json.dumps(metadata, indent=2).encode("utf-8"),
         )
 
-        # Update manifest at asset root
-        asset_root = build_asset_root(context)
+        # Update manifest at asset root (config-aware)
+        asset_root = build_asset_root(context, config_key=config_key)
         manifest_key = f"{asset_root}/_manifest.json"
         layer = asset_root.split("/")[0]
         code_location = asset_root.split("/")[1] if "/" in asset_root else "unknown"
@@ -134,19 +159,21 @@ class MinioIOManager(ConfigurableIOManager):
             count=count,
             size_bytes=len(payload),
             partition=partition_str,
+            config_key=config_key,
         )
         manifest.add_materialization(record)
         self.client.put_object(manifest_key, manifest.to_bytes())
 
-        context.add_output_metadata(
-            {
-                "s3_path": f"s3://{self.bucket}/{data_key}",
-                "format": metadata["format"],
-                "size_bytes": len(payload),
-                "row_count": count,
-                "layer": metadata["layer"],
-            }
-        )
+        output_meta = {
+            "s3_path": f"s3://{self.bucket}/{data_key}",
+            "format": metadata["format"],
+            "size_bytes": len(payload),
+            "row_count": count,
+            "layer": metadata["layer"],
+        }
+        if config_key:
+            output_meta["config_key"] = config_key
+        context.add_output_metadata(output_meta)
 
     def _get_input_type_hint(self, context: InputContext) -> type | None:
         try:

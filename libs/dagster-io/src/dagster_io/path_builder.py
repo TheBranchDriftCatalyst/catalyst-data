@@ -94,27 +94,44 @@ def hive_partition_path(context: OutputContext | InputContext, key=None) -> str:
     return _hive_partition_segment(str(partition_key))
 
 
-def build_asset_root(context: OutputContext | InputContext) -> str:
-    """Build the root prefix for an asset: {layer}/{code_location}/{group}/{asset}"""
+def build_asset_root(
+    context: OutputContext | InputContext,
+    config_key: str | None = None,
+) -> str:
+    """Build the root prefix for an asset.
+
+    Without config_key: ``{layer}/{code_location}/{group}/{asset}``
+    With config_key:    ``{layer}/{code_location}/{group}/{asset}/config={config_key}``
+    """
     layer = _extract_layer(context)
     code_location = _code_location_from_context(context)
     group = _group_from_asset_key(context.asset_key)
     asset_name = context.asset_key.to_user_string().replace("/", "_")
-    return f"{layer}/{code_location}/{group}/{asset_name}"
+    root = f"{layer}/{code_location}/{group}/{asset_name}"
+    if config_key:
+        root = f"{root}/config={config_key}"
+    return root
 
 
-def build_output_prefix(context: OutputContext) -> str:
-    """Build S3 key prefix for output: {layer}/{code_location}/{group}/{asset}[/partition]"""
-    root = build_asset_root(context)
+def build_output_prefix(
+    context: OutputContext,
+    config_key: str | None = None,
+) -> str:
+    """Build S3 key prefix for output: {layer}/{code_location}/{group}/{asset}[/config=...][/partition]"""
+    root = build_asset_root(context, config_key=config_key)
     if context.has_asset_partitions:
         partition = hive_partition_path(context)
         return f"{root}/{partition}" if partition else root
     return root
 
 
-def build_input_prefix(context: InputContext, partition_key=None) -> str:
-    """Build S3 key prefix for input: {layer}/{code_location}/{group}/{asset}[/partition]"""
-    root = build_asset_root(context)
+def build_input_prefix(
+    context: InputContext,
+    partition_key=None,
+    config_key: str | None = None,
+) -> str:
+    """Build S3 key prefix for input: {layer}/{code_location}/{group}/{asset}[/config=...][/partition]"""
+    root = build_asset_root(context, config_key=config_key)
     if partition_key is not None:
         partition = hive_partition_path(context, key=partition_key)
         return f"{root}/{partition}" if partition else root

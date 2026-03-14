@@ -27,6 +27,9 @@ _OPENAI_MISSING_MSG = (
 )
 
 
+_EMBEDDING_PATTERNS = {"embed", "ada-002", "text-embedding"}
+
+
 class LLMClient:
     """Thin wrapper around the OpenAI SDK pointed at a LiteLLM proxy."""
 
@@ -42,6 +45,31 @@ class LLMClient:
             base_url=config.base_url,
             api_key=config.api_key,
         )
+
+    # --------------------------------------------------------------------- #
+    # Model discovery
+    # --------------------------------------------------------------------- #
+
+    def list_models(self) -> list[dict]:
+        """Query the proxy's /v1/models endpoint and return model info dicts."""
+        response = self._client.models.list()
+        return [{"id": m.id, "owned_by": getattr(m, "owned_by", "")} for m in response]
+
+    def list_chat_models(self) -> list[str]:
+        """Return model IDs suitable for chat completions (excludes embedding models)."""
+        models = self.list_models()
+        return [
+            m["id"] for m in models
+            if not any(pat in m["id"].lower() for pat in _EMBEDDING_PATTERNS)
+        ]
+
+    def list_embedding_models(self) -> list[str]:
+        """Return model IDs suitable for embeddings."""
+        models = self.list_models()
+        return [
+            m["id"] for m in models
+            if any(pat in m["id"].lower() for pat in _EMBEDDING_PATTERNS)
+        ]
 
     # --------------------------------------------------------------------- #
     # Chat completions

@@ -34,6 +34,7 @@ PAGE_DESCRIPTIONS: dict[str, str] = {
     "Cross-Source Linker": "Entity resolution across sources",
     "Data Chat": "RAG-powered Q&A over corpus",
     "Entity Concordance": "KWIC concordance and co-occurrence",
+    "Config Comparison": "Side-by-side embedding config evaluation",
 }
 
 # ---------------------------------------------------------------------------
