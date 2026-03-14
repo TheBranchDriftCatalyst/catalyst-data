@@ -36,10 +36,21 @@ CATALYST_CSS = """
 }
 
 /* ===== Global Typography ===== */
-html, body,
-.stApp, .stApp p, .stApp span, .stApp div, .stApp label, .stApp li,
-[data-testid="stSidebar"], [data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span, [data-testid="stSidebar"] label {
+/* Set on root elements — inherits to all children naturally.
+   Do NOT set on div/span directly — that clobbers Material Symbols icon fonts. */
+html, body, .stApp, [data-testid="stSidebar"] {
+    font-family: "Rajdhani", "Inter", ui-sans-serif, system-ui, sans-serif !important;
+}
+
+/* Explicit targets that don't inherit (form elements, etc) */
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stText"],
+[data-testid="stAlert"] p,
+.stButton > button,
+input, select, textarea, label,
+[data-testid="stMetricLabel"],
+[data-testid="stExpanderDetails"] p {
     font-family: "Rajdhani", "Inter", ui-sans-serif, system-ui, sans-serif !important;
 }
 
@@ -55,28 +66,6 @@ h1, h2, h3, h4, h5, h6,
 code, pre, [data-testid="stCode"] *,
 .stCodeBlock, .stDataFrame th {
     font-family: "Space Mono", ui-monospace, monospace !important;
-}
-
-/* ===== Fix: Restore Material Symbols for Streamlit icon ligatures ===== */
-/* Expander toggle icons */
-[data-testid="stExpander"] summary > div > div:first-child,
-[data-testid="stExpander"] summary > span > span:first-child,
-/* Sidebar collapse/expand button */
-[data-testid="collapsedControl"] span,
-[data-testid="stSidebarCollapsedControl"] span,
-button[kind="headerNoPadding"] span,
-[data-testid="stBaseButton-headerNoPadding"] span,
-/* Broad catch: any element Streamlit renders as an icon */
-[data-testid*="Icon"] span,
-[data-testid*="icon"] span {
-    font-family: "Material Symbols Rounded" !important;
-    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24 !important;
-    -webkit-text-fill-color: initial !important;
-    background: none !important;
-    -webkit-background-clip: initial !important;
-    background-clip: initial !important;
-    text-transform: none !important;
-    letter-spacing: normal !important;
 }
 
 /* ===== Header — neon gradient text ===== */
