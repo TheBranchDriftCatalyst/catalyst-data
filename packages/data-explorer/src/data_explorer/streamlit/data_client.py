@@ -3,11 +3,78 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 
 import numpy as np
+import streamlit as st
 from dagster_io.manifest import AssetManifest
 from dagster_io.s3_client import S3Client
 from dagster_io.serializers import deserialize
+
+
+# ------------------------------------------------------------------
+# Module-level cached loaders (st.cache_data cannot hash `self`)
+# ------------------------------------------------------------------
+
+@st.cache_data(ttl=300, show_spinner="Loading asset data...")
+def _load_asset_data(
+    endpoint_url: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str,
+    asset_root: str,
+    limit: int,
+) -> list[dict]:
+    """Cached data loader that reconstructs a DataClient internally."""
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
+    return client.load_data(asset_root, limit=limit)
+
+
+@st.cache_data(ttl=300, show_spinner="Listing assets...")
+def _list_assets_cached(
+    endpoint_url: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str,
+) -> list[dict]:
+    """Cached asset listing."""
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
+    return client.list_assets()
+
+
+@st.cache_data(ttl=300, show_spinner="Listing partitions...")
+def _list_partitions_cached(
+    endpoint_url: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str,
+    prefix: str,
+) -> list[str]:
+    """Cached partition listing."""
+    s3 = S3Client(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
+    keys = s3.list_all_objects(prefix)
+    partitions: set[str] = set()
+    for k in keys:
+        suffix = k[len(prefix):].lstrip("/")
+        parts = suffix.split("/")
+        if len(parts) >= 2:
+            partitions.add(parts[0])
+    return sorted(partitions)
 
 
 class DataClient:
@@ -26,6 +93,22 @@ class DataClient:
             secret_key=secret_key,
             bucket=bucket,
         )
+        self._endpoint_url = endpoint_url
+        self._access_key = access_key
+        self._secret_key = secret_key
+        self._bucket = bucket
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _conn_args(self) -> tuple[str, str, str, str]:
+        """Return connection params tuple for cached helpers."""
+        return (self._endpoint_url, self._access_key, self._secret_key, self._bucket)
+
+    def _cached_load(self, asset_root: str, limit: int) -> list[dict]:
+        """Delegate to the module-level cached loader."""
+        return _load_asset_data(*self._conn_args(), asset_root=asset_root, limit=limit)
 
     # ------------------------------------------------------------------
     # Asset discovery
@@ -39,9 +122,6 @@ class DataClient:
         assets = []
         for mk in metadata_keys:
             parts = mk.rsplit("/_metadata.json", 1)[0].split("/")
-            # layout: {layer}/{code_location}/{group}/{asset}/.../_metadata.json
-            # The asset root is everything before _metadata.json's parent dir
-            # Minimum: layer/code_location/group/asset/_metadata.json (4 parts)
             if len(parts) < 4:
                 continue
             layer, code_location, group, asset = parts[0], parts[1], parts[2], parts[3]
@@ -95,7 +175,6 @@ class DataClient:
                 break
             ext = "." + dk.rsplit(".", 1)[-1]
 
-            # Find the matching _metadata.json in the same directory
             dir_prefix = dk.rsplit("/", 1)[0] + "/"
             meta_keys = [k for k in keys if k.startswith(dir_prefix) and k.endswith("_metadata.json")]
             metadata = {}
@@ -106,7 +185,6 @@ class DataClient:
                     pass
 
             raw = self.s3.get_object(dk)
-            # Deserialize without type hint — returns dicts/lists
             result = deserialize(raw, ext, metadata, type_hint=None)
 
             if isinstance(result, list):
@@ -136,7 +214,6 @@ class DataClient:
         if not rows:
             return []
 
-        # Expect rows with 'embedding' (list[float]) and other fields
         embeddings = []
         valid_rows = []
         for r in rows:
@@ -150,7 +227,6 @@ class DataClient:
 
         q = np.array(query_vec, dtype=np.float32)
         mat = np.array(embeddings, dtype=np.float32)
-        # Cosine similarity
         norms = np.linalg.norm(mat, axis=1) * np.linalg.norm(q)
         norms = np.where(norms == 0, 1, norms)
         scores = mat @ q / norms
@@ -162,3 +238,145 @@ class DataClient:
             row["score"] = float(scores[i])
             results.append(row)
         return results
+
+    # ------------------------------------------------------------------
+    # Linguistic & knowledge-graph data exploration
+    # ------------------------------------------------------------------
+
+    def load_entities(
+        self,
+        source: str,
+        partition: str | None = None,
+        limit: int = 5000,
+    ) -> list[dict]:
+        """Load NER entity rows from ``silver/{source}/default/entities_ner``."""
+        asset_root = f"silver/{source}/default/entities_ner"
+        if partition:
+            asset_root += f"/{partition}"
+        return self._cached_load(asset_root, limit)
+
+    def load_propositions(
+        self,
+        source: str,
+        partition: str | None = None,
+        limit: int = 5000,
+    ) -> list[dict]:
+        """Load SPO proposition rows from ``gold/{source}/default/propositions``."""
+        asset_root = f"gold/{source}/default/propositions"
+        if partition:
+            asset_root += f"/{partition}"
+        return self._cached_load(asset_root, limit)
+
+    def load_chunks(
+        self,
+        source: str,
+        partition: str | None = None,
+        limit: int = 5000,
+    ) -> list[dict]:
+        """Load text-chunk rows from ``silver/{source}/default/text_chunks``."""
+        asset_root = f"silver/{source}/default/text_chunks"
+        if partition:
+            asset_root += f"/{partition}"
+        return self._cached_load(asset_root, limit)
+
+    # ------------------------------------------------------------------
+    # Source & partition discovery
+    # ------------------------------------------------------------------
+
+    def list_sources(self) -> list[str]:
+        """Return distinct ``code_location`` values across all assets."""
+        assets = _list_assets_cached(*self._conn_args())
+        return sorted({a["code_location"] for a in assets})
+
+    def list_partitions(
+        self,
+        source: str,
+        asset_name: str,
+        layer: str = "silver",
+    ) -> list[str]:
+        """List available partition keys for an asset."""
+        prefix = f"{layer}/{source}/default/{asset_name}/"
+        return _list_partitions_cached(*self._conn_args(), prefix=prefix)
+
+    # ------------------------------------------------------------------
+    # Cross-asset queries
+    # ------------------------------------------------------------------
+
+    def get_entity_context(
+        self,
+        entity_text: str,
+        source: str,
+        partition: str | None = None,
+    ) -> list[dict]:
+        """Find all text chunks containing a given entity."""
+        entities = self.load_entities(source, partition)
+        matching_chunk_ids = {
+            e["chunk_id"]
+            for e in entities
+            if e.get("text", "").lower() == entity_text.lower()
+            and "chunk_id" in e
+        }
+        if not matching_chunk_ids:
+            return []
+        chunks = self.load_chunks(source, partition)
+        return [c for c in chunks if c.get("chunk_id") in matching_chunk_ids]
+
+    def get_entity_propositions(
+        self,
+        entity_text: str,
+        source: str,
+        partition: str | None = None,
+    ) -> list[dict]:
+        """Find all SPO triples where entity is subject or object."""
+        propositions = self.load_propositions(source, partition)
+        needle = entity_text.lower()
+        return [
+            p for p in propositions
+            if p.get("subject", "").lower() == needle
+            or p.get("object", "").lower() == needle
+        ]
+
+    def get_document_entities(
+        self,
+        document_id: str,
+        source: str,
+        partition: str | None = None,
+    ) -> list[dict]:
+        """Return all entities extracted from a specific document."""
+        entities = self.load_entities(source, partition)
+        return [e for e in entities if e.get("source_doc_id") == document_id]
+
+    def get_document_propositions(
+        self,
+        document_id: str,
+        source: str,
+        partition: str | None = None,
+    ) -> list[dict]:
+        """Return all propositions extracted from a specific document."""
+        propositions = self.load_propositions(source, partition)
+        return [p for p in propositions if p.get("source_doc_id") == document_id]
+
+    def build_entity_cooccurrence(
+        self,
+        entity_texts: list[str],
+        source: str,
+        partition: str | None = None,
+    ) -> dict[tuple[str, str], int]:
+        """Build entity co-occurrence dict: ``{(entity_a, entity_b): count}``."""
+        entities = self.load_entities(source, partition)
+        target_set = {t.lower() for t in entity_texts}
+
+        chunk_entities: dict[str, set[str]] = defaultdict(set)
+        for e in entities:
+            text_lower = e.get("text", "").lower()
+            if text_lower in target_set and "chunk_id" in e:
+                chunk_entities[e["chunk_id"]].add(text_lower)
+
+        cooccurrence: dict[tuple[str, str], int] = defaultdict(int)
+        for _chunk_id, ent_set in chunk_entities.items():
+            ents = sorted(ent_set)
+            for i, a in enumerate(ents):
+                for b in ents[i + 1:]:
+                    cooccurrence[(a, b)] += 1
+
+        return dict(cooccurrence)

@@ -1,12 +1,16 @@
-"""Data Explorer — Streamlit entry point."""
+"""Data Explorer — Corpus dashboard home page."""
 
 from __future__ import annotations
 
+from collections import Counter
+
+import plotly.graph_objects as go
 import streamlit as st
 
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
-from data_explorer.streamlit.theme import apply_theme
+from data_explorer.streamlit.navigation import PAGE_LABELS, navigate_to
+from data_explorer.streamlit.theme import apply_theme, get_plotly_template
 
 st.set_page_config(
     page_title="Data Explorer",
@@ -15,6 +19,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 apply_theme()
+
+# ---------------------------------------------------------------------------
+# Page descriptions for quick-access cards
+# ---------------------------------------------------------------------------
+
+PAGE_DESCRIPTIONS: dict[str, str] = {
+    "Asset Browser": "Browse materialized Dagster assets",
+    "Document Explorer": "Explore documents by source",
+    "Entity Viewer": "Interactive SPO graph visualization",
+    "Media Player": "Video/audio playback with transcripts",
+    "Embedding Search": "Embedding-powered semantic search",
+    "Cross-Source Linker": "Entity resolution across sources",
+    "Data Chat": "RAG-powered Q&A over corpus",
+    "Entity Concordance": "KWIC concordance and co-occurrence",
+}
+
+# ---------------------------------------------------------------------------
+# S3 client (cached resource)
+# ---------------------------------------------------------------------------
 
 
 @st.cache_resource
@@ -28,9 +51,15 @@ def _get_client() -> DataClient:
     )
 
 
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+
+
 def main() -> None:
     client = _get_client()
 
+    # -- Sidebar: connection status -------------------------------------------
     with st.sidebar:
         st.title("Data Explorer")
         st.caption(f"S3: `{client.s3.bucket}`")
@@ -43,33 +72,127 @@ def main() -> None:
 
         st.divider()
 
-        # Asset catalog (cached)
         if st.button("Refresh catalog"):
             st.cache_data.clear()
 
-    # Landing page
+    # -- Load asset catalog ---------------------------------------------------
     st.header("Catalyst Data Explorer")
-    st.markdown(
-        "Browse materialized Dagster assets stored in MinIO S3. "
-        "Use the sidebar pages to explore assets, documents, entities, media, and embeddings."
-    )
 
     assets = client.list_assets()
-    if assets:
-        col1, col2, col3 = st.columns(3)
-        layers = {}
-        for a in assets:
-            layers.setdefault(a["layer"], []).append(a)
-        col1.metric("Assets", len(assets))
-        col2.metric("Layers", len(layers))
-        col3.metric("Code Locations", len({a["code_location"] for a in assets}))
 
-        for layer in sorted(layers):
-            with st.expander(f"**{layer}** ({len(layers[layer])} assets)", expanded=False):
-                for a in sorted(layers[layer], key=lambda x: x["asset"]):
-                    st.text(f"  {a['code_location']}/{a['asset']}")
-    else:
+    if not assets:
         st.info("No assets found. Check S3 connection and bucket contents.")
+        return
+
+    # Pre-compute breakdowns
+    sources = client.list_sources()
+    layers: dict[str, int] = Counter(a["layer"] for a in assets)
+    code_locations: set[str] = {a["code_location"] for a in assets}
+
+    # ── Row 1: Metric cards ─────────────────────────────────────────────────
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Assets", len(assets))
+    m2.metric("Total Sources", len(sources))
+    m3.metric("Layers", len(layers))
+    m4.metric("Code Locations", len(code_locations))
+
+    st.divider()
+
+    # ── Row 2: Charts ───────────────────────────────────────────────────────
+    tpl = get_plotly_template()
+    chart_left, chart_right = st.columns(2)
+
+    # -- Left: Source breakdown donut chart -----------------------------------
+    with chart_left:
+        st.subheader("Source Breakdown")
+        loc_counts = Counter(a["code_location"] for a in assets)
+        labels = list(loc_counts.keys())
+        values = list(loc_counts.values())
+
+        fig_donut = go.Figure(
+            data=[
+                go.Pie(
+                    labels=labels,
+                    values=values,
+                    hole=0.5,
+                    textinfo="label+value",
+                    textposition="outside",
+                    marker=dict(
+                        colors=tpl["layout"]["colorway"][: len(labels)],
+                        line=dict(color="#0a0a0f", width=2),
+                    ),
+                    hovertemplate="<b>%{label}</b><br>Assets: %{value}<br>%{percent}<extra></extra>",
+                )
+            ]
+        )
+        fig_donut.update_layout(
+            showlegend=False,
+            height=380,
+            margin=dict(t=20, b=20, l=20, r=20),
+            **tpl["layout"],
+        )
+        st.plotly_chart(fig_donut, use_container_width=True)
+
+    # -- Right: Layer distribution horizontal bar chart -----------------------
+    with chart_right:
+        st.subheader("Layer Distribution")
+        layer_order = ["bronze", "silver", "gold"]
+        sorted_layers = sorted(layers.keys(), key=lambda x: layer_order.index(x) if x in layer_order else 99)
+        layer_names = list(sorted_layers)
+        layer_values = [layers[l] for l in sorted_layers]
+        colorway = tpl["layout"]["colorway"]
+
+        fig_bar = go.Figure(
+            data=[
+                go.Bar(
+                    y=layer_names,
+                    x=layer_values,
+                    orientation="h",
+                    marker=dict(
+                        color=[colorway[i % len(colorway)] for i in range(len(layer_names))],
+                        line=dict(color="#0a0a0f", width=1),
+                    ),
+                    text=layer_values,
+                    textposition="auto",
+                    hovertemplate="<b>%{y}</b><br>Assets: %{x}<extra></extra>",
+                )
+            ]
+        )
+        fig_bar.update_layout(
+            height=380,
+            margin=dict(t=20, b=20, l=20, r=20),
+            xaxis_title="Asset Count",
+            yaxis=dict(
+                categoryorder="array",
+                categoryarray=list(reversed(layer_names)),
+            ),
+            **tpl["layout"],
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    st.divider()
+
+    # ── Row 3: Quick-access page cards ──────────────────────────────────────
+    st.subheader("Quick Access")
+
+    page_items = list(PAGE_LABELS.items())
+    # Render in rows of 3
+    for row_start in range(0, len(page_items), 3):
+        row_items = page_items[row_start : row_start + 3]
+        cols = st.columns(3)
+        for col, (page_path, page_name) in zip(cols, row_items):
+            with col:
+                with st.container(border=True):
+                    st.subheader(page_name, anchor=False)
+                    description = PAGE_DESCRIPTIONS.get(page_name, "")
+                    if description:
+                        st.caption(description)
+                    if st.button(
+                        f"Open {page_name}",
+                        key=f"nav_{page_path}",
+                        use_container_width=True,
+                    ):
+                        navigate_to(page_path)
 
 
 # Streamlit pages are discovered from the pages/ directory alongside this file.

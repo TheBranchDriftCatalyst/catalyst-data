@@ -14,6 +14,9 @@ dependencies = [
     "plotly>=5.0",
     "numpy>=1.26",
     "openai>=1.0",
+    "scikit-learn>=1.4",
+    "scipy>=1.12",
+    "streamlit-agraph>=0.0.45",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +24,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.8",
 ]
+umap = ["umap-learn>=0.5"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/data_explorer"]
