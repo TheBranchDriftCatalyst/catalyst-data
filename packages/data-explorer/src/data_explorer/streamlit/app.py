@@ -27,9 +27,10 @@ apply_theme()
 PAGE_DESCRIPTIONS: dict[str, str] = {
     "Asset Browser": "Browse materialized Dagster assets",
     "Document Explorer": "Explore documents by source",
-    "Entity Viewer": "Interactive SPO graph visualization",
+    "Knowledge Graph": "Interactive SPO graph visualization",
+    "Document Lens": "Deep-read view with NER overlays",
     "Media Player": "Video/audio playback with transcripts",
-    "Embedding Search": "Embedding-powered semantic search",
+    "Semantic Explorer": "Embedding-powered semantic search",
     "Cross-Source Linker": "Entity resolution across sources",
     "Data Chat": "RAG-powered Q&A over corpus",
     "Entity Concordance": "KWIC concordance and co-occurrence",
@@ -125,11 +126,11 @@ def main() -> None:
                 )
             ]
         )
+        fig_donut.update_layout(template=get_plotly_template())
         fig_donut.update_layout(
             showlegend=False,
             height=380,
             margin=dict(t=20, b=20, l=20, r=20),
-            **tpl["layout"],
         )
         st.plotly_chart(fig_donut, use_container_width=True)
 
@@ -158,6 +159,7 @@ def main() -> None:
                 )
             ]
         )
+        fig_bar.update_layout(template=get_plotly_template())
         fig_bar.update_layout(
             height=380,
             margin=dict(t=20, b=20, l=20, r=20),
@@ -166,7 +168,6 @@ def main() -> None:
                 categoryorder="array",
                 categoryarray=list(reversed(layer_names)),
             ),
-            **tpl["layout"],
         )
         st.plotly_chart(fig_bar, use_container_width=True)
 
