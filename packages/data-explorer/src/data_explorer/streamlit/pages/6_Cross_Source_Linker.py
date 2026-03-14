@@ -229,7 +229,6 @@ with tab_groups:
                     freq_df = pd.DataFrame(
                         [{"Source": s, "Count": c} for s, c in sorted(source_freq.items())]
                     )
-                    tmpl = get_plotly_template()["layout"]
                     fig = go.Figure(
                         go.Bar(
                             x=freq_df["Source"],
@@ -239,13 +238,11 @@ with tab_groups:
                             textposition="auto",
                         )
                     )
+                    fig.update_layout(template=get_plotly_template())
                     fig.update_layout(
                         height=250,
-                        paper_bgcolor=tmpl["paper_bgcolor"],
-                        plot_bgcolor=tmpl["plot_bgcolor"],
-                        font=tmpl["font"],
-                        xaxis=dict(**tmpl["xaxis"], title=""),
-                        yaxis=dict(**tmpl["yaxis"], title="Mentions"),
+                        xaxis_title="",
+                        yaxis_title="Mentions",
                         margin=dict(t=10, b=40, l=40, r=10),
                         showlegend=False,
                     )
@@ -294,7 +291,6 @@ with tab_matrix:
             row = [g["source_freq"].get(s, 0) for s in selected_sources]
             matrix_data.append(row)
 
-        tmpl = get_plotly_template()["layout"]
         fig = go.Figure(
             go.Heatmap(
                 z=matrix_data,
@@ -316,16 +312,14 @@ with tab_matrix:
                 ),
                 colorbar=dict(
                     title="Mentions",
-                    titlefont=dict(color="#a1a1aa", family="Rajdhani, sans-serif"),
+                    title_font=dict(color="#a1a1aa", family="Rajdhani, sans-serif"),
                     tickfont=dict(color="#a1a1aa", family="Space Mono, monospace", size=10),
                 ),
             )
         )
+        fig.update_layout(template=get_plotly_template())
         fig.update_layout(
             height=max(400, top_n * 22),
-            paper_bgcolor=tmpl["paper_bgcolor"],
-            plot_bgcolor=tmpl["plot_bgcolor"],
-            font=tmpl["font"],
             xaxis=dict(
                 side="top",
                 tickfont=dict(family="Rajdhani, sans-serif", size=12, color="#a1a1aa"),
@@ -382,7 +376,6 @@ with tab_stats:
             ENTITY_COLORS.get(lbl, "#a1a1aa") for lbl in label_df["Label"]
         ]
 
-        tmpl = get_plotly_template()["layout"]
         fig = go.Figure(
             go.Bar(
                 x=label_df["Label"],
@@ -393,13 +386,11 @@ with tab_stats:
                 textfont=dict(color="#e4e4e7", family="Space Mono, monospace", size=11),
             )
         )
+        fig.update_layout(template=get_plotly_template())
         fig.update_layout(
             height=350,
-            paper_bgcolor=tmpl["paper_bgcolor"],
-            plot_bgcolor=tmpl["plot_bgcolor"],
-            font=tmpl["font"],
-            xaxis=dict(**tmpl["xaxis"], title=""),
-            yaxis=dict(**tmpl["yaxis"], title="Mentions"),
+            xaxis_title="",
+            yaxis_title="Mentions",
             margin=dict(t=10, b=40, l=60, r=10),
             showlegend=False,
         )
