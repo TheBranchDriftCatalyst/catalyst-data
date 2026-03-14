@@ -86,14 +86,16 @@ def _load_entities_for_source(source: str) -> list[dict]:
 
 @st.cache_data(ttl=300)
 def _discover_entity_sources() -> list[str]:
-    """Discover all sources that have entity assets."""
+    """Discover pipeline prefixes that have entity assets."""
     client = _get_client()
     assets = client.list_assets()
-    return sorted({
-        a["code_location"]
-        for a in assets
-        if "entit" in a["asset"].lower() and a["layer"] == "silver"
-    })
+    sources: set[str] = set()
+    for a in assets:
+        if "entit" in a["asset"].lower() and a["layer"] == "silver":
+            prefix = a["asset"].rsplit("_", 1)[0] if "_" in a["asset"] else ""
+            if prefix:
+                sources.add(prefix)
+    return sorted(sources)
 
 
 def _find_entities_for_file(filename_stem: str) -> list[dict]:

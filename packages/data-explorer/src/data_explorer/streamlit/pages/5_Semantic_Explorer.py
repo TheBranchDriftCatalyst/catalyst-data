@@ -142,11 +142,13 @@ if query:
     st.success(f"Found {len(results)} results above threshold ({score_threshold})")
 
     # 4. Load entities for the selected source (for chip rendering)
-    source_code = selected_asset.get("code_location", "")
+    # Extract pipeline prefix from asset name (e.g. "congress" from "congress_embeddings")
+    asset_name = selected_asset.get("asset", "")
+    source_prefix = asset_name.rsplit("_", 1)[0] if "_" in asset_name else ""
     all_entities: list[dict] = []
-    if source_code:
+    if source_prefix:
         try:
-            all_entities = _load_entities_for_source(source_code)
+            all_entities = _load_entities_for_source(source_prefix)
         except Exception:
             pass  # entities are optional enrichment
 

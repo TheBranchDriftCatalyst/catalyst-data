@@ -47,8 +47,7 @@ def _list_sources() -> list[str]:
 
 @st.cache_data(ttl=300, show_spinner="Loading documents...")
 def _load_documents(source: str, limit: int = 2000) -> list[dict]:
-    asset_root = f"silver/{source}/default/documents"
-    return _get_client().load_data(asset_root, limit=limit)
+    return _get_client().load_documents(source, limit=limit)
 
 
 @st.cache_data(ttl=300, show_spinner="Loading chunks...")

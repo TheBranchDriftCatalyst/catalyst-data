@@ -240,8 +240,76 @@ class DataClient:
         return results
 
     # ------------------------------------------------------------------
+    # Source & partition discovery
+    # ------------------------------------------------------------------
+
+    def list_sources(self) -> list[str]:
+        """Return distinct pipeline prefixes extracted from asset names.
+
+        Assets are named like ``congress_entities``, ``leak_propositions``,
+        ``media_chunks``.  This method extracts the prefix before the last
+        underscore-delimited suffix (entities, propositions, chunks,
+        embeddings, documents, transcriptions, metadata) and returns the
+        unique pipeline names (e.g. ``["congress", "leak", "media"]``).
+        """
+        assets = _list_assets_cached(*self._conn_args())
+        suffixes = {
+            "entities", "propositions", "chunks", "embeddings",
+            "documents", "transcriptions", "metadata", "bills",
+        }
+        sources: set[str] = set()
+        for a in assets:
+            name = a["asset"]
+            # Try to split off a known suffix
+            for suf in suffixes:
+                if name.endswith(f"_{suf}"):
+                    prefix = name[: -(len(suf) + 1)]
+                    if prefix:
+                        sources.add(prefix)
+                    break
+        return sorted(sources) if sources else sorted({a["code_location"] for a in assets})
+
+    def _find_asset_root(self, source: str, asset_suffix: str, layer: str) -> str | None:
+        """Find the S3 root for an asset matching ``{source}_{asset_suffix}`` in *layer*.
+
+        Returns the ``root`` path (e.g. ``silver/default/default/congress_entities``)
+        or ``None`` if not found.
+        """
+        assets = _list_assets_cached(*self._conn_args())
+        target = f"{source}_{asset_suffix}"
+        for a in assets:
+            if a["layer"] == layer and a["asset"] == target:
+                return a["root"]
+        return None
+
+    def list_partitions(
+        self,
+        source: str,
+        asset_suffix: str,
+        layer: str = "silver",
+    ) -> list[str]:
+        """List available partition keys for a source's asset."""
+        root = self._find_asset_root(source, asset_suffix, layer)
+        if not root:
+            return []
+        return _list_partitions_cached(*self._conn_args(), prefix=root + "/")
+
+    # ------------------------------------------------------------------
     # Linguistic & knowledge-graph data exploration
     # ------------------------------------------------------------------
+
+    def load_documents(
+        self,
+        source: str,
+        partition: str | None = None,
+        limit: int = 2000,
+    ) -> list[dict]:
+        """Load document rows for *source*."""
+        root = self._find_asset_root(source, "documents", "silver")
+        if not root:
+            return []
+        asset_root = f"{root}/{partition}" if partition else root
+        return self._cached_load(asset_root, limit)
 
     def load_entities(
         self,
@@ -249,10 +317,11 @@ class DataClient:
         partition: str | None = None,
         limit: int = 5000,
     ) -> list[dict]:
-        """Load NER entity rows from ``silver/{source}/default/entities_ner``."""
-        asset_root = f"silver/{source}/default/entities_ner"
-        if partition:
-            asset_root += f"/{partition}"
+        """Load NER entity rows for *source* (e.g. ``congress``, ``leak``)."""
+        root = self._find_asset_root(source, "entities", "silver")
+        if not root:
+            return []
+        asset_root = f"{root}/{partition}" if partition else root
         return self._cached_load(asset_root, limit)
 
     def load_propositions(
@@ -261,10 +330,11 @@ class DataClient:
         partition: str | None = None,
         limit: int = 5000,
     ) -> list[dict]:
-        """Load SPO proposition rows from ``gold/{source}/default/propositions``."""
-        asset_root = f"gold/{source}/default/propositions"
-        if partition:
-            asset_root += f"/{partition}"
+        """Load SPO proposition rows for *source*."""
+        root = self._find_asset_root(source, "propositions", "gold")
+        if not root:
+            return []
+        asset_root = f"{root}/{partition}" if partition else root
         return self._cached_load(asset_root, limit)
 
     def load_chunks(
@@ -273,30 +343,12 @@ class DataClient:
         partition: str | None = None,
         limit: int = 5000,
     ) -> list[dict]:
-        """Load text-chunk rows from ``silver/{source}/default/text_chunks``."""
-        asset_root = f"silver/{source}/default/text_chunks"
-        if partition:
-            asset_root += f"/{partition}"
+        """Load text-chunk rows for *source*."""
+        root = self._find_asset_root(source, "chunks", "silver")
+        if not root:
+            return []
+        asset_root = f"{root}/{partition}" if partition else root
         return self._cached_load(asset_root, limit)
-
-    # ------------------------------------------------------------------
-    # Source & partition discovery
-    # ------------------------------------------------------------------
-
-    def list_sources(self) -> list[str]:
-        """Return distinct ``code_location`` values across all assets."""
-        assets = _list_assets_cached(*self._conn_args())
-        return sorted({a["code_location"] for a in assets})
-
-    def list_partitions(
-        self,
-        source: str,
-        asset_name: str,
-        layer: str = "silver",
-    ) -> list[str]:
-        """List available partition keys for an asset."""
-        prefix = f"{layer}/{source}/default/{asset_name}/"
-        return _list_partitions_cached(*self._conn_args(), prefix=prefix)
 
     # ------------------------------------------------------------------
     # Cross-asset queries
