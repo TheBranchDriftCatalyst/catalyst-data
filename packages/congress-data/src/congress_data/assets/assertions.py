@@ -37,25 +37,32 @@ For each assertion, provide:
 Be precise with predicates. Prefer canonical forms over variations."""
 
 
+class AssertionQualifiers(BaseModel):
+    """Qualifier fields for an assertion."""
+
+    time: str = Field(description="When this occurred (date/session/period), or empty string if unknown")
+    location: str = Field(description="Where (committee/chamber/jurisdiction), or empty string if unknown")
+    condition: str = Field(description="Under what condition, or empty string if none")
+    manner: str = Field(description="How (unanimously/by voice vote/etc), or empty string if unknown")
+    source_attribution: str = Field(description="Who says so, or empty string if not attributed")
+
+
 class QualifiedAssertion(BaseModel):
     """A single qualified assertion extracted by the LLM."""
 
     subject: str = Field(description="Entity performing or being described")
     predicate: str = Field(description="Normalized relationship or action")
     object: str = Field(description="Target entity or value")
-    confidence: float = Field(default=0.8, ge=0, le=1)
-    negated: bool = Field(default=False, description="Is this a negative assertion?")
-    hedged: bool = Field(default=False, description="Is this uncertain/hedged?")
-    qualifiers: dict[str, str] = Field(
-        default_factory=dict,
-        description="Keys: time, location, condition, manner, source_attribution",
-    )
+    confidence: float = Field(description="Score 0-1 indicating how clearly the text supports this")
+    negated: bool = Field(description="True if this is a negative assertion")
+    hedged: bool = Field(description="True if this is uncertain/hedged")
+    qualifiers: AssertionQualifiers = Field(description="Qualifier fields for this assertion")
 
 
 class AssertionExtractionResult(BaseModel):
     """Structured output from assertion extraction."""
 
-    assertions: list[QualifiedAssertion] = Field(default_factory=list)
+    assertions: list[QualifiedAssertion] = Field(description="Extracted assertions")
 
 
 def _normalize_predicate(predicate: str) -> str:
@@ -115,12 +122,14 @@ def congress_assertions(
         ])
 
         for ext in result.assertions:
+            # Convert structured qualifiers to dict, dropping empty values
+            quals = {k: v for k, v in ext.qualifiers.model_dump().items() if v}
             assertion = Assertion(
                 subject_text=ext.subject,
                 predicate=ext.predicate,
                 predicate_canonical=_normalize_predicate(ext.predicate),
                 object_text=ext.object,
-                qualifiers=ext.qualifiers,
+                qualifiers=quals,
                 confidence=ext.confidence,
                 negated=ext.negated,
                 hedged=ext.hedged,

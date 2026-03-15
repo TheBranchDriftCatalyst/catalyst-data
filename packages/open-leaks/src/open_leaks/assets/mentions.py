@@ -48,14 +48,14 @@ class MentionExtraction(BaseModel):
     text: str = Field(description="Entity mention as it appears in text")
     label: str = Field(description="Entity type: PERSON, ORG, GPE, LOC, DATE, LAW, EVENT, MONEY, NORP, FACILITY, OTHER")
     context: str = Field(description="Sentence fragment containing the entity")
-    span_start: int = Field(default=-1, description="Character offset start (0-based)")
-    span_end: int = Field(default=-1, description="Character offset end (exclusive)")
+    span_start: int = Field(description="Character offset start (0-based), or -1 if unknown")
+    span_end: int = Field(description="Character offset end (exclusive), or -1 if unknown")
 
 
 class MentionExtractionResult(BaseModel):
     """Structured output from mention extraction."""
 
-    mentions: list[MentionExtraction] = Field(default_factory=list)
+    mentions: list[MentionExtraction] = Field(description="Extracted entity mentions")
 
 
 def _parse_mention_type(label: str) -> MentionType:
