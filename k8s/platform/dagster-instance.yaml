@@ -39,6 +39,13 @@ data:
         run_k8s_config:
           container_config:
             image_pull_policy: Always
+            resources:
+              requests:
+                cpu: 500m
+                memory: 2Gi
+              limits:
+                cpu: "2"
+                memory: 4Gi
             env:
               - name: DAGSTER_POSTGRES_HOST
                 value: dagster-postgres.catalyst-data.svc.cluster.local

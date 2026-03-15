@@ -8,6 +8,7 @@ Downloads and parses:
 
 import csv
 import io
+import time
 import zipfile
 from pathlib import Path
 
@@ -22,6 +23,37 @@ from open_leaks.entities import Cable, CourtDocument, OffshoreEntity, OffshoreRe
 # ---------------------------------------------------------------------------
 
 _HTTP_TIMEOUT = httpx.Timeout(connect=30, read=300, write=30, pool=30)
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 2  # seconds — exponential: 2, 4, 8
+
+
+def _retry_on_network_error(
+    func,
+    *args,
+    context: AssetExecutionContext,
+    description: str = "request",
+    **kwargs,
+):
+    """Execute *func* with exponential-backoff retry on network errors.
+
+    Retries up to ``_MAX_RETRIES`` times for ``httpx.ConnectError`` and
+    ``httpx.TimeoutException``.  Other exceptions propagate immediately.
+    """
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            return func(*args, **kwargs)
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            if attempt == _MAX_RETRIES:
+                context.log.error(
+                    f"{description}: failed after {_MAX_RETRIES} attempts — {exc}"
+                )
+                raise
+            delay = _RETRY_BACKOFF_BASE ** attempt
+            context.log.warning(
+                f"{description}: attempt {attempt}/{_MAX_RETRIES} failed ({type(exc).__name__}), "
+                f"retrying in {delay}s…"
+            )
+            time.sleep(delay)
 
 
 def _ensure_cache(config: OpenLeaksConfig) -> Path:
@@ -40,20 +72,27 @@ def _download_file(
         context.log.info(f"Using cached file: {dest} ({dest.stat().st_size / 1024 / 1024:.1f} MB)")
         return dest
 
-    context.log.info(f"Downloading {url} → {dest}")
-    with httpx.stream("GET", url, follow_redirects=True, timeout=_HTTP_TIMEOUT) as r:
-        r.raise_for_status()
-        total = int(r.headers.get("content-length", 0))
-        downloaded = 0
-        with open(dest, "wb") as f:
-            for chunk in r.iter_bytes(chunk_size=65536):
-                f.write(chunk)
-                downloaded += len(chunk)
-                if total and downloaded % (50 * 1024 * 1024) < 65536:
-                    pct = downloaded / total * 100
-                    context.log.info(
-                        f"  {downloaded / 1024 / 1024:.1f} / {total / 1024 / 1024:.1f} MB ({pct:.0f}%)"
-                    )
+    def _do_download():
+        context.log.info(f"Downloading {url} → {dest}")
+        with httpx.stream("GET", url, follow_redirects=True, timeout=_HTTP_TIMEOUT) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("content-length", 0))
+            downloaded = 0
+            with open(dest, "wb") as f:
+                for chunk in r.iter_bytes(chunk_size=65536):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total and downloaded % (50 * 1024 * 1024) < 65536:
+                        pct = downloaded / total * 100
+                        context.log.info(
+                            f"  {downloaded / 1024 / 1024:.1f} / {total / 1024 / 1024:.1f} MB ({pct:.0f}%)"
+                        )
+
+    _retry_on_network_error(
+        _do_download,
+        context=context,
+        description=f"download {url}",
+    )
 
     size_mb = dest.stat().st_size / 1024 / 1024
     context.log.info(f"Download complete: {dest.name} ({size_mb:.1f} MB)")
@@ -297,13 +336,18 @@ def _fetch_epstein_api(
                 context.log.info(f"Fetching page {page} ({len(docs):,} docs so far)")
 
             try:
-                resp = client.get(url)
+                resp = _retry_on_network_error(
+                    client.get,
+                    url,
+                    context=context,
+                    description=f"epstein API page {page}",
+                )
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
                 context.log.warning(f"API returned {e.response.status_code} — stopping pagination")
                 break
-            except httpx.ConnectError:
-                context.log.error(f"Cannot connect to {api_base} — API may be unavailable")
+            except (httpx.ConnectError, httpx.TimeoutException) as e:
+                context.log.error(f"Cannot connect to {api_base} after {_MAX_RETRIES} retries — {e}")
                 break
 
             payload = resp.json()
