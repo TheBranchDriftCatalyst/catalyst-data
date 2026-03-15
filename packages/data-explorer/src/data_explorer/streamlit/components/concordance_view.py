@@ -75,19 +75,37 @@ def _kwic_split(
 def render_concordance(
     matches: list[dict],
     context_window: int = 60,
+    page_size: int = 100,
 ) -> None:
     """Render a KWIC concordance table for a list of entity matches.
 
     Supports both legacy entity dicts (text, label, context, source_doc_id, chunk_id)
     and new mention dicts (text, mention_type, context, document_id, chunk_id).
+
+    Results are paginated to avoid overwhelming the browser with large HTML tables.
     """
     if not matches:
         st.info("No concordance matches to display.")
         return
 
+    # Pagination
+    total = len(matches)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = st.number_input(
+        f"Page (1–{total_pages}, {total} matches)",
+        min_value=1,
+        max_value=total_pages,
+        value=1,
+        step=1,
+        key="kwic_page",
+    )
+    page_start = (page - 1) * page_size
+    page_end = min(page_start + page_size, total)
+    page_matches = matches[page_start:page_end]
+
     # Build HTML rows
     rows: list[str] = []
-    for m in matches:
+    for m in page_matches:
         entity_text: str = m.get("text", "")
         # Support both "label" (legacy) and "mention_type" (new)
         label: str = m.get("label", "") or m.get("mention_type", "")
@@ -127,6 +145,8 @@ def render_concordance(
         font-family: "Space Mono", ui-monospace, monospace;
         font-size: 0.78rem;
         line-height: 1.6;
+        background: transparent;
+        color: #e4e4e7;
     }}
     table.kwic-table td {{
         padding: 0.25rem 0.4rem;
@@ -182,7 +202,7 @@ def render_concordance(
     </table>
     """
 
-    st.markdown(table_html, unsafe_allow_html=True)
+    st.html(table_html)
 
 
 def render_concordance_stats(matches: list[dict]) -> None:
@@ -294,7 +314,7 @@ def render_mention_stats(mentions: list[dict]) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_assertion_table(assertions: list[dict]) -> None:
+def render_assertion_table(assertions: list[dict], page_size: int = 100, key_suffix: str = "") -> None:
     """Render an assertion table with qualifier chips, negation, and hedging indicators.
 
     Each assertion is displayed as a row with:
@@ -304,13 +324,33 @@ def render_assertion_table(assertions: list[dict]) -> None:
     - Negation indicator (strikethrough styling)
     - Hedging indicator (italic styling)
     - Confidence score
+
+    Results are paginated to avoid overwhelming the browser.
     """
     if not assertions:
         st.info("No assertions to display.")
         return
 
+    # Pagination
+    total = len(assertions)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    if total_pages > 1:
+        page = st.number_input(
+            f"Page (1–{total_pages}, {total} assertions)",
+            min_value=1,
+            max_value=total_pages,
+            value=1,
+            step=1,
+            key=f"assert_page{key_suffix}",
+        )
+    else:
+        page = 1
+    page_start = (page - 1) * page_size
+    page_end = min(page_start + page_size, total)
+    page_assertions = assertions[page_start:page_end]
+
     rows: list[str] = []
-    for a in assertions:
+    for a in page_assertions:
         subject = html.escape(a.get("subject_text", ""))
         predicate = html.escape(a.get("predicate_canonical", "") or a.get("predicate", ""))
         obj = html.escape(a.get("object_text", ""))
@@ -364,6 +404,7 @@ def render_assertion_table(assertions: list[dict]) -> None:
         font-family: "Rajdhani", sans-serif;
         font-size: 0.82rem;
         line-height: 1.6;
+        color: #e4e4e7;
     }}
     table.assert-table th {{
         font-family: "Rajdhani", sans-serif;
@@ -448,4 +489,4 @@ def render_assertion_table(assertions: list[dict]) -> None:
     </table>
     """
 
-    st.markdown(table_html, unsafe_allow_html=True)
+    st.html(table_html)

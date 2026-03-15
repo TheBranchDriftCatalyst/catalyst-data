@@ -411,7 +411,7 @@ with tab_profile:
                 or a.get("object_text", "").lower() == selected_entity.lower()
             ]
             if entity_assertions:
-                render_assertion_table(entity_assertions)
+                render_assertion_table(entity_assertions, key_suffix="_profile")
             else:
                 st.info("No assertions found for this entity.")
 
