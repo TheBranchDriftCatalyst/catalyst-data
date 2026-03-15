@@ -26,20 +26,23 @@ def _code_location_from_context(context: OutputContext | InputContext) -> str:
             upstream, type(upstream).__name__,
         )
         if upstream is not None:
+            import sys
             # Try definition_metadata first (standard for @asset outputs)
             meta = getattr(upstream, "definition_metadata", None)
-            logger.info("path_builder: definition_metadata=%r", meta)
+            print(f"DEBUG PATH_BUILDER: definition_metadata={meta}", file=sys.stderr, flush=True)
             # Also try .metadata (SourceAssets may expose metadata differently)
             if not meta:
                 meta = getattr(upstream, "metadata", None)
-                logger.info("path_builder: fallback .metadata=%r", meta)
+                print(f"DEBUG PATH_BUILDER: fallback .metadata={meta}", file=sys.stderr, flush=True)
+            # Also dump all attrs for debugging
+            print(f"DEBUG PATH_BUILDER: upstream attrs={[a for a in dir(upstream) if not a.startswith('_')]}", file=sys.stderr, flush=True)
             meta = meta or {}
             override = meta.get("source_code_location")
             if override:
-                logger.info("path_builder: using source_code_location override=%s", override)
+                print(f"DEBUG PATH_BUILDER: using override={override}", file=sys.stderr, flush=True)
                 return override
             else:
-                logger.warning("path_builder: no source_code_location in meta keys=%s", list(meta.keys()))
+                print(f"DEBUG PATH_BUILDER: NO override found, meta keys={list(meta.keys())}", file=sys.stderr, flush=True)
     try:
         origin = context.step_context.dagster_run.external_pipeline_origin
         loc = origin.external_repository_origin.code_location_origin.location_name
@@ -148,7 +151,7 @@ def build_asset_root(
     root = f"{layer}/{code_location}/{group}/{asset_name}"
     if config_key:
         root = f"{root}/config={config_key}"
-    logger.info("path_builder: build_asset_root=%s (layer=%s, code_location=%s, group=%s, asset=%s)", root, layer, code_location, group, asset_name)
+    import sys; print(f"DEBUG PATH_BUILDER: root={root} layer={layer} code_location={code_location} group={group} asset={asset_name}", file=sys.stderr, flush=True)
     return root
 
 

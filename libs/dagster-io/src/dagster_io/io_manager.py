@@ -214,6 +214,7 @@ class MinioIOManager(ConfigurableIOManager):
         self, context: InputContext, partition_key=None
     ) -> typing.Any:
         prefix = build_input_prefix(context, partition_key=partition_key)
+        import sys; print(f"DEBUG IO_MANAGER: load_input prefix={prefix} asset_key={context.asset_key}", file=sys.stderr, flush=True)
         logger.debug("Loading asset from prefix=%s", prefix)
         meta_bytes = self.client.get_object(f"{prefix}/_metadata.json")
         metadata = json.loads(meta_bytes)
