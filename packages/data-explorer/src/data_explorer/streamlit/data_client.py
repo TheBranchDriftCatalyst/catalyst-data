@@ -270,7 +270,6 @@ class DataClient:
             "entities", "propositions", "chunks", "embeddings",
             "documents", "transcriptions", "metadata", "bills",
             "mentions", "assertions", "entity_candidates",
-            "canonical_entities", "entity_alignments", "assertion_graph",
         }
         sources: set[str] = set()
         for a in assets:

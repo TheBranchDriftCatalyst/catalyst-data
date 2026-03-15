@@ -8,3 +8,4 @@ build/
 .scratch/
 *.egg
 .pytest_cache/
+.env.cluster

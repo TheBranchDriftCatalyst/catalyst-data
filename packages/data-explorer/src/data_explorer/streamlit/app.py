@@ -139,7 +139,7 @@ def main() -> None:
     # -- Right: Layer distribution horizontal bar chart -----------------------
     with chart_right:
         st.subheader("Layer Distribution")
-        layer_order = ["bronze", "silver", "gold"]
+        layer_order = ["bronze", "silver", "gold", "platinum"]
         sorted_layers = sorted(layers.keys(), key=lambda x: layer_order.index(x) if x in layer_order else 99)
         layer_names = list(sorted_layers)
         layer_values = [layers[l] for l in sorted_layers]
