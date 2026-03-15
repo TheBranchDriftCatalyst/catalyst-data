@@ -64,7 +64,7 @@ class GraphDBResource(ConfigurableResource):
         logger.info("Upserting %d canonical entities to PostgreSQL", len(entities))
         conn = self._pg_conn()
         try:
-            with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "postgresql", "operation": "upsert_entities"}):
+          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "postgresql", "operation": "upsert_entities"}):
             with conn.cursor() as cur:
                 for ent in entities:
                     cur.execute(
