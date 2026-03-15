@@ -113,19 +113,14 @@ spec:
             periodSeconds: 30
       volumes:
         - name: prompts
-          projected:
-            sources:
-              - configMap:
-                  name: shared-prompts
-                  items:
-                    - key: ner-basic.prompt
-                      path: ner/basic.prompt
-                    - key: propositions-spo.prompt
-                      path: propositions/spo.prompt
-              - configMap:
-                  name: congress-data-prompts
-                  items:
-                    - key: mentions.prompt
-                      path: mentions/congress.prompt
-                    - key: assertions.prompt
-                      path: assertions/congress.prompt
+          configMap:
+            name: congress-data-prompts
+            items:
+              - key: ner-basic.prompt
+                path: ner/basic.prompt
+              - key: propositions-spo.prompt
+                path: propositions/spo.prompt
+              - key: mentions.prompt
+                path: mentions/congress.prompt
+              - key: assertions.prompt
+                path: assertions/congress.prompt
