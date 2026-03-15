@@ -11,47 +11,61 @@ from dagster import InputContext, OutputContext
 logger = logging.getLogger(__name__)
 
 
+def _unwrap_metadata_value(val):
+    """Unwrap Dagster MetadataValue to its raw Python value.
+
+    Dagster wraps metadata values in MetadataValue objects (e.g.,
+    TextMetadataValue). This extracts the underlying .value/.text.
+    """
+    if val is None:
+        return None
+    # MetadataValue subclasses have a .value property
+    if hasattr(val, "value"):
+        return val.value
+    # TextMetadataValue also has .text
+    if hasattr(val, "text"):
+        return val.text
+    return val
+
+
+def _get_metadata_str(meta: dict, key: str, default: str | None = None) -> str | None:
+    """Get a string value from a metadata dict, unwrapping MetadataValue if needed."""
+    val = meta.get(key, default)
+    return _unwrap_metadata_value(val) if val is not default else default
+
+
+def _get_upstream_metadata(context: InputContext) -> dict:
+    """Get metadata dict from an InputContext's upstream output.
+
+    Tries definition_metadata first, then metadata. Returns empty dict if
+    neither is available.
+    """
+    upstream = context.upstream_output
+    if upstream is None:
+        return {}
+    meta = getattr(upstream, "definition_metadata", None)
+    if not meta:
+        meta = getattr(upstream, "metadata", None)
+    return meta or {}
+
+
 def _code_location_from_context(context: OutputContext | InputContext) -> str:
     """Extract code location name from run context, falling back to env var.
 
     For InputContext, checks upstream metadata for ``source_code_location``
     override — enables cross-code-location reads via SourceAssets.
     """
-    # Cross-code-location override: SourceAsset metadata can specify the
-    # code location that actually wrote the data.
     if isinstance(context, InputContext):
-        upstream = context.upstream_output
-        logger.info(
-            "path_builder: InputContext upstream_output=%r, type=%s",
-            upstream, type(upstream).__name__,
-        )
-        if upstream is not None:
-            import sys
-            # Try definition_metadata first (standard for @asset outputs)
-            meta = getattr(upstream, "definition_metadata", None)
-            print(f"DEBUG PATH_BUILDER: definition_metadata={meta}", file=sys.stderr, flush=True)
-            # Also try .metadata (SourceAssets may expose metadata differently)
-            if not meta:
-                meta = getattr(upstream, "metadata", None)
-                print(f"DEBUG PATH_BUILDER: fallback .metadata={meta}", file=sys.stderr, flush=True)
-            # Also dump all attrs for debugging
-            print(f"DEBUG PATH_BUILDER: upstream attrs={[a for a in dir(upstream) if not a.startswith('_')]}", file=sys.stderr, flush=True)
-            meta = meta or {}
-            override = meta.get("source_code_location")
-            if override:
-                print(f"DEBUG PATH_BUILDER: using override={override}", file=sys.stderr, flush=True)
-                return override
-            else:
-                print(f"DEBUG PATH_BUILDER: NO override found, meta keys={list(meta.keys())}", file=sys.stderr, flush=True)
+        meta = _get_upstream_metadata(context)
+        override = _get_metadata_str(meta, "source_code_location")
+        if override:
+            logger.debug("path_builder: using source_code_location override=%s", override)
+            return override
     try:
         origin = context.step_context.dagster_run.external_pipeline_origin
-        loc = origin.external_repository_origin.code_location_origin.location_name
-        logger.info("path_builder: resolved code_location from run origin=%s", loc)
-        return loc
+        return origin.external_repository_origin.code_location_origin.location_name
     except Exception:
-        fallback = os.environ.get("DAGSTER_CODE_LOCATION", "default")
-        logger.info("path_builder: falling back to env DAGSTER_CODE_LOCATION=%s", fallback)
-        return fallback
+        return os.environ.get("DAGSTER_CODE_LOCATION", "default")
 
 
 def _group_from_asset_key(asset_key) -> str:
@@ -72,16 +86,10 @@ def _extract_layer(context: OutputContext | InputContext) -> str:
         if isinstance(context, OutputContext):
             meta = context.definition_metadata or {}
         else:
-            # InputContext: read from upstream output's definition metadata
-            meta = getattr(context.upstream_output, "definition_metadata", None)
-            if not meta:
-                meta = getattr(context.upstream_output, "metadata", None)
-            meta = meta or {}
-        layer = meta.get("layer", "raw")
-        logger.info("path_builder: _extract_layer=%s from meta keys=%s", layer, list(meta.keys()))
+            meta = _get_upstream_metadata(context)
+        layer = _get_metadata_str(meta, "layer", "raw")
         return layer
     except Exception:
-        logger.warning("path_builder: _extract_layer falling back to 'raw'")
         return "raw"
 
 
@@ -151,7 +159,7 @@ def build_asset_root(
     root = f"{layer}/{code_location}/{group}/{asset_name}"
     if config_key:
         root = f"{root}/config={config_key}"
-    import sys; print(f"DEBUG PATH_BUILDER: root={root} layer={layer} code_location={code_location} group={group} asset={asset_name}", file=sys.stderr, flush=True)
+    logger.debug("path_builder: build_asset_root=%s", root)
     return root
 
 
