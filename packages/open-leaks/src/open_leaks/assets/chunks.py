@@ -9,7 +9,11 @@ Routes by document_type for optimal chunk sizes:
 from dagster import AssetExecutionContext, Output, asset
 from dagster_io import ChunkingResource, TextChunk
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from open_leaks.core.document import Document
+
+logger = get_logger(__name__)
 
 CHUNK_PROFILES = {
     "cable": {"chunk_size": 1500, "chunk_overlap": 250},
@@ -29,6 +33,7 @@ def leak_chunks(
     chunking: ChunkingResource,
     leak_documents: list[Document],
 ) -> Output[list[TextChunk]]:
+    logger.info("Starting leak_chunks chunking for %d documents", len(leak_documents))
     all_chunks: list[TextChunk] = []
     stats: dict[str, int] = {}
 
@@ -50,6 +55,8 @@ def leak_chunks(
         all_chunks.extend(chunks)
         stats[doc.document_type] = stats.get(doc.document_type, 0) + len(chunks)
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_chunks", layer="silver").inc(len(all_chunks))
+    logger.info("leak_chunks complete: %d documents -> %d chunks", len(leak_documents), len(all_chunks))
     context.log.info(
         f"Chunked {len(leak_documents)} documents into {len(all_chunks)} chunks: "
         + ", ".join(f"{k}={v}" for k, v in stats.items())

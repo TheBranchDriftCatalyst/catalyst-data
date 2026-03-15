@@ -4,7 +4,10 @@ from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
 
+from dagster_io.logging import get_logger
 from open_leaks.entities import OffshoreRelationship
+
+logger = get_logger(__name__)
 
 
 @asset(

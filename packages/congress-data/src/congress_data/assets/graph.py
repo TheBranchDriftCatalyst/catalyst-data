@@ -7,6 +7,10 @@ from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
 
+from dagster_io.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 @asset(
     group_name="congress",

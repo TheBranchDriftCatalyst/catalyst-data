@@ -1,0 +1,51 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dagster-pipeline-alerts
+  namespace: catalyst-data
+  labels:
+    app.kubernetes.io/part-of: dagster
+spec:
+  groups:
+    - name: dagster.pipeline.alerts
+      rules:
+        - alert: DagsterAssetMaterializationSlow
+          expr: catalyst_asset_materialization_duration_seconds{quantile="0.99"} > 1800
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Slow asset materialization: {{ $labels.asset_key }}"
+            description: "Asset {{ $labels.asset_key }} in {{ $labels.code_location }} p99 duration > 30m"
+
+        - alert: DagsterLLMHighErrorRate
+          expr: |
+            rate(catalyst_llm_requests_total{status="error"}[5m])
+            / rate(catalyst_llm_requests_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High LLM error rate for {{ $labels.model }}"
+            description: "LLM error rate > 10% for model {{ $labels.model }}"
+
+        - alert: DagsterCodeLocationDown
+          expr: up{job="dagster-code-locations"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Dagster code location down"
+            description: "Code location metrics endpoint unreachable for 5 minutes"
+
+        - alert: DagsterHighMemoryUsage
+          expr: |
+            container_memory_working_set_bytes{namespace="catalyst-data", container!=""}
+            / container_spec_memory_limit_bytes{namespace="catalyst-data", container!=""} > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory usage in {{ $labels.pod }}"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} using >90% memory"

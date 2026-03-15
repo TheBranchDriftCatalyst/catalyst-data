@@ -7,9 +7,22 @@ from collections import defaultdict
 
 import numpy as np
 import streamlit as st
+from dagster_io.logging import get_logger
 from dagster_io.manifest import AssetManifest
+from dagster_io.models import (
+    AlignmentEdge,
+    AlignmentType,
+    Assertion,
+    CanonicalEntity,
+    EntityCandidate,
+    Mention,
+    MentionType,
+    Provenance,
+)
 from dagster_io.s3_client import S3Client
 from dagster_io.serializers import deserialize
+
+logger = get_logger(__name__)
 
 
 # ------------------------------------------------------------------
@@ -256,6 +269,8 @@ class DataClient:
         suffixes = {
             "entities", "propositions", "chunks", "embeddings",
             "documents", "transcriptions", "metadata", "bills",
+            "mentions", "assertions", "entity_candidates",
+            "canonical_entities", "entity_alignments", "assertion_graph",
         }
         sources: set[str] = set()
         for a in assets:
@@ -316,8 +331,18 @@ class DataClient:
         source: str,
         partition: str | None = None,
         limit: int = 5000,
+        legacy: bool = False,
     ) -> list[dict]:
-        """Load NER entity rows for *source* (e.g. ``congress``, ``leak``)."""
+        """Load NER entity rows for *source* (e.g. ``congress``, ``leak``).
+
+        When *legacy* is False (default), loads gold-layer mentions instead.
+        Set *legacy=True* to use the original silver-layer entities.
+        """
+        if not legacy:
+            logger.info("load_entities: routing to load_mentions for source=%s", source)
+            return self.load_mentions(source, partition)
+
+        logger.info("load_entities(legacy=True): loading silver entities for source=%s", source)
         root = self._find_asset_root(source, "entities", "silver")
         if not root:
             return []
@@ -349,6 +374,202 @@ class DataClient:
             return []
         asset_root = f"{root}/{partition}" if partition else root
         return self._cached_load(asset_root, limit)
+
+    # ------------------------------------------------------------------
+    # EDC data loading (mentions, assertions, canonical entities, alignments)
+    # ------------------------------------------------------------------
+
+    def load_mentions(
+        self,
+        source: str,
+        partition: str | None = None,
+        mention_type: str | None = None,
+        limit: int = 5000,
+    ) -> list[dict]:
+        """Load gold-layer Mention objects for a source."""
+        logger.info("Loading mentions for source=%s", source)
+        root = self._find_asset_root(source, "mentions", "gold")
+        if root is None:
+            logger.warning("No mentions found for source=%s, falling back to legacy entities", source)
+            return self.load_entities(source, partition, legacy=True)
+
+        asset_root = f"{root}/{partition}" if partition else root
+        records = self._cached_load(asset_root, limit)
+
+        # Validate with Pydantic model
+        validated = []
+        for r in records:
+            try:
+                mention = Mention.model_validate(r) if isinstance(r, dict) else r
+                if mention_type and mention.mention_type.value != mention_type:
+                    continue
+                validated.append(mention.model_dump() if isinstance(mention, Mention) else r)
+            except Exception as e:
+                logger.debug("Skipping invalid mention record: %s", e)
+                validated.append(r)  # pass through as dict
+
+        logger.info("Loaded %d mentions for source=%s", len(validated), source)
+        return validated
+
+    def load_assertions(
+        self,
+        source: str,
+        partition: str | None = None,
+        limit: int = 5000,
+    ) -> list[dict]:
+        """Load gold-layer Assertion objects for a source."""
+        logger.info("Loading assertions for source=%s", source)
+        root = self._find_asset_root(source, "assertions", "gold")
+        if root is None:
+            logger.warning("No assertions found for source=%s, falling back to propositions", source)
+            return self.load_propositions(source, partition, limit=limit)
+
+        asset_root = f"{root}/{partition}" if partition else root
+        records = self._cached_load(asset_root, limit)
+
+        validated = []
+        for r in records:
+            try:
+                assertion = Assertion.model_validate(r) if isinstance(r, dict) else r
+                validated.append(assertion.model_dump() if isinstance(assertion, Assertion) else r)
+            except Exception as e:
+                logger.debug("Skipping invalid assertion record: %s", e)
+                validated.append(r)
+
+        logger.info("Loaded %d assertions for source=%s", len(validated), source)
+        return validated
+
+    def load_canonical_entities(
+        self,
+        partition: str | None = None,
+        limit: int = 5000,
+    ) -> list[dict]:
+        """Load platinum-layer canonical entities from knowledge_graph."""
+        logger.info("Loading canonical entities")
+        assets = _list_assets_cached(*self._conn_args())
+        root = None
+        for a in assets:
+            if a["layer"] == "platinum" and a["asset"] == "canonical_entities":
+                root = a["root"]
+                break
+
+        if root is None:
+            logger.warning("No canonical_entities found in platinum layer")
+            return []
+
+        logger.debug("Resolved canonical_entities root=%s", root)
+        asset_root = f"{root}/{partition}" if partition else root
+        records = self._cached_load(asset_root, limit)
+
+        validated = []
+        for r in records:
+            try:
+                entity = CanonicalEntity.model_validate(r) if isinstance(r, dict) else r
+                validated.append(entity.model_dump() if isinstance(entity, CanonicalEntity) else r)
+            except Exception as e:
+                logger.debug("Skipping invalid canonical entity record: %s", e)
+                validated.append(r)
+
+        logger.info("Loaded %d canonical entities", len(validated))
+        return validated
+
+    def load_entity_alignments(
+        self,
+        partition: str | None = None,
+        limit: int = 5000,
+    ) -> list[dict]:
+        """Load platinum-layer entity alignment edges from knowledge_graph."""
+        logger.info("Loading entity alignments")
+        assets = _list_assets_cached(*self._conn_args())
+        root = None
+        for a in assets:
+            if a["layer"] == "platinum" and a["asset"] == "entity_alignments":
+                root = a["root"]
+                break
+
+        if root is None:
+            logger.warning("No entity_alignments found in platinum layer")
+            return []
+
+        logger.debug("Resolved entity_alignments root=%s", root)
+        asset_root = f"{root}/{partition}" if partition else root
+        records = self._cached_load(asset_root, limit)
+
+        validated = []
+        for r in records:
+            try:
+                edge = AlignmentEdge.model_validate(r) if isinstance(r, dict) else r
+                validated.append(edge.model_dump() if isinstance(edge, AlignmentEdge) else r)
+            except Exception as e:
+                logger.debug("Skipping invalid alignment edge record: %s", e)
+                validated.append(r)
+
+        logger.info("Loaded %d entity alignments", len(validated))
+        return validated
+
+    def load_assertion_graph(
+        self,
+        partition: str | None = None,
+        limit: int = 5000,
+    ) -> list[dict]:
+        """Load platinum-layer cross-source assertion graph from knowledge_graph."""
+        logger.info("Loading assertion graph")
+        assets = _list_assets_cached(*self._conn_args())
+        root = None
+        for a in assets:
+            if a["layer"] == "platinum" and a["asset"] == "assertion_graph":
+                root = a["root"]
+                break
+
+        if root is None:
+            logger.warning("No assertion_graph found in platinum layer")
+            return []
+
+        logger.debug("Resolved assertion_graph root=%s", root)
+        asset_root = f"{root}/{partition}" if partition else root
+        records = self._cached_load(asset_root, limit)
+        logger.info("Loaded %d assertion graph records", len(records))
+        return records
+
+    # ------------------------------------------------------------------
+    # EDC helper queries
+    # ------------------------------------------------------------------
+
+    def get_mentions_for_document(
+        self,
+        source: str,
+        document_id: str,
+        partition: str | None = None,
+    ) -> list[dict]:
+        """Load mentions for a specific document, sorted by span_start."""
+        mentions = self.load_mentions(source, partition)
+        filtered = [m for m in mentions if m.get("document_id") == document_id]
+        filtered.sort(key=lambda m: m.get("span_start") or 0)
+        return filtered
+
+    def get_assertions_for_entity(
+        self,
+        source: str,
+        entity_text: str,
+        partition: str | None = None,
+    ) -> list[dict]:
+        """Load assertions where entity_text appears as subject or object."""
+        assertions = self.load_assertions(source, partition)
+        needle = entity_text.lower()
+        return [
+            a for a in assertions
+            if a.get("subject_text", "").lower() == needle
+            or a.get("object_text", "").lower() == needle
+        ]
+
+    def get_canonical_entity_by_name(self, name: str) -> dict | None:
+        """Search canonical entities by name (case-insensitive)."""
+        entities = self.load_canonical_entities()
+        needle = name.lower()
+        for e in entities:
+            if e.get("canonical_name", "").lower() == needle:
+                return e
+        return None
 
     # ------------------------------------------------------------------
     # Cross-asset queries
@@ -475,15 +696,21 @@ class DataClient:
         source: str,
         partition: str | None = None,
     ) -> dict[tuple[str, str], int]:
-        """Build entity co-occurrence dict: ``{(entity_a, entity_b): count}``."""
-        entities = self.load_entities(source, partition)
+        """Build entity co-occurrence dict: ``{(entity_a, entity_b): count}``.
+
+        Uses mentions (grouped by mention_type) when available, falling back
+        to legacy entities.
+        """
+        mentions = self.load_mentions(source, partition)
         target_set = {t.lower() for t in entity_texts}
 
         chunk_entities: dict[str, set[str]] = defaultdict(set)
-        for e in entities:
-            text_lower = e.get("text", "").lower()
-            if text_lower in target_set and "chunk_id" in e:
-                chunk_entities[e["chunk_id"]].add(text_lower)
+        for m in mentions:
+            text_lower = m.get("text", "").lower()
+            if text_lower in target_set and "chunk_id" in m:
+                # Include mention_type in the key for richer co-occurrence
+                mention_type = m.get("mention_type", "OTHER")
+                chunk_entities[m["chunk_id"]].add(text_lower)
 
         cooccurrence: dict[tuple[str, str], int] = defaultdict(int)
         for _chunk_id, ent_set in chunk_entities.items():

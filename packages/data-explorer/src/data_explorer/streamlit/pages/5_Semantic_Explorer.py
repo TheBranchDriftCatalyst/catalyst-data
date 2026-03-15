@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import streamlit as st
 
@@ -16,6 +18,8 @@ from data_explorer.streamlit.components.embedding_scatter import (
     render_reduction_controls,
 )
 from data_explorer.streamlit.components.entity_chip import render_entity_chip_html
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="Semantic Explorer",
@@ -62,9 +66,17 @@ def _embed_query(text: str) -> list[float]:
 
 
 @st.cache_data(ttl=300)
-def _load_entities_for_source(source: str) -> list[dict]:
-    """Load all NER entities for a given source."""
-    return _get_client().load_entities(source)
+def _load_mentions_for_source(source: str) -> list[dict]:
+    """Load all mentions for a given source (EDC), fallback to entities."""
+    client = _get_client()
+    try:
+        return client.load_mentions(source)
+    except Exception:
+        logger.debug("load_mentions not available for %s, falling back to load_entities", source)
+        try:
+            return client.load_entities(source)
+        except Exception:
+            return []
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +104,15 @@ with st.sidebar:
     embedding_model = embedding_model_selector(key="semantic_embedding_model")
     top_k = st.slider("Top K results", 5, 50, 10, step=5)
     score_threshold = st.slider("Score threshold", 0.0, 1.0, 0.5, step=0.05)
+
+    # Mention type filter
+    mention_type_filter = st.multiselect(
+        "Mention Type",
+        options=["PERSON", "ORG", "GPE", "LOC", "DATE", "LAW", "EVENT", "MONEY", "NORP", "FACILITY", "OTHER"],
+        default=[],
+        key="se_mention_type_filter",
+        help="Filter entity chips by mention type (leave empty for all)",
+    )
 
 reduction_method, reduction_params = render_reduction_controls()
 
@@ -143,23 +164,30 @@ if query:
 
     st.success(f"Found {len(results)} results above threshold ({score_threshold})")
 
-    # 4. Load entities for the selected source (for chip rendering)
+    # 4. Load mentions for the selected source (for chip rendering)
     # Extract pipeline prefix from asset name (e.g. "congress" from "congress_embeddings")
     asset_name = selected_asset.get("asset", "")
     source_prefix = asset_name.rsplit("_", 1)[0] if "_" in asset_name else ""
-    all_entities: list[dict] = []
+    all_mentions: list[dict] = []
     if source_prefix:
         try:
-            all_entities = _load_entities_for_source(source_prefix)
+            all_mentions = _load_mentions_for_source(source_prefix)
         except Exception:
-            pass  # entities are optional enrichment
+            pass  # mentions are optional enrichment
 
-    # Build a chunk_id -> entities lookup
-    chunk_entity_map: dict[str, list[dict]] = {}
-    for ent in all_entities:
-        cid = ent.get("chunk_id", "")
+    # Apply mention type filter if set
+    if mention_type_filter and all_mentions:
+        all_mentions = [
+            m for m in all_mentions
+            if str(m.get("mention_type") or m.get("label", "")).upper() in mention_type_filter
+        ]
+
+    # Build a chunk_id -> mentions lookup
+    chunk_mention_map: dict[str, list[dict]] = {}
+    for m in all_mentions:
+        cid = m.get("chunk_id", "")
         if cid:
-            chunk_entity_map.setdefault(cid, []).append(ent)
+            chunk_mention_map.setdefault(cid, []).append(m)
 
     # ------------------------------------------------------------------
     # Result cards
@@ -211,24 +239,25 @@ if query:
                         document_id=doc_id,
                     )
 
-            # -- Entity chips for this chunk
-            chunk_entities = chunk_entity_map.get(chunk_id, [])
-            if chunk_entities:
-                # Deduplicate by (text, label)
+            # -- Mention/entity chips for this chunk
+            chunk_mentions = chunk_mention_map.get(chunk_id, [])
+            if chunk_mentions:
+                # Deduplicate by (text, type)
                 seen: set[tuple[str, str]] = set()
-                unique_ents: list[dict] = []
-                for ent in chunk_entities:
-                    key = (ent.get("text", ""), ent.get("label", ""))
+                unique_mentions: list[dict] = []
+                for m in chunk_mentions:
+                    mtype = str(m.get("mention_type") or m.get("label", ""))
+                    key = (m.get("text", ""), mtype)
                     if key not in seen and key[0]:
                         seen.add(key)
-                        unique_ents.append(ent)
+                        unique_mentions.append(m)
 
                 chips_html = " ".join(
                     render_entity_chip_html(
-                        text=ent["text"],
-                        label=ent.get("label", ""),
+                        text=m["text"],
+                        label=str(m.get("mention_type") or m.get("label", "")),
                     )
-                    for ent in unique_ents[:12]
+                    for m in unique_mentions[:12]
                 )
                 st.markdown(
                     f'<div style="display:flex;flex-wrap:wrap;gap:0.35rem;'

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import html
+import logging
 import re
 
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 # Entity color palette — semi-transparent backgrounds for dark theme
 ENTITY_COLORS: dict[str, dict[str, str]] = {
@@ -18,6 +21,21 @@ ENTITY_COLORS: dict[str, dict[str, str]] = {
 }
 
 _DEFAULT_COLORS = {"bg": "rgba(161,161,170,0.2)", "border": "#a1a1aa"}
+
+# Mention type color palette for span-based highlighting
+MENTION_TYPE_COLORS: dict[str, str] = {
+    "PERSON": "#3b82f6",
+    "ORG": "#22c55e",
+    "GPE": "#f97316",
+    "LOC": "#06b6d4",
+    "LAW": "#a855f7",
+    "EVENT": "#ef4444",
+    "DATE": "#6b7280",
+    "MONEY": "#eab308",
+    "NORP": "#ec4899",
+    "FACILITY": "#14b8a6",
+    "OTHER": "#9ca3af",
+}
 
 
 def _entity_span(escaped_text: str, label: str) -> str:
@@ -185,3 +203,145 @@ def render_entity_legend() -> None:
         + "</div>",
         unsafe_allow_html=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Mention-based rendering (EDC models)
+# ---------------------------------------------------------------------------
+
+
+def render_document_with_mentions(content: str, mentions: list[dict]) -> str:
+    """Render document content with highlighted entity mentions.
+
+    Uses span_start/span_end from Mention objects to precisely highlight
+    entities in the text with color-coded spans based on mention_type.
+
+    Args:
+        content: The raw document text
+        mentions: List of Mention dicts with span_start, span_end, text, mention_type
+
+    Returns:
+        HTML string with highlighted mentions for st.markdown(unsafe_allow_html=True)
+    """
+    if not mentions or not content:
+        return html.escape(content) if content else ""
+
+    # Filter mentions with valid spans and sort by span_start descending
+    # (insert from end to preserve earlier offsets)
+    valid_mentions = [
+        m for m in mentions
+        if m.get("span_start") is not None
+        and m.get("span_end") is not None
+        and m["span_start"] < m["span_end"] <= len(content)
+    ]
+    valid_mentions.sort(key=lambda m: m["span_start"], reverse=True)
+
+    result = content
+    for m in valid_mentions:
+        start = m["span_start"]
+        end = m["span_end"]
+        mention_type = m.get("mention_type", "OTHER")
+        if isinstance(mention_type, str):
+            color = MENTION_TYPE_COLORS.get(mention_type, MENTION_TYPE_COLORS["OTHER"])
+        else:
+            color = MENTION_TYPE_COLORS.get(
+                mention_type.value if hasattr(mention_type, "value") else str(mention_type),
+                MENTION_TYPE_COLORS["OTHER"],
+            )
+
+        safe_text = html.escape(result[start:end])
+        safe_type = html.escape(str(mention_type))
+        safe_mention_text = html.escape(m.get("text", ""))
+        highlighted = (
+            f'<span style="background-color: {color}20; border-bottom: 2px solid {color}; '
+            f'padding: 0 2px; border-radius: 2px;" '
+            f'title="{safe_type}: {safe_mention_text}">'
+            f"{safe_text}</span>"
+        )
+        result = result[:start] + highlighted + result[end:]
+
+    # Escape parts that are NOT already wrapped in HTML spans
+    # Since we inserted HTML into the raw string, we need to be careful.
+    # The approach above inserts HTML into raw content, so non-highlighted
+    # parts remain unescaped. We handle this by escaping the original content
+    # first, then re-inserting highlights. Let's redo with proper escaping.
+    # Actually, the standard approach (used in the spec) is to work on raw
+    # content and trust that the highlighted spans are safe. The content between
+    # highlights is raw text that could contain HTML chars. Let's fix this
+    # by working on the escaped content with adjusted offsets.
+
+    # Re-implement properly: escape first, then insert highlights
+    return _render_mentions_safe(content, mentions)
+
+
+def _render_mentions_safe(content: str, mentions: list[dict]) -> str:
+    """Safely render mentions by escaping content first, then inserting highlights."""
+    if not mentions or not content:
+        return html.escape(content) if content else ""
+
+    valid_mentions = [
+        m for m in mentions
+        if m.get("span_start") is not None
+        and m.get("span_end") is not None
+        and 0 <= m["span_start"] < m["span_end"] <= len(content)
+    ]
+    # Sort by span_start ascending to build output left-to-right
+    valid_mentions.sort(key=lambda m: m["span_start"])
+
+    # Remove overlaps: keep earlier/longer mentions
+    filtered: list[dict] = []
+    last_end = 0
+    for m in valid_mentions:
+        if m["span_start"] >= last_end:
+            filtered.append(m)
+            last_end = m["span_end"]
+
+    parts: list[str] = []
+    pos = 0
+    for m in filtered:
+        start = m["span_start"]
+        end = m["span_end"]
+
+        # Escape text before this mention
+        if start > pos:
+            parts.append(html.escape(content[pos:start]))
+
+        mention_type = m.get("mention_type", "OTHER")
+        if isinstance(mention_type, str):
+            color = MENTION_TYPE_COLORS.get(mention_type, MENTION_TYPE_COLORS["OTHER"])
+        else:
+            color = MENTION_TYPE_COLORS.get(
+                mention_type.value if hasattr(mention_type, "value") else str(mention_type),
+                MENTION_TYPE_COLORS["OTHER"],
+            )
+
+        safe_text = html.escape(content[start:end])
+        safe_type = html.escape(str(mention_type))
+        safe_mention_text = html.escape(m.get("text", ""))
+        parts.append(
+            f'<span style="background-color: {color}20; border-bottom: 2px solid {color}; '
+            f'padding: 0 2px; border-radius: 2px;" '
+            f'title="{safe_type}: {safe_mention_text}">'
+            f"{safe_text}</span>"
+        )
+        pos = end
+
+    # Remaining text after last mention
+    if pos < len(content):
+        parts.append(html.escape(content[pos:]))
+
+    return "".join(parts)
+
+
+def render_mention_legend() -> str:
+    """Render a legend showing mention type color coding."""
+    items = []
+    for mtype, color in MENTION_TYPE_COLORS.items():
+        if mtype == "OTHER":
+            continue
+        items.append(
+            f'<span style="background-color: {color}20; border-bottom: 2px solid {color}; '
+            f'padding: 2px 6px; border-radius: 2px; margin-right: 8px; font-size: 0.85em;">'
+            f"{mtype}</span>"
+        )
+    return " ".join(items)

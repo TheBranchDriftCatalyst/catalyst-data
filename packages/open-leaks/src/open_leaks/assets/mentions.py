@@ -12,10 +12,18 @@ from dagster_io import (
     Provenance,
     TextChunk,
 )
+from dagster_io.prompts import load_prompt
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-MENTION_SYSTEM_PROMPT = """\
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED, ENTITIES_EXTRACTED, LLM_REQUEST_DURATION, track_duration
+
+logger = get_logger(__name__)
+
+MENTION_SYSTEM_PROMPT = load_prompt(
+    "mentions/leaks",
+    fallback="""\
 You are a named-entity extraction system specialized in leaked documents analysis.
 Given a text chunk, extract all named entity mentions with precise information.
 
@@ -39,7 +47,8 @@ For each entity, provide:
 - span_start: character offset where the mention starts in the input text (0-based)
 - span_end: character offset where the mention ends (exclusive)
 
-Be exhaustive but avoid duplicates within the same span."""
+Be exhaustive but avoid duplicates within the same span.""",
+)
 
 
 class MentionExtraction(BaseModel):
@@ -87,16 +96,20 @@ def leak_mentions(
     llm: LLMResource,
     leak_chunks: list[TextChunk],
 ) -> Output[list[Mention]]:
+    logger.info("Starting leak_mentions extraction for %d chunks", len(leak_chunks))
     chain = llm.with_structured_output(MentionExtractionResult)
     all_mentions: list[Mention] = []
 
     for i, chunk in enumerate(leak_chunks):
-        result: MentionExtractionResult = chain.invoke([
-            SystemMessage(content=MENTION_SYSTEM_PROMPT),
-            HumanMessage(content=f"Extract all entity mentions from this text:\n\n{chunk.text}"),
-        ])
+        logger.debug("Processing chunk %d/%d id=%s", i + 1, len(leak_chunks), chunk.chunk_id)
+        with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "mention_extract"}):
+            result: MentionExtractionResult = chain.invoke([
+                SystemMessage(content=MENTION_SYSTEM_PROMPT),
+                HumanMessage(content=f"Extract all entity mentions from this text:\n\n{chunk.text}"),
+            ])
 
         for ext in result.mentions:
+            ENTITIES_EXTRACTED.labels(code_location="open_leaks", entity_type=ext.label, method="llm").inc()
             mention = Mention(
                 document_id=chunk.document_id,
                 chunk_id=chunk.chunk_id,
@@ -118,6 +131,9 @@ def leak_mentions(
 
         if (i + 1) % 50 == 0:
             context.log.info(f"Processed {i + 1}/{len(leak_chunks)} chunks — {len(all_mentions)} mentions so far")
+            logger.info("Mention progress: %d/%d chunks, %d mentions so far", i + 1, len(leak_chunks), len(all_mentions))
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_mentions", layer="gold").inc(len(all_mentions))
+    logger.info("leak_mentions complete: %d mentions from %d chunks", len(all_mentions), len(leak_chunks))
     context.log.info(f"Extracted {len(all_mentions)} mentions from {len(leak_chunks)} chunks")
     return Output(all_mentions, metadata={"mention_count": len(all_mentions)})

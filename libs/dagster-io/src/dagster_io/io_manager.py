@@ -11,10 +11,19 @@ from datetime import datetime, timezone
 from dagster import ConfigurableIOManager, InputContext, OutputContext
 from pydantic import PrivateAttr
 
+from dagster_io.logging import get_logger
 from dagster_io.manifest import load_or_create_manifest, make_record
+from dagster_io.metrics import (
+    S3_BYTES_TRANSFERRED,
+    S3_OPERATION_DURATION,
+    S3_OPERATIONS,
+    track_duration,
+)
 from dagster_io.path_builder import build_asset_root, build_input_prefix, build_output_prefix
 from dagster_io.s3_client import S3Client
 from dagster_io.serializers import _extract_schema, deserialize, serialize
+
+logger = get_logger(__name__)
 
 
 class MinioIOManager(ConfigurableIOManager):
@@ -120,6 +129,7 @@ class MinioIOManager(ConfigurableIOManager):
     def handle_output(self, context: OutputContext, obj: typing.Any) -> None:
         if obj is None:
             context.log.warning("Skipping S3 write — output is None")
+            logger.warning("Skipping S3 write — output is None", extra={"asset_key": context.asset_key.to_user_string()})
             return
 
         config_key = self._extract_config_key(context)
@@ -127,6 +137,8 @@ class MinioIOManager(ConfigurableIOManager):
         prefix = build_output_prefix(context, config_key=config_key)
         type_hint = self._get_type_hint(context)
         payload, ext, ser_meta = serialize(obj, type_hint)
+        logger.debug("Serialization format=%s for asset=%s", ser_meta.get("format"), context.asset_key.to_user_string())
+        logger.debug("S3 output path prefix=%s", prefix)
 
         # Content-hash dedup: skip write if payload unchanged from last materialization
         payload_hash = hashlib.sha256(payload).hexdigest()
@@ -149,6 +161,7 @@ class MinioIOManager(ConfigurableIOManager):
 
         # Write data (overwrite in place — MinIO versioning preserves history)
         data_key = f"{prefix}/data{ext}"
+        logger.info("Storing asset=%s to s3://%s/%s size=%d", context.asset_key.to_user_string(), self.bucket, data_key, len(payload))
         self.client.put_object(data_key, payload)
 
         # Write enhanced metadata sidecar
@@ -186,6 +199,7 @@ class MinioIOManager(ConfigurableIOManager):
         if config_key:
             output_meta["config_key"] = config_key
         context.add_output_metadata(output_meta)
+        logger.info("Asset store complete asset=%s format=%s size=%d rows=%d", context.asset_key.to_user_string(), metadata["format"], len(payload), count)
 
     def _get_input_type_hint(self, context: InputContext) -> type | None:
         try:
@@ -200,11 +214,13 @@ class MinioIOManager(ConfigurableIOManager):
         self, context: InputContext, partition_key=None
     ) -> typing.Any:
         prefix = build_input_prefix(context, partition_key=partition_key)
+        logger.debug("Loading asset from prefix=%s", prefix)
         meta_bytes = self.client.get_object(f"{prefix}/_metadata.json")
         metadata = json.loads(meta_bytes)
         ext = "." + metadata["format"]
         payload = self.client.get_object(f"{prefix}/data{ext}")
         type_hint = self._get_input_type_hint(context)
+        logger.info("Loaded asset from prefix=%s format=%s size=%d", prefix, metadata["format"], len(payload))
         return deserialize(payload, ext, metadata, type_hint=type_hint)
 
     def load_input(self, context: InputContext) -> typing.Any:

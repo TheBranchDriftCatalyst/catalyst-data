@@ -6,7 +6,11 @@ from typing import Any
 
 from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from media_ingest.assets.discovery import NFS_VOLUMES_CONFIG
+
+logger = get_logger(__name__)
 
 
 def _ffprobe(path: str) -> dict[str, Any]:
@@ -74,6 +78,7 @@ def media_metadata(
     context: AssetExecutionContext,
     media_files: list[dict[str, Any]],
 ) -> Output[list[dict[str, Any]]]:
+    logger.info("Starting media_metadata extraction for %d files", len(media_files))
     enriched = []
     errors = 0
 
@@ -87,6 +92,8 @@ def media_metadata(
             file_info["metadata"] = _extract_metadata(probe)
         enriched.append(file_info)
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_metadata", layer="silver").inc(len(enriched))
+    logger.info("media_metadata complete: %d files probed (%d errors)", len(enriched), errors)
     context.log.info(f"Probed {len(enriched)} files ({errors} errors)")
 
     return Output(

@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 
+from dagster_io.logging import get_logger
 from dagster_io.models import (
     AlignmentEdge,
     AlignmentType,
@@ -16,6 +17,8 @@ from dagster_io.models import (
     Mention,
     MentionType,
 )
+
+logger = get_logger(__name__)
 
 
 class _UnionFind:
@@ -109,6 +112,8 @@ class ConcordanceEngine:
         """
         if not mentions:
             return []
+
+        logger.info("Resolving %d mentions for code_location=%s", len(mentions), code_location)
 
         uf = _UnionFind()
 
@@ -216,6 +221,7 @@ class ConcordanceEngine:
             )
             candidates.append(candidate)
 
+        logger.info("Resolved %d mentions into %d candidates for code_location=%s", len(mentions), len(candidates), code_location)
         return candidates
 
 
@@ -254,6 +260,8 @@ class CrossSourceAligner:
         """
         edges: list[AlignmentEdge] = []
         locations = list(sources.keys())
+        total_candidates = sum(len(v) for v in sources.values())
+        logger.info("Cross-source alignment starting: %d locations, %d total candidates", len(locations), total_candidates)
 
         for i, loc_a in enumerate(locations):
             for loc_b in locations[i + 1:]:
@@ -267,6 +275,7 @@ class CrossSourceAligner:
                         if edge is not None:
                             edges.append(edge)
 
+        logger.info("Cross-source alignment complete: %d edges produced", len(edges))
         return edges
 
     def _score_pair(

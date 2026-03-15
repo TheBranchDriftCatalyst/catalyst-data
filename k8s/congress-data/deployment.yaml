@@ -17,6 +17,10 @@ spec:
       labels:
         app: congress-data
         app.kubernetes.io/name: congress-data
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
     spec:
       imagePullSecrets:
         - name: ghcr-secret
@@ -27,7 +31,22 @@ spec:
             - name: grpc
               containerPort: 4000
               protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
           env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://alloy.monitoring.svc.cluster.local:4317"
+            - name: OTEL_SERVICE_NAME
+              value: "catalyst-data.congress-data"
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.namespace=catalyst-data,deployment.environment=production"
+            - name: LOG_LEVEL
+              value: "DEBUG"
+            - name: LOG_FORMAT
+              value: "json"
+            - name: METRICS_PORT
+              value: "9090"
             - name: CONGRESS_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -69,6 +88,12 @@ spec:
               value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
             - name: EMBEDDING_BASE_URL
               value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+            - name: PROMPT_REGISTRY_DIR
+              value: /app/prompts
+          volumeMounts:
+            - name: prompts
+              mountPath: /app/prompts
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -86,3 +111,21 @@ spec:
               port: grpc
             initialDelaySeconds: 30
             periodSeconds: 30
+      volumes:
+        - name: prompts
+          projected:
+            sources:
+              - configMap:
+                  name: shared-prompts
+                  items:
+                    - key: ner-basic.prompt
+                      path: ner/basic.prompt
+                    - key: propositions-spo.prompt
+                      path: propositions/spo.prompt
+              - configMap:
+                  name: congress-data-prompts
+                  items:
+                    - key: mentions.prompt
+                      path: mentions/congress.prompt
+                    - key: assertions.prompt
+                      path: assertions/congress.prompt

@@ -2,9 +2,13 @@
 
 from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from congress_data.client import CongressAPIClient
 from congress_data.config import CongressionalConfig
 from congress_data.entities import Bill, Committee, Member
+
+logger = get_logger(__name__)
 
 
 @asset(
@@ -16,6 +20,7 @@ from congress_data.entities import Bill, Committee, Member
 def congress_bills(
     context: AssetExecutionContext, config: CongressionalConfig
 ) -> Output[list[Bill]]:
+    logger.info("Starting congress_bills extraction for congress=%d", config.congress_number)
     with CongressAPIClient(api_key=config.congress_api_key) as client:
         bills: list[Bill] = []
         for bill_data in client.iterate_bills(
@@ -24,6 +29,8 @@ def congress_bills(
             bill = Bill.from_api_response(bill_data, congress=config.congress_number)
             bills.append(bill)
 
+        ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_bills", layer="bronze").inc(len(bills))
+        logger.info("congress_bills extraction complete count=%d", len(bills))
         context.log.info(f"Extracted {len(bills)} bills from congress {config.congress_number}")
 
     return Output(
@@ -45,6 +52,7 @@ def congress_bills(
 def congress_members(
     context: AssetExecutionContext, config: CongressionalConfig
 ) -> Output[list[Member]]:
+    logger.info("Starting congress_members extraction for congress=%d", config.congress_number)
     with CongressAPIClient(api_key=config.congress_api_key) as client:
         members: list[Member] = []
         for member_data in client.iterate_members(
@@ -53,6 +61,8 @@ def congress_members(
             member = Member.from_api_response(member_data)
             members.append(member)
 
+        ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_members", layer="bronze").inc(len(members))
+        logger.info("congress_members extraction complete count=%d", len(members))
         context.log.info(
             f"Extracted {len(members)} members from congress {config.congress_number}"
         )
@@ -76,6 +86,7 @@ def congress_members(
 def congress_committees(
     context: AssetExecutionContext, config: CongressionalConfig
 ) -> Output[list[Committee]]:
+    logger.info("Starting congress_committees extraction for congress=%d", config.congress_number)
     with CongressAPIClient(api_key=config.congress_api_key) as client:
         committees: list[Committee] = []
         for committee_data in client.iterate_committees(
@@ -84,6 +95,8 @@ def congress_committees(
             committee = Committee.from_api_response(committee_data)
             committees.append(committee)
 
+        ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_committees", layer="bronze").inc(len(committees))
+        logger.info("congress_committees extraction complete count=%d", len(committees))
         context.log.info(
             f"Extracted {len(committees)} committees from congress {config.congress_number}"
         )

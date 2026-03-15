@@ -17,6 +17,10 @@ spec:
       labels:
         app: knowledge-graph
         app.kubernetes.io/name: knowledge-graph
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
     spec:
       imagePullSecrets:
         - name: ghcr-secret
@@ -27,7 +31,22 @@ spec:
             - name: grpc
               containerPort: 4000
               protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
           env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://alloy.monitoring.svc.cluster.local:4317"
+            - name: OTEL_SERVICE_NAME
+              value: "catalyst-data.knowledge-graph"
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.namespace=catalyst-data,deployment.environment=production"
+            - name: LOG_LEVEL
+              value: "DEBUG"
+            - name: LOG_FORMAT
+              value: "json"
+            - name: METRICS_PORT
+              value: "9090"
             - name: DAGSTER_CURRENT_IMAGE
               value: ghcr.io/thebranchdriftcatalyst/knowledge-graph:latest
             - name: DAGSTER_S3_ENDPOINT_URL

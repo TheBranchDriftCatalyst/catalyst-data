@@ -1,5 +1,13 @@
 """Open-source leaked documents pipeline — Dagster code location."""
 
+from dagster_io.logging import configure_logging
+from dagster_io.metrics import start_metrics_server
+from dagster_io.observability import configure_tracing
+
+configure_logging()
+configure_tracing(service_name="catalyst-data.open_leaks")
+start_metrics_server()
+
 from dagster import Definitions
 from dagster_io import ChunkingResource, EmbeddingResource, LLMResource, MinioIOManager
 

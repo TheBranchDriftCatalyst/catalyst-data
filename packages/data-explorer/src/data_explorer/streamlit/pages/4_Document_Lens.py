@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 
 import pandas as pd
@@ -13,9 +14,13 @@ from data_explorer.streamlit.theme import apply_theme
 from data_explorer.streamlit.navigation import get_nav_params, render_breadcrumbs
 from data_explorer.streamlit.components.document_renderer import (
     render_document,
+    render_document_with_mentions,
     render_entity_legend,
+    render_mention_legend,
 )
 from data_explorer.streamlit.components.entity_chip import render_entity_chip_list
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="Document Lens",
@@ -63,6 +68,15 @@ def _load_document_entities(document_id: str, source: str) -> list[dict]:
 @st.cache_data(ttl=300, show_spinner="Loading propositions...")
 def _load_document_propositions(document_id: str, source: str) -> list[dict]:
     return _get_client().get_document_propositions(document_id, source)
+
+
+@st.cache_data(ttl=300, show_spinner="Loading mentions...")
+def _load_mentions_for_document(source: str, document_id: str) -> list[dict]:
+    try:
+        return _get_client().get_mentions_for_document(source, document_id)
+    except Exception:
+        logger.debug("get_mentions_for_document not available for %s/%s", source, document_id)
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +166,7 @@ st.caption(f"**{document_title}**  |  source: `{selected_source}`  |  id: `{docu
 
 chunks: list[dict] = []
 entities: list[dict] = []
+mentions: list[dict] = []
 propositions: list[dict] = []
 
 if document_id:
@@ -160,17 +175,28 @@ if document_id:
         chunks = [c for c in all_chunks if c.get("document_id") == document_id]
         chunks.sort(key=lambda c: c.get("index", 0))
 
+    # Try loading mentions first (EDC), fall back to legacy entities
     if show_entities:
-        entities = _load_document_entities(document_id, selected_source)
+        mentions = _load_mentions_for_document(selected_source, document_id)
+        if not mentions:
+            entities = _load_document_entities(document_id, selected_source)
 
     propositions = _load_document_propositions(document_id, selected_source)
 
 # ---------------------------------------------------------------------------
-# Entity legend
+# Entity/Mention legend
 # ---------------------------------------------------------------------------
 
-if show_entities and entities:
-    render_entity_legend()
+if show_entities:
+    if mentions:
+        legend_html = render_mention_legend()
+        st.markdown(
+            f'<div style="display:flex;flex-wrap:wrap;gap:4px;padding:0.5rem 0;">'
+            f'{legend_html}</div>',
+            unsafe_allow_html=True,
+        )
+    elif entities:
+        render_entity_legend()
 
 # ---------------------------------------------------------------------------
 # Document rendering
@@ -185,12 +211,33 @@ effective_text = document_text
 if not effective_text and chunks:
     effective_text = "\n\n".join(c.get("text", "") for c in chunks)
 
-render_document(
-    text=effective_text,
-    entities=entities if show_entities else None,
-    chunks=chunks if show_chunks else None,
-    show_chunk_boundaries=show_chunks,
-)
+if mentions and show_entities:
+    # Use span-based mention highlighting (EDC)
+    container_style = (
+        "font-family:'Space Mono',monospace;"
+        "font-size:0.82rem;"
+        "line-height:1.7;"
+        "color:#e4e4e7;"
+        "background:#16161d;"
+        "border:1px solid #27272a;"
+        "border-radius:0.25rem;"
+        "padding:1rem 1.25rem;"
+        "white-space:pre-wrap;"
+        "word-wrap:break-word;"
+    )
+    highlighted_html = render_document_with_mentions(effective_text, mentions)
+    st.markdown(
+        f'<div style="{container_style}">{highlighted_html}</div>',
+        unsafe_allow_html=True,
+    )
+else:
+    # Legacy entity-based rendering
+    render_document(
+        text=effective_text,
+        entities=entities if show_entities else None,
+        chunks=chunks if show_chunks else None,
+        show_chunk_boundaries=show_chunks,
+    )
 
 # ---------------------------------------------------------------------------
 # Metrics bar
@@ -199,42 +246,99 @@ render_document(
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Characters", f"{len(effective_text):,}")
 m2.metric("Chunks", len(chunks))
-m3.metric("Entities", len(entities))
+m3.metric("Mentions" if mentions else "Entities", len(mentions) if mentions else len(entities))
 m4.metric("Propositions", len(propositions))
 
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Bottom panel: Entity summary + Propositions table
+# Bottom panel: Mention/Entity summary + Propositions table
 # ---------------------------------------------------------------------------
 
 col_entities, col_propositions = st.columns(2)
 
-# --- Left column: Entity summary ---
+# --- Left column: Mention / Entity summary ---
 with col_entities:
-    st.subheader("Entity Summary")
+    if mentions:
+        st.subheader("Mention Summary")
 
-    if entities:
-        # Group entities by label and count occurrences
-        label_groups: dict[str, list[dict]] = {}
-        for e in entities:
-            label = e.get("label", "UNKNOWN")
-            label_groups.setdefault(label, []).append(e)
+        # Mention type distribution
+        type_counts: Counter[str] = Counter()
+        for m in mentions:
+            mtype = m.get("mention_type", "OTHER")
+            if hasattr(mtype, "value"):
+                mtype = mtype.value
+            type_counts[str(mtype)] += 1
 
-        for label in sorted(label_groups.keys()):
-            group = label_groups[label]
-            st.markdown(f"**{label}** ({len(group)} mentions)")
+        # Display as grouped chips
+        for mtype in sorted(type_counts.keys()):
+            count = type_counts[mtype]
+            type_mentions = [m for m in mentions if str(m.get("mention_type", "OTHER")) == mtype]
 
-            # Count unique entity texts within this label
-            text_counts = Counter(e.get("text", "") for e in group if e.get("text"))
+            st.markdown(f"**{mtype}** ({count} mentions)")
+
+            text_counts = Counter(m.get("text", "") for m in type_mentions if m.get("text"))
             chip_data = [
-                {"text": text, "label": label, "count": count}
-                for text, count in text_counts.most_common()
+                {"text": text, "label": mtype, "count": cnt}
+                for text, cnt in text_counts.most_common()
             ]
-
             render_entity_chip_list(chip_data, max_display=12, columns=3)
+
+        # Mention detail panel
+        st.divider()
+        st.subheader("Mention Details")
+        selected_mention_idx = st.selectbox(
+            "Select mention",
+            range(len(mentions)),
+            format_func=lambda i: f"{mentions[i].get('text', '')} ({mentions[i].get('mention_type', '')})",
+            key="dl_mention_select",
+        )
+        if selected_mention_idx is not None and mentions:
+            sel_m = mentions[selected_mention_idx]
+            mtype = sel_m.get("mention_type", "OTHER")
+            if hasattr(mtype, "value"):
+                mtype = mtype.value
+
+            detail_cols = st.columns(3)
+            detail_cols[0].markdown(f"**Type:** `{mtype}`")
+            prov = sel_m.get("provenance") or {}
+            conf = prov.get("confidence", sel_m.get("confidence"))
+            if conf is not None:
+                detail_cols[1].markdown(f"**Confidence:** {conf:.2f}")
+            method = prov.get("extraction_method", "")
+            if method:
+                detail_cols[2].markdown(f"**Method:** `{method}`")
+
+            span_start = sel_m.get("span_start")
+            span_end = sel_m.get("span_end")
+            if span_start is not None and span_end is not None:
+                st.markdown(f"**Span:** `{span_start}:{span_end}`")
+
+            context = sel_m.get("context", "")
+            if context:
+                st.markdown("**Context:**")
+                st.text(context[:500])
     else:
-        st.info("No entities found for this document.")
+        st.subheader("Entity Summary")
+
+        if entities:
+            label_groups: dict[str, list[dict]] = {}
+            for e in entities:
+                label = e.get("label", "UNKNOWN")
+                label_groups.setdefault(label, []).append(e)
+
+            for label in sorted(label_groups.keys()):
+                group = label_groups[label]
+                st.markdown(f"**{label}** ({len(group)} mentions)")
+
+                text_counts = Counter(e.get("text", "") for e in group if e.get("text"))
+                chip_data = [
+                    {"text": text, "label": label, "count": count}
+                    for text, count in text_counts.most_common()
+                ]
+                render_entity_chip_list(chip_data, max_display=12, columns=3)
+        else:
+            st.info("No entities found for this document.")
 
 # --- Right column: Propositions table ---
 with col_propositions:

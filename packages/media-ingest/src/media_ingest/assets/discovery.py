@@ -1,11 +1,16 @@
 """Stage 1: Scan NFS directories for media files."""
 
 import os
+import time
 from typing import Any
 
 from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from media_ingest.config import MediaIngestConfig
+
+logger = get_logger(__name__)
 
 NFS_VOLUMES_CONFIG = {
     "dagster-k8s/config": {
@@ -57,15 +62,21 @@ def _scan_directory(root: str, extensions: set[str]) -> list[dict[str, Any]]:
 def media_files(
     context: AssetExecutionContext, config: MediaIngestConfig
 ) -> Output[list[dict[str, Any]]]:
+    logger.info("Starting media_files discovery scan")
     extensions = {e.strip() for e in config.extensions.split(",")}
 
     all_files: list[dict[str, Any]] = []
     for scan_path in [config.metube_path, config.tubesync_path]:
+        scan_start = time.monotonic()
         found = _scan_directory(scan_path, extensions)
+        scan_duration = time.monotonic() - scan_start
+        logger.info("Scanned %s: %d files in %.2fs", scan_path, len(found), scan_duration)
         context.log.info(f"Found {len(found)} media files in {scan_path}")
         all_files.extend(found)
 
     total_size = sum(f["size_bytes"] for f in all_files)
+    ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_files", layer="bronze").inc(len(all_files))
+    logger.info("media_files discovery complete: %d files, %.2f GiB", len(all_files), total_size / (1024**3))
     context.log.info(f"Total: {len(all_files)} files, {total_size / (1024**3):.2f} GiB")
 
     return Output(

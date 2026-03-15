@@ -6,7 +6,6 @@ congress-data serves as the reference implementation.
 
 from __future__ import annotations
 
-import logging
 import time
 from abc import abstractmethod
 from typing import Any, Iterator
@@ -15,7 +14,9 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-logger = logging.getLogger(__name__)
+from dagster_io.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class BaseAPIClient:
@@ -72,7 +73,9 @@ class BaseAPIClient:
         now = time.monotonic()
         elapsed = now - self._last_request_time
         if elapsed < self._min_interval:
-            time.sleep(self._min_interval - elapsed)
+            wait = self._min_interval - elapsed
+            logger.debug("Rate limit: waiting %.2fs", wait)
+            time.sleep(wait)
         self._last_request_time = time.monotonic()
 
     # -- HTTP --
@@ -89,6 +92,7 @@ class BaseAPIClient:
 
         resp = self._session.get(url, params=params or {}, timeout=self.timeout)
         resp.raise_for_status()
+        logger.info("API GET %s status=%d size=%d", url, resp.status_code, len(resp.content))
         return resp.json()
 
     # -- Pagination --

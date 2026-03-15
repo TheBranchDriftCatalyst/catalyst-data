@@ -11,10 +11,18 @@ from dagster_io import (
     Provenance,
     TextChunk,
 )
+from dagster_io.prompts import load_prompt
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-ASSERTION_SYSTEM_PROMPT = """\
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSERTIONS_CREATED, ASSET_RECORDS_PROCESSED, LLM_REQUEST_DURATION, track_duration
+
+logger = get_logger(__name__)
+
+ASSERTION_SYSTEM_PROMPT = load_prompt(
+    "assertions/congress",
+    fallback="""\
 You are a knowledge-graph extraction system specialized in U.S. Congressional data.
 Given a text chunk, extract qualified Subject-Predicate-Object assertions.
 
@@ -34,7 +42,8 @@ For each assertion, provide:
   - manner: how ("unanimously", "by voice vote", "with amendments")
   - source_attribution: who says so ("according to", "as reported by")
 
-Be precise with predicates. Prefer canonical forms over variations."""
+Be precise with predicates. Prefer canonical forms over variations.""",
+)
 
 
 class AssertionQualifiers(BaseModel):
@@ -110,16 +119,19 @@ def congress_assertions(
     llm: LLMResource,
     congress_chunks: list[TextChunk],
 ) -> Output[list[Assertion]]:
+    logger.info("Starting congress_assertions extraction for %d chunks", len(congress_chunks))
     chain = llm.with_structured_output(AssertionExtractionResult)
     all_assertions: list[Assertion] = []
 
     for i, chunk in enumerate(congress_chunks):
-        result: AssertionExtractionResult = chain.invoke([
-            SystemMessage(content=ASSERTION_SYSTEM_PROMPT),
-            HumanMessage(
-                content=f"Extract qualified assertions from this text:\n\n{chunk.text}"
-            ),
-        ])
+        logger.debug("Processing chunk %d/%d id=%s", i + 1, len(congress_chunks), chunk.chunk_id)
+        with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "assertion_extract"}):
+            result: AssertionExtractionResult = chain.invoke([
+                SystemMessage(content=ASSERTION_SYSTEM_PROMPT),
+                HumanMessage(
+                    content=f"Extract qualified assertions from this text:\n\n{chunk.text}"
+                ),
+            ])
 
         for ext in result.assertions:
             # Convert structured qualifiers to dict, dropping empty values
@@ -142,14 +154,20 @@ def congress_assertions(
                 ),
             )
             all_assertions.append(assertion)
+            ASSERTIONS_CREATED.labels(code_location="congress_data", predicate=ext.predicate[:50]).inc()
+            if ext.confidence < 0.5:
+                logger.warning("Low confidence assertion: subject=%s predicate=%s confidence=%.2f", ext.subject[:50], ext.predicate[:50], ext.confidence)
 
         if (i + 1) % 50 == 0:
             context.log.info(
                 f"Processed {i + 1}/{len(congress_chunks)} chunks — {len(all_assertions)} assertions so far"
             )
+            logger.info("Assertion progress: %d/%d chunks, %d assertions so far", i + 1, len(congress_chunks), len(all_assertions))
 
     negated_count = sum(1 for a in all_assertions if a.negated)
     hedged_count = sum(1 for a in all_assertions if a.hedged)
+    ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_assertions", layer="gold").inc(len(all_assertions))
+    logger.info("congress_assertions complete: %d assertions from %d chunks (negated=%d, hedged=%d)", len(all_assertions), len(congress_chunks), negated_count, hedged_count)
     context.log.info(
         f"Extracted {len(all_assertions)} assertions from {len(congress_chunks)} chunks "
         f"({negated_count} negated, {hedged_count} hedged)"

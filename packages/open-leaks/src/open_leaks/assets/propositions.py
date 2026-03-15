@@ -4,13 +4,22 @@ from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
 from dagster_io import LLMResource, TextChunk
+from dagster_io.prompts import load_prompt
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-SPO_SYSTEM_PROMPT = (
-    "You are a knowledge-graph extraction system. "
-    "Given a text chunk, extract Subject-Predicate-Object triples. "
-    "Focus on factual, verifiable claims. Omit vague or opinion-based statements."
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED, LLM_REQUEST_DURATION, track_duration
+
+logger = get_logger(__name__)
+
+SPO_SYSTEM_PROMPT = load_prompt(
+    "propositions/spo",
+    fallback=(
+        "You are a knowledge-graph extraction system. "
+        "Given a text chunk, extract Subject-Predicate-Object triples. "
+        "Focus on factual, verifiable claims. Omit vague or opinion-based statements."
+    ),
 )
 
 
@@ -50,16 +59,19 @@ def leak_propositions(
     llm: LLMResource,
     leak_chunks: list[TextChunk],
 ) -> Output[list[dict[str, Any]]]:
+    logger.info("Starting leak_propositions extraction for %d chunks", len(leak_chunks))
     chain = llm.with_structured_output(PropositionResult)
     all_propositions: list[dict[str, Any]] = []
 
     for i, chunk in enumerate(leak_chunks):
-        result: PropositionResult = chain.invoke([
-            SystemMessage(content=SPO_SYSTEM_PROMPT),
-            HumanMessage(
-                content=f"Extract subject-predicate-object propositions from this text:\n\n{chunk.text}"
-            ),
-        ])
+        logger.debug("Processing chunk %d/%d id=%s", i + 1, len(leak_chunks), chunk.chunk_id)
+        with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "proposition_extract"}):
+            result: PropositionResult = chain.invoke([
+                SystemMessage(content=SPO_SYSTEM_PROMPT),
+                HumanMessage(
+                    content=f"Extract subject-predicate-object propositions from this text:\n\n{chunk.text}"
+                ),
+            ])
         for prop in result.propositions:
             all_propositions.append({
                 **prop.model_dump(),
@@ -69,7 +81,10 @@ def leak_propositions(
 
         if (i + 1) % 50 == 0:
             context.log.info(f"Processed {i + 1}/{len(leak_chunks)} chunks")
+            logger.info("Proposition progress: %d/%d chunks, %d propositions so far", i + 1, len(leak_chunks), len(all_propositions))
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_propositions", layer="gold").inc(len(all_propositions))
+    logger.info("leak_propositions complete: %d propositions from %d chunks", len(all_propositions), len(leak_chunks))
     context.log.info(
         f"Extracted {len(all_propositions)} propositions from {len(leak_chunks)} chunks"
     )

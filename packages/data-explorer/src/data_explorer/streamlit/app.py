@@ -35,6 +35,7 @@ PAGE_DESCRIPTIONS: dict[str, str] = {
     "Data Chat": "RAG-powered Q&A over corpus",
     "Entity Concordance": "KWIC concordance and co-occurrence",
     "Config Comparison": "Side-by-side embedding config evaluation",
+    "Prompt Catalog": "Browse and test registered LLM prompts",
 }
 
 # ---------------------------------------------------------------------------

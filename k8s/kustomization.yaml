@@ -38,3 +38,24 @@ resources:
   - data-explorer/deployment.yaml
   - data-explorer/service.yaml
   - data-explorer/ingressroute.yaml
+  # Monitoring (ServiceMonitor, PrometheusRule, Grafana Dashboard)
+  - monitoring/servicemonitor.yaml
+  - monitoring/prometheusrule.yaml
+  - monitoring/grafana-dashboard.yaml
+
+configMapGenerator:
+  - name: shared-prompts
+    files:
+      - ner-basic.prompt=../libs/dagster-io/prompts/ner/basic.prompt
+      - propositions-spo.prompt=../libs/dagster-io/prompts/propositions/spo.prompt
+  - name: open-leaks-prompts
+    files:
+      - mentions.prompt=../packages/open-leaks/prompts/mentions.prompt
+      - assertions.prompt=../packages/open-leaks/prompts/assertions.prompt
+  - name: congress-data-prompts
+    files:
+      - mentions.prompt=../packages/congress-data/prompts/mentions.prompt
+      - assertions.prompt=../packages/congress-data/prompts/assertions.prompt
+  - name: data-explorer-prompts
+    files:
+      - rag-research-assistant.prompt=../packages/data-explorer/prompts/rag-research-assistant.prompt

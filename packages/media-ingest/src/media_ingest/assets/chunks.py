@@ -9,6 +9,11 @@ from typing import Any
 from dagster import AssetExecutionContext, Output, asset
 from dagster_io import ChunkingResource, TextChunk
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+
+logger = get_logger(__name__)
+
 # Speech transcriptions benefit from smaller chunks since spoken language
 # is less information-dense than written text.
 TRANSCRIPTION_CHUNK_SIZE = 800
@@ -26,6 +31,7 @@ def media_chunks(
     chunking: ChunkingResource,
     media_transcriptions: list[dict[str, Any]],
 ) -> Output[list[TextChunk]]:
+    logger.info("Starting media_chunks chunking for %d transcriptions", len(media_transcriptions))
     all_chunks: list[TextChunk] = []
     skipped = 0
 
@@ -48,6 +54,8 @@ def media_chunks(
         )
         all_chunks.extend(chunks)
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_chunks", layer="silver").inc(len(all_chunks))
+    logger.info("media_chunks complete: %d transcriptions -> %d chunks (skipped=%d)", len(media_transcriptions) - skipped, len(all_chunks), skipped)
     context.log.info(
         f"Chunked {len(media_transcriptions) - skipped} transcriptions into {len(all_chunks)} chunks "
         f"(skipped {skipped} empty, size={TRANSCRIPTION_CHUNK_SIZE}, overlap={TRANSCRIPTION_CHUNK_OVERLAP})"

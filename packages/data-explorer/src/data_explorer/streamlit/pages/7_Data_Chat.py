@@ -13,6 +13,7 @@ from data_explorer.streamlit.llm_client import (
 )
 from data_explorer.streamlit.components.model_selector import chat_model_selector
 from data_explorer.streamlit.navigation import render_breadcrumbs
+from data_explorer.streamlit.prompt_registry import get_prompt
 from data_explorer.streamlit.theme import apply_theme
 
 st.set_page_config(page_title="Data Chat", page_icon=":material/chat:", layout="wide")
@@ -138,11 +139,13 @@ if query:
     # --- Build RAG context and stream response --- #
     rag_context = build_rag_context(results)
 
-    system_prompt = (
+    _DEFAULT_RAG_SYSTEM_PROMPT = (
         "You are a research assistant. Answer the question based ONLY on the "
         "provided context. If the context doesn't contain enough information, "
         "say so. Cite sources using [Source: document_id] format."
     )
+    rag_prompt = get_prompt("rag/research-assistant")
+    system_prompt = rag_prompt.system_content if rag_prompt else _DEFAULT_RAG_SYSTEM_PROMPT
 
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},

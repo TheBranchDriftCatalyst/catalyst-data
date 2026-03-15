@@ -62,7 +62,12 @@ spec:
               value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
             - name: EMBEDDING_BASE_URL
               value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+            - name: PROMPT_REGISTRY_DIR
+              value: /app/prompts
           volumeMounts:
+            - name: prompts
+              mountPath: /app/prompts
+              readOnly: true
             - name: metube-downloads
               mountPath: /data/metube
               readOnly: true
@@ -89,6 +94,35 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 30
       volumes:
+        - name: prompts
+          projected:
+            sources:
+              - configMap:
+                  name: shared-prompts
+                  items:
+                    - key: ner-basic.prompt
+                      path: ner/basic.prompt
+                    - key: propositions-spo.prompt
+                      path: propositions/spo.prompt
+              - configMap:
+                  name: open-leaks-prompts
+                  items:
+                    - key: mentions.prompt
+                      path: mentions/leaks.prompt
+                    - key: assertions.prompt
+                      path: assertions/leaks.prompt
+              - configMap:
+                  name: congress-data-prompts
+                  items:
+                    - key: mentions.prompt
+                      path: mentions/congress.prompt
+                    - key: assertions.prompt
+                      path: assertions/congress.prompt
+              - configMap:
+                  name: data-explorer-prompts
+                  items:
+                    - key: rag-research-assistant.prompt
+                      path: rag/research-assistant.prompt
         - name: metube-downloads
           persistentVolumeClaim:
             claimName: metube-downloads

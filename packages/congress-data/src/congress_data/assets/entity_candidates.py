@@ -12,6 +12,11 @@ from dagster_io import (
     Mention,
 )
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+
+logger = get_logger(__name__)
+
 
 @asset(
     group_name="congress",
@@ -34,6 +39,7 @@ def congress_entity_candidates(
     embeddings: EmbeddingResource,
     congress_mentions: list[Mention],
 ) -> Output[list[EntityCandidate]]:
+    logger.info("Starting congress_entity_candidates resolution for %d mentions", len(congress_mentions))
     context.log.info(f"Resolving {len(congress_mentions)} mentions into entity candidates")
 
     # Collect unique surface forms for embedding
@@ -55,6 +61,8 @@ def congress_entity_candidates(
         embeddings=embedding_map,
     )
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_entity_candidates", layer="gold").inc(len(candidates))
+    logger.info("congress_entity_candidates complete: %d mentions -> %d candidates", len(congress_mentions), len(candidates))
     context.log.info(
         f"Resolved {len(congress_mentions)} mentions → {len(candidates)} entity candidates"
     )

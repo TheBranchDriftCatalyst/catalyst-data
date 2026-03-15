@@ -15,8 +15,12 @@ from pathlib import Path
 import httpx
 from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from open_leaks.config import OpenLeaksConfig
 from open_leaks.entities import Cable, CourtDocument, OffshoreEntity, OffshoreRelationship
+
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Download helpers
@@ -406,10 +410,13 @@ def wikileaks_cables(
     context: AssetExecutionContext,
     config: OpenLeaksConfig,
 ) -> Output[list[Cable]]:
+    logger.info("Starting wikileaks_cables extraction")
     cache = _ensure_cache(config)
     csv_path = cache / "cables.csv"
     _download_file(config.cablegate_csv_url, csv_path, context)
     cables = _parse_cables_csv(csv_path, context, max_count=config.max_cables)
+    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="wikileaks_cables", layer="bronze").inc(len(cables))
+    logger.info("wikileaks_cables extraction complete count=%d", len(cables))
 
     return Output(
         cables,
@@ -431,10 +438,13 @@ def icij_offshore_entities(
     context: AssetExecutionContext,
     config: OpenLeaksConfig,
 ) -> Output[list[OffshoreEntity]]:
+    logger.info("Starting icij_offshore_entities extraction")
     cache = _ensure_cache(config)
     zip_path = cache / "icij-offshoreleaks.zip"
     _download_file(config.icij_bulk_url, zip_path, context)
     entities = _parse_icij_entities_from_zip(zip_path, context, max_count=config.max_icij_entities)
+    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="icij_offshore_entities", layer="bronze").inc(len(entities))
+    logger.info("icij_offshore_entities extraction complete count=%d", len(entities))
 
     datasets = {}
     for e in entities:
@@ -461,10 +471,13 @@ def icij_offshore_relationships(
     context: AssetExecutionContext,
     config: OpenLeaksConfig,
 ) -> Output[list[OffshoreRelationship]]:
+    logger.info("Starting icij_offshore_relationships extraction")
     cache = _ensure_cache(config)
     zip_path = cache / "icij-offshoreleaks.zip"
     _download_file(config.icij_bulk_url, zip_path, context)
     rels = _parse_icij_relationships_from_zip(zip_path, context, max_count=config.max_icij_relationships)
+    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="icij_offshore_relationships", layer="bronze").inc(len(rels))
+    logger.info("icij_offshore_relationships extraction complete count=%d", len(rels))
 
     rel_types = {}
     for r in rels:
@@ -490,7 +503,10 @@ def epstein_court_docs(
     context: AssetExecutionContext,
     config: OpenLeaksConfig,
 ) -> Output[list[CourtDocument]]:
+    logger.info("Starting epstein_court_docs extraction")
     docs = _fetch_epstein_api(config.epstein_api_url, context, max_count=config.max_epstein_docs)
+    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="epstein_court_docs", layer="bronze").inc(len(docs))
+    logger.info("epstein_court_docs extraction complete count=%d", len(docs))
 
     doc_types = {}
     for d in docs:

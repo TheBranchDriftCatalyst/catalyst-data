@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 from typing import Any, Iterator
 
+from dagster_io.logging import get_logger
 from congress_data.core.base_api_client import BaseAPIClient
+
+logger = get_logger(__name__)
 
 
 class CongressAPIClient(BaseAPIClient):
@@ -51,6 +54,7 @@ class CongressAPIClient(BaseAPIClient):
     def iterate_bills(
         self, congress: int = 118, max_bills: int | None = None
     ) -> Iterator[dict[str, Any]]:
+        logger.info("Iterating bills for congress=%d max_bills=%s", congress, max_bills)
         yield from self.paginate(
             f"/bill/{congress}",
             results_key="bills",
@@ -70,6 +74,7 @@ class CongressAPIClient(BaseAPIClient):
     def iterate_members(
         self, congress: int = 118, max_members: int | None = None
     ) -> Iterator[dict[str, Any]]:
+        logger.info("Iterating members for congress=%d max_members=%s", congress, max_members)
         yield from self.paginate(
             f"/member/congress/{congress}",
             results_key="members",
@@ -98,6 +103,7 @@ class CongressAPIClient(BaseAPIClient):
     def iterate_committees(
         self, congress: int = 118, max_committees: int | None = None
     ) -> Iterator[dict[str, Any]]:
+        logger.info("Iterating committees for congress=%d max_committees=%s", congress, max_committees)
         yield from self.paginate(
             f"/committee/{congress}",
             results_key="committees",

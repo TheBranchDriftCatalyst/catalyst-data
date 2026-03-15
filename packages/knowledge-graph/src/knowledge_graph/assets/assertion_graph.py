@@ -11,7 +11,11 @@ from typing import Any
 from dagster import AssetExecutionContext, Output, asset
 from dagster_io import Assertion, CanonicalEntity
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from knowledge_graph.resources import GraphDBResource
+
+logger = get_logger(__name__)
 
 
 def _build_name_index(entities: list[CanonicalEntity]) -> dict[str, str]:
@@ -67,6 +71,7 @@ def assertion_graph(
     leak_assertions: list[Assertion],
 ) -> Output[dict[str, Any]]:
     all_assertions = congress_assertions + leak_assertions
+    logger.info("Starting assertion_graph: %d assertions against %d canonical entities", len(all_assertions), len(canonical_entities))
     context.log.info(
         f"Processing {len(all_assertions)} assertions against "
         f"{len(canonical_entities)} canonical entities"
@@ -101,6 +106,7 @@ def assertion_graph(
         else:
             unlinked_count += 1
 
+    logger.info("Assertion linking: fully=%d partial=%d unlinked=%d", stats["fully_linked"], stats["partially_linked"], unlinked_count)
     context.log.info(
         f"Linked: {stats['fully_linked']} full, {stats['partially_linked']} partial, "
         f"{unlinked_count} unlinked"
@@ -115,6 +121,8 @@ def assertion_graph(
     neo4j_count = graph_db.sync_assertions_to_neo4j(fully_linked)
     context.log.info(f"Wrote {neo4j_count} assertion edges to Neo4j")
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="knowledge_graph", asset_key="assertion_graph", layer="platinum").inc(len(all_assertions))
+    logger.info("assertion_graph complete: %d assertions, pg=%d, neo4j=%d", len(all_assertions), pg_count, neo4j_count)
     result = {
         "total_assertions": len(all_assertions),
         "fully_linked": stats["fully_linked"],

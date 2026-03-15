@@ -11,6 +11,7 @@ Configure via environment variables or Dagster launchpad.
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 from dagster import ConfigurableResource
@@ -18,6 +19,18 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, PrivateAttr
+
+from dagster_io.logging import get_logger
+from dagster_io.metrics import (
+    EMBEDDING_BATCH_DURATION,
+    EMBEDDING_VECTORS_CREATED,
+    LLM_REQUEST_DURATION,
+    LLM_REQUESTS,
+    LLM_TOKENS_USED,
+    track_duration,
+)
+
+logger = get_logger(__name__)
 
 
 class LLMResource(ConfigurableResource):
@@ -52,6 +65,7 @@ class LLMResource(ConfigurableResource):
     request_timeout: float = float(os.environ.get("LLM_REQUEST_TIMEOUT", "300"))
 
     def setup_for_execution(self, context) -> None:  # noqa: ANN001
+        logger.info("Initializing LLM resource model=%s base_url=%s", self.model, self.base_url)
         self._chat_model = ChatOpenAI(
             base_url=self.base_url,
             api_key=self.api_key or "unused",
@@ -68,22 +82,68 @@ class LLMResource(ConfigurableResource):
 
     def complete(self, prompt: str, *, system: str = "") -> str:
         """Send a chat completion and return the text response."""
+        logger.debug("LLM complete model=%s prompt_len=%d", self.model, len(prompt))
         messages = []
         if system:
             messages.append(SystemMessage(content=system))
         messages.append(HumanMessage(content=prompt))
-        response = self._chat_model.invoke(messages)
-        return str(response.content)
+        LLM_REQUESTS.labels(model=self.model, operation="complete", status="pending").inc()
+        start = time.monotonic()
+        try:
+            with track_duration(LLM_REQUEST_DURATION, {"model": self.model, "operation": "complete"}):
+                response = self._chat_model.invoke(messages)
+            duration = time.monotonic() - start
+            result = str(response.content)
+            LLM_REQUESTS.labels(model=self.model, operation="complete", status="success").inc()
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                usage = response.usage_metadata
+                if hasattr(usage, "get"):
+                    prompt_tokens = usage.get("input_tokens", 0)
+                    completion_tokens = usage.get("output_tokens", 0)
+                else:
+                    prompt_tokens = getattr(usage, "input_tokens", 0)
+                    completion_tokens = getattr(usage, "output_tokens", 0)
+                LLM_TOKENS_USED.labels(model=self.model, token_type="prompt").inc(prompt_tokens)
+                LLM_TOKENS_USED.labels(model=self.model, token_type="completion").inc(completion_tokens)
+            logger.info("LLM complete done model=%s duration=%.2fs response_len=%d", self.model, duration, len(result))
+            return result
+        except Exception:
+            LLM_REQUESTS.labels(model=self.model, operation="complete", status="error").inc()
+            logger.error("LLM complete failed model=%s", self.model, exc_info=True)
+            raise
 
     def complete_json(self, prompt: str, *, system: str = "") -> str:
         """Send a chat completion requesting JSON output."""
+        logger.debug("LLM complete_json model=%s prompt_len=%d", self.model, len(prompt))
         model = self._chat_model.bind(response_format={"type": "json_object"})
         messages = []
         if system:
             messages.append(SystemMessage(content=system))
         messages.append(HumanMessage(content=prompt))
-        response = model.invoke(messages)
-        return str(response.content)
+        LLM_REQUESTS.labels(model=self.model, operation="complete_json", status="pending").inc()
+        start = time.monotonic()
+        try:
+            with track_duration(LLM_REQUEST_DURATION, {"model": self.model, "operation": "complete_json"}):
+                response = model.invoke(messages)
+            duration = time.monotonic() - start
+            result = str(response.content)
+            LLM_REQUESTS.labels(model=self.model, operation="complete_json", status="success").inc()
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                usage = response.usage_metadata
+                if hasattr(usage, "get"):
+                    prompt_tokens = usage.get("input_tokens", 0)
+                    completion_tokens = usage.get("output_tokens", 0)
+                else:
+                    prompt_tokens = getattr(usage, "input_tokens", 0)
+                    completion_tokens = getattr(usage, "output_tokens", 0)
+                LLM_TOKENS_USED.labels(model=self.model, token_type="prompt").inc(prompt_tokens)
+                LLM_TOKENS_USED.labels(model=self.model, token_type="completion").inc(completion_tokens)
+            logger.info("LLM complete_json done model=%s duration=%.2fs response_len=%d", self.model, duration, len(result))
+            return result
+        except Exception:
+            LLM_REQUESTS.labels(model=self.model, operation="complete_json", status="error").inc()
+            logger.error("LLM complete_json failed model=%s", self.model, exc_info=True)
+            raise
 
     def with_structured_output(self, schema: type[BaseModel]) -> Any:
         """Return a LangChain runnable that outputs a Pydantic model.
@@ -96,6 +156,7 @@ class LLMResource(ConfigurableResource):
             chain = llm.with_structured_output(Entities)
             result = chain.invoke([HumanMessage(content="Extract entities...")])
         """
+        logger.debug("LLM with_structured_output model=%s schema=%s", self.model, schema.__name__)
         return self._chat_model.with_structured_output(schema)
 
 
@@ -129,6 +190,7 @@ class EmbeddingResource(ConfigurableResource):
     _embeddings: Any = PrivateAttr()
 
     def setup_for_execution(self, context) -> None:  # noqa: ANN001
+        logger.info("Initializing EmbeddingResource provider=%s model=%s", self.provider, self.model)
         if self.provider == "huggingface":
             from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -149,8 +211,16 @@ class EmbeddingResource(ConfigurableResource):
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of texts."""
-        return self._embeddings.embed_documents(texts)
+        logger.info("Embedding %d texts with model=%s", len(texts), self.model)
+        with track_duration(EMBEDDING_BATCH_DURATION, {"model": self.model}):
+            result = self._embeddings.embed_documents(texts)
+        EMBEDDING_VECTORS_CREATED.labels(model=self.model).inc(len(result))
+        logger.info("Embedding complete count=%d dimensions=%d", len(result), len(result[0]) if result else 0)
+        return result
 
     def embed_single(self, text: str) -> list[float]:
         """Embed a single text string (uses query embedding for better retrieval)."""
-        return self._embeddings.embed_query(text)
+        logger.debug("Embedding single text len=%d model=%s", len(text), self.model)
+        result = self._embeddings.embed_query(text)
+        EMBEDDING_VECTORS_CREATED.labels(model=self.model).inc(1)
+        return result

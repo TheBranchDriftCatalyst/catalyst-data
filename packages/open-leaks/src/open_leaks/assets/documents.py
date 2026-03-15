@@ -2,8 +2,12 @@
 
 from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from open_leaks.core.document import Document
 from open_leaks.entities import Cable, CourtDocument, OffshoreEntity
+
+logger = get_logger(__name__)
 
 
 def _cable_to_document(cable: Cable) -> Document:
@@ -96,6 +100,7 @@ def leak_documents(
     icij_offshore_entities: list[OffshoreEntity],
     epstein_court_docs: list[CourtDocument],
 ) -> Output[list[Document]]:
+    logger.info("Starting leak_documents transformation")
     documents: list[Document] = []
 
     for cable in wikileaks_cables:
@@ -107,6 +112,8 @@ def leak_documents(
     for doc in epstein_court_docs:
         documents.append(_court_doc_to_document(doc))
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_documents", layer="silver").inc(len(documents))
+    logger.info("leak_documents transformation complete count=%d", len(documents))
     context.log.info(
         f"Produced {len(documents)} documents "
         f"(cables={len(wikileaks_cables)}, icij_entities={len(icij_offshore_entities)}, "

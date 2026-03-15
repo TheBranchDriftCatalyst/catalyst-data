@@ -1,13 +1,19 @@
 """Graph database resources — Neo4j + PostgreSQL dual-write."""
 
 import json
-import logging
 import os
 from typing import Any
 
 from dagster import ConfigurableResource
 
-logger = logging.getLogger(__name__)
+from dagster_io.logging import get_logger
+from dagster_io.metrics import (
+    GRAPH_DB_OPERATION_DURATION,
+    GRAPH_DB_OPERATIONS,
+    track_duration,
+)
+
+logger = get_logger(__name__)
 
 
 class GraphDBResource(ConfigurableResource):
@@ -55,8 +61,10 @@ class GraphDBResource(ConfigurableResource):
         """Upsert canonical entities into PostgreSQL."""
         if not entities:
             return 0
+        logger.info("Upserting %d canonical entities to PostgreSQL", len(entities))
         conn = self._pg_conn()
         try:
+            with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "postgresql", "operation": "upsert_entities"}):
             with conn.cursor() as cur:
                 for ent in entities:
                     cur.execute(
@@ -87,6 +95,8 @@ class GraphDBResource(ConfigurableResource):
                         ),
                     )
             conn.commit()
+            GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="upsert_entities").inc(len(entities))
+            logger.info("PostgreSQL upsert_canonical_entities complete count=%d", len(entities))
             return len(entities)
         finally:
             conn.close()
@@ -95,8 +105,10 @@ class GraphDBResource(ConfigurableResource):
         """Upsert alignment edges into PostgreSQL."""
         if not edges:
             return 0
+        logger.info("Upserting %d alignment edges to PostgreSQL", len(edges))
         conn = self._pg_conn()
         try:
+          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "postgresql", "operation": "upsert_edges"}):
             with conn.cursor() as cur:
                 for edge in edges:
                     cur.execute(
@@ -120,6 +132,8 @@ class GraphDBResource(ConfigurableResource):
                         ),
                     )
             conn.commit()
+            GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="upsert_edges").inc(len(edges))
+            logger.info("PostgreSQL upsert_alignment_edges complete count=%d", len(edges))
             return len(edges)
         finally:
             conn.close()
@@ -128,8 +142,10 @@ class GraphDBResource(ConfigurableResource):
         """Upsert assertions into PostgreSQL."""
         if not assertions:
             return 0
+        logger.info("Upserting %d assertions to PostgreSQL", len(assertions))
         conn = self._pg_conn()
         try:
+          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "postgresql", "operation": "upsert_assertions"}):
             with conn.cursor() as cur:
                 for a in assertions:
                     cur.execute(
@@ -160,6 +176,8 @@ class GraphDBResource(ConfigurableResource):
                         ),
                     )
             conn.commit()
+            GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="upsert_assertions").inc(len(assertions))
+            logger.info("PostgreSQL upsert_assertions complete count=%d", len(assertions))
             return len(assertions)
         finally:
             conn.close()
@@ -170,8 +188,10 @@ class GraphDBResource(ConfigurableResource):
         """Sync canonical entities to Neo4j as nodes."""
         if not entities:
             return 0
+        logger.info("Syncing %d entities to Neo4j", len(entities))
         driver = self._neo4j_driver()
         try:
+          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "neo4j", "operation": "sync_entities"}):
             with driver.session() as session:
                 for ent in entities:
                     session.run(
@@ -188,6 +208,8 @@ class GraphDBResource(ConfigurableResource):
                         aliases=ent.get("aliases", []),
                         mention_count=ent.get("mention_count", 0),
                     )
+            GRAPH_DB_OPERATIONS.labels(backend="neo4j", operation="sync_entities").inc(len(entities))
+            logger.info("Neo4j sync_entities complete count=%d", len(entities))
             return len(entities)
         finally:
             driver.close()
@@ -196,8 +218,10 @@ class GraphDBResource(ConfigurableResource):
         """Sync alignment edges to Neo4j as relationships."""
         if not edges:
             return 0
+        logger.info("Syncing %d alignment edges to Neo4j", len(edges))
         driver = self._neo4j_driver()
         try:
+          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "neo4j", "operation": "sync_edges"}):
             with driver.session() as session:
                 for edge in edges:
                     rel_type = edge["alignment_type"].upper().replace(" ", "_")
@@ -213,6 +237,8 @@ class GraphDBResource(ConfigurableResource):
                         score=edge["score"],
                         method=edge.get("method", ""),
                     )
+            GRAPH_DB_OPERATIONS.labels(backend="neo4j", operation="sync_edges").inc(len(edges))
+            logger.info("Neo4j sync_alignment_edges complete count=%d", len(edges))
             return len(edges)
         finally:
             driver.close()
@@ -221,9 +247,11 @@ class GraphDBResource(ConfigurableResource):
         """Sync assertions to Neo4j as edges between entity nodes."""
         if not assertions:
             return 0
+        logger.info("Syncing %d assertions to Neo4j", len(assertions))
         driver = self._neo4j_driver()
         count = 0
         try:
+          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "neo4j", "operation": "sync_assertions"}):
             with driver.session() as session:
                 for a in assertions:
                     subj_id = a.get("subject_canonical_id")
@@ -249,6 +277,8 @@ class GraphDBResource(ConfigurableResource):
                         hedged=a.get("hedged", False),
                     )
                     count += 1
+            GRAPH_DB_OPERATIONS.labels(backend="neo4j", operation="sync_assertions").inc(count)
+            logger.info("Neo4j sync_assertions complete count=%d", count)
             return count
         finally:
             driver.close()

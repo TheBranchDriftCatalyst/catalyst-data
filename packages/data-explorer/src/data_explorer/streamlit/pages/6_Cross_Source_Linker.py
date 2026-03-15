@@ -1,24 +1,22 @@
-"""Cross-Source Linker — Entity resolution and linking across data sources."""
+"""Cross-Source Linker — Explore canonical entities resolved across all data sources."""
 
 from __future__ import annotations
-
-from collections import Counter
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from data_explorer.streamlit.components.entity_chip import render_entity_chip_html
+from dagster_io.logging import get_logger
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
-from data_explorer.streamlit.entity_resolution import EntityResolver
 from data_explorer.streamlit.navigation import (
     ENTITY_COLORS,
-    get_nav_params,
     navigate_to,
     render_breadcrumbs,
 )
 from data_explorer.streamlit.theme import apply_theme, get_plotly_template
+
+logger = get_logger(__name__)
 
 st.set_page_config(page_title="Cross-Source Linker", page_icon=":material/link:", layout="wide")
 apply_theme()
@@ -26,11 +24,12 @@ render_breadcrumbs([
     ("Home", "app.py"),
     ("Cross-Source Linker", None),
 ])
-st.header("Cross-Source Linker")
+st.title("Cross-Source Entity Linker")
+st.caption("Explore canonical entities resolved across all data sources")
 
 
 # ---------------------------------------------------------------------------
-# Data access helpers
+# Data access
 # ---------------------------------------------------------------------------
 
 @st.cache_resource
@@ -44,344 +43,256 @@ def _get_client() -> DataClient:
     )
 
 
-@st.cache_data(ttl=300, show_spinner="Loading entities...")
-def _load_source_entities(source: str, limit: int) -> list[dict]:
-    return _get_client().load_entities(source, limit=limit)
+@st.cache_data(ttl=300, show_spinner="Loading canonical entities...")
+def _load_canonical_entities(endpoint_url: str, access_key: str, secret_key: str, bucket: str) -> list[dict]:
+    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    return client.load_canonical_entities()
 
 
-# ---------------------------------------------------------------------------
-# Nav params for pre-filtering
-# ---------------------------------------------------------------------------
+@st.cache_data(ttl=300, show_spinner="Loading entity alignments...")
+def _load_entity_alignments(endpoint_url: str, access_key: str, secret_key: str, bucket: str) -> list[dict]:
+    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    return client.load_entity_alignments()
 
-nav_params = get_nav_params()
-prefilter_label: str | None = nav_params.get("entity_label")
-prefilter_sources: list[str] | None = nav_params.get("sources")
-
-# ---------------------------------------------------------------------------
-# Source discovery
-# ---------------------------------------------------------------------------
 
 client = _get_client()
-all_sources = client.list_sources()
 
-if not all_sources:
-    st.warning("No data sources found.")
+# ---------------------------------------------------------------------------
+# Load platinum-layer data
+# ---------------------------------------------------------------------------
+
+with st.spinner("Loading platinum-layer entities..."):
+    canonical_entities = _load_canonical_entities(
+        client._endpoint_url, client._access_key, client._secret_key, client._bucket,
+    )
+    alignments = _load_entity_alignments(
+        client._endpoint_url, client._access_key, client._secret_key, client._bucket,
+    )
+
+if not canonical_entities:
+    st.warning("No canonical entities found. Run the knowledge-graph pipeline first.")
     st.stop()
 
-# ---------------------------------------------------------------------------
-# Sidebar controls
-# ---------------------------------------------------------------------------
-
-with st.sidebar:
-    st.subheader("Sources & Filters")
-
-    default_sources = prefilter_sources if prefilter_sources else all_sources
-    selected_sources = st.multiselect(
-        "Sources",
-        options=all_sources,
-        default=[s for s in default_sources if s in all_sources],
-        key="xsl_sources",
-    )
-
-    # Entity label filter
-    all_labels = sorted(ENTITY_COLORS.keys())
-    default_label_idx = (
-        all_labels.index(prefilter_label) + 1
-        if prefilter_label and prefilter_label in all_labels
-        else 0
-    )
-    label_options = ["All"] + all_labels
-    selected_label = st.selectbox(
-        "Entity label filter",
-        label_options,
-        index=default_label_idx,
-        key="xsl_label",
-    )
-
-    max_per_source = st.slider(
-        "Max entities per source",
-        min_value=500,
-        max_value=5000,
-        value=2000,
-        step=500,
-        key="xsl_max",
-    )
-
-    sort_order = st.selectbox(
-        "Sort entity groups by",
-        ["Count (descending)", "Alphabetical"],
-        key="xsl_sort",
-    )
-
-    if st.button("Refresh", key="xsl_refresh"):
-        st.cache_data.clear()
-        st.rerun()
-
-if not selected_sources:
-    st.info("Select at least one source from the sidebar.")
-    st.stop()
+logger.info("Loaded %d canonical entities and %d alignments", len(canonical_entities), len(alignments))
 
 # ---------------------------------------------------------------------------
-# Load and tag entities from all selected sources
+# Summary stats
 # ---------------------------------------------------------------------------
 
-with st.spinner("Loading entities from selected sources..."):
-    combined_entities: list[dict] = []
-    source_counts: dict[str, int] = {}
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Canonical Entities", len(canonical_entities))
+col2.metric("Alignment Edges", len(alignments))
 
-    for source in selected_sources:
-        rows = _load_source_entities(source, max_per_source)
-        for r in rows:
-            r["_source"] = source
-        combined_entities.extend(rows)
-        source_counts[source] = len(rows)
+multi_source = [e for e in canonical_entities if len(e.get("source_code_locations", [])) > 1]
+col3.metric("Multi-Source Entities", len(multi_source))
 
-if not combined_entities:
-    st.warning("No entities found in the selected sources.")
-    st.stop()
+avg_mentions = sum(e.get("mention_count", 0) for e in canonical_entities) / max(len(canonical_entities), 1)
+col4.metric("Avg Mentions/Entity", f"{avg_mentions:.1f}")
 
-st.caption(
-    f"Loaded **{len(combined_entities):,}** entities across "
-    f"**{len(selected_sources)}** source(s): "
-    + ", ".join(f"{s} ({source_counts[s]:,})" for s in selected_sources)
-)
+st.divider()
 
 # ---------------------------------------------------------------------------
-# Apply label filter before resolution
+# Filters
 # ---------------------------------------------------------------------------
 
-if selected_label != "All":
-    combined_entities = [
-        e for e in combined_entities
-        if e.get("label", "").upper() == selected_label
+filter_col1, filter_col2, filter_col3 = st.columns(3)
+with filter_col1:
+    entity_types = sorted(set(e.get("entity_type", "UNKNOWN") for e in canonical_entities))
+    selected_type = st.selectbox("Entity Type", ["All"] + entity_types)
+with filter_col2:
+    all_sources = sorted(set(s for e in canonical_entities for s in e.get("source_code_locations", [])))
+    selected_source = st.selectbox("Source", ["All"] + all_sources)
+with filter_col3:
+    search_query = st.text_input("Search by name/alias")
+
+# Apply filters
+filtered = canonical_entities
+if selected_type != "All":
+    filtered = [e for e in filtered if e.get("entity_type") == selected_type]
+if selected_source != "All":
+    filtered = [e for e in filtered if selected_source in e.get("source_code_locations", [])]
+if search_query:
+    q = search_query.lower()
+    filtered = [
+        e for e in filtered
+        if q in e.get("canonical_name", "").lower()
+        or any(q in a.lower() for a in e.get("aliases", []))
     ]
-    if not combined_entities:
-        st.warning(f"No **{selected_label}** entities found in the selected sources.")
-        st.stop()
 
 # ---------------------------------------------------------------------------
-# Entity resolution
+# Entity table
 # ---------------------------------------------------------------------------
 
-with st.spinner("Resolving entities..."):
-    resolver = EntityResolver(combined_entities)
-    resolver.resolve()
-    entity_groups = resolver.get_entity_groups()
+st.subheader(f"Canonical Entities ({len(filtered)})")
 
-# Enrich groups with per-source frequency
-for group in entity_groups:
-    aliases_set = set(group["aliases"]) | {group["canonical"]}
-    source_freq: Counter[str] = Counter()
-    for e in combined_entities:
-        if e.get("text", "").strip() in aliases_set:
-            source_freq[e["_source"]] += 1
-    group["source_freq"] = dict(source_freq)
-    group["n_sources"] = len(source_freq)
+if filtered:
+    df = pd.DataFrame([{
+        "Name": e.get("canonical_name", ""),
+        "Type": e.get("entity_type", ""),
+        "Sources": ", ".join(e.get("source_code_locations", [])),
+        "Mentions": e.get("mention_count", 0),
+        "Aliases": ", ".join(e.get("aliases", [])[:3]),
+    } for e in filtered])
 
-# Apply sorting
-if sort_order == "Alphabetical":
-    entity_groups.sort(key=lambda g: g["canonical"].lower())
-# else already sorted by count from get_entity_groups()
+    selected_idx = st.dataframe(
+        df, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row",
+    )
+
+    # Detail view for selected entity
+    if selected_idx and selected_idx.selection and selected_idx.selection.rows:
+        row_idx = selected_idx.selection.rows[0]
+        entity = filtered[row_idx]
+
+        st.divider()
+        st.subheader(f"Entity: {entity.get('canonical_name', '')}")
+
+        tab1, tab2, tab3 = st.tabs(["Identity", "Alignments", "Source Candidates"])
+
+        with tab1:
+            id_col1, id_col2 = st.columns(2)
+            with id_col1:
+                st.write("**Type:**", entity.get("entity_type", ""))
+                st.write("**Canonical Name:**", entity.get("canonical_name", ""))
+                st.write("**Mention Count:**", entity.get("mention_count", 0))
+                st.write("**Sources:**", ", ".join(entity.get("source_code_locations", [])))
+            with id_col2:
+                st.write("**Aliases:**")
+                for alias in entity.get("aliases", []):
+                    st.write(f"  - {alias}")
+                if entity.get("description"):
+                    st.write("**Description:**", entity.get("description", ""))
+
+            # Navigation to Entity Concordance
+            if st.button("View in Entity Concordance", key="nav_concordance"):
+                navigate_to(
+                    "pages/8_Entity_Concordance.py",
+                    entity_text=entity.get("canonical_name", ""),
+                    entity_label=entity.get("entity_type", ""),
+                )
+
+        with tab2:
+            entity_id = entity.get("canonical_id", "")
+            related_alignments = [
+                a for a in alignments
+                if a.get("source_entity_id") == entity_id
+                or a.get("target_entity_id") == entity_id
+            ]
+            if related_alignments:
+                # Resolve names for the "other" entity
+                entity_name_map = {
+                    e.get("canonical_id", ""): e.get("canonical_name", e.get("canonical_id", ""))
+                    for e in canonical_entities
+                }
+                align_df = pd.DataFrame([{
+                    "Other Entity": entity_name_map.get(
+                        a.get("target_entity_id") if a.get("source_entity_id") == entity_id else a.get("source_entity_id"),
+                        a.get("target_entity_id") if a.get("source_entity_id") == entity_id else a.get("source_entity_id"),
+                    ),
+                    "Alignment": a.get("alignment_type", ""),
+                    "Score": f"{a.get('score', 0):.3f}",
+                    "Method": a.get("method", ""),
+                    "Evidence": str(a.get("evidence", ""))[:100],
+                } for a in related_alignments])
+                st.dataframe(align_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No alignment edges for this entity")
+
+        with tab3:
+            candidate_ids = entity.get("source_candidate_ids", [])
+            if candidate_ids:
+                st.write("**Source Candidate IDs:**")
+                for cid in candidate_ids:
+                    st.code(cid)
+            else:
+                st.info("No source candidate IDs recorded")
+else:
+    st.info("No entities match the current filters.")
 
 # ---------------------------------------------------------------------------
-# Tabs
+# Alignment distribution
 # ---------------------------------------------------------------------------
 
-tab_groups, tab_matrix, tab_stats = st.tabs(
-    ["Entity Groups", "Cross-Source Matrix", "Statistics"]
-)
+st.divider()
+st.subheader("Alignment Distribution")
 
-# === Tab 1: Entity Groups ===
-with tab_groups:
-    st.subheader("Resolved Entity Groups")
-    st.caption(f"{len(entity_groups)} groups")
+if alignments:
+    chart_col1, chart_col2 = st.columns(2)
 
-    if not entity_groups:
-        st.info("No entity groups after resolution.")
-    else:
-        for idx, group in enumerate(entity_groups):
-            canonical = group["canonical"]
-            label = group["label"]
-            aliases = group["aliases"]
-            count = group["count"]
-            source_freq = group["source_freq"]
-            n_sources = group["n_sources"]
-
-            chip_html = render_entity_chip_html(canonical, label, count=count)
-            source_tag = (
-                f'<span style="color:#a1a1aa;font-size:0.75rem;margin-left:0.5em;">'
-                f'{n_sources} source{"s" if n_sources != 1 else ""}</span>'
-            )
-
-            with st.expander(f"{canonical}  ({label} | {count} mentions | {n_sources} sources)"):
-                # Chip and basic info
-                st.markdown(chip_html + source_tag, unsafe_allow_html=True)
-
-                # Aliases
-                if aliases:
-                    st.markdown(
-                        "**Aliases:** "
-                        + ", ".join(f"`{a}`" for a in sorted(aliases))
-                    )
-
-                # Per-source frequency bar chart
-                if source_freq:
-                    freq_df = pd.DataFrame(
-                        [{"Source": s, "Count": c} for s, c in sorted(source_freq.items())]
-                    )
-                    fig = go.Figure(
-                        go.Bar(
-                            x=freq_df["Source"],
-                            y=freq_df["Count"],
-                            marker_color="#00fcd6",
-                            text=freq_df["Count"],
-                            textposition="auto",
-                        )
-                    )
-                    fig.update_layout(template=get_plotly_template())
-                    fig.update_layout(
-                        height=250,
-                        xaxis_title="",
-                        yaxis_title="Mentions",
-                        margin=dict(t=10, b=40, l=40, r=10),
-                        showlegend=False,
-                    )
-                    st.plotly_chart(fig, use_container_width=True, key=f"freq_{idx}")
-
-                # Navigation links
-                link_cols = st.columns(2)
-                with link_cols[0]:
-                    if st.button(
-                        "View in Entity Concordance",
-                        key=f"nav_ev_{idx}",
-                    ):
-                        navigate_to(
-                            "pages/8_Entity_Concordance.py",
-                            entity_text=canonical,
-                            entity_label=label,
-                        )
-                with link_cols[1]:
-                    if st.button(
-                        "View in Entity Concordance",
-                        key=f"nav_ec_{idx}",
-                    ):
-                        navigate_to(
-                            "pages/8_Entity_Concordance.py",
-                            entity_text=canonical,
-                            entity_label=label,
-                        )
-
-# === Tab 2: Cross-Source Matrix ===
-with tab_matrix:
-    st.subheader("Entity-Source Heatmap")
-
-    # Build matrix: rows = top entities by total count, columns = sources
-    top_n = min(50, len(entity_groups))
-    top_groups = sorted(entity_groups, key=lambda g: g["count"], reverse=True)[:top_n]
-
-    if not top_groups or len(selected_sources) < 2:
-        st.info(
-            "Select at least 2 sources and ensure entities are available "
-            "to display the cross-source matrix."
+    with chart_col1:
+        st.markdown("**By Alignment Type**")
+        type_counts: dict[str, int] = {}
+        for a in alignments:
+            t = a.get("alignment_type", "UNKNOWN")
+            type_counts[t] = type_counts.get(t, 0) + 1
+        type_df = pd.DataFrame(
+            [{"Type": k, "Count": v} for k, v in sorted(type_counts.items())],
         )
-    else:
-        entity_names = [g["canonical"] for g in top_groups]
-        matrix_data: list[list[int]] = []
-        for g in top_groups:
-            row = [g["source_freq"].get(s, 0) for s in selected_sources]
-            matrix_data.append(row)
-
         fig = go.Figure(
-            go.Heatmap(
-                z=matrix_data,
-                x=selected_sources,
-                y=entity_names,
-                colorscale=[
-                    [0.0, "#0a0a0f"],
-                    [0.2, "#16161d"],
-                    [0.4, "#1a3a35"],
-                    [0.6, "#0e6e5c"],
-                    [0.8, "#00c9a7"],
-                    [1.0, "#00fcd6"],
-                ],
-                hoverongaps=False,
-                hovertemplate=(
-                    "<b>%{y}</b><br>"
-                    "Source: %{x}<br>"
-                    "Mentions: %{z}<extra></extra>"
-                ),
-                colorbar=dict(
-                    title="Mentions",
-                    title_font=dict(color="#a1a1aa", family="Rajdhani, sans-serif"),
-                    tickfont=dict(color="#a1a1aa", family="Space Mono, monospace", size=10),
-                ),
+            go.Bar(
+                x=type_df["Type"],
+                y=type_df["Count"],
+                marker_color="#00fcd6",
+                text=type_df["Count"],
+                textposition="auto",
+                textfont=dict(color="#e4e4e7", family="Space Mono, monospace", size=11),
             )
         )
         fig.update_layout(template=get_plotly_template())
         fig.update_layout(
-            height=max(400, top_n * 22),
-            xaxis=dict(
-                side="top",
-                tickfont=dict(family="Rajdhani, sans-serif", size=12, color="#a1a1aa"),
-            ),
-            yaxis=dict(
-                autorange="reversed",
-                tickfont=dict(family="Rajdhani, sans-serif", size=11, color="#e4e4e7"),
-            ),
-            margin=dict(t=60, b=20, l=200, r=40),
+            height=300,
+            xaxis_title="",
+            yaxis_title="Count",
+            margin=dict(t=10, b=40, l=40, r=10),
+            showlegend=False,
         )
-        st.plotly_chart(fig, use_container_width=True, key="heatmap")
+        st.plotly_chart(fig, use_container_width=True, key="align_type_dist")
 
-        st.caption(
-            f"Showing top {top_n} entities by total mention count across "
-            f"{len(selected_sources)} sources."
-        )
+    with chart_col2:
+        st.markdown("**Score Distribution**")
+        scores = [a.get("score", 0) for a in alignments if a.get("score") is not None]
+        if scores:
+            import numpy as np
+            bins = np.histogram(scores, bins=20)
+            bin_edges = [(bins[1][i] + bins[1][i + 1]) / 2 for i in range(len(bins[1]) - 1)]
+            fig = go.Figure(
+                go.Bar(
+                    x=bin_edges,
+                    y=bins[0].tolist(),
+                    marker_color="#c026d3",
+                    textfont=dict(color="#e4e4e7", family="Space Mono, monospace", size=11),
+                )
+            )
+            fig.update_layout(template=get_plotly_template())
+            fig.update_layout(
+                height=300,
+                xaxis_title="Score",
+                yaxis_title="Count",
+                margin=dict(t=10, b=40, l=40, r=10),
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True, key="align_score_dist")
+        else:
+            st.info("No alignment scores available")
 
-# === Tab 3: Statistics ===
-with tab_stats:
-    st.subheader("Resolution Statistics")
-
-    # Compute stats
-    total_raw = len(combined_entities)
-    unique_raw_texts = len({e.get("text", "").strip() for e in combined_entities if e.get("text")})
-    unique_after = len(entity_groups)
-    reduction_pct = (
-        ((unique_raw_texts - unique_after) / unique_raw_texts * 100)
-        if unique_raw_texts > 0
-        else 0.0
-    )
-
-    # Metrics row
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Total Mentions", f"{total_raw:,}")
-    m2.metric("Unique Texts", f"{unique_raw_texts:,}")
-    m3.metric("After Resolution", f"{unique_after:,}")
-    m4.metric("Reduction", f"{reduction_pct:.1f}%")
-
+    # Entity type breakdown
     st.divider()
-
-    # Label distribution chart
-    st.markdown("**Entity Label Distribution**")
-
-    label_counts: Counter[str] = Counter()
-    for e in combined_entities:
-        lbl = e.get("label", "UNKNOWN").upper()
-        label_counts[lbl] += 1
-
-    if label_counts:
-        label_df = pd.DataFrame(
-            [{"Label": lbl, "Count": cnt} for lbl, cnt in label_counts.most_common()]
+    st.markdown("**Entity Type Distribution**")
+    etype_counts: dict[str, int] = {}
+    for e in canonical_entities:
+        t = e.get("entity_type", "UNKNOWN")
+        etype_counts[t] = etype_counts.get(t, 0) + 1
+    if etype_counts:
+        etype_df = pd.DataFrame(
+            [{"Type": k, "Count": v} for k, v in sorted(etype_counts.items(), key=lambda x: x[1], reverse=True)],
         )
-        label_colors = [
-            ENTITY_COLORS.get(lbl, "#a1a1aa") for lbl in label_df["Label"]
-        ]
-
+        type_colors = [ENTITY_COLORS.get(t, "#a1a1aa") for t in etype_df["Type"]]
         fig = go.Figure(
             go.Bar(
-                x=label_df["Label"],
-                y=label_df["Count"],
-                marker_color=label_colors,
-                text=label_df["Count"],
+                x=etype_df["Type"],
+                y=etype_df["Count"],
+                marker_color=type_colors,
+                text=etype_df["Count"],
                 textposition="auto",
                 textfont=dict(color="#e4e4e7", family="Space Mono, monospace", size=11),
             )
@@ -390,46 +301,10 @@ with tab_stats:
         fig.update_layout(
             height=350,
             xaxis_title="",
-            yaxis_title="Mentions",
+            yaxis_title="Count",
             margin=dict(t=10, b=40, l=60, r=10),
             showlegend=False,
         )
-        st.plotly_chart(fig, use_container_width=True, key="label_dist")
-
-    st.divider()
-
-    # Per-source stats table
-    st.markdown("**Per-Source Summary**")
-    source_stats_rows: list[dict] = []
-    for source in selected_sources:
-        source_ents = [e for e in combined_entities if e["_source"] == source]
-        unique_texts = len({e.get("text", "").strip() for e in source_ents if e.get("text")})
-        labels_in_source = len({e.get("label", "") for e in source_ents})
-        source_stats_rows.append({
-            "Source": source,
-            "Total Mentions": len(source_ents),
-            "Unique Texts": unique_texts,
-            "Labels": labels_in_source,
-        })
-
-    if source_stats_rows:
-        stats_df = pd.DataFrame(source_stats_rows)
-        st.dataframe(stats_df, use_container_width=True, hide_index=True)
-
-    # Cross-source entity overlap
-    st.divider()
-    st.markdown("**Cross-Source Entity Overlap**")
-    multi_source_groups = [g for g in entity_groups if g["n_sources"] > 1]
-    single_source_groups = [g for g in entity_groups if g["n_sources"] == 1]
-
-    ov1, ov2 = st.columns(2)
-    ov1.metric("Entities in Multiple Sources", f"{len(multi_source_groups):,}")
-    ov2.metric("Entities in Single Source", f"{len(single_source_groups):,}")
-
-    if multi_source_groups:
-        st.caption("Top cross-source entities:")
-        top_cross = sorted(multi_source_groups, key=lambda g: g["count"], reverse=True)[:20]
-        cross_html_parts: list[str] = []
-        for g in top_cross:
-            cross_html_parts.append(render_entity_chip_html(g["canonical"], g["label"], count=g["count"]))
-        st.markdown("  ".join(cross_html_parts), unsafe_allow_html=True)
+        st.plotly_chart(fig, use_container_width=True, key="etype_dist")
+else:
+    st.info("No alignment edges found.")

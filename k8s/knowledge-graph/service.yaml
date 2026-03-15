@@ -6,12 +6,17 @@ metadata:
   labels:
     app: knowledge-graph
     app.kubernetes.io/name: knowledge-graph
+    app.kubernetes.io/part-of: dagster
 spec:
   type: ClusterIP
   ports:
     - name: grpc
       port: 4000
       targetPort: grpc
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
       protocol: TCP
   selector:
     app: knowledge-graph

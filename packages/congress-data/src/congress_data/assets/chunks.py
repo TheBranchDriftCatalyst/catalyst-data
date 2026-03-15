@@ -8,7 +8,11 @@ Routes by document_type for optimal chunk sizes:
 from dagster import AssetExecutionContext, Output, asset
 from dagster_io import ChunkingResource, TextChunk
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from congress_data.core.document import Document
+
+logger = get_logger(__name__)
 
 # Optimal chunk sizes per document type
 CHUNK_PROFILES = {
@@ -28,6 +32,7 @@ def congress_chunks(
     chunking: ChunkingResource,
     congress_documents: list[Document],
 ) -> Output[list[TextChunk]]:
+    logger.info("Starting congress_chunks chunking for %d documents", len(congress_documents))
     all_chunks: list[TextChunk] = []
     stats: dict[str, int] = {}
 
@@ -49,6 +54,8 @@ def congress_chunks(
         all_chunks.extend(chunks)
         stats[doc.document_type] = stats.get(doc.document_type, 0) + len(chunks)
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_chunks", layer="silver").inc(len(all_chunks))
+    logger.info("congress_chunks complete: %d documents -> %d chunks", len(congress_documents), len(all_chunks))
     context.log.info(
         f"Chunked {len(congress_documents)} documents into {len(all_chunks)} chunks: "
         + ", ".join(f"{k}={v}" for k, v in stats.items())

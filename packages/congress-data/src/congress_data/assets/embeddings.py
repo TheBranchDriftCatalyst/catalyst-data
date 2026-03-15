@@ -5,6 +5,11 @@ from typing import Any
 from dagster import AssetExecutionContext, Output, asset
 from dagster_io import EmbeddingResource, TextChunk
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+
+logger = get_logger(__name__)
+
 
 @asset(
     group_name="congress",
@@ -27,10 +32,13 @@ def congress_embeddings(
     embeddings: EmbeddingResource,
     congress_chunks: list[TextChunk],
 ) -> Output[list[dict[str, Any]]]:
+    logger.info("Starting congress_embeddings for %d chunks", len(congress_chunks))
     texts = [chunk.text for chunk in congress_chunks]
 
     context.log.info(f"Embedding {len(texts)} chunks with model={embeddings.model}")
     vectors = embeddings.embed(texts)
+    ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_embeddings", layer="gold").inc(len(vectors))
+    logger.info("congress_embeddings complete: %d vectors (%dd)", len(vectors), len(vectors[0]) if vectors else 0)
 
     results = [
         {

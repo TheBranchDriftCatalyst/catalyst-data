@@ -5,6 +5,11 @@ from typing import Any
 from dagster import AssetExecutionContext, Output, asset
 from dagster_io import EmbeddingResource, TextChunk
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED, EMBEDDING_BATCH_DURATION, EMBEDDING_VECTORS_CREATED, track_duration
+
+logger = get_logger(__name__)
+
 
 @asset(
     group_name="leaks",
@@ -27,11 +32,14 @@ def leak_embeddings(
     embeddings: EmbeddingResource,
     leak_chunks: list[TextChunk],
 ) -> Output[list[dict[str, Any]]]:
+    logger.info("Starting leak_embeddings for %d chunks", len(leak_chunks))
     texts = [chunk.text for chunk in leak_chunks]
 
     context.log.info(f"Embedding {len(texts)} chunks with model={embeddings.model}")
     vectors = embeddings.embed(texts)
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_embeddings", layer="gold").inc(len(vectors))
+    logger.info("leak_embeddings complete: %d vectors (%dd)", len(vectors), len(vectors[0]) if vectors else 0)
     results = [
         {
             "chunk_id": chunk.chunk_id,

@@ -12,6 +12,11 @@ from dagster_io import (
     Mention,
 )
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+
+logger = get_logger(__name__)
+
 
 @asset(
     group_name="leaks",
@@ -34,6 +39,7 @@ def leak_entity_candidates(
     embeddings: EmbeddingResource,
     leak_mentions: list[Mention],
 ) -> Output[list[EntityCandidate]]:
+    logger.info("Starting leak_entity_candidates resolution for %d mentions", len(leak_mentions))
     context.log.info(f"Resolving {len(leak_mentions)} mentions into entity candidates")
 
     # Collect unique surface forms for embedding
@@ -55,6 +61,8 @@ def leak_entity_candidates(
         embeddings=embedding_map,
     )
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_entity_candidates", layer="gold").inc(len(candidates))
+    logger.info("leak_entity_candidates complete: %d mentions -> %d candidates", len(leak_mentions), len(candidates))
     context.log.info(
         f"Resolved {len(leak_mentions)} mentions → {len(candidates)} entity candidates"
     )

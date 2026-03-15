@@ -11,7 +11,11 @@ from dagster_io import (
     EntityCandidate,
 )
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from knowledge_graph.resources import GraphDBResource
+
+logger = get_logger(__name__)
 
 
 @asset(
@@ -36,6 +40,7 @@ def entity_alignments(
     congress_entity_candidates: list[EntityCandidate],
     leak_entity_candidates: list[EntityCandidate],
 ) -> Output[list[AlignmentEdge]]:
+    logger.info("Starting entity_alignments: %d congress + %d leak candidates", len(congress_entity_candidates), len(leak_entity_candidates))
     context.log.info(
         f"Computing alignment edges: {len(congress_entity_candidates)} congress "
         f"+ {len(leak_entity_candidates)} leak candidates"
@@ -50,6 +55,8 @@ def entity_alignments(
     # Count by type
     same_as_count = sum(1 for e in edges if e.alignment_type.value == "sameAs")
     possible_count = sum(1 for e in edges if e.alignment_type.value == "possibleSameAs")
+    ASSET_RECORDS_PROCESSED.labels(code_location="knowledge_graph", asset_key="entity_alignments", layer="platinum").inc(len(edges))
+    logger.info("entity_alignments complete: %d edges (%d sameAs, %d possibleSameAs)", len(edges), same_as_count, possible_count)
     context.log.info(
         f"Found {len(edges)} alignment edges: {same_as_count} sameAs, {possible_count} possibleSameAs"
     )

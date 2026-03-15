@@ -12,7 +12,11 @@ from dagster_io import (
     EntityCandidate,
 )
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from knowledge_graph.resources import GraphDBResource
+
+logger = get_logger(__name__)
 
 
 @asset(
@@ -37,6 +41,7 @@ def canonical_entities(
     congress_entity_candidates: list[EntityCandidate],
     leak_entity_candidates: list[EntityCandidate],
 ) -> Output[list[CanonicalEntity]]:
+    logger.info("Starting canonical_entities resolution: %d congress + %d leak candidates", len(congress_entity_candidates), len(leak_entity_candidates))
     context.log.info(
         f"Resolving canonical entities from {len(congress_entity_candidates)} congress "
         f"+ {len(leak_entity_candidates)} leak candidates"
@@ -98,6 +103,8 @@ def canonical_entities(
         )
         canonical_list.append(canonical)
 
+    ASSET_RECORDS_PROCESSED.labels(code_location="knowledge_graph", asset_key="canonical_entities", layer="platinum").inc(len(canonical_list))
+    logger.info("canonical_entities complete: %d canonical entities from %d candidates", len(canonical_list), len(all_candidates))
     context.log.info(f"Produced {len(canonical_list)} canonical entities")
 
     # Dual-write to PostgreSQL + Neo4j

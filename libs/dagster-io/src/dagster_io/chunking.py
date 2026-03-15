@@ -19,6 +19,11 @@ from dagster import ConfigurableResource
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field
 
+from dagster_io.logging import get_logger
+from dagster_io.metrics import CHUNKS_CREATED, CHUNK_PROCESSING_DURATION, track_duration
+
+logger = get_logger(__name__)
+
 DEFAULT_SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
 
 
@@ -105,12 +110,16 @@ class ChunkingResource(ConfigurableResource):
         """
         size = chunk_size or self.chunk_size
         overlap = chunk_overlap or self.chunk_overlap
-        raw_chunks = self.split_text(content, chunk_size=size, chunk_overlap=overlap)
+        logger.debug("Chunking document=%s size=%d overlap=%d content_len=%d", document_id, size, overlap, len(content))
+        with track_duration(CHUNK_PROCESSING_DURATION, {"strategy": "recursive"}):
+            raw_chunks = self.split_text(content, chunk_size=size, chunk_overlap=overlap)
 
         if not raw_chunks:
             return []
 
         total = len(raw_chunks)
+        CHUNKS_CREATED.labels(strategy="recursive").inc(total)
+        logger.info("Chunked document=%s into %d chunks (size=%d, overlap=%d)", document_id, total, size, overlap)
         base_meta = {
             **(metadata or {}),
             "chunk_size": size,
@@ -146,6 +155,8 @@ class ChunkingResource(ConfigurableResource):
         if not text:
             return []
 
+        CHUNKS_CREATED.labels(strategy="passthrough").inc(1)
+        logger.debug("Passthrough chunk document=%s len=%d", document_id, len(text))
         full_text = f"{title}\n\n{text}" if (self.prepend_title and title) else text
         return [
             TextChunk(

@@ -57,6 +57,10 @@ spec:
             - "-w"
             - "/dagster-workspace/workspace.yaml"
           env:
+            - name: LOG_LEVEL
+              value: "DEBUG"
+            - name: LOG_FORMAT
+              value: "json"
             - name: DAGSTER_HOME
               value: /opt/dagster/dagster_home
             - name: DAGSTER_POSTGRES_HOST
@@ -158,6 +162,10 @@ spec:
             - "-w"
             - "/dagster-workspace/workspace.yaml"
           env:
+            - name: LOG_LEVEL
+              value: "DEBUG"
+            - name: LOG_FORMAT
+              value: "json"
             - name: DAGSTER_HOME
               value: /opt/dagster/dagster_home
             - name: DAGSTER_POSTGRES_HOST
