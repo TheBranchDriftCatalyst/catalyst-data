@@ -39,7 +39,7 @@ class S3Client:
         with track_duration(S3_OPERATION_DURATION, {"operation": "put_object", "bucket": self.bucket}):
             self._client.put_object(Bucket=self.bucket, Key=key, Body=data)
         S3_OPERATIONS.labels(operation="put_object", bucket=self.bucket).inc()
-        S3_BYTES_TRANSFERRED.labels(operation="put_object", bucket=self.bucket).inc(len(data))
+        S3_BYTES_TRANSFERRED.labels(direction="upload", bucket=self.bucket).inc(len(data))
         logger.info("S3 put_object complete key=%s size=%d", key, len(data))
 
     def get_object(self, key: str) -> bytes:
@@ -48,7 +48,7 @@ class S3Client:
             resp = self._client.get_object(Bucket=self.bucket, Key=key)
             data = resp["Body"].read()
         S3_OPERATIONS.labels(operation="get_object", bucket=self.bucket).inc()
-        S3_BYTES_TRANSFERRED.labels(operation="get_object", bucket=self.bucket).inc(len(data))
+        S3_BYTES_TRANSFERRED.labels(direction="download", bucket=self.bucket).inc(len(data))
         logger.info("S3 get_object complete key=%s size=%d", key, len(data))
         return data
 

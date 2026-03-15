@@ -103,14 +103,14 @@ EMBEDDING_VECTORS_CREATED = Counter(
 CHUNK_PROCESSING_DURATION = Histogram(
     "catalyst_chunk_processing_duration_seconds",
     "Duration of chunk processing operations",
-    ["code_location", "asset_key"],
+    ["strategy"],
     registry=REGISTRY,
 )
 
 CHUNKS_CREATED = Counter(
     "catalyst_chunks_created_total",
     "Total chunks created",
-    ["code_location"],
+    ["strategy"],
     registry=REGISTRY,
 )
 

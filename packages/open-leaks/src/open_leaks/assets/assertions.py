@@ -154,7 +154,7 @@ def leak_assertions(
                 ),
             )
             all_assertions.append(assertion)
-            ASSERTIONS_CREATED.labels(code_location="open_leaks", predicate=ext.predicate[:50]).inc()
+            ASSERTIONS_CREATED.labels(code_location="open_leaks").inc()
             if ext.confidence < 0.5:
                 logger.warning("Low confidence assertion: subject=%s predicate=%s confidence=%.2f", ext.subject[:50], ext.predicate[:50], ext.confidence)
 

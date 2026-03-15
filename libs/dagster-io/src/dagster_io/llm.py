@@ -212,9 +212,9 @@ class EmbeddingResource(ConfigurableResource):
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of texts."""
         logger.info("Embedding %d texts with model=%s", len(texts), self.model)
-        with track_duration(EMBEDDING_BATCH_DURATION, {"model": self.model}):
+        with track_duration(EMBEDDING_BATCH_DURATION, {"provider": self.provider, "model": self.model}):
             result = self._embeddings.embed_documents(texts)
-        EMBEDDING_VECTORS_CREATED.labels(model=self.model).inc(len(result))
+        EMBEDDING_VECTORS_CREATED.labels(provider=self.provider, model=self.model).inc(len(result))
         logger.info("Embedding complete count=%d dimensions=%d", len(result), len(result[0]) if result else 0)
         return result
 
@@ -222,5 +222,5 @@ class EmbeddingResource(ConfigurableResource):
         """Embed a single text string (uses query embedding for better retrieval)."""
         logger.debug("Embedding single text len=%d model=%s", len(text), self.model)
         result = self._embeddings.embed_query(text)
-        EMBEDDING_VECTORS_CREATED.labels(model=self.model).inc(1)
+        EMBEDDING_VECTORS_CREATED.labels(provider=self.provider, model=self.model).inc(1)
         return result
