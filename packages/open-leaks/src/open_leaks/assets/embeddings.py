@@ -6,7 +6,7 @@ from dagster import AssetExecutionContext, Output, asset
 from dagster_io import EmbeddingResource, TextChunk
 
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSET_RECORDS_PROCESSED, EMBEDDING_BATCH_DURATION, EMBEDDING_VECTORS_CREATED, track_duration
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 
 logger = get_logger(__name__)
 

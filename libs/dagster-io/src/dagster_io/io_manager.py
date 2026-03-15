@@ -13,12 +13,6 @@ from pydantic import PrivateAttr
 
 from dagster_io.logging import get_logger
 from dagster_io.manifest import load_or_create_manifest, make_record
-from dagster_io.metrics import (
-    S3_BYTES_TRANSFERRED,
-    S3_OPERATION_DURATION,
-    S3_OPERATIONS,
-    track_duration,
-)
 from dagster_io.path_builder import build_asset_root, build_input_prefix, build_output_prefix
 from dagster_io.s3_client import S3Client
 from dagster_io.serializers import _extract_schema, deserialize, serialize
