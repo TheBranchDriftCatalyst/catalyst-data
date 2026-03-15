@@ -9,7 +9,18 @@ from dagster import InputContext, OutputContext
 
 
 def _code_location_from_context(context: OutputContext | InputContext) -> str:
-    """Extract code location name from run context, falling back to env var."""
+    """Extract code location name from run context, falling back to env var.
+
+    For InputContext, checks upstream metadata for ``source_code_location``
+    override — enables cross-code-location reads via SourceAssets.
+    """
+    # Cross-code-location override: SourceAsset metadata can specify the
+    # code location that actually wrote the data.
+    if isinstance(context, InputContext):
+        meta = getattr(context.upstream_output, "definition_metadata", None) or {}
+        override = meta.get("source_code_location")
+        if override:
+            return override
     try:
         origin = context.step_context.dagster_run.external_pipeline_origin
         return origin.external_repository_origin.code_location_origin.location_name
