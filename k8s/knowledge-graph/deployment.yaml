@@ -47,6 +47,8 @@ spec:
               value: "json"
             - name: METRICS_PORT
               value: "9090"
+            - name: DAGSTER_CODE_LOCATION
+              value: knowledge_graph
             - name: DAGSTER_CURRENT_IMAGE
               value: ghcr.io/thebranchdriftcatalyst/knowledge-graph:latest
             - name: DAGSTER_S3_ENDPOINT_URL
