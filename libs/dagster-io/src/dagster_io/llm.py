@@ -48,6 +48,9 @@ class LLMResource(ConfigurableResource):
 
     _chat_model: ChatOpenAI = PrivateAttr()
 
+    max_retries: int = int(os.environ.get("LLM_MAX_RETRIES", "5"))
+    request_timeout: float = float(os.environ.get("LLM_REQUEST_TIMEOUT", "300"))
+
     def setup_for_execution(self, context) -> None:  # noqa: ANN001
         self._chat_model = ChatOpenAI(
             base_url=self.base_url,
@@ -55,6 +58,8 @@ class LLMResource(ConfigurableResource):
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            max_retries=self.max_retries,
+            timeout=self.request_timeout,
         )
 
     def get_model(self) -> BaseChatModel:
