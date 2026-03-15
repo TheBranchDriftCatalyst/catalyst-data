@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 
 from dagster import InputContext, OutputContext
+
+logger = logging.getLogger(__name__)
 
 
 def _code_location_from_context(context: OutputContext | InputContext) -> str:
@@ -17,15 +20,35 @@ def _code_location_from_context(context: OutputContext | InputContext) -> str:
     # Cross-code-location override: SourceAsset metadata can specify the
     # code location that actually wrote the data.
     if isinstance(context, InputContext):
-        meta = getattr(context.upstream_output, "definition_metadata", None) or {}
-        override = meta.get("source_code_location")
-        if override:
-            return override
+        upstream = context.upstream_output
+        logger.info(
+            "path_builder: InputContext upstream_output=%r, type=%s",
+            upstream, type(upstream).__name__,
+        )
+        if upstream is not None:
+            # Try definition_metadata first (standard for @asset outputs)
+            meta = getattr(upstream, "definition_metadata", None)
+            logger.info("path_builder: definition_metadata=%r", meta)
+            # Also try .metadata (SourceAssets may expose metadata differently)
+            if not meta:
+                meta = getattr(upstream, "metadata", None)
+                logger.info("path_builder: fallback .metadata=%r", meta)
+            meta = meta or {}
+            override = meta.get("source_code_location")
+            if override:
+                logger.info("path_builder: using source_code_location override=%s", override)
+                return override
+            else:
+                logger.warning("path_builder: no source_code_location in meta keys=%s", list(meta.keys()))
     try:
         origin = context.step_context.dagster_run.external_pipeline_origin
-        return origin.external_repository_origin.code_location_origin.location_name
+        loc = origin.external_repository_origin.code_location_origin.location_name
+        logger.info("path_builder: resolved code_location from run origin=%s", loc)
+        return loc
     except Exception:
-        return os.environ.get("DAGSTER_CODE_LOCATION", "default")
+        fallback = os.environ.get("DAGSTER_CODE_LOCATION", "default")
+        logger.info("path_builder: falling back to env DAGSTER_CODE_LOCATION=%s", fallback)
+        return fallback
 
 
 def _group_from_asset_key(asset_key) -> str:
@@ -47,11 +70,15 @@ def _extract_layer(context: OutputContext | InputContext) -> str:
             meta = context.definition_metadata or {}
         else:
             # InputContext: read from upstream output's definition metadata
-            meta = (
-                getattr(context.upstream_output, "definition_metadata", None) or {}
-            )
-        return meta.get("layer", "raw")
+            meta = getattr(context.upstream_output, "definition_metadata", None)
+            if not meta:
+                meta = getattr(context.upstream_output, "metadata", None)
+            meta = meta or {}
+        layer = meta.get("layer", "raw")
+        logger.info("path_builder: _extract_layer=%s from meta keys=%s", layer, list(meta.keys()))
+        return layer
     except Exception:
+        logger.warning("path_builder: _extract_layer falling back to 'raw'")
         return "raw"
 
 
@@ -121,6 +148,7 @@ def build_asset_root(
     root = f"{layer}/{code_location}/{group}/{asset_name}"
     if config_key:
         root = f"{root}/config={config_key}"
+    logger.info("path_builder: build_asset_root=%s (layer=%s, code_location=%s, group=%s, asset=%s)", root, layer, code_location, group, asset_name)
     return root
 
 
