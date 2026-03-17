@@ -8,9 +8,11 @@ from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.observability import get_tracer, trace_operation
 from media_ingest.assets.discovery import NFS_VOLUMES_CONFIG
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 def _ffprobe(path: str) -> dict[str, Any]:
@@ -78,33 +80,34 @@ def media_metadata(
     context: AssetExecutionContext,
     media_files: list[dict[str, Any]],
 ) -> Output[list[dict[str, Any]]]:
-    logger.info("Starting media_metadata extraction for %d files", len(media_files))
-    enriched = []
-    errors = 0
+    with trace_operation("media_metadata", tracer, {"code_location": "media_ingest", "layer": "silver", "record_count": len(media_files)}):
+        logger.info("Starting media_metadata extraction for %d files", len(media_files))
+        enriched = []
+        errors = 0
 
-    for file_info in media_files:
-        probe = _ffprobe(file_info["path"])
-        if "error" in probe:
-            context.log.warning(f"ffprobe failed for {file_info['filename']}: {probe['error']}")
-            file_info["metadata"] = {"error": probe["error"]}
-            errors += 1
-        else:
-            file_info["metadata"] = _extract_metadata(probe)
-        enriched.append(file_info)
+        for file_info in media_files:
+            probe = _ffprobe(file_info["path"])
+            if "error" in probe:
+                context.log.warning(f"ffprobe failed for {file_info['filename']}: {probe['error']}")
+                file_info["metadata"] = {"error": probe["error"]}
+                errors += 1
+            else:
+                file_info["metadata"] = _extract_metadata(probe)
+            enriched.append(file_info)
 
-    ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_metadata", layer="silver").inc(len(enriched))
-    logger.info("media_metadata complete: %d files probed (%d errors)", len(enriched), errors)
-    context.log.info(f"Probed {len(enriched)} files ({errors} errors)")
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_metadata", layer="silver").inc(len(enriched))
+        logger.info("media_metadata complete: %d files probed (%d errors)", len(enriched), errors)
+        context.log.info(f"Probed {len(enriched)} files ({errors} errors)")
 
-    return Output(
-        enriched,
-        metadata={
-            "total_files": len(enriched),
-            "errors": errors,
-            "with_video": sum(1 for f in enriched if f.get("metadata", {}).get("has_video")),
-            "with_audio": sum(1 for f in enriched if f.get("metadata", {}).get("has_audio")),
-            "total_duration_hours": MetadataValue.float(
-                round(sum(f.get("metadata", {}).get("duration_seconds", 0) for f in enriched) / 3600, 2)
-            ),
-        },
-    )
+        return Output(
+            enriched,
+            metadata={
+                "total_files": len(enriched),
+                "errors": errors,
+                "with_video": sum(1 for f in enriched if f.get("metadata", {}).get("has_video")),
+                "with_audio": sum(1 for f in enriched if f.get("metadata", {}).get("has_audio")),
+                "total_duration_hours": MetadataValue.float(
+                    round(sum(f.get("metadata", {}).get("duration_seconds", 0) for f in enriched) / 3600, 2)
+                ),
+            },
+        )

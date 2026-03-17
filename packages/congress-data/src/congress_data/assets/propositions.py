@@ -10,8 +10,10 @@ from pydantic import BaseModel, Field
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED, LLM_REQUEST_DURATION, track_duration
+from dagster_io.observability import get_tracer, trace_operation
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 SPO_SYSTEM_PROMPT = load_prompt(
     "propositions/spo",
@@ -59,33 +61,34 @@ def congress_propositions(
     llm: LLMResource,
     congress_chunks: list[TextChunk],
 ) -> Output[list[dict[str, Any]]]:
-    logger.info("Starting congress_propositions extraction for %d chunks", len(congress_chunks))
-    chain = llm.with_structured_output(PropositionResult)
-    all_propositions: list[dict[str, Any]] = []
+    with trace_operation("congress_propositions", tracer, {"code_location": "congress_data", "layer": "gold", "chunk_count": len(congress_chunks)}):
+        logger.info("Starting congress_propositions extraction for %d chunks", len(congress_chunks))
+        chain = llm.with_structured_output(PropositionResult)
+        all_propositions: list[dict[str, Any]] = []
 
-    for i, chunk in enumerate(congress_chunks):
-        logger.debug("Processing chunk %d/%d id=%s", i + 1, len(congress_chunks), chunk.chunk_id)
-        with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "proposition_extract"}):
-            result: PropositionResult = chain.invoke([
-                SystemMessage(content=SPO_SYSTEM_PROMPT),
-                HumanMessage(
-                    content=f"Extract subject-predicate-object propositions from this text:\n\n{chunk.text}"
-                ),
-            ])
-        for prop in result.propositions:
-            all_propositions.append({
-                **prop.model_dump(),
-                "source_doc_id": chunk.document_id,
-                "chunk_id": chunk.chunk_id,
-            })
+        for i, chunk in enumerate(congress_chunks):
+            logger.debug("Processing chunk %d/%d id=%s", i + 1, len(congress_chunks), chunk.chunk_id)
+            with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "proposition_extract"}):
+                result: PropositionResult = chain.invoke([
+                    SystemMessage(content=SPO_SYSTEM_PROMPT),
+                    HumanMessage(
+                        content=f"Extract subject-predicate-object propositions from this text:\n\n{chunk.text}"
+                    ),
+                ])
+            for prop in result.propositions:
+                all_propositions.append({
+                    **prop.model_dump(),
+                    "source_doc_id": chunk.document_id,
+                    "chunk_id": chunk.chunk_id,
+                })
 
-        if (i + 1) % 50 == 0:
-            context.log.info(f"Processed {i + 1}/{len(congress_chunks)} chunks")
-            logger.info("Proposition progress: %d/%d chunks, %d propositions so far", i + 1, len(congress_chunks), len(all_propositions))
+            if (i + 1) % 50 == 0:
+                context.log.info(f"Processed {i + 1}/{len(congress_chunks)} chunks")
+                logger.info("Proposition progress: %d/%d chunks, %d propositions so far", i + 1, len(congress_chunks), len(all_propositions))
 
-    ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_propositions", layer="gold").inc(len(all_propositions))
-    logger.info("congress_propositions complete: %d propositions from %d chunks", len(all_propositions), len(congress_chunks))
-    context.log.info(
-        f"Extracted {len(all_propositions)} propositions from {len(congress_chunks)} chunks"
-    )
-    return Output(all_propositions, metadata={"proposition_count": len(all_propositions)})
+        ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_propositions", layer="gold").inc(len(all_propositions))
+        logger.info("congress_propositions complete: %d propositions from %d chunks", len(all_propositions), len(congress_chunks))
+        context.log.info(
+            f"Extracted {len(all_propositions)} propositions from {len(congress_chunks)} chunks"
+        )
+        return Output(all_propositions, metadata={"proposition_count": len(all_propositions)})

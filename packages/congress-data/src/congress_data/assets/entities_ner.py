@@ -10,8 +10,10 @@ from pydantic import BaseModel, Field
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED, ENTITIES_EXTRACTED, LLM_REQUEST_DURATION, track_duration
+from dagster_io.observability import get_tracer, trace_operation
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 NER_SYSTEM_PROMPT = load_prompt(
     "ner/basic",
@@ -58,30 +60,31 @@ def congress_entities(
     llm: LLMResource,
     congress_chunks: list[TextChunk],
 ) -> Output[list[dict[str, Any]]]:
-    logger.info("Starting congress_entities NER extraction for %d chunks", len(congress_chunks))
-    chain = llm.with_structured_output(NERResult)
-    all_entities: list[dict[str, Any]] = []
+    with trace_operation("congress_entities", tracer, {"code_location": "congress_data", "layer": "silver", "chunk_count": len(congress_chunks)}):
+        logger.info("Starting congress_entities NER extraction for %d chunks", len(congress_chunks))
+        chain = llm.with_structured_output(NERResult)
+        all_entities: list[dict[str, Any]] = []
 
-    for i, chunk in enumerate(congress_chunks):
-        logger.debug("Processing chunk %d/%d id=%s", i + 1, len(congress_chunks), chunk.chunk_id)
-        with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "ner_extract"}):
-            result: NERResult = chain.invoke([
-                SystemMessage(content=NER_SYSTEM_PROMPT),
-                HumanMessage(content=f"Extract named entities from this text:\n\n{chunk.text}"),
-            ])
-        for ent in result.entities:
-            all_entities.append({
-                **ent.model_dump(),
-                "source_doc_id": chunk.document_id,
-                "chunk_id": chunk.chunk_id,
-            })
-            ENTITIES_EXTRACTED.labels(code_location="congress_data", entity_type=ent.label, method="llm").inc()
+        for i, chunk in enumerate(congress_chunks):
+            logger.debug("Processing chunk %d/%d id=%s", i + 1, len(congress_chunks), chunk.chunk_id)
+            with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "ner_extract"}):
+                result: NERResult = chain.invoke([
+                    SystemMessage(content=NER_SYSTEM_PROMPT),
+                    HumanMessage(content=f"Extract named entities from this text:\n\n{chunk.text}"),
+                ])
+            for ent in result.entities:
+                all_entities.append({
+                    **ent.model_dump(),
+                    "source_doc_id": chunk.document_id,
+                    "chunk_id": chunk.chunk_id,
+                })
+                ENTITIES_EXTRACTED.labels(code_location="congress_data", entity_type=ent.label, method="llm").inc()
 
-        if (i + 1) % 50 == 0:
-            context.log.info(f"Processed {i + 1}/{len(congress_chunks)} chunks")
-            logger.info("NER progress: %d/%d chunks, %d entities so far", i + 1, len(congress_chunks), len(all_entities))
+            if (i + 1) % 50 == 0:
+                context.log.info(f"Processed {i + 1}/{len(congress_chunks)} chunks")
+                logger.info("NER progress: %d/%d chunks, %d entities so far", i + 1, len(congress_chunks), len(all_entities))
 
-    ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_entities", layer="silver").inc(len(all_entities))
-    logger.info("congress_entities NER complete: %d entities from %d chunks", len(all_entities), len(congress_chunks))
-    context.log.info(f"Extracted {len(all_entities)} entities from {len(congress_chunks)} chunks")
-    return Output(all_entities, metadata={"entity_count": len(all_entities)})
+        ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_entities", layer="silver").inc(len(all_entities))
+        logger.info("congress_entities NER complete: %d entities from %d chunks", len(all_entities), len(congress_chunks))
+        context.log.info(f"Extracted {len(all_entities)} entities from {len(congress_chunks)} chunks")
+        return Output(all_entities, metadata={"entity_count": len(all_entities)})

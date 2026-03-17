@@ -8,8 +8,10 @@ from pydantic import BaseModel, Field
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.observability import get_tracer, trace_operation
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 class MediaDocument(BaseModel):
@@ -53,21 +55,22 @@ def media_documents(
     context: AssetExecutionContext,
     media_metadata: list[dict[str, Any]],
 ) -> Output[list[MediaDocument]]:
-    logger.info("Starting media_documents transformation for %d files", len(media_metadata))
-    documents = [_file_to_document(f) for f in media_metadata]
+    with trace_operation("media_documents", tracer, {"code_location": "media_ingest", "layer": "silver", "record_count": len(media_metadata)}):
+        logger.info("Starting media_documents transformation for %d files", len(media_metadata))
+        documents = [_file_to_document(f) for f in media_metadata]
 
-    by_source: dict[str, int] = {}
-    for doc in documents:
-        by_source[doc.source] = by_source.get(doc.source, 0) + 1
+        by_source: dict[str, int] = {}
+        for doc in documents:
+            by_source[doc.source] = by_source.get(doc.source, 0) + 1
 
-    ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_documents", layer="silver").inc(len(documents))
-    logger.info("media_documents complete: %d documents", len(documents))
-    context.log.info(f"Produced {len(documents)} documents")
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_documents", layer="silver").inc(len(documents))
+        logger.info("media_documents complete: %d documents", len(documents))
+        context.log.info(f"Produced {len(documents)} documents")
 
-    return Output(
-        documents,
-        metadata={
-            "total_documents": len(documents),
-            "by_source": MetadataValue.json(by_source),
-        },
-    )
+        return Output(
+            documents,
+            metadata={
+                "total_documents": len(documents),
+                "by_source": MetadataValue.json(by_source),
+            },
+        )

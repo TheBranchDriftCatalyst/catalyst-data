@@ -17,8 +17,10 @@ from pydantic import BaseModel, Field
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSERTIONS_CREATED, ASSET_RECORDS_PROCESSED, LLM_REQUEST_DURATION, track_duration
+from dagster_io.observability import get_tracer, trace_operation
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 ASSERTION_SYSTEM_PROMPT = load_prompt(
     "assertions/leaks",
@@ -119,64 +121,65 @@ def leak_assertions(
     llm: LLMResource,
     leak_chunks: list[TextChunk],
 ) -> Output[list[Assertion]]:
-    logger.info("Starting leak_assertions extraction for %d chunks", len(leak_chunks))
-    chain = llm.with_structured_output(AssertionExtractionResult)
-    all_assertions: list[Assertion] = []
+    with trace_operation("leak_assertions", tracer, {"code_location": "open_leaks", "layer": "gold", "chunk_count": len(leak_chunks)}):
+        logger.info("Starting leak_assertions extraction for %d chunks", len(leak_chunks))
+        chain = llm.with_structured_output(AssertionExtractionResult)
+        all_assertions: list[Assertion] = []
 
-    for i, chunk in enumerate(leak_chunks):
-        logger.debug("Processing chunk %d/%d id=%s", i + 1, len(leak_chunks), chunk.chunk_id)
-        with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "assertion_extract"}):
-            result: AssertionExtractionResult = chain.invoke([
-                SystemMessage(content=ASSERTION_SYSTEM_PROMPT),
-                HumanMessage(
-                    content=f"Extract qualified assertions from this text:\n\n{chunk.text}"
-                ),
-            ])
+        for i, chunk in enumerate(leak_chunks):
+            logger.debug("Processing chunk %d/%d id=%s", i + 1, len(leak_chunks), chunk.chunk_id)
+            with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "assertion_extract"}):
+                result: AssertionExtractionResult = chain.invoke([
+                    SystemMessage(content=ASSERTION_SYSTEM_PROMPT),
+                    HumanMessage(
+                        content=f"Extract qualified assertions from this text:\n\n{chunk.text}"
+                    ),
+                ])
 
-        for ext in result.assertions:
-            # Convert structured qualifiers to dict, dropping empty values
-            quals = {k: v for k, v in ext.qualifiers.model_dump().items() if v}
-            assertion = Assertion(
-                subject_text=ext.subject,
-                predicate=ext.predicate,
-                predicate_canonical=_normalize_predicate(ext.predicate),
-                object_text=ext.object,
-                qualifiers=quals,
-                confidence=ext.confidence,
-                negated=ext.negated,
-                hedged=ext.hedged,
-                provenance=Provenance(
-                    source_document_id=chunk.document_id,
-                    chunk_id=chunk.chunk_id,
-                    extraction_model=llm.model,
+            for ext in result.assertions:
+                # Convert structured qualifiers to dict, dropping empty values
+                quals = {k: v for k, v in ext.qualifiers.model_dump().items() if v}
+                assertion = Assertion(
+                    subject_text=ext.subject,
+                    predicate=ext.predicate,
+                    predicate_canonical=_normalize_predicate(ext.predicate),
+                    object_text=ext.object,
+                    qualifiers=quals,
                     confidence=ext.confidence,
-                    code_location="open_leaks",
-                ),
-            )
-            all_assertions.append(assertion)
-            ASSERTIONS_CREATED.labels(code_location="open_leaks").inc()
-            if ext.confidence < 0.5:
-                logger.warning("Low confidence assertion: subject=%s predicate=%s confidence=%.2f", ext.subject[:50], ext.predicate[:50], ext.confidence)
+                    negated=ext.negated,
+                    hedged=ext.hedged,
+                    provenance=Provenance(
+                        source_document_id=chunk.document_id,
+                        chunk_id=chunk.chunk_id,
+                        extraction_model=llm.model,
+                        confidence=ext.confidence,
+                        code_location="open_leaks",
+                    ),
+                )
+                all_assertions.append(assertion)
+                ASSERTIONS_CREATED.labels(code_location="open_leaks").inc()
+                if ext.confidence < 0.5:
+                    logger.warning("Low confidence assertion: subject=%s predicate=%s confidence=%.2f", ext.subject[:50], ext.predicate[:50], ext.confidence)
 
-        if (i + 1) % 50 == 0:
-            context.log.info(
-                f"Processed {i + 1}/{len(leak_chunks)} chunks — {len(all_assertions)} assertions so far"
-            )
-            logger.info("Assertion progress: %d/%d chunks, %d assertions so far", i + 1, len(leak_chunks), len(all_assertions))
+            if (i + 1) % 50 == 0:
+                context.log.info(
+                    f"Processed {i + 1}/{len(leak_chunks)} chunks — {len(all_assertions)} assertions so far"
+                )
+                logger.info("Assertion progress: %d/%d chunks, %d assertions so far", i + 1, len(leak_chunks), len(all_assertions))
 
-    negated_count = sum(1 for a in all_assertions if a.negated)
-    hedged_count = sum(1 for a in all_assertions if a.hedged)
-    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_assertions", layer="gold").inc(len(all_assertions))
-    logger.info("leak_assertions complete: %d assertions from %d chunks (negated=%d, hedged=%d)", len(all_assertions), len(leak_chunks), negated_count, hedged_count)
-    context.log.info(
-        f"Extracted {len(all_assertions)} assertions from {len(leak_chunks)} chunks "
-        f"({negated_count} negated, {hedged_count} hedged)"
-    )
-    return Output(
-        all_assertions,
-        metadata={
-            "assertion_count": len(all_assertions),
-            "negated_count": negated_count,
-            "hedged_count": hedged_count,
-        },
-    )
+        negated_count = sum(1 for a in all_assertions if a.negated)
+        hedged_count = sum(1 for a in all_assertions if a.hedged)
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_assertions", layer="gold").inc(len(all_assertions))
+        logger.info("leak_assertions complete: %d assertions from %d chunks (negated=%d, hedged=%d)", len(all_assertions), len(leak_chunks), negated_count, hedged_count)
+        context.log.info(
+            f"Extracted {len(all_assertions)} assertions from {len(leak_chunks)} chunks "
+            f"({negated_count} negated, {hedged_count} hedged)"
+        )
+        return Output(
+            all_assertions,
+            metadata={
+                "assertion_count": len(all_assertions),
+                "negated_count": negated_count,
+                "hedged_count": hedged_count,
+            },
+        )

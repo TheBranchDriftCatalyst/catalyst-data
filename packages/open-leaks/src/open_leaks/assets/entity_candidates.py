@@ -14,8 +14,10 @@ from dagster_io import (
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.observability import get_tracer, trace_operation
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 @asset(
@@ -39,40 +41,41 @@ def leak_entity_candidates(
     embeddings: EmbeddingResource,
     leak_mentions: list[Mention],
 ) -> Output[list[EntityCandidate]]:
-    logger.info("Starting leak_entity_candidates resolution for %d mentions", len(leak_mentions))
-    context.log.info(f"Resolving {len(leak_mentions)} mentions into entity candidates")
+    with trace_operation("leak_entity_candidates", tracer, {"code_location": "open_leaks", "layer": "gold", "mention_count": len(leak_mentions)}):
+        logger.info("Starting leak_entity_candidates resolution for %d mentions", len(leak_mentions))
+        context.log.info(f"Resolving {len(leak_mentions)} mentions into entity candidates")
 
-    # Collect unique surface forms for embedding
-    unique_texts = sorted({m.text.lower().strip() for m in leak_mentions})
-    context.log.info(f"Embedding {len(unique_texts)} unique surface forms")
+        # Collect unique surface forms for embedding
+        unique_texts = sorted({m.text.lower().strip() for m in leak_mentions})
+        context.log.info(f"Embedding {len(unique_texts)} unique surface forms")
 
-    # Embed all unique surface forms
-    if unique_texts:
-        vectors = embeddings.embed(unique_texts)
-        embedding_map = dict(zip(unique_texts, vectors))
-    else:
-        embedding_map = {}
+        # Embed all unique surface forms
+        if unique_texts:
+            vectors = embeddings.embed(unique_texts)
+            embedding_map = dict(zip(unique_texts, vectors))
+        else:
+            embedding_map = {}
 
-    # Run concordance engine
-    engine = ConcordanceEngine()
-    candidates = engine.resolve(
-        mentions=leak_mentions,
-        code_location="open_leaks",
-        embeddings=embedding_map,
-    )
+        # Run concordance engine
+        engine = ConcordanceEngine()
+        candidates = engine.resolve(
+            mentions=leak_mentions,
+            code_location="open_leaks",
+            embeddings=embedding_map,
+        )
 
-    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_entity_candidates", layer="gold").inc(len(candidates))
-    logger.info("leak_entity_candidates complete: %d mentions -> %d candidates", len(leak_mentions), len(candidates))
-    context.log.info(
-        f"Resolved {len(leak_mentions)} mentions → {len(candidates)} entity candidates"
-    )
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_entity_candidates", layer="gold").inc(len(candidates))
+        logger.info("leak_entity_candidates complete: %d mentions -> %d candidates", len(leak_mentions), len(candidates))
+        context.log.info(
+            f"Resolved {len(leak_mentions)} mentions → {len(candidates)} entity candidates"
+        )
 
-    return Output(
-        candidates,
-        metadata={
-            "mention_count": len(leak_mentions),
-            "candidate_count": len(candidates),
-            "unique_surface_forms": len(unique_texts),
-            "reduction_ratio": round(len(candidates) / max(len(unique_texts), 1), 3),
-        },
-    )
+        return Output(
+            candidates,
+            metadata={
+                "mention_count": len(leak_mentions),
+                "candidate_count": len(candidates),
+                "unique_surface_forms": len(unique_texts),
+                "reduction_ratio": round(len(candidates) / max(len(unique_texts), 1), 3),
+            },
+        )

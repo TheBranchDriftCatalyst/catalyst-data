@@ -4,10 +4,12 @@ from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.observability import get_tracer, trace_operation
 from open_leaks.core.document import Document
 from open_leaks.entities import Cable, CourtDocument, OffshoreEntity
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 def _cable_to_document(cable: Cable) -> Document:
@@ -100,34 +102,35 @@ def leak_documents(
     icij_offshore_entities: list[OffshoreEntity],
     epstein_court_docs: list[CourtDocument],
 ) -> Output[list[Document]]:
-    logger.info("Starting leak_documents transformation")
-    documents: list[Document] = []
+    with trace_operation("leak_documents", tracer, {"code_location": "open_leaks", "layer": "silver", "cable_count": len(wikileaks_cables), "entity_count": len(icij_offshore_entities), "court_doc_count": len(epstein_court_docs)}):
+        logger.info("Starting leak_documents transformation")
+        documents: list[Document] = []
 
-    for cable in wikileaks_cables:
-        documents.append(_cable_to_document(cable))
+        for cable in wikileaks_cables:
+            documents.append(_cable_to_document(cable))
 
-    for entity in icij_offshore_entities:
-        documents.append(_offshore_entity_to_document(entity))
+        for entity in icij_offshore_entities:
+            documents.append(_offshore_entity_to_document(entity))
 
-    for doc in epstein_court_docs:
-        documents.append(_court_doc_to_document(doc))
+        for doc in epstein_court_docs:
+            documents.append(_court_doc_to_document(doc))
 
-    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_documents", layer="silver").inc(len(documents))
-    logger.info("leak_documents transformation complete count=%d", len(documents))
-    context.log.info(
-        f"Produced {len(documents)} documents "
-        f"(cables={len(wikileaks_cables)}, icij_entities={len(icij_offshore_entities)}, "
-        f"court_docs={len(epstein_court_docs)})"
-    )
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_documents", layer="silver").inc(len(documents))
+        logger.info("leak_documents transformation complete count=%d", len(documents))
+        context.log.info(
+            f"Produced {len(documents)} documents "
+            f"(cables={len(wikileaks_cables)}, icij_entities={len(icij_offshore_entities)}, "
+            f"court_docs={len(epstein_court_docs)})"
+        )
 
-    return Output(
-        documents,
-        metadata={
-            "total_documents": len(documents),
-            "by_source": MetadataValue.json({
-                "wikileaks_cables": len(wikileaks_cables),
-                "icij_offshore_entities": len(icij_offshore_entities),
-                "epstein_court_docs": len(epstein_court_docs),
-            }),
-        },
-    )
+        return Output(
+            documents,
+            metadata={
+                "total_documents": len(documents),
+                "by_source": MetadataValue.json({
+                    "wikileaks_cables": len(wikileaks_cables),
+                    "icij_offshore_entities": len(icij_offshore_entities),
+                    "epstein_court_docs": len(epstein_court_docs),
+                }),
+            },
+        )

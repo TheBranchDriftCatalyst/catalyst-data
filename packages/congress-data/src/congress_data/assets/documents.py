@@ -4,10 +4,12 @@ from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.observability import get_tracer, trace_operation
 from congress_data.core.document import Document
 from congress_data.entities import Bill, Committee, Member
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 def _bill_to_document(bill: Bill) -> Document:
@@ -102,34 +104,35 @@ def congress_documents(
     congress_members: list[Member],
     congress_committees: list[Committee],
 ) -> Output[list[Document]]:
-    logger.info("Starting congress_documents transformation")
-    documents: list[Document] = []
+    with trace_operation("congress_documents", tracer, {"code_location": "congress_data", "layer": "silver", "bill_count": len(congress_bills), "member_count": len(congress_members), "committee_count": len(congress_committees)}):
+        logger.info("Starting congress_documents transformation")
+        documents: list[Document] = []
 
-    for bill in congress_bills:
-        documents.append(_bill_to_document(bill))
+        for bill in congress_bills:
+            documents.append(_bill_to_document(bill))
 
-    for member in congress_members:
-        documents.append(_member_to_document(member))
+        for member in congress_members:
+            documents.append(_member_to_document(member))
 
-    for committee in congress_committees:
-        documents.append(_committee_to_document(committee))
+        for committee in congress_committees:
+            documents.append(_committee_to_document(committee))
 
-    ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_documents", layer="silver").inc(len(documents))
-    logger.info("congress_documents transformation complete count=%d", len(documents))
-    context.log.info(
-        f"Produced {len(documents)} documents "
-        f"(bills={len(congress_bills)}, members={len(congress_members)}, "
-        f"committees={len(congress_committees)})"
-    )
+        ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_documents", layer="silver").inc(len(documents))
+        logger.info("congress_documents transformation complete count=%d", len(documents))
+        context.log.info(
+            f"Produced {len(documents)} documents "
+            f"(bills={len(congress_bills)}, members={len(congress_members)}, "
+            f"committees={len(congress_committees)})"
+        )
 
-    return Output(
-        documents,
-        metadata={
-            "total_documents": len(documents),
-            "by_type": MetadataValue.json({
-                "bills": len(congress_bills),
-                "members": len(congress_members),
-                "committees": len(congress_committees),
-            }),
-        },
-    )
+        return Output(
+            documents,
+            metadata={
+                "total_documents": len(documents),
+                "by_type": MetadataValue.json({
+                    "bills": len(congress_bills),
+                    "members": len(congress_members),
+                    "committees": len(congress_committees),
+                }),
+            },
+        )

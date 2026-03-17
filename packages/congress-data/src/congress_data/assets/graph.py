@@ -8,8 +8,10 @@ from typing import Any
 from dagster import AssetExecutionContext, Output, asset
 
 from dagster_io.logging import get_logger
+from dagster_io.observability import get_tracer, trace_operation
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 @asset(
@@ -32,6 +34,7 @@ def congress_graph(
     context: AssetExecutionContext,
     congress_entities: list[dict[str, Any]],
 ) -> Output[dict[str, Any]]:
-    raise NotImplementedError(
-        "Graph loading requires Neo4j — configure via NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD env vars"
-    )
+    with trace_operation("congress_graph", tracer, {"code_location": "congress_data", "layer": "gold", "entity_count": len(congress_entities)}):
+        raise NotImplementedError(
+            "Graph loading requires Neo4j — configure via NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD env vars"
+        )

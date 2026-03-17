@@ -17,10 +17,12 @@ from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.observability import get_tracer, trace_operation
 from open_leaks.config import OpenLeaksConfig
 from open_leaks.entities import Cable, CourtDocument, OffshoreEntity, OffshoreRelationship
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 # ---------------------------------------------------------------------------
 # Download helpers
@@ -410,22 +412,23 @@ def wikileaks_cables(
     context: AssetExecutionContext,
     config: OpenLeaksConfig,
 ) -> Output[list[Cable]]:
-    logger.info("Starting wikileaks_cables extraction")
-    cache = _ensure_cache(config)
-    csv_path = cache / "cables.csv"
-    _download_file(config.cablegate_csv_url, csv_path, context)
-    cables = _parse_cables_csv(csv_path, context, max_count=config.max_cables)
-    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="wikileaks_cables", layer="bronze").inc(len(cables))
-    logger.info("wikileaks_cables extraction complete count=%d", len(cables))
+    with trace_operation("wikileaks_cables", tracer, {"code_location": "open_leaks", "layer": "bronze"}):
+        logger.info("Starting wikileaks_cables extraction")
+        cache = _ensure_cache(config)
+        csv_path = cache / "cables.csv"
+        _download_file(config.cablegate_csv_url, csv_path, context)
+        cables = _parse_cables_csv(csv_path, context, max_count=config.max_cables)
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="wikileaks_cables", layer="bronze").inc(len(cables))
+        logger.info("wikileaks_cables extraction complete count=%d", len(cables))
 
-    return Output(
-        cables,
-        metadata={
-            "count": len(cables),
-            "source_url": config.cablegate_csv_url,
-            "sample_subjects": MetadataValue.json([c.subject[:100] for c in cables[:5]]),
-        },
-    )
+        return Output(
+            cables,
+            metadata={
+                "count": len(cables),
+                "source_url": config.cablegate_csv_url,
+                "sample_subjects": MetadataValue.json([c.subject[:100] for c in cables[:5]]),
+            },
+        )
 
 
 @asset(
@@ -438,27 +441,28 @@ def icij_offshore_entities(
     context: AssetExecutionContext,
     config: OpenLeaksConfig,
 ) -> Output[list[OffshoreEntity]]:
-    logger.info("Starting icij_offshore_entities extraction")
-    cache = _ensure_cache(config)
-    zip_path = cache / "icij-offshoreleaks.zip"
-    _download_file(config.icij_bulk_url, zip_path, context)
-    entities = _parse_icij_entities_from_zip(zip_path, context, max_count=config.max_icij_entities)
-    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="icij_offshore_entities", layer="bronze").inc(len(entities))
-    logger.info("icij_offshore_entities extraction complete count=%d", len(entities))
+    with trace_operation("icij_offshore_entities", tracer, {"code_location": "open_leaks", "layer": "bronze"}):
+        logger.info("Starting icij_offshore_entities extraction")
+        cache = _ensure_cache(config)
+        zip_path = cache / "icij-offshoreleaks.zip"
+        _download_file(config.icij_bulk_url, zip_path, context)
+        entities = _parse_icij_entities_from_zip(zip_path, context, max_count=config.max_icij_entities)
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="icij_offshore_entities", layer="bronze").inc(len(entities))
+        logger.info("icij_offshore_entities extraction complete count=%d", len(entities))
 
-    datasets = {}
-    for e in entities:
-        ds = e.source_dataset or "unknown"
-        datasets[ds] = datasets.get(ds, 0) + 1
+        datasets = {}
+        for e in entities:
+            ds = e.source_dataset or "unknown"
+            datasets[ds] = datasets.get(ds, 0) + 1
 
-    return Output(
-        entities,
-        metadata={
-            "count": len(entities),
-            "by_dataset": MetadataValue.json(datasets),
-            "sample_names": MetadataValue.json([e.name for e in entities[:5]]),
-        },
-    )
+        return Output(
+            entities,
+            metadata={
+                "count": len(entities),
+                "by_dataset": MetadataValue.json(datasets),
+                "sample_names": MetadataValue.json([e.name for e in entities[:5]]),
+            },
+        )
 
 
 @asset(
@@ -471,26 +475,27 @@ def icij_offshore_relationships(
     context: AssetExecutionContext,
     config: OpenLeaksConfig,
 ) -> Output[list[OffshoreRelationship]]:
-    logger.info("Starting icij_offshore_relationships extraction")
-    cache = _ensure_cache(config)
-    zip_path = cache / "icij-offshoreleaks.zip"
-    _download_file(config.icij_bulk_url, zip_path, context)
-    rels = _parse_icij_relationships_from_zip(zip_path, context, max_count=config.max_icij_relationships)
-    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="icij_offshore_relationships", layer="bronze").inc(len(rels))
-    logger.info("icij_offshore_relationships extraction complete count=%d", len(rels))
+    with trace_operation("icij_offshore_relationships", tracer, {"code_location": "open_leaks", "layer": "bronze"}):
+        logger.info("Starting icij_offshore_relationships extraction")
+        cache = _ensure_cache(config)
+        zip_path = cache / "icij-offshoreleaks.zip"
+        _download_file(config.icij_bulk_url, zip_path, context)
+        rels = _parse_icij_relationships_from_zip(zip_path, context, max_count=config.max_icij_relationships)
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="icij_offshore_relationships", layer="bronze").inc(len(rels))
+        logger.info("icij_offshore_relationships extraction complete count=%d", len(rels))
 
-    rel_types = {}
-    for r in rels:
-        rt = r.rel_type or "unknown"
-        rel_types[rt] = rel_types.get(rt, 0) + 1
+        rel_types = {}
+        for r in rels:
+            rt = r.rel_type or "unknown"
+            rel_types[rt] = rel_types.get(rt, 0) + 1
 
-    return Output(
-        rels,
-        metadata={
-            "count": len(rels),
-            "by_rel_type": MetadataValue.json(rel_types),
-        },
-    )
+        return Output(
+            rels,
+            metadata={
+                "count": len(rels),
+                "by_rel_type": MetadataValue.json(rel_types),
+            },
+        )
 
 
 @asset(
@@ -503,21 +508,22 @@ def epstein_court_docs(
     context: AssetExecutionContext,
     config: OpenLeaksConfig,
 ) -> Output[list[CourtDocument]]:
-    logger.info("Starting epstein_court_docs extraction")
-    docs = _fetch_epstein_api(config.epstein_api_url, context, max_count=config.max_epstein_docs)
-    ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="epstein_court_docs", layer="bronze").inc(len(docs))
-    logger.info("epstein_court_docs extraction complete count=%d", len(docs))
+    with trace_operation("epstein_court_docs", tracer, {"code_location": "open_leaks", "layer": "bronze"}):
+        logger.info("Starting epstein_court_docs extraction")
+        docs = _fetch_epstein_api(config.epstein_api_url, context, max_count=config.max_epstein_docs)
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="epstein_court_docs", layer="bronze").inc(len(docs))
+        logger.info("epstein_court_docs extraction complete count=%d", len(docs))
 
-    doc_types = {}
-    for d in docs:
-        dt = d.document_type or "unknown"
-        doc_types[dt] = doc_types.get(dt, 0) + 1
+        doc_types = {}
+        for d in docs:
+            dt = d.document_type or "unknown"
+            doc_types[dt] = doc_types.get(dt, 0) + 1
 
-    return Output(
-        docs,
-        metadata={
-            "count": len(docs),
-            "by_type": MetadataValue.json(doc_types),
-            "sample_titles": MetadataValue.json([d.title[:100] for d in docs[:5] if d.title]),
-        },
-    )
+        return Output(
+            docs,
+            metadata={
+                "count": len(docs),
+                "by_type": MetadataValue.json(doc_types),
+                "sample_titles": MetadataValue.json([d.title[:100] for d in docs[:5] if d.title]),
+            },
+        )
