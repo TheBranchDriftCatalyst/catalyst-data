@@ -28,22 +28,22 @@ from knowledge_graph.resources import GraphDBResource
 _congress_entity_candidates = SourceAsset(
     key="congress_entity_candidates",
     description="Entity candidates from congress_data code location",
-    metadata={"layer": "gold", "source_code_location": "default"},
+    metadata={"layer": "gold", "source_code_location": "congress_data"},
 )
 _leak_entity_candidates = SourceAsset(
     key="leak_entity_candidates",
     description="Entity candidates from open_leaks code location",
-    metadata={"layer": "gold", "source_code_location": "default"},
+    metadata={"layer": "gold", "source_code_location": "open_leaks"},
 )
 _congress_assertions = SourceAsset(
     key="congress_assertions",
     description="Assertions from congress_data code location",
-    metadata={"layer": "gold", "source_code_location": "default"},
+    metadata={"layer": "gold", "source_code_location": "congress_data"},
 )
 _leak_assertions = SourceAsset(
     key="leak_assertions",
     description="Assertions from open_leaks code location",
-    metadata={"layer": "gold", "source_code_location": "default"},
+    metadata={"layer": "gold", "source_code_location": "open_leaks"},
 )
 
 # Import platinum layer assets
