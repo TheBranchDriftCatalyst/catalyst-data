@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_langgraph.clients.llm import LLMClient
+from catalyst_langgraph.nodes._audit import make_audit_event
 from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
 
@@ -23,15 +23,18 @@ FALLBACK_PROMPT = (
 )
 
 
-def make_extract_mentions(llm_client: LLMClient):
-    """Create an extract_mentions node with closed-over LLM client."""
+class ExtractMentions:
+    """Extract entity mentions from raw text via LLM."""
 
-    async def extract_mentions(state: ExtractionState) -> dict[str, Any]:
+    def __init__(self, llm_client: LLMClient) -> None:
+        self.llm_client = llm_client
+
+    async def __call__(self, state: ExtractionState) -> dict[str, Any]:
         try:
             system = load_prompt("mention_extraction", FALLBACK_PROMPT)
             raw_text = state.get("raw_text", "")
 
-            result = await llm_client.structured_output(
+            result = await self.llm_client.structured_output(
                 MentionExtractionResult,
                 [SystemMessage(content=system), HumanMessage(content=raw_text)],
             )
@@ -42,14 +45,7 @@ def make_extract_mentions(llm_client: LLMClient):
                 "current_mention_candidates": candidates,
                 "status": WorkflowStatus.VALIDATING_MENTIONS.value,
                 "audit_events": state.get("audit_events", [])
-                + [
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "node_name": "extract_mentions",
-                        "status": "completed",
-                        "details": {"candidate_count": len(candidates)},
-                    }
-                ],
+                + [make_audit_event("extract_mentions", "completed", candidate_count=len(candidates))],
             }
         except Exception as e:
             logger.exception("extract_mentions failed")
@@ -57,14 +53,9 @@ def make_extract_mentions(llm_client: LLMClient):
                 "status": WorkflowStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "node_name": "extract_mentions",
-                        "status": "error",
-                        "details": {"error": str(e)},
-                    }
-                ],
+                + [make_audit_event("extract_mentions", "error", error=str(e))],
             }
 
-    return extract_mentions
+
+# Backward-compatible alias
+make_extract_mentions = ExtractMentions

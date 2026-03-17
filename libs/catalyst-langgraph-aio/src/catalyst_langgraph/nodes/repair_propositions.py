@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_langgraph.clients.llm import LLMClient
+from catalyst_langgraph.nodes._audit import make_audit_event
 from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
 
@@ -24,10 +24,13 @@ FALLBACK_PROMPT = (
 )
 
 
-def make_repair_propositions(llm_client: LLMClient):
-    """Create a repair_propositions node with closed-over LLM client."""
+class RepairPropositions:
+    """Repair proposition candidates based on validation errors."""
 
-    async def repair_propositions(state: ExtractionState) -> dict[str, Any]:
+    def __init__(self, llm_client: LLMClient) -> None:
+        self.llm_client = llm_client
+
+    async def __call__(self, state: ExtractionState) -> dict[str, Any]:
         try:
             system = load_prompt("proposition_repair", FALLBACK_PROMPT)
             raw_text = state.get("raw_text", "")
@@ -43,7 +46,7 @@ def make_repair_propositions(llm_client: LLMClient):
                 f"Original text:\n{raw_text}"
             )
 
-            result = await llm_client.structured_output(
+            result = await self.llm_client.structured_output(
                 PropositionExtractionResult,
                 [SystemMessage(content=system), HumanMessage(content=prompt)],
             )
@@ -62,17 +65,7 @@ def make_repair_propositions(llm_client: LLMClient):
                     "retry": retry_count,
                 },
                 "audit_events": state.get("audit_events", [])
-                + [
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "node_name": "repair_propositions",
-                        "status": "completed",
-                        "details": {
-                            "retry_count": retry_count,
-                            "repaired_count": len(repaired),
-                        },
-                    }
-                ],
+                + [make_audit_event("repair_propositions", "completed", retry_count=retry_count, repaired_count=len(repaired))],
             }
         except Exception as e:
             logger.exception("repair_propositions failed")
@@ -80,14 +73,9 @@ def make_repair_propositions(llm_client: LLMClient):
                 "status": WorkflowStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "node_name": "repair_propositions",
-                        "status": "error",
-                        "details": {"error": str(e)},
-                    }
-                ],
+                + [make_audit_event("repair_propositions", "error", error=str(e))],
             }
 
-    return repair_propositions
+
+# Backward-compatible alias
+make_repair_propositions = RepairPropositions

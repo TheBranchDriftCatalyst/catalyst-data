@@ -23,8 +23,9 @@ class MCPClient(ABC):
 class StdioMCPClient(MCPClient):
     """MCP client that communicates with a server subprocess via stdio."""
 
-    def __init__(self, command: list[str]) -> None:
+    def __init__(self, command: list[str], *, timeout: float = 30.0) -> None:
         self._command = command
+        self._timeout = timeout
         self._process: asyncio.subprocess.Process | None = None
 
     async def start(self) -> None:
@@ -54,7 +55,15 @@ class StdioMCPClient(MCPClient):
         self._process.stdin.write(payload.encode())
         await self._process.stdin.drain()
 
-        line = await self._process.stdout.readline()
+        try:
+            line = await asyncio.wait_for(
+                self._process.stdout.readline(), timeout=self._timeout
+            )
+        except asyncio.TimeoutError:
+            await self.stop()
+            raise TimeoutError(
+                f"MCP server did not respond within {self._timeout}s"
+            )
         response = json.loads(line.decode())
 
         if "error" in response:

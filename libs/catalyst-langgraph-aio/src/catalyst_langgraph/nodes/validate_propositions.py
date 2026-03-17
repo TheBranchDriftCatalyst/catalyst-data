@@ -3,25 +3,28 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from catalyst_langgraph.clients.mcp import MCPClient
+from catalyst_langgraph.nodes._audit import make_audit_event
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
 
 logger = logging.getLogger(__name__)
 
 
-def make_validate_propositions(mcp_client: MCPClient):
-    """Create a validate_propositions node with closed-over MCP client."""
+class ValidatePropositions:
+    """Validate proposition candidates via MCP contract server."""
 
-    async def validate_propositions(state: ExtractionState) -> dict[str, Any]:
+    def __init__(self, mcp_client: MCPClient) -> None:
+        self.mcp_client = mcp_client
+
+    async def __call__(self, state: ExtractionState) -> dict[str, Any]:
         try:
             candidates = state.get("current_proposition_candidates", [])
             accepted_mentions = state.get("accepted_mentions", [])
 
             raw_text = state.get("raw_text", "")
-            result = await mcp_client.call_tool(
+            result = await self.mcp_client.call_tool(
                 "validate_propositions",
                 {
                     "propositions": candidates,
@@ -37,16 +40,7 @@ def make_validate_propositions(mcp_client: MCPClient):
             update: dict[str, Any] = {
                 "latest_proposition_validation": result,
                 "audit_events": state.get("audit_events", [])
-                + [
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "node_name": "validate_propositions",
-                        "status": verdict,
-                        "details": {
-                            "errors": result.get("errors", []),
-                        },
-                    }
-                ],
+                + [make_audit_event("validate_propositions", verdict, errors=result.get("errors", []))],
             }
 
             if verdict == "valid":
@@ -62,14 +56,9 @@ def make_validate_propositions(mcp_client: MCPClient):
                 "status": WorkflowStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "node_name": "validate_propositions",
-                        "status": "error",
-                        "details": {"error": str(e)},
-                    }
-                ],
+                + [make_audit_event("validate_propositions", "error", error=str(e))],
             }
 
-    return validate_propositions
+
+# Backward-compatible alias
+make_validate_propositions = ValidatePropositions

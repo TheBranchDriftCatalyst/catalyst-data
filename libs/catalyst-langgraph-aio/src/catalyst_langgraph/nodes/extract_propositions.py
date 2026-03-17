@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_langgraph.clients.llm import LLMClient
+from catalyst_langgraph.nodes._audit import make_audit_event
 from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
 
@@ -24,10 +24,13 @@ FALLBACK_PROMPT = (
 )
 
 
-def make_extract_propositions(llm_client: LLMClient):
-    """Create an extract_propositions node with closed-over LLM client."""
+class ExtractPropositions:
+    """Extract propositions (SPO triples) from text using accepted mentions."""
 
-    async def extract_propositions(state: ExtractionState) -> dict[str, Any]:
+    def __init__(self, llm_client: LLMClient) -> None:
+        self.llm_client = llm_client
+
+    async def __call__(self, state: ExtractionState) -> dict[str, Any]:
         try:
             system = load_prompt("proposition_extraction", FALLBACK_PROMPT)
             raw_text = state.get("raw_text", "")
@@ -38,7 +41,7 @@ def make_extract_propositions(llm_client: LLMClient):
                 f"Text:\n{raw_text}"
             )
 
-            result = await llm_client.structured_output(
+            result = await self.llm_client.structured_output(
                 PropositionExtractionResult,
                 [SystemMessage(content=system), HumanMessage(content=prompt)],
             )
@@ -49,14 +52,7 @@ def make_extract_propositions(llm_client: LLMClient):
                 "current_proposition_candidates": candidates,
                 "status": WorkflowStatus.VALIDATING_PROPOSITIONS.value,
                 "audit_events": state.get("audit_events", [])
-                + [
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "node_name": "extract_propositions",
-                        "status": "completed",
-                        "details": {"candidate_count": len(candidates)},
-                    }
-                ],
+                + [make_audit_event("extract_propositions", "completed", candidate_count=len(candidates))],
             }
         except Exception as e:
             logger.exception("extract_propositions failed")
@@ -64,14 +60,9 @@ def make_extract_propositions(llm_client: LLMClient):
                 "status": WorkflowStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "node_name": "extract_propositions",
-                        "status": "error",
-                        "details": {"error": str(e)},
-                    }
-                ],
+                + [make_audit_event("extract_propositions", "error", error=str(e))],
             }
 
-    return extract_propositions
+
+# Backward-compatible alias
+make_extract_propositions = ExtractPropositions

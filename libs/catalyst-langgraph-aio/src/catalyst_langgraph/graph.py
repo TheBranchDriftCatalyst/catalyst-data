@@ -2,22 +2,45 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from langgraph.graph import END, StateGraph
+from langgraph.types import RetryPolicy
 
 from catalyst_langgraph.clients.llm import LLMClient
 from catalyst_langgraph.clients.mcp import MCPClient
-from catalyst_langgraph.nodes.extract_mentions import make_extract_mentions
-from catalyst_langgraph.nodes.extract_propositions import make_extract_propositions
-from catalyst_langgraph.nodes.persist_artifacts import make_persist_artifacts
-from catalyst_langgraph.nodes.repair_mentions import make_repair_mentions
-from catalyst_langgraph.nodes.repair_propositions import make_repair_propositions
-from catalyst_langgraph.nodes.validate_mentions import make_validate_mentions
-from catalyst_langgraph.nodes.validate_propositions import make_validate_propositions
+from catalyst_langgraph.nodes import make_audit_event
+from catalyst_langgraph.nodes.extract_mentions import ExtractMentions
+from catalyst_langgraph.nodes.extract_propositions import ExtractPropositions
+from catalyst_langgraph.nodes.persist_artifacts import PersistArtifacts
+from catalyst_langgraph.nodes.repair_mentions import RepairMentions
+from catalyst_langgraph.nodes.repair_propositions import RepairPropositions
+from catalyst_langgraph.nodes.validate_mentions import ValidateMentions
+from catalyst_langgraph.nodes.validate_propositions import ValidatePropositions
 from catalyst_langgraph.repository.base import ArtifactRepository
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
+
+# --- Stratified error handling: RetryPolicy for transient errors ---
+
+TRANSIENT_ERRORS = (ConnectionError, TimeoutError, OSError)
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Return True if the exception is transient and worth retrying."""
+    if isinstance(exc, TRANSIENT_ERRORS):
+        return True
+    exc_str = str(exc).lower()
+    if "rate limit" in exc_str or "429" in exc_str:
+        return True
+    return False
+
+
+LLM_RETRY = RetryPolicy(
+    max_attempts=3, initial_interval=1.0, backoff_factor=2.0, retry_on=_is_transient
+)
+MCP_RETRY = RetryPolicy(
+    max_attempts=2, initial_interval=0.5, retry_on=_is_transient
+)
 
 
 def _route_after_mention_validation(state: ExtractionState) -> str:
@@ -52,22 +75,17 @@ def _route_after_proposition_validation(state: ExtractionState) -> str:
 
 def _failure_handler(state: ExtractionState) -> dict[str, Any]:
     """Mark the workflow as failed when max retries are exhausted."""
-    audit_event = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "node_name": "failure_handler",
-        "status": "failed",
-        "details": {
-            "reason": "max retries exhausted",
-            "mention_retry_count": state.get("mention_retry_count", 0),
-            "proposition_retry_count": state.get("proposition_retry_count", 0),
-            "max_retries": state.get("max_retries", 3),
-        },
-    }
-    existing_events = list(state.get("audit_events", []))
-    existing_events.append(audit_event)
+    event = make_audit_event(
+        "failure_handler",
+        "failed",
+        reason="max retries exhausted",
+        mention_retry_count=state.get("mention_retry_count", 0),
+        proposition_retry_count=state.get("proposition_retry_count", 0),
+        max_retries=state.get("max_retries", 3),
+    )
     return {
         "status": WorkflowStatus.FAILED.value,
-        "audit_events": existing_events,
+        "audit_events": list(state.get("audit_events", [])) + [event],
     }
 
 
@@ -94,16 +112,14 @@ def build_extraction_graph(
     """
     graph = StateGraph(ExtractionState)
 
-    # Add nodes (each closes over its dependencies)
-    graph.add_node("extract_mentions", make_extract_mentions(llm_client))
-    graph.add_node("validate_mentions", make_validate_mentions(mcp_client))
-    graph.add_node("repair_mentions", make_repair_mentions(llm_client))
-    graph.add_node("extract_propositions", make_extract_propositions(llm_client))
-    graph.add_node(
-        "validate_propositions", make_validate_propositions(mcp_client)
-    )
-    graph.add_node("repair_propositions", make_repair_propositions(llm_client))
-    graph.add_node("persist_artifacts", make_persist_artifacts(repository))
+    # Add nodes — class instances with RetryPolicy for transient errors
+    graph.add_node("extract_mentions", ExtractMentions(llm_client), retry_policy=LLM_RETRY)
+    graph.add_node("validate_mentions", ValidateMentions(mcp_client), retry_policy=MCP_RETRY)
+    graph.add_node("repair_mentions", RepairMentions(llm_client), retry_policy=LLM_RETRY)
+    graph.add_node("extract_propositions", ExtractPropositions(llm_client), retry_policy=LLM_RETRY)
+    graph.add_node("validate_propositions", ValidatePropositions(mcp_client), retry_policy=MCP_RETRY)
+    graph.add_node("repair_propositions", RepairPropositions(llm_client), retry_policy=LLM_RETRY)
+    graph.add_node("persist_artifacts", PersistArtifacts(repository))
     graph.add_node("failure_handler", _failure_handler)
 
     # Set entry point
