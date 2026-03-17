@@ -1,0 +1,54 @@
+# Version control
+.git
+.gitignore
+
+# Claude / AI tooling
+.claude/
+.beads/
+CLAUDE.md
+AGENTS.md
+
+# Documentation
+docs/
+*.md
+
+# Testing
+tests/
+**/tests/
+**/*.test.*
+.pytest_cache/
+
+# Notebooks
+**/notebooks/
+**/*.ipynb
+
+# Python caches
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.egg-info/
+**/.ruff_cache/
+
+# Build artifacts
+dist/
+build/
+
+# Dev configs
+.envrc
+.env
+*.local
+.vscode/
+.idea/
+
+# Kubernetes manifests (not needed in image builds)
+k8s/
+
+# Scripts
+scripts/
+
+# uv lock (not used inside containers)
+uv.lock
+**/uv.lock
+
+# Prompts (not needed at runtime)
+**/prompts/
