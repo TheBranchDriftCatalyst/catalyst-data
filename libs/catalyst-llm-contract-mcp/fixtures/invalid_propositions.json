@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "binary",
+    "subject_text": "United Nations",
+    "subject_id": "nonexistent_id",
+    "predicate": "FoundedIn",
+    "object_text": "1945",
+    "object_id": "mention_1",
+    "confidence": 1.5,
+    "negated": false,
+    "hedged": false,
+    "qualifiers": {}
+  }
+]

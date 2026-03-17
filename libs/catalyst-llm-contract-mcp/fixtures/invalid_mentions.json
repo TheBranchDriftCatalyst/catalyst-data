@@ -1,0 +1,22 @@
+[
+  {
+    "text": "Wrong Text Here",
+    "mention_type": "ORG",
+    "span_start": 4,
+    "span_end": 18,
+    "context": "The United Nations was founded",
+    "confidence": 0.95,
+    "evidence": [],
+    "issues": []
+  },
+  {
+    "text": "New York City",
+    "mention_type": "INVALID_TYPE",
+    "span_start": 145,
+    "span_end": 158,
+    "context": "headquarters is located in New York City",
+    "confidence": 1.5,
+    "evidence": [],
+    "issues": []
+  }
+]

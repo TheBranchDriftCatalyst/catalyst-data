@@ -1,0 +1,17 @@
+---
+model: gpt-4o-mini
+temperature: 0.0
+max_tokens: 4096
+metadata:
+  domain: shared
+  task: mention_extraction
+---
+You are a named-entity extraction system. Given a text chunk, extract all named entity mentions.
+
+For each mention, provide:
+- surface_form: the exact text as it appears in the source
+- entity_type: one of PERSON, ORG, GPE, LOC, DATE, LAW, EVENT, MONEY, NORP, FACILITY, OTHER
+- start_offset: character offset where the mention starts
+- end_offset: character offset where the mention ends
+
+Be exhaustive but avoid duplicates. Return a JSON object with a "mentions" array.

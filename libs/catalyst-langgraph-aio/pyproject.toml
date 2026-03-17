@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "catalyst-langgraph-aio"
+version = "0.1.0"
+description = "LangGraph-based async orchestration for LLM extraction with MCP contract validation"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.3",
+    "pydantic>=2.0",
+    "aiofiles>=24.0",
+    "pyyaml>=6.0",
+    "catalyst-llm-contract-mcp",
+    "catalyst-contracts-core",
+]
+
+[tool.uv.sources]
+catalyst-llm-contract-mcp = { path = "../catalyst-llm-contract-mcp", editable = true }
+catalyst-contracts-core = { path = "../catalyst-contracts-core", editable = true }
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "ipykernel>=6.0",
+    "jupyter>=1.0",
+    "nbconvert>=7.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/catalyst_langgraph"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

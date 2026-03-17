@@ -8,4 +8,8 @@ build/
 .scratch/
 *.egg
 .pytest_cache/
-.env.cluster
+.env
+.env.*
+.coverage
+*.executed.ipynb
+.DS_Store

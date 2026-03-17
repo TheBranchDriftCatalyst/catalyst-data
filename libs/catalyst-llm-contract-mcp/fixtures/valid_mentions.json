@@ -1,0 +1,32 @@
+[
+  {
+    "text": "United Nations",
+    "mention_type": "ORG",
+    "span_start": 4,
+    "span_end": 18,
+    "context": "The United Nations was founded",
+    "confidence": 0.95,
+    "evidence": [],
+    "issues": []
+  },
+  {
+    "text": "New York City",
+    "mention_type": "GPE",
+    "span_start": 145,
+    "span_end": 158,
+    "context": "headquarters is located in New York City",
+    "confidence": 0.98,
+    "evidence": [],
+    "issues": []
+  },
+  {
+    "text": "Antonio Guterres",
+    "mention_type": "PERSON",
+    "span_start": 250,
+    "span_end": 266,
+    "context": "Secretary-General Antonio Guterres",
+    "confidence": 0.97,
+    "evidence": [],
+    "issues": []
+  }
+]

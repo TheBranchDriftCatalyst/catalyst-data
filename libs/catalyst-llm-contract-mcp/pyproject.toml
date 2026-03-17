@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "catalyst-llm-contract-mcp"
+version = "0.1.0"
+description = "MCP server enforcing LLM output contracts for knowledge graph pipelines"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.26",
+    "pydantic>=2.0",
+    "catalyst-contracts-core",
+]
+
+[tool.uv.sources]
+catalyst-contracts-core = { path = "../catalyst-contracts-core", editable = true }
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
+
+[project.scripts]
+catalyst-contracts = "catalyst_contracts.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/catalyst_contracts"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

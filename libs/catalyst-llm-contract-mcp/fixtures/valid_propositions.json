@@ -1,0 +1,26 @@
+[
+  {
+    "kind": "binary",
+    "subject_text": "United Nations",
+    "subject_id": "mention_0",
+    "predicate": "founded_in",
+    "object_text": "1945",
+    "object_id": "mention_1",
+    "confidence": 0.92,
+    "negated": false,
+    "hedged": false,
+    "qualifiers": {}
+  },
+  {
+    "kind": "binary",
+    "subject_text": "Antonio Guterres",
+    "subject_id": "mention_2",
+    "predicate": "leads",
+    "object_text": "United Nations",
+    "object_id": "mention_0",
+    "confidence": 0.88,
+    "negated": false,
+    "hedged": false,
+    "qualifiers": {"since": "2017"}
+  }
+]
