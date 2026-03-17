@@ -20,6 +20,8 @@ PAGE_LABELS: dict[str, str] = {
     "pages/8_Entity_Concordance.py": "Entity Concordance",
     "pages/9_Config_Comparison.py": "Config Comparison",
     "pages/10_Prompt_Catalog.py": "Prompt Catalog",
+    "pages/11_Entity_Candidates.py": "Entity Candidates",
+    "pages/12_Assertion_Graph.py": "Assertion Graph",
 }
 
 ENTITY_COLORS: dict[str, str] = {

@@ -472,6 +472,34 @@ class DataClient:
         logger.info("Loaded %d canonical entities", len(validated))
         return validated
 
+    def load_entity_candidates(
+        self,
+        source: str,
+        partition: str | None = None,
+        limit: int = 5000,
+    ) -> list[dict]:
+        """Load gold-layer EntityCandidate objects for a source."""
+        logger.info("Loading entity candidates for source=%s", source)
+        root = self._find_asset_root(source, "entity_candidates", "gold")
+        if root is None:
+            logger.warning("No entity_candidates found for source=%s", source)
+            return []
+
+        asset_root = f"{root}/{partition}" if partition else root
+        records = self._cached_load(asset_root, limit)
+
+        validated = []
+        for r in records:
+            try:
+                candidate = EntityCandidate.model_validate(r) if isinstance(r, dict) else r
+                validated.append(candidate.model_dump() if isinstance(candidate, EntityCandidate) else r)
+            except Exception as e:
+                logger.debug("Skipping invalid entity candidate record: %s", e)
+                validated.append(r)
+
+        logger.info("Loaded %d entity candidates for source=%s", len(validated), source)
+        return validated
+
     def load_entity_alignments(
         self,
         partition: str | None = None,
@@ -580,13 +608,13 @@ class DataClient:
         source: str,
         partition: str | None = None,
     ) -> list[dict]:
-        """Find all text chunks containing a given entity."""
-        entities = self.load_entities(source, partition)
+        """Find all text chunks containing a given entity (uses mentions, falls back to legacy)."""
+        mentions = self.load_mentions(source, partition)
         matching_chunk_ids = {
-            e["chunk_id"]
-            for e in entities
-            if e.get("text", "").lower() == entity_text.lower()
-            and "chunk_id" in e
+            m["chunk_id"]
+            for m in mentions
+            if m.get("text", "").lower() == entity_text.lower()
+            and "chunk_id" in m
         }
         if not matching_chunk_ids:
             return []
@@ -614,9 +642,9 @@ class DataClient:
         source: str,
         partition: str | None = None,
     ) -> list[dict]:
-        """Return all entities extracted from a specific document."""
-        entities = self.load_entities(source, partition)
-        return [e for e in entities if e.get("source_doc_id") == document_id]
+        """Return all entities/mentions extracted from a specific document."""
+        mentions = self.load_mentions(source, partition)
+        return [m for m in mentions if m.get("document_id") == document_id or m.get("source_doc_id") == document_id]
 
     def get_document_propositions(
         self,

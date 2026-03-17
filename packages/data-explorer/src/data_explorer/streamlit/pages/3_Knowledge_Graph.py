@@ -352,13 +352,6 @@ config = Config(
     hierarchical=False,
     height=600,
     width=1200,
-    nodeHighlightBehavior=True,
-    highlightColor="#00fcd6",
-    collapsible=False,
-    node={"highlightStrokeColor": "#00fcd6"},
-    link={"highlightColor": "#00fcd6"},
-    bgcolor="#0a0a0f",
-    font_color="#e4e4e7",
 )
 
 agraph(nodes=nodes, edges=edges, config=config)

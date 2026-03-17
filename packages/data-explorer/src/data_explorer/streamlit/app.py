@@ -36,6 +36,8 @@ PAGE_DESCRIPTIONS: dict[str, str] = {
     "Entity Concordance": "KWIC concordance and co-occurrence",
     "Config Comparison": "Side-by-side embedding config evaluation",
     "Prompt Catalog": "Browse and test registered LLM prompts",
+    "Entity Candidates": "Browse entity candidates from concordance resolution",
+    "Assertion Graph": "Platinum-layer cross-source assertion graph",
 }
 
 # ---------------------------------------------------------------------------
