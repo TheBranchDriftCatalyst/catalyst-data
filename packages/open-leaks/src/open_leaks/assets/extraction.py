@@ -29,8 +29,21 @@ tracer = get_tracer(__name__)
 # ---------------------------------------------------------------------------
 
 _HTTP_TIMEOUT = httpx.Timeout(connect=30, read=300, write=30, pool=30)
-_MAX_RETRIES = 3
-_RETRY_BACKOFF_BASE = 2  # seconds — exponential: 2, 4, 8
+# Longer read timeout for large file streaming (1.65 GB over slow links)
+_STREAM_TIMEOUT = httpx.Timeout(connect=30, read=600, write=30, pool=30)
+_MAX_RETRIES = 5
+_RETRY_BACKOFF_BASE = 2  # seconds — exponential: 2, 4, 8, 16, 32
+_PROGRESS_INTERVAL_MB = 25  # log progress every N MB
+
+# Retryable transport-level exceptions (covers connection drops mid-download,
+# read timeouts, and generic transport failures — not just connect + timeout).
+_RETRYABLE_ERRORS = (
+    httpx.ConnectError,
+    httpx.TimeoutException,
+    httpx.ReadError,
+    httpx.RemoteProtocolError,
+    httpx.CloseError,
+)
 
 
 def _retry_on_network_error(
@@ -38,26 +51,28 @@ def _retry_on_network_error(
     *args,
     context: AssetExecutionContext,
     description: str = "request",
+    max_retries: int = _MAX_RETRIES,
     **kwargs,
 ):
     """Execute *func* with exponential-backoff retry on network errors.
 
-    Retries up to ``_MAX_RETRIES`` times for ``httpx.ConnectError`` and
-    ``httpx.TimeoutException``.  Other exceptions propagate immediately.
+    Retries up to *max_retries* times for transport-level httpx errors
+    (connect, timeout, read, protocol, close).  Other exceptions propagate
+    immediately.
     """
-    for attempt in range(1, _MAX_RETRIES + 1):
+    for attempt in range(1, max_retries + 1):
         try:
             return func(*args, **kwargs)
-        except (httpx.ConnectError, httpx.TimeoutException) as exc:
-            if attempt == _MAX_RETRIES:
+        except _RETRYABLE_ERRORS as exc:
+            if attempt == max_retries:
                 context.log.error(
-                    f"{description}: failed after {_MAX_RETRIES} attempts — {exc}"
+                    f"{description}: failed after {max_retries} attempts — {type(exc).__name__}: {exc}"
                 )
                 raise
             delay = _RETRY_BACKOFF_BASE ** attempt
             context.log.warning(
-                f"{description}: attempt {attempt}/{_MAX_RETRIES} failed ({type(exc).__name__}), "
-                f"retrying in {delay}s…"
+                f"{description}: attempt {attempt}/{max_retries} failed "
+                f"({type(exc).__name__}: {exc}), retrying in {delay}s…"
             )
             time.sleep(delay)
 
@@ -73,25 +88,90 @@ def _download_file(
     dest: Path,
     context: AssetExecutionContext,
 ) -> Path:
-    """Stream-download a file with progress logging. Skips if cached."""
+    """Stream-download a large file with resume support and progress logging.
+
+    * **Streaming**: writes chunks to disk immediately — never holds the full
+      file in memory.
+    * **Resume**: if a partial file exists from a previous interrupted attempt,
+      sends an HTTP ``Range`` header so the server can pick up where it left
+      off (common on archive.org / CDN origins).  Falls back to a full
+      download if the server returns 200 instead of 206.
+    * **Retries**: each download attempt is retried independently via
+      ``_retry_on_network_error``.
+    * **Cache**: if the file already exists *and* its size matches the
+      ``Content-Length`` from a HEAD request, skips the download entirely.
+    """
     if dest.exists() and dest.stat().st_size > 0:
-        context.log.info(f"Using cached file: {dest} ({dest.stat().st_size / 1024 / 1024:.1f} MB)")
-        return dest
+        # Quick validation: ask the server for the expected size so we don't
+        # skip a truncated file from a prior crash.
+        try:
+            head = httpx.head(url, follow_redirects=True, timeout=_HTTP_TIMEOUT)
+            expected = int(head.headers.get("content-length", 0))
+            actual = dest.stat().st_size
+            if expected and actual >= expected:
+                context.log.info(
+                    f"Using cached file: {dest} ({actual / 1024 / 1024:.1f} MB, "
+                    f"matches expected {expected / 1024 / 1024:.1f} MB)"
+                )
+                return dest
+            if expected:
+                context.log.info(
+                    f"Cached file incomplete: {actual / 1024 / 1024:.1f} / "
+                    f"{expected / 1024 / 1024:.1f} MB — will attempt resume"
+                )
+        except _RETRYABLE_ERRORS:
+            # If HEAD fails, fall through to download (cache might be fine)
+            if dest.stat().st_size > 0:
+                context.log.warning(
+                    f"HEAD request failed; using potentially-complete cached file: {dest}"
+                )
+                return dest
 
     def _do_download():
-        context.log.info(f"Downloading {url} → {dest}")
-        with httpx.stream("GET", url, follow_redirects=True, timeout=_HTTP_TIMEOUT) as r:
+        # Determine resume offset from any existing partial file
+        resume_offset = 0
+        if dest.exists():
+            resume_offset = dest.stat().st_size
+
+        headers: dict[str, str] = {}
+        if resume_offset > 0:
+            headers["Range"] = f"bytes={resume_offset}-"
+            context.log.info(
+                f"Resuming download of {url} from byte {resume_offset} "
+                f"({resume_offset / 1024 / 1024:.1f} MB)"
+            )
+        else:
+            context.log.info(f"Downloading {url} → {dest}")
+
+        with httpx.stream(
+            "GET", url, headers=headers, follow_redirects=True, timeout=_STREAM_TIMEOUT,
+        ) as r:
             r.raise_for_status()
+
+            # Determine whether server honoured the Range request
+            is_partial = r.status_code == 206
+            if resume_offset > 0 and not is_partial:
+                # Server ignored Range header — restart from scratch
+                context.log.warning(
+                    "Server returned 200 (not 206); restarting full download"
+                )
+                resume_offset = 0
+
             total = int(r.headers.get("content-length", 0))
-            downloaded = 0
-            with open(dest, "wb") as f:
-                for chunk in r.iter_bytes(chunk_size=65536):
+            if is_partial:
+                total += resume_offset  # content-length is remaining bytes
+            downloaded = resume_offset
+
+            mode = "ab" if is_partial else "wb"
+            with open(dest, mode) as f:
+                for chunk in r.iter_bytes(chunk_size=65_536):
                     f.write(chunk)
                     downloaded += len(chunk)
-                    if total and downloaded % (50 * 1024 * 1024) < 65536:
+                    if total and downloaded % (_PROGRESS_INTERVAL_MB * 1024 * 1024) < 65_536:
                         pct = downloaded / total * 100
                         context.log.info(
-                            f"  {downloaded / 1024 / 1024:.1f} / {total / 1024 / 1024:.1f} MB ({pct:.0f}%)"
+                            f"  {downloaded / 1024 / 1024:.1f} / "
+                            f"{total / 1024 / 1024:.1f} MB ({pct:.0f}%)"
                         )
 
     _retry_on_network_error(
@@ -99,6 +179,9 @@ def _download_file(
         context=context,
         description=f"download {url}",
     )
+
+    if not dest.exists() or dest.stat().st_size == 0:
+        raise RuntimeError(f"Download produced empty file: {dest}")
 
     size_mb = dest.stat().st_size / 1024 / 1024
     context.log.info(f"Download complete: {dest.name} ({size_mb:.1f} MB)")
@@ -319,6 +402,45 @@ def _parse_cables_csv(
 # ---------------------------------------------------------------------------
 
 
+def _check_api_reachable(
+    api_base: str,
+    context: AssetExecutionContext,
+) -> bool:
+    """Verify the API base URL is reachable before starting pagination.
+
+    Returns True if the API responds (any 2xx/3xx), False otherwise.
+    Logs detailed diagnostics on failure.
+    """
+    try:
+        resp = httpx.get(
+            f"{api_base}/documents?page=1&limit=1",
+            follow_redirects=True,
+            timeout=_HTTP_TIMEOUT,
+        )
+        if resp.status_code < 400:
+            context.log.info(
+                f"API health check passed: {api_base} (status {resp.status_code})"
+            )
+            return True
+        context.log.error(
+            f"API health check failed: {api_base} returned HTTP {resp.status_code} — "
+            f"the source may be down or the URL may have changed"
+        )
+        return False
+    except _RETRYABLE_ERRORS as exc:
+        context.log.error(
+            f"API health check failed: cannot reach {api_base} — "
+            f"{type(exc).__name__}: {exc}. "
+            f"Check DNS resolution, firewall rules, and whether the source is still online."
+        )
+        return False
+    except httpx.HTTPStatusError as exc:
+        context.log.error(
+            f"API health check failed: {api_base} returned {exc.response.status_code}"
+        )
+        return False
+
+
 def _fetch_epstein_api(
     api_base: str,
     context: AssetExecutionContext,
@@ -329,16 +451,31 @@ def _fetch_epstein_api(
     Response format: {"data": [...], "total": N, "page": N, "limit": N}
     Document fields: id, slug, title, document_type, source, document_date,
                      excerpt, page_count, file_url, source_url
+
+    Includes a pre-flight health check, exponential-backoff retries on each
+    page, and broad transport-error handling so transient failures on page 1
+    don't immediately abort the entire asset.
     """
+    # --- Pre-flight: verify the API is reachable ---
+    if not _check_api_reachable(api_base, context):
+        context.log.error(
+            f"Epstein API at {api_base} is unreachable. Returning empty list "
+            f"to avoid crashing downstream assets. Re-materialise once the "
+            f"source is back online."
+        )
+        return []
+
     docs: list[CourtDocument] = []
     page = 1
     page_size = 100
+    consecutive_failures = 0
+    max_consecutive_failures = 3
     client = httpx.Client(timeout=_HTTP_TIMEOUT, follow_redirects=True)
 
     try:
         while True:
             url = f"{api_base}/documents?page={page}&limit={page_size}"
-            if page == 1 or page % 50 == 0:
+            if page == 1 or page % 10 == 0:
                 context.log.info(f"Fetching page {page} ({len(docs):,} docs so far)")
 
             try:
@@ -349,18 +486,49 @@ def _fetch_epstein_api(
                     description=f"epstein API page {page}",
                 )
                 resp.raise_for_status()
+                consecutive_failures = 0  # reset on success
             except httpx.HTTPStatusError as e:
-                context.log.warning(f"API returned {e.response.status_code} — stopping pagination")
+                context.log.warning(
+                    f"API returned HTTP {e.response.status_code} on page {page} — "
+                    f"stopping pagination ({len(docs):,} docs collected)"
+                )
                 break
-            except (httpx.ConnectError, httpx.TimeoutException) as e:
-                context.log.error(f"Cannot connect to {api_base} after {_MAX_RETRIES} retries — {e}")
+            except _RETRYABLE_ERRORS as e:
+                consecutive_failures += 1
+                context.log.error(
+                    f"Page {page} failed after {_MAX_RETRIES} retries — "
+                    f"{type(e).__name__}: {e} "
+                    f"(consecutive failures: {consecutive_failures}/{max_consecutive_failures})"
+                )
+                if consecutive_failures >= max_consecutive_failures:
+                    context.log.error(
+                        f"Aborting: {max_consecutive_failures} consecutive page failures. "
+                        f"Returning {len(docs):,} docs collected so far."
+                    )
+                    break
+                # Skip this page and try the next one
+                page += 1
+                continue
+
+            try:
+                payload = resp.json()
+            except Exception as e:
+                context.log.warning(
+                    f"Page {page} returned non-JSON response — {type(e).__name__}: {e}. "
+                    f"Stopping pagination."
+                )
                 break
 
-            payload = resp.json()
             items = payload.get("data", []) if isinstance(payload, dict) else payload
             total = payload.get("total", 0) if isinstance(payload, dict) else 0
 
+            if page == 1:
+                context.log.info(
+                    f"API reports {total:,} total documents (page_size={page_size})"
+                )
+
             if not items:
+                context.log.info(f"Page {page} returned empty data — pagination complete")
                 break
 
             for item in items:
@@ -407,6 +575,16 @@ def _fetch_epstein_api(
     description="Extract diplomatic cables from WikiLeaks Cablegate archive (archive.org CSV)",
     compute_kind="extract",
     metadata={"layer": "bronze"},
+    op_tags={
+        "dagster-k8s/config": {
+            "container_config": {
+                "resources": {
+                    "requests": {"cpu": "500m", "memory": "2Gi", "ephemeral-storage": "4Gi"},
+                    "limits": {"cpu": "2", "memory": "4Gi", "ephemeral-storage": "8Gi"},
+                }
+            }
+        }
+    },
 )
 def wikileaks_cables(
     context: AssetExecutionContext,
@@ -503,6 +681,16 @@ def icij_offshore_relationships(
     description="Extract court documents from Epstein case files (public API)",
     compute_kind="extract",
     metadata={"layer": "bronze"},
+    op_tags={
+        "dagster-k8s/config": {
+            "container_config": {
+                "resources": {
+                    "requests": {"cpu": "250m", "memory": "512Mi"},
+                    "limits": {"cpu": "1", "memory": "1Gi"},
+                }
+            }
+        }
+    },
 )
 def epstein_court_docs(
     context: AssetExecutionContext,
