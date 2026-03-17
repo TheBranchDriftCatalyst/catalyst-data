@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0",
     "catalyst-llm-contract-mcp",
     "catalyst-contracts-core",
+    "python-dotenv>=1.0",
 ]
 
 [tool.uv.sources]

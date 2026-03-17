@@ -10,6 +10,7 @@ build/
 .pytest_cache/
 .env
 .env.*
+.envrc
 .coverage
 *.executed.ipynb
 .DS_Store
