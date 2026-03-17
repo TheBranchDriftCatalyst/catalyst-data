@@ -19,12 +19,40 @@ from catalyst_langgraph.clients.mcp import MockMCPClient
 from catalyst_langgraph.graph import build_extraction_graph
 from catalyst_langgraph.repository.jsonl import JsonlRepository
 
+from catalyst_contracts.models.extraction_output import (
+    MentionCandidate,
+    MentionExtractionResult,
+    PropositionCandidate,
+    PropositionExtractionResult,
+)
+
 
 SOURCE_TEXT = (
     "The United Nations was founded in 1945 by 51 countries committed to "
     "maintaining international peace and security. Its headquarters is "
     "located in New York City, United States."
 )
+
+
+def _to_mention_result(mentions: list[dict]) -> MentionExtractionResult:
+    """Build a MentionExtractionResult from dicts, handling old/new field names."""
+    candidates = []
+    for m in mentions:
+        candidates.append(MentionCandidate(
+            text=m.get("text", m.get("surface_form", "")),
+            mention_type=m.get("mention_type", m.get("entity_type", "OTHER")),
+            span_start=m.get("span_start", m.get("start_offset", 0)),
+            span_end=m.get("span_end", m.get("end_offset", 0)),
+            confidence=m.get("confidence", 1.0),
+        ))
+    return MentionExtractionResult(mentions=candidates)
+
+
+def _to_proposition_result(propositions: list[dict]) -> PropositionExtractionResult:
+    """Build a PropositionExtractionResult from dicts."""
+    return PropositionExtractionResult(
+        propositions=[PropositionCandidate(**p) for p in propositions]
+    )
 
 
 class MockLLMForIntegration:
@@ -40,6 +68,10 @@ class MockLLMForIntegration:
         return json.dumps({"mentions": self._mentions})
 
     async def structured_output(self, schema, messages) -> Any:
+        if schema is MentionExtractionResult:
+            return _to_mention_result(self._mentions)
+        elif schema is PropositionExtractionResult:
+            return _to_proposition_result(self._propositions)
         return None
 
 
@@ -51,10 +83,6 @@ def valid_mentions() -> list[dict]:
     """Mentions with spans that actually align with SOURCE_TEXT."""
     return [
         {
-            "surface_form": "United Nations",
-            "entity_type": "ORG",
-            "start_offset": 4,
-            "end_offset": 18,
             "text": "United Nations",
             "mention_type": "ORG",
             "span_start": 4,
@@ -62,10 +90,6 @@ def valid_mentions() -> list[dict]:
             "confidence": 0.95,
         },
         {
-            "surface_form": "New York City",
-            "entity_type": "GPE",
-            "start_offset": 145,
-            "end_offset": 158,
             "text": "New York City",
             "mention_type": "GPE",
             "span_start": 145,
@@ -80,8 +104,6 @@ def invalid_mentions_then_fixed() -> tuple[list[dict], list[dict]]:
     """First attempt has wrong spans; repaired version has correct spans."""
     bad = [
         {
-            "surface_form": "United Nations",
-            "entity_type": "ORG",
             "text": "United Nations",
             "mention_type": "ORG",
             "span_start": 0,  # Wrong! Should be 4
@@ -91,8 +113,6 @@ def invalid_mentions_then_fixed() -> tuple[list[dict], list[dict]]:
     ]
     good = [
         {
-            "surface_form": "United Nations",
-            "entity_type": "ORG",
             "text": "United Nations",
             "mention_type": "ORG",
             "span_start": 4,
@@ -203,6 +223,12 @@ class TestFullFlowEndToEnd:
                 return json.dumps({"mentions": good})
 
             async def structured_output(self, schema, messages):
+                if schema is MentionExtractionResult:
+                    call_count["n"] += 1
+                    data = bad if call_count["n"] <= 1 else good
+                    return _to_mention_result(data)
+                elif schema is PropositionExtractionResult:
+                    return _to_proposition_result(valid_propositions)
                 return None
 
         mention_validate_count = {"n": 0}

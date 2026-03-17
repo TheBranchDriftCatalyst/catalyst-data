@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MathObjectKind(str, Enum):
@@ -15,11 +15,13 @@ class MathObjectKind(str, Enum):
 
 
 class MathObject(BaseModel):
-    symbol: str
-    kind: MathObjectKind
-    name: str | None = None
-    latex: str | None = None
-    domain: str | None = None
+    """A mathematical object referenced in a proposition."""
+
+    symbol: str = Field(description="The symbol representing this math object (e.g., 'x', 'f', '+')")
+    kind: MathObjectKind = Field(description="Kind of math object: variable, constant, function, operator, set, or relation")
+    name: str | None = Field(default=None, description="Human-readable name of the object (e.g., 'velocity')")
+    latex: str | None = Field(default=None, description="LaTeX representation of the symbol")
+    domain: str | None = Field(default=None, description="Mathematical domain (e.g., 'real numbers', 'integers')")
 
 
 class MathPropositionKind(str, Enum):
@@ -32,8 +34,10 @@ class MathPropositionKind(str, Enum):
 
 
 class MathProposition(BaseModel):
-    kind: MathPropositionKind
-    statement: str
-    latex: str | None = None
-    objects: list[MathObject] = []
-    dependencies: list[str] = []
+    """A mathematical proposition extracted from text."""
+
+    kind: MathPropositionKind = Field(description="Kind of proposition: equation, inequality, definition, theorem, axiom, or conjecture")
+    statement: str = Field(description="The mathematical statement in natural language or symbolic form")
+    latex: str | None = Field(default=None, description="LaTeX representation of the statement")
+    objects: list[MathObject] = Field(default=[], description="Mathematical objects referenced in this proposition")
+    dependencies: list[str] = Field(default=[], description="IDs of propositions this one depends on")

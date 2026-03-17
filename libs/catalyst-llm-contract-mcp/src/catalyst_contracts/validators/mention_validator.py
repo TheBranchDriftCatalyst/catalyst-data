@@ -61,7 +61,7 @@ def validate_mentions(
             item_errors.append(
                 ValidationErrorItem(
                     path=path,
-                    code=IssueCode.MISSING_REQUIRED_FIELD.value if hasattr(IssueCode, 'MISSING_REQUIRED_FIELD') else "MISSING_REQUIRED_FIELD",
+                    code=IssueCode.MISSING_REQUIRED_FIELD.value,
                     message=f"Missing required fields: {', '.join(missing)}",
                 )
             )

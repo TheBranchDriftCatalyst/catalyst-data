@@ -16,6 +16,12 @@ from catalyst_contracts.models.math import (
     MathProposition,
     MathPropositionKind,
 )
+from catalyst_contracts.models.extraction_output import (
+    MentionCandidate,
+    MentionExtractionResult,
+    PropositionCandidate,
+    PropositionExtractionResult,
+)
 from catalyst_contracts.models.mentions import MentionExtraction
 from catalyst_contracts.models.propositions import (
     BinaryProposition,
@@ -43,12 +49,16 @@ __all__ = [
     "MathObjectKind",
     "MathProposition",
     "MathPropositionKind",
+    "MentionCandidate",
     "MentionExtraction",
+    "MentionExtractionResult",
     "BinaryProposition",
     "NaryProposition",
     "Proposition",
     "PropositionArgument",
+    "PropositionCandidate",
     "PropositionExtraction",
+    "PropositionExtractionResult",
     "RepairAction",
     "RepairInstruction",
     "RepairPlan",

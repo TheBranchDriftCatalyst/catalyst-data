@@ -48,6 +48,13 @@ def make_validate_mentions(mcp_client: MCPClient):
             }
 
             if verdict == "valid":
+                # Assign stable span-based composite IDs to each accepted mention
+                for m in candidates:
+                    m["id"] = (
+                        f"{m.get('mention_type', m.get('entity_type', 'UNK'))}:"
+                        f"{m.get('span_start', m.get('start_offset', 0))}:"
+                        f"{m.get('span_end', m.get('end_offset', 0))}"
+                    )
                 update["accepted_mentions"] = candidates
                 update["status"] = WorkflowStatus.EXTRACTING_PROPOSITIONS.value
             else:

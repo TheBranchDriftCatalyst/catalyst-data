@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, TypedDict
 
+# TODO: rename this to catalyst-extraction-graph .... or something like that
 
 class WorkflowStatus(str, Enum):
     PENDING = "pending"

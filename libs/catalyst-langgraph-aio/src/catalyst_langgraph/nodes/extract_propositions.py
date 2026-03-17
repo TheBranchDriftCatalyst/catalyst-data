@@ -7,9 +7,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from catalyst_langgraph.clients.llm import LLMClient
-from catalyst_langgraph.prompts import load_prompt, strip_code_fences
+from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
+
+from catalyst_contracts.models.extraction_output import PropositionExtractionResult
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +38,12 @@ def make_extract_propositions(llm_client: LLMClient):
                 f"Text:\n{raw_text}"
             )
 
-            response = await llm_client.complete(prompt, system=system)
+            result = await llm_client.structured_output(
+                PropositionExtractionResult,
+                [SystemMessage(content=system), HumanMessage(content=prompt)],
+            )
 
-            try:
-                parsed = json.loads(strip_code_fences(response))
-                candidates = parsed.get("propositions", [])
-            except json.JSONDecodeError:
-                logger.warning("Failed to parse LLM response as JSON: %s", response[:200])
-                candidates = []
+            candidates = [p.model_dump() for p in result.propositions]
 
             return {
                 "current_proposition_candidates": candidates,

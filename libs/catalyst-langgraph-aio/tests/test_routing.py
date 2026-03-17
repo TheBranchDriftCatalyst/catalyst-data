@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from langgraph.graph import END
-
 from catalyst_langgraph.graph import (
     _route_after_mention_validation,
     _route_after_proposition_validation,
@@ -19,9 +17,9 @@ class TestRouteAfterMentionValidation:
         state = {"latest_mention_validation": {"verdict": "invalid"}, "mention_retry_count": 1, "max_retries": 3}
         assert _route_after_mention_validation(state) == "repair_mentions"
 
-    def test_rejected_at_max_retries_routes_to_end(self):
+    def test_rejected_at_max_retries_routes_to_failure_handler(self):
         state = {"latest_mention_validation": {"verdict": "invalid"}, "mention_retry_count": 3, "max_retries": 3}
-        assert _route_after_mention_validation(state) == END
+        assert _route_after_mention_validation(state) == "failure_handler"
 
     def test_missing_validation_defaults_to_rejected(self):
         state = {"mention_retry_count": 0, "max_retries": 3}
@@ -41,6 +39,6 @@ class TestRouteAfterPropositionValidation:
         state = {"latest_proposition_validation": {"verdict": "invalid"}, "proposition_retry_count": 1, "max_retries": 3}
         assert _route_after_proposition_validation(state) == "repair_propositions"
 
-    def test_rejected_at_max_retries_routes_to_end(self):
+    def test_rejected_at_max_retries_routes_to_failure_handler(self):
         state = {"latest_proposition_validation": {"verdict": "invalid"}, "proposition_retry_count": 3, "max_retries": 3}
-        assert _route_after_proposition_validation(state) == END
+        assert _route_after_proposition_validation(state) == "failure_handler"

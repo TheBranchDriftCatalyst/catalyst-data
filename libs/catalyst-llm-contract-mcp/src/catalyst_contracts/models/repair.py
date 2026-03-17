@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RepairAction(str, Enum):
@@ -14,14 +14,18 @@ class RepairAction(str, Enum):
 
 
 class RepairInstruction(BaseModel):
-    path: str
-    action: RepairAction
-    current_value: Any = None
-    suggested_value: Any = None
-    reason: str
-    auto_applicable: bool = False
+    """A single repair instruction for fixing a validation error."""
+
+    path: str = Field(description="JSON path to the field to repair (e.g., 'mentions[0].span_start')")
+    action: RepairAction = Field(description="Repair action: replace, delete, insert, or coerce")
+    current_value: Any = Field(default=None, description="The current value of the field")
+    suggested_value: Any = Field(default=None, description="The suggested replacement value")
+    reason: str = Field(description="Human-readable explanation of why this repair is needed")
+    auto_applicable: bool = Field(default=False, description="Whether this repair can be applied automatically without LLM re-generation")
 
 
 class RepairPlan(BaseModel):
-    instructions: list[RepairInstruction] = []
-    preserves_valid_fields: bool = True
+    """A plan for repairing validation errors in extraction output."""
+
+    instructions: list[RepairInstruction] = Field(default=[], description="Ordered list of repair instructions")
+    preserves_valid_fields: bool = Field(default=True, description="Whether applying this plan preserves fields that already passed validation")

@@ -4,30 +4,46 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 
 from catalyst_langgraph.clients.mcp import MockMCPClient
 
+from catalyst_contracts.models.extraction_output import (
+    MentionCandidate,
+    MentionExtractionResult,
+    PropositionCandidate,
+    PropositionExtractionResult,
+)
+
 
 class MockLLMClient:
-    """Mock LLM client for testing that returns configurable responses."""
+    """Mock LLM client for testing that returns configurable responses.
+
+    Supports both ``complete()`` (legacy) and ``structured_output()`` calls.
+    For ``structured_output()``, returns a proper Pydantic model instance
+    matching the requested schema.
+    """
 
     def __init__(self) -> None:
         self.complete_responses: dict[str, str] = {}
         self.structured_responses: dict[str, Any] = {}
         self.complete_calls: list[tuple[str, str]] = []
+        self.structured_calls: list[tuple[type, list]] = []
+        self._mention_data: list[dict] | None = None
+        self._proposition_data: list[dict] | None = None
 
     def set_complete_response(self, key: str, response: str) -> None:
         self.complete_responses[key] = response
 
     def set_default_mentions(self, mentions: list[dict]) -> None:
+        self._mention_data = mentions
         self.complete_responses["_default_mentions"] = json.dumps(
             {"mentions": mentions}
         )
 
     def set_default_propositions(self, propositions: list[dict]) -> None:
+        self._proposition_data = propositions
         self.complete_responses["_default_propositions"] = json.dumps(
             {"propositions": propositions}
         )
@@ -55,7 +71,29 @@ class MockLLMClient:
         return json.dumps({"mentions": [], "propositions": []})
 
     async def structured_output(self, schema: type, messages: list) -> Any:
-        return AsyncMock()
+        self.structured_calls.append((schema, messages))
+
+        # Determine if this is a mention or proposition extraction based on
+        # the requested schema type
+        if schema is MentionExtractionResult:
+            data = self._mention_data or []
+            mention_objects = [MentionCandidate(**m) for m in data]
+            return MentionExtractionResult(mentions=mention_objects)
+        elif schema is PropositionExtractionResult:
+            data = self._proposition_data or []
+            prop_objects = [PropositionCandidate(**p) for p in data]
+            return PropositionExtractionResult(propositions=prop_objects)
+
+        # Fallback for unknown schemas — check message content for hints
+        msg_text = " ".join(str(m) for m in messages).lower()
+        if "proposition" in msg_text or "triple" in msg_text:
+            data = self._proposition_data or []
+            prop_objects = [PropositionCandidate(**p) for p in data]
+            return PropositionExtractionResult(propositions=prop_objects)
+
+        data = self._mention_data or []
+        mention_objects = [MentionCandidate(**m) for m in data]
+        return MentionExtractionResult(mentions=mention_objects)
 
 
 @pytest.fixture
@@ -72,16 +110,18 @@ def mock_mcp() -> MockMCPClient:
 def sample_mentions() -> list[dict]:
     return [
         {
-            "surface_form": "Acme Corp",
-            "entity_type": "ORG",
-            "start_offset": 0,
-            "end_offset": 9,
+            "text": "Acme Corp",
+            "mention_type": "ORG",
+            "span_start": 0,
+            "span_end": 9,
+            "confidence": 1.0,
         },
         {
-            "surface_form": "John Smith",
-            "entity_type": "PERSON",
-            "start_offset": 20,
-            "end_offset": 30,
+            "text": "John Smith",
+            "mention_type": "PERSON",
+            "span_start": 20,
+            "span_end": 30,
+            "confidence": 1.0,
         },
     ]
 

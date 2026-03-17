@@ -7,9 +7,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from catalyst_langgraph.clients.llm import LLMClient
-from catalyst_langgraph.prompts import load_prompt, strip_code_fences
+from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
+
+from catalyst_contracts.models.extraction_output import MentionExtractionResult
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +40,12 @@ def make_repair_mentions(llm_client: LLMClient):
                 f"Original text:\n{raw_text}"
             )
 
-            response = await llm_client.complete(prompt, system=system)
+            result = await llm_client.structured_output(
+                MentionExtractionResult,
+                [SystemMessage(content=system), HumanMessage(content=prompt)],
+            )
 
-            try:
-                parsed = json.loads(strip_code_fences(response))
-                repaired = parsed.get("mentions", [])
-            except json.JSONDecodeError:
-                logger.warning("repair_mentions: Failed to parse LLM repair response")
-                repaired = []
+            repaired = [m.model_dump() for m in result.mentions]
 
             retry_count = state.get("mention_retry_count", 0) + 1
 

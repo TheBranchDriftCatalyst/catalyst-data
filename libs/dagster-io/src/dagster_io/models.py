@@ -14,39 +14,13 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-
-class MentionType(str, Enum):
-    PERSON = "PERSON"
-    ORG = "ORG"
-    GPE = "GPE"
-    LOC = "LOC"
-    DATE = "DATE"
-    LAW = "LAW"
-    EVENT = "EVENT"
-    MONEY = "MONEY"
-    NORP = "NORP"
-    FACILITY = "FACILITY"
-    OTHER = "OTHER"
-
-
-class AlignmentType(str, Enum):
-    SAME_AS = "sameAs"
-    POSSIBLE_SAME_AS = "possibleSameAs"
-    RELATED_TO = "relatedTo"
-    PART_OF = "partOf"
-
-
-class ExtractionMethod(str, Enum):
-    LLM = "llm"
-    SPACY = "spacy"
-    REGEX = "regex"
-    MANUAL = "manual"
-    STRUCTURED = "structured"
+# Canonical source: catalyst-contracts-core — re-exported for backward compat
+from catalyst_contracts_core.enums import AlignmentType, ExtractionMethod, MentionType
+from catalyst_contracts_core.types import Provenance
 
 
 def _deterministic_id(*parts: str) -> str:
@@ -59,20 +33,6 @@ def _content_hash(*parts: str) -> str:
     """Full SHA-256 hash for content dedup."""
     payload = "|".join(parts)
     return hashlib.sha256(payload.encode()).hexdigest()
-
-
-class Provenance(BaseModel):
-    """Tracks where an extraction came from."""
-
-    source_document_id: str
-    chunk_id: str
-    span_start: int | None = None
-    span_end: int | None = None
-    extraction_method: ExtractionMethod = ExtractionMethod.LLM
-    extraction_model: str = ""
-    confidence: float = Field(default=1.0, ge=0, le=1)
-    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    code_location: str = ""
 
 
 class Mention(BaseModel):

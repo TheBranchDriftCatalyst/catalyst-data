@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from catalyst_langgraph.clients.llm import LLMClient
-from catalyst_langgraph.prompts import load_prompt, strip_code_fences
+from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
+
+from catalyst_contracts.models.extraction_output import MentionExtractionResult
 
 logger = logging.getLogger(__name__)
 
 FALLBACK_PROMPT = (
     "Extract all named entity mentions from the following text. "
     "Return a JSON object with a 'mentions' array, where each mention has: "
-    "surface_form, entity_type, start_offset, end_offset."
+    "text, mention_type, span_start, span_end."
 )
 
 
@@ -28,14 +31,12 @@ def make_extract_mentions(llm_client: LLMClient):
             system = load_prompt("mention_extraction", FALLBACK_PROMPT)
             raw_text = state.get("raw_text", "")
 
-            response = await llm_client.complete(raw_text, system=system)
+            result = await llm_client.structured_output(
+                MentionExtractionResult,
+                [SystemMessage(content=system), HumanMessage(content=raw_text)],
+            )
 
-            try:
-                parsed = json.loads(strip_code_fences(response))
-                candidates = parsed.get("mentions", [])
-            except json.JSONDecodeError:
-                logger.warning("Failed to parse LLM response as JSON: %s", response[:200])
-                candidates = []
+            candidates = [m.model_dump() for m in result.mentions]
 
             return {
                 "current_mention_candidates": candidates,

@@ -26,7 +26,7 @@ def make_validate_propositions(mcp_client: MCPClient):
                 {
                     "propositions": candidates,
                     "known_mention_ids": [
-                        m.get("surface_form", m.get("text", "")) for m in accepted_mentions
+                        m["id"] for m in accepted_mentions if "id" in m
                     ],
                     "source_text": raw_text,
                 },
