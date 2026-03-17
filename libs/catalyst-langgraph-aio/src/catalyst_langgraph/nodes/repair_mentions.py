@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from catalyst_langgraph.clients.llm import LLMClient
-from catalyst_langgraph.prompts import load_prompt
+from catalyst_langgraph.prompts import load_prompt, strip_code_fences
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def make_repair_mentions(llm_client: LLMClient):
             response = await llm_client.complete(prompt, system=system)
 
             try:
-                parsed = json.loads(response)
+                parsed = json.loads(strip_code_fences(response))
                 repaired = parsed.get("mentions", [])
             except json.JSONDecodeError:
                 logger.warning("repair_mentions: Failed to parse LLM repair response")

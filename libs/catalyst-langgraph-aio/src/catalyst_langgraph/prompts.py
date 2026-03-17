@@ -57,6 +57,21 @@ def parse_prompt_file(path: Path, prompt_id: str | None = None) -> ParsedPrompt:
     )
 
 
+def strip_code_fences(text: str) -> str:
+    """Strip markdown code fences from LLM output.
+
+    LLMs often wrap JSON in ```json ... ``` blocks.
+    This extracts the content inside the fences.
+    """
+    import re
+
+    text = text.strip()
+    m = re.match(r"^```(?:json|JSON)?\s*\n(.*?)```\s*$", text, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return text
+
+
 def load_prompt(prompt_id: str, fallback: str) -> str:
     """Load a prompt from the registry directory by ID.
 
