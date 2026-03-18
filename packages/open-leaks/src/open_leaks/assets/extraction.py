@@ -619,7 +619,7 @@ def wikileaks_cables(
             "container_config": {
                 "resources": {
                     "requests": {"cpu": "500m", "memory": "2Gi"},
-                    "limits": {"cpu": "2", "memory": "4Gi"},
+                    "limits": {"memory": "16Gi"},
                 }
             }
         }
@@ -663,7 +663,7 @@ def icij_offshore_entities(
             "container_config": {
                 "resources": {
                     "requests": {"cpu": "500m", "memory": "2Gi"},
-                    "limits": {"cpu": "2", "memory": "4Gi"},
+                    "limits": {"memory": "16Gi"},
                 }
             }
         }
