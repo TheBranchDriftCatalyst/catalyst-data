@@ -614,6 +614,16 @@ def wikileaks_cables(
     description="Extract offshore entities from ICIJ databases (Panama/Paradise/Pandora Papers)",
     compute_kind="extract",
     metadata={"layer": "bronze"},
+    op_tags={
+        "dagster-k8s/config": {
+            "container_config": {
+                "resources": {
+                    "requests": {"cpu": "500m", "memory": "2Gi"},
+                    "limits": {"cpu": "2", "memory": "4Gi"},
+                }
+            }
+        }
+    },
 )
 def icij_offshore_entities(
     context: AssetExecutionContext,
@@ -648,6 +658,16 @@ def icij_offshore_entities(
     description="Extract offshore relationships from ICIJ databases (edge data)",
     compute_kind="extract",
     metadata={"layer": "bronze"},
+    op_tags={
+        "dagster-k8s/config": {
+            "container_config": {
+                "resources": {
+                    "requests": {"cpu": "500m", "memory": "2Gi"},
+                    "limits": {"cpu": "2", "memory": "4Gi"},
+                }
+            }
+        }
+    },
 )
 def icij_offshore_relationships(
     context: AssetExecutionContext,
