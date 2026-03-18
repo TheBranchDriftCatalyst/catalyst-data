@@ -12,8 +12,8 @@ from catalyst_langgraph.repository.jsonl import JsonlRepository
 async def test_save_mentions(tmp_path: Path):
     repo = JsonlRepository(tmp_path)
     mentions = [
-        {"surface_form": "Acme Corp", "entity_type": "ORG"},
-        {"surface_form": "John Smith", "entity_type": "PERSON"},
+        {"text": "Acme Corp", "mention_type": "ORG"},
+        {"text": "John Smith", "mention_type": "PERSON"},
     ]
     await repo.save_mentions("doc-001", mentions)
 
@@ -22,8 +22,8 @@ async def test_save_mentions(tmp_path: Path):
 
     lines = output_file.read_text().strip().split("\n")
     assert len(lines) == 2
-    assert json.loads(lines[0])["surface_form"] == "Acme Corp"
-    assert json.loads(lines[1])["entity_type"] == "PERSON"
+    assert json.loads(lines[0])["text"] == "Acme Corp"
+    assert json.loads(lines[1])["mention_type"] == "PERSON"
 
 
 @pytest.mark.asyncio

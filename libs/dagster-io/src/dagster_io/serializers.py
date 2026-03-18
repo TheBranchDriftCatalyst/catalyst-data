@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import json
 import pickle
+import tempfile
 import typing
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
+
+# Threshold: lists with more items than this use streaming file-based serialization
+_STREAM_THRESHOLD = 50_000
 
 
 def _is_pydantic_model(tp: type | None) -> bool:
@@ -61,6 +66,9 @@ def serialize(data: Any, type_hint: type | None) -> tuple[bytes, str, dict]:
 
     Returns:
         (payload_bytes, extension_with_dot, metadata_dict)
+
+    For large JSONL lists (>50K items), use serialize_to_file() instead to
+    avoid holding the entire serialized payload in memory.
     """
     fmt = _detect_format(data, type_hint)
     metadata = {
@@ -92,6 +100,48 @@ def serialize(data: Any, type_hint: type | None) -> tuple[bytes, str, dict]:
     payload = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
     metadata["count"] = len(data) if hasattr(data, "__len__") else 1
     return payload, ".pkl", metadata
+
+
+def should_stream(data: Any, type_hint: type | None) -> bool:
+    """Return True if the data should use streaming file-based serialization."""
+    fmt = _detect_format(data, type_hint)
+    return fmt == "jsonl" and isinstance(data, list) and len(data) > _STREAM_THRESHOLD
+
+
+def serialize_to_file(data: Any, type_hint: type | None) -> tuple[str, str, dict]:
+    """Stream-serialize large lists to a temp file instead of holding in memory.
+
+    Returns:
+        (temp_file_path, extension_with_dot, metadata_dict)
+
+    Caller is responsible for cleaning up the temp file after upload.
+    """
+    fmt = _detect_format(data, type_hint)
+    metadata = {
+        "format": fmt,
+        "type": str(type_hint) if type_hint else "unknown",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if fmt != "jsonl":
+        raise ValueError(f"serialize_to_file only supports JSONL, got {fmt}")
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".jsonl")
+    try:
+        import os
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for item in data:
+                if isinstance(item, BaseModel):
+                    f.write(item.model_dump_json())
+                else:
+                    f.write(json.dumps(item, default=str))
+                f.write("\n")
+    except Exception:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
+
+    metadata["count"] = len(data)
+    return tmp_path, ".jsonl", metadata
 
 
 def _extract_schema(obj: Any) -> dict:

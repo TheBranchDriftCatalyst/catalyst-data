@@ -262,13 +262,13 @@ async def test_validate_mentions_assigns_composite_ids(mock_mcp, sample_state):
     mock_mcp.set_response("validate_mentions", {"verdict": "valid", "errors": []})
     mentions = [
         {
-            "surface_form": "Acme Corp",
+            "text": "Acme Corp",
             "mention_type": "ORG",
             "span_start": 0,
             "span_end": 9,
         },
         {
-            "surface_form": "John Smith",
+            "text": "John Smith",
             "mention_type": "PERSON",
             "span_start": 20,
             "span_end": 30,
@@ -288,7 +288,7 @@ async def test_validate_mentions_id_deterministic(mock_mcp, sample_state):
     """Same mention always produces the same composite ID."""
     mock_mcp.set_response("validate_mentions", {"verdict": "valid", "errors": []})
     mention = {
-        "surface_form": "Acme Corp",
+        "text": "Acme Corp",
         "mention_type": "ORG",
         "span_start": 5,
         "span_end": 14,
@@ -311,7 +311,7 @@ async def test_validate_mentions_zero_span(mock_mcp, sample_state):
     mock_mcp.set_response("validate_mentions", {"verdict": "valid", "errors": []})
     mentions = [
         {
-            "surface_form": "",
+            "text": "",
             "mention_type": "ORG",
             "span_start": 10,
             "span_end": 10,
@@ -330,8 +330,8 @@ async def test_validate_mentions_overlapping_spans_unique_ids(mock_mcp, sample_s
     """Multiple mentions with same type but different spans get unique IDs."""
     mock_mcp.set_response("validate_mentions", {"verdict": "valid", "errors": []})
     mentions = [
-        {"surface_form": "Acme", "mention_type": "ORG", "span_start": 0, "span_end": 4},
-        {"surface_form": "Acme Corp", "mention_type": "ORG", "span_start": 0, "span_end": 9},
+        {"text": "Acme", "mention_type": "ORG", "span_start": 0, "span_end": 4},
+        {"text": "Acme Corp", "mention_type": "ORG", "span_start": 0, "span_end": 9},
     ]
     sample_state["current_mention_candidates"] = mentions
 
@@ -397,8 +397,8 @@ async def test_validate_propositions_empty_accepted_mentions(mock_mcp, sample_st
 async def test_validate_propositions_passes_composite_ids(mock_mcp, sample_state, sample_propositions):
     """validate_propositions sends composite IDs (not surface forms) as known_mention_ids."""
     sample_state["accepted_mentions"] = [
-        {"id": "ORG:0:9", "surface_form": "Acme Corp", "mention_type": "ORG"},
-        {"id": "PERSON:20:30", "surface_form": "John Smith", "mention_type": "PERSON"},
+        {"id": "ORG:0:9", "text": "Acme Corp", "mention_type": "ORG"},
+        {"id": "PERSON:20:30", "text": "John Smith", "mention_type": "PERSON"},
     ]
     sample_state["current_proposition_candidates"] = sample_propositions
     mock_mcp.set_response("validate_propositions", {"verdict": "valid", "errors": []})
@@ -410,7 +410,7 @@ async def test_validate_propositions_passes_composite_ids(mock_mcp, sample_state
     known_ids = call_args[1]["known_mention_ids"]
     assert "ORG:0:9" in known_ids
     assert "PERSON:20:30" in known_ids
-    # Surface forms must NOT appear
+    # Text values must NOT appear
     assert "Acme Corp" not in known_ids
     assert "John Smith" not in known_ids
 
@@ -419,8 +419,8 @@ async def test_validate_propositions_passes_composite_ids(mock_mcp, sample_state
 async def test_validate_propositions_skips_mentions_without_id(mock_mcp, sample_state, sample_propositions):
     """Mentions without an 'id' field are excluded from known_mention_ids."""
     sample_state["accepted_mentions"] = [
-        {"id": "ORG:0:9", "surface_form": "Acme Corp"},
-        {"surface_form": "John Smith"},  # no id field
+        {"id": "ORG:0:9", "text": "Acme Corp"},
+        {"text": "John Smith"},  # no id field
     ]
     sample_state["current_proposition_candidates"] = sample_propositions
     mock_mcp.set_response("validate_propositions", {"verdict": "valid", "errors": []})

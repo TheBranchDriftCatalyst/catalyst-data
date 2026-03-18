@@ -15,7 +15,7 @@ from dagster_io.logging import get_logger
 from dagster_io.manifest import load_or_create_manifest, make_record
 from dagster_io.path_builder import build_asset_root, build_input_prefix, build_output_prefix
 from dagster_io.s3_client import S3Client
-from dagster_io.serializers import _extract_schema, deserialize, serialize
+from dagster_io.serializers import _extract_schema, deserialize, serialize, serialize_to_file, should_stream
 
 logger = get_logger(__name__)
 
@@ -130,9 +130,21 @@ class MinioIOManager(ConfigurableIOManager):
 
         prefix = build_output_prefix(context, config_key=config_key)
         type_hint = self._get_type_hint(context)
+
+        use_streaming = should_stream(obj, type_hint)
+
+        if use_streaming:
+            self._handle_output_streaming(context, obj, type_hint, prefix, config_key)
+        else:
+            self._handle_output_inmemory(context, obj, type_hint, prefix, config_key)
+
+    def _handle_output_inmemory(
+        self, context: OutputContext, obj: typing.Any, type_hint: type | None,
+        prefix: str, config_key: str | None,
+    ) -> None:
+        """Standard in-memory serialize + upload for small datasets."""
         payload, ext, ser_meta = serialize(obj, type_hint)
         logger.debug("Serialization format=%s for asset=%s", ser_meta.get("format"), context.asset_key.to_user_string())
-        logger.debug("S3 output path prefix=%s", prefix)
 
         # Content-hash dedup: skip write if payload unchanged from last materialization
         payload_hash = hashlib.sha256(payload).hexdigest()
@@ -194,6 +206,98 @@ class MinioIOManager(ConfigurableIOManager):
             output_meta["config_key"] = config_key
         context.add_output_metadata(output_meta)
         logger.info("Asset store complete asset=%s format=%s size=%d rows=%d", context.asset_key.to_user_string(), metadata["format"], len(payload), count)
+
+    def _handle_output_streaming(
+        self, context: OutputContext, obj: typing.Any, type_hint: type | None,
+        prefix: str, config_key: str | None,
+    ) -> None:
+        """Stream-serialize large JSONL datasets to a temp file, then multipart upload to S3."""
+        import os
+
+        count = len(obj) if hasattr(obj, "__len__") else 0
+        context.log.info(
+            "Using streaming serialization for %d items (asset=%s)",
+            count, context.asset_key.to_user_string(),
+        )
+
+        tmp_path, ext, ser_meta = serialize_to_file(obj, type_hint)
+        try:
+            size_bytes = os.path.getsize(tmp_path)
+
+            # Content-hash: hash the file in chunks instead of loading into memory
+            file_hash = hashlib.sha256()
+            with open(tmp_path, "rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    file_hash.update(chunk)
+            payload_hash = file_hash.hexdigest()
+
+            asset_root = build_asset_root(context, config_key=config_key)
+            manifest_key = f"{asset_root}/_manifest.json"
+            layer = asset_root.split("/")[0]
+            code_location = asset_root.split("/")[1] if "/" in asset_root else "unknown"
+            asset_name = context.asset_key.to_user_string()
+
+            manifest = load_or_create_manifest(
+                self.client.get_object, manifest_key, asset_name, code_location, layer
+            )
+            if (
+                manifest.materializations
+                and manifest.materializations[-1].content_hash == payload_hash
+            ):
+                context.log.info("Content unchanged (hash=%s) — skipping write", payload_hash[:12])
+                context.add_output_metadata({"skipped": True, "reason": "content_unchanged"})
+                return
+
+            # Stream upload via multipart
+            data_key = f"{prefix}/data{ext}"
+            logger.info(
+                "Streaming upload asset=%s to s3://%s/%s size=%d",
+                context.asset_key.to_user_string(), self.bucket, data_key, size_bytes,
+            )
+            self.client.put_object_file(data_key, tmp_path)
+
+            # Write metadata sidecar
+            count = ser_meta.get("count", 0)
+            metadata = self._build_metadata(
+                context, ser_meta["format"], count, size_bytes, type_hint, obj,
+                config_key=config_key,
+            )
+            self.client.put_object(
+                f"{prefix}/_metadata.json",
+                json.dumps(metadata, indent=2).encode("utf-8"),
+            )
+
+            # Update manifest
+            partition_str = str(context.asset_partition_key) if context.has_asset_partitions else None
+            record = make_record(
+                run_id=context.run_id,
+                fmt=ser_meta["format"],
+                count=count,
+                size_bytes=size_bytes,
+                partition=partition_str,
+                config_key=config_key,
+                content_hash=payload_hash,
+            )
+            manifest.add_materialization(record)
+            self.client.put_object(manifest_key, manifest.to_bytes())
+
+            output_meta = {
+                "s3_path": f"s3://{self.bucket}/{data_key}",
+                "format": metadata["format"],
+                "size_bytes": size_bytes,
+                "row_count": count,
+                "layer": metadata["layer"],
+                "streaming": True,
+            }
+            if config_key:
+                output_meta["config_key"] = config_key
+            context.add_output_metadata(output_meta)
+            logger.info(
+                "Streaming store complete asset=%s format=%s size=%d rows=%d",
+                context.asset_key.to_user_string(), metadata["format"], size_bytes, count,
+            )
+        finally:
+            os.unlink(tmp_path)
 
     def _get_input_type_hint(self, context: InputContext) -> type | None:
         try:

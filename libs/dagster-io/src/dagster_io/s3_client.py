@@ -42,6 +42,22 @@ class S3Client:
         S3_BYTES_TRANSFERRED.labels(direction="upload", bucket=self.bucket).inc(len(data))
         logger.info("S3 put_object complete key=%s size=%d", key, len(data))
 
+    def put_object_file(self, key: str, file_path: str) -> int:
+        """Upload a file to S3 using multipart upload for large files.
+
+        Returns the file size in bytes.
+        """
+        import os
+
+        size = os.path.getsize(file_path)
+        logger.debug("S3 put_object_file bucket=%s key=%s size=%d", self.bucket, key, size)
+        with track_duration(S3_OPERATION_DURATION, {"operation": "put_object_file", "bucket": self.bucket}):
+            self._client.upload_file(file_path, self.bucket, key)
+        S3_OPERATIONS.labels(operation="put_object_file", bucket=self.bucket).inc()
+        S3_BYTES_TRANSFERRED.labels(direction="upload", bucket=self.bucket).inc(size)
+        logger.info("S3 put_object_file complete key=%s size=%d", key, size)
+        return size
+
     def get_object(self, key: str) -> bytes:
         logger.debug("S3 get_object bucket=%s key=%s", self.bucket, key)
         with track_duration(S3_OPERATION_DURATION, {"operation": "get_object", "bucket": self.bucket}):
