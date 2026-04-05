@@ -35,6 +35,17 @@ spec:
               containerPort: 9090
               protocol: TCP
           env:
+            # Dagster instance postgres (needed for sensor context.instance access)
+            - name: DAGSTER_POSTGRES_HOST
+              value: dagster-postgres.catalyst-data.svc.cluster.local
+            - name: DAGSTER_POSTGRES_PORT
+              value: "5432"
+            - name: DAGSTER_POSTGRES_USER
+              value: dagster
+            - name: DAGSTER_POSTGRES_PASSWORD
+              value: dagster-homelab
+            - name: DAGSTER_POSTGRES_DB
+              value: dagster
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://alloy.monitoring.svc.cluster.local:4317"
             - name: OTEL_SERVICE_NAME
