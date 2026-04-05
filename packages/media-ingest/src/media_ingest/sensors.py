@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 # The S3 path where media_documents data lives — the sensor reads this to
 # discover new document IDs without needing to run the discovery pipeline.
-_DOCUMENTS_S3_PREFIX = "silver/media_ingest/media/media_documents"
+_DOCUMENTS_S3_PREFIX = "silver/default/media/media_documents"
 
 
 def _get_s3_client() -> S3Client:
