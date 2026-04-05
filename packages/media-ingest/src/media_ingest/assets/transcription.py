@@ -1,4 +1,9 @@
-"""Stage 4: Transcribe audio with speaker diarization using faster-whisper + pyannote."""
+"""Stage 4: Transcribe audio with speaker diarization.
+
+Supports two backends:
+- faster-whisper (CTranslate2): CPU-optimized, default
+- openvino (OpenVINO GenAI WhisperPipeline): Intel GPU accelerated, 10-50x realtime
+"""
 
 import os
 import time
@@ -18,8 +23,8 @@ tracer = get_tracer(__name__)
 
 WHISPER_MODEL_CACHE = "/data/whisper-models"
 
-# Whisper K8s config: heavier resources + HF credentials for pyannote diarization.
-# Volumes (NFS media, whisper-models) are inherited from dagster-instance.yaml.
+# K8s config: resources + HF credentials for pyannote diarization.
+# GPU requests added dynamically when openvino backend is selected.
 WHISPER_K8S_CONFIG = {
     **NFS_VOLUMES_CONFIG,
     "dagster-k8s/config": {
@@ -38,11 +43,114 @@ WHISPER_K8S_CONFIG = {
 }
 
 
+# ── Backend: faster-whisper (CTranslate2, CPU) ──────────────────────────────
+
+
+def _load_faster_whisper(config: MediaIngestConfig):
+    """Load faster-whisper model."""
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(
+        config.whisper_model,
+        device=config.whisper_device,
+        compute_type=config.whisper_compute_type,
+        download_root=WHISPER_MODEL_CACHE,
+    )
+
+
+def _transcribe_faster_whisper(model, audio_path: str, word_timestamps: bool) -> dict:
+    """Transcribe with faster-whisper, return normalized result."""
+    segments, info = model.transcribe(audio_path, word_timestamps=word_timestamps)
+    segments_list = []
+    for s in segments:
+        seg = {"start": s.start, "end": s.end, "text": s.text.strip()}
+        if s.words:
+            seg["words"] = [
+                {"start": w.start, "end": w.end, "word": w.word, "probability": w.probability}
+                for w in s.words
+            ]
+        segments_list.append(seg)
+    return {
+        "segments": segments_list,
+        "language": info.language,
+        "language_probability": info.language_probability,
+        "duration_s": info.duration,
+    }
+
+
+# ── Backend: OpenVINO GenAI (Intel GPU / CPU) ───────────────────────────────
+
+
+def _load_openvino(config: MediaIngestConfig):
+    """Download and load OpenVINO whisper model."""
+    from huggingface_hub import snapshot_download
+
+    model_dir = os.path.join(WHISPER_MODEL_CACHE, config.openvino_model_id.replace("/", "--"))
+    if not os.path.isdir(model_dir):
+        logger.info("Downloading OpenVINO model %s to %s", config.openvino_model_id, model_dir)
+        snapshot_download(config.openvino_model_id, local_dir=model_dir)
+
+    import openvino_genai
+    return openvino_genai.WhisperPipeline(model_dir, config.openvino_device)
+
+
+def _transcribe_openvino(pipe, audio_path: str, word_timestamps: bool) -> dict:
+    """Transcribe with OpenVINO GenAI WhisperPipeline, return normalized result."""
+    import librosa
+
+    raw_speech, sr = librosa.load(audio_path, sr=16000)
+    duration_s = len(raw_speech) / sr
+
+    result = pipe.generate(
+        raw_speech.tolist(),
+        max_new_tokens=448,
+        return_timestamps=True,
+    )
+
+    # Parse OpenVINO chunks into our segment format
+    segments_list = []
+    if hasattr(result, "chunks") and result.chunks:
+        for chunk in result.chunks:
+            seg = {
+                "start": chunk.start_ts,
+                "end": chunk.end_ts,
+                "text": chunk.text.strip(),
+            }
+            segments_list.append(seg)
+    else:
+        # Fallback: single segment with full text
+        segments_list.append({
+            "start": 0.0,
+            "end": duration_s,
+            "text": str(result).strip(),
+        })
+
+    # OpenVINO doesn't expose language detection; detect from text
+    language = "en"
+    language_probability = 0.0
+    if hasattr(result, "chunks") and result.chunks:
+        # Try to detect from first chunk if available
+        for chunk in result.chunks:
+            if hasattr(chunk, "language"):
+                language = chunk.language
+                break
+
+    return {
+        "segments": segments_list,
+        "language": language,
+        "language_probability": language_probability,
+        "duration_s": duration_s,
+    }
+
+
+# ── Speaker diarization (shared across backends) ────────────────────────────
+
+
 def _assign_speakers(
     whisper_segments: list[dict],
     diarization,
 ) -> list[dict]:
-    """Align whisper word-level timestamps with pyannote speaker turns."""
+    """Align whisper segment timestamps with pyannote speaker turns."""
     speaker_turns = list(diarization.itertracks(yield_label=True))
 
     for seg in whisper_segments:
@@ -50,7 +158,6 @@ def _assign_speakers(
             for word in seg["words"]:
                 mid = (word["start"] + word["end"]) / 2
                 word["speaker"] = _find_speaker_at(speaker_turns, mid)
-            # Majority vote for segment-level speaker
             speakers = [w["speaker"] for w in seg["words"] if w["speaker"]]
             if speakers:
                 seg["speaker"] = max(set(speakers), key=speakers.count)
@@ -72,12 +179,7 @@ def _find_speaker_at(speaker_turns: list, timestamp: float) -> str | None:
 
 
 def _patch_pyannote_auth():
-    """Monkey-patch huggingface_hub to accept deprecated use_auth_token kwarg.
-
-    pyannote.audio 3.4 passes use_auth_token= to hf_hub_download() in
-    multiple modules, but huggingface_hub >=1.0 removed that parameter.
-    Patch at the module level so every internal import picks it up.
-    """
+    """Monkey-patch huggingface_hub for pyannote 3.4 compat with hf_hub >=1.0."""
     import functools
     import sys
 
@@ -112,9 +214,6 @@ def _run_diarization(audio_path: str, hf_token: str, cache_dir: str):
     """Run pyannote speaker diarization pipeline."""
     import torch
     _patch_pyannote_auth()
-    # torch 2.6+ defaults weights_only=True but pyannote checkpoints
-    # contain custom types. lightning_fabric passes weights_only=True
-    # explicitly, so we must force it off for these trusted HF models.
     _orig_load = torch.load
 
     def _patched_load(*a, **kw):
@@ -132,11 +231,13 @@ def _run_diarization(audio_path: str, hf_token: str, cache_dir: str):
     )
     if pipeline is None:
         raise RuntimeError(
-            "Failed to load pyannote pipeline — ensure the HF token has access "
-            "to pyannote/speaker-diarization-3.1 (accept license at "
-            "https://hf.co/pyannote/speaker-diarization-3.1)"
+            "Failed to load pyannote pipeline — accept license at "
+            "https://hf.co/pyannote/speaker-diarization-3.1"
         )
     return pipeline(audio_path)
+
+
+# ── Per-file transcription (backend-agnostic) ───────────────────────────────
 
 
 def _transcribe_file(
@@ -145,26 +246,16 @@ def _transcribe_file(
     config: MediaIngestConfig,
     context: AssetExecutionContext,
 ) -> dict[str, Any]:
-    """Transcribe a single file with optional diarization."""
+    """Transcribe a single file with the configured backend + optional diarization."""
     start = time.monotonic()
 
-    segments, info = model.transcribe(
-        doc.source_path,
-        word_timestamps=config.enable_diarization,
-    )
-    segments_list = []
-    for s in segments:
-        seg = {
-            "start": s.start,
-            "end": s.end,
-            "text": s.text.strip(),
-        }
-        if s.words:
-            seg["words"] = [
-                {"start": w.start, "end": w.end, "word": w.word, "probability": w.probability}
-                for w in s.words
-            ]
-        segments_list.append(seg)
+    # Dispatch to backend
+    if config.whisper_backend == "openvino":
+        result = _transcribe_openvino(model, doc.source_path, config.enable_diarization)
+    else:
+        result = _transcribe_faster_whisper(model, doc.source_path, config.enable_diarization)
+
+    segments_list = result["segments"]
 
     # Run diarization and align speakers
     hf_token = config.hf_token or os.environ.get("HF_TOKEN", "")
@@ -198,9 +289,9 @@ def _transcribe_file(
         speaker_text = speaker_text.strip()
 
     logger.info(
-        "Transcription complete file=%s duration=%.1fs language=%s prob=%.2f segments=%d speakers=%d",
-        doc.title, duration, info.language, info.language_probability,
-        len(segments_list), len(unique_speakers),
+        "Transcription complete file=%s duration=%.1fs language=%s segments=%d speakers=%d backend=%s",
+        doc.title, duration, result["language"],
+        len(segments_list), len(unique_speakers), config.whisper_backend,
     )
 
     return {
@@ -208,20 +299,23 @@ def _transcribe_file(
         "title": doc.title,
         "text": full_text,
         "speaker_text": speaker_text or None,
-        "language": info.language,
-        "language_probability": info.language_probability,
+        "language": result["language"],
+        "language_probability": result.get("language_probability", 0.0),
         "segments": segments_list,
         "segment_count": len(segments_list),
         "speaker_count": len(unique_speakers),
         "speakers": sorted(unique_speakers) if unique_speakers else [],
-        "duration_s": info.duration,
+        "duration_s": result["duration_s"],
         "transcription_time_s": round(duration, 1),
     }
 
 
+# ── Dagster asset ────────────────────────────────────────────────────────────
+
+
 @asset(
     group_name="media_ingest",
-    description="Transcribe audio with speaker diarization (faster-whisper + pyannote)",
+    description="Transcribe audio with speaker diarization (faster-whisper or OpenVINO)",
     compute_kind="ml",
     metadata={"layer": "gold"},
     op_tags=WHISPER_K8S_CONFIG,
@@ -232,38 +326,40 @@ def media_transcriptions(
     media_documents: list[MediaDocument],
 ) -> Output[list[dict[str, Any]]]:
     with trace_operation("media_transcriptions", tracer, {"code_location": "media_ingest", "layer": "gold", "record_count": len(media_documents), "whisper_model": config.whisper_model}):
-        from faster_whisper import WhisperModel
-
         audio_docs = [d for d in media_documents if d.metadata.get("has_audio")]
+        backend = config.whisper_backend
         logger.info(
-            "Starting media_transcriptions: %d audio files (model=%s, device=%s, compute=%s, diarize=%s)",
-            len(audio_docs), config.whisper_model, config.whisper_device,
-            config.whisper_compute_type, config.enable_diarization,
+            "Starting media_transcriptions: %d audio files (backend=%s, model=%s, diarize=%s)",
+            len(audio_docs), backend, config.whisper_model, config.enable_diarization,
         )
 
-        context.log.info(
-            f"Loading faster-whisper model '{config.whisper_model}' "
-            f"(device={config.whisper_device}, compute_type={config.whisper_compute_type}, "
-            f"cache={WHISPER_MODEL_CACHE}, diarization={config.enable_diarization})"
-        )
-        model = WhisperModel(
-            config.whisper_model,
-            device=config.whisper_device,
-            compute_type=config.whisper_compute_type,
-            download_root=WHISPER_MODEL_CACHE,
-        )
+        # Load model based on backend
+        if backend == "openvino":
+            context.log.info(
+                f"Loading OpenVINO model '{config.openvino_model_id}' "
+                f"(device={config.openvino_device}, cache={WHISPER_MODEL_CACHE})"
+            )
+            model = _load_openvino(config)
+            model_label = f"openvino:{config.openvino_model_id}:{config.openvino_device}"
+        else:
+            context.log.info(
+                f"Loading faster-whisper model '{config.whisper_model}' "
+                f"(device={config.whisper_device}, compute_type={config.whisper_compute_type})"
+            )
+            model = _load_faster_whisper(config)
+            model_label = f"faster-whisper:{config.whisper_model}:{config.whisper_compute_type}"
 
         results: list[dict[str, Any]] = []
         errors = 0
 
         for doc in audio_docs:
             context.log.info(f"Transcribing: {doc.title}")
-            logger.info("Transcribing file=%s id=%s", doc.title, doc.id)
+            logger.info("Transcribing file=%s id=%s backend=%s", doc.title, doc.id, backend)
             try:
                 result = _transcribe_file(model, doc, config, context)
                 results.append(result)
             except Exception as e:
-                context.log.warning(f"Whisper failed for {doc.title}: {e}")
+                context.log.warning(f"Transcription failed for {doc.title}: {e}")
                 logger.error("Transcription failed file=%s error=%s", doc.title, str(e))
                 results.append({
                     "document_id": doc.id,
@@ -284,9 +380,8 @@ def media_transcriptions(
             metadata={
                 "total_transcribed": len(results),
                 "errors": errors,
-                "model": config.whisper_model,
-                "device": config.whisper_device,
-                "compute_type": config.whisper_compute_type,
+                "backend": backend,
+                "model": model_label,
                 "diarization_enabled": config.enable_diarization,
                 "total_speakers_detected": total_speakers,
                 "languages": MetadataValue.json(

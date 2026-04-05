@@ -21,6 +21,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+openvino = [
+    "openvino-genai>=2025.4",
+    "librosa>=0.10",
+    "soundfile>=0.12",
+]
 dev = [
     "dagster-webserver>=1.9",
     "pytest>=8.0",
