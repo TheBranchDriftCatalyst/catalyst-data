@@ -43,14 +43,22 @@ FROM python:3.12-slim
 #   ffmpeg         - media processing / audio extraction
 #   libsndfile1    - soundfile (required by pyannote.audio + librosa)
 #   libgomp1       - OpenMP (required by ctranslate2/faster-whisper)
-#   intel-opencl-icd    - Intel OpenCL ICD for GPU compute
-#   intel-level-zero-gpu - oneAPI Level Zero GPU driver
-#   ocl-icd-libopencl1  - OpenCL ICD loader
+#   Intel GPU compute runtime (OpenCL + Level Zero) from Intel APT repo
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ffmpeg libsndfile1 libgomp1 \
+        gnupg ca-certificates wget && \
+    wget -qO- https://repositories.intel.com/gpu/intel-graphics.key | \
+        gpg --dearmor -o /usr/share/keyrings/intel-graphics.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] \
+        https://repositories.intel.com/gpu/ubuntu-noble noble unified" \
+        > /etc/apt/sources.list.d/intel-gpu.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
         ocl-icd-libopencl1 intel-opencl-icd \
         intel-level-zero-gpu level-zero && \
+    apt-get purge -y gnupg wget && \
+    apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
