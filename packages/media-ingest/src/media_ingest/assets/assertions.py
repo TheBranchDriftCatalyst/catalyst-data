@@ -1,4 +1,7 @@
-"""Gold: Qualified assertion extraction from media transcription chunks via LLM."""
+"""Gold: Qualified assertion extraction from media transcription chunks via LLM.
+
+Partitioned by document_id — each run extracts assertions from one document's chunks.
+"""
 
 from dagster import AssetExecutionContext, Output, asset
 from dagster_io import (
@@ -14,6 +17,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
+from media_ingest.partitions import media_partitions
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -94,9 +98,10 @@ MEDIA_PREDICATE_MAPPINGS = {
 
 @asset(
     group_name="media_ingest",
-    description="Extract qualified assertions from media transcription chunks via LLM",
+    description="Extract qualified assertions from one document's transcription chunks via LLM",
     compute_kind="llm",
     metadata={"layer": "gold"},
+    partitions_def=media_partitions,
     op_tags=LLM_ASSET_K8S_CONFIG,
 )
 def media_assertions(
@@ -104,8 +109,22 @@ def media_assertions(
     llm: LLMResource,
     media_chunks: list[TextChunk],
 ) -> Output[list[Assertion]]:
-    with trace_operation("media_assertions", tracer, {"code_location": "media_ingest", "layer": "gold", "chunk_count": len(media_chunks)}):
-        logger.info("Starting media_assertions extraction for %d chunks", len(media_chunks))
+    partition_key = context.partition_key
+    with trace_operation("media_assertions", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key, "chunk_count": len(media_chunks)}):
+        logger.info("Starting media_assertions extraction for partition=%s (%d chunks)", partition_key, len(media_chunks))
+
+        if not media_chunks:
+            context.log.info(f"No chunks for partition={partition_key} — returning empty assertions")
+            return Output(
+                [],
+                metadata={
+                    "document_id": partition_key,
+                    "assertion_count": 0,
+                    "negated_count": 0,
+                    "hedged_count": 0,
+                },
+            )
+
         chain = llm.with_structured_output(AssertionExtractionResult)
         results = llm.invoke_batch(
             chain,
@@ -128,8 +147,8 @@ def media_assertions(
         hedged_count = sum(1 for a in all_assertions if a.hedged)
         ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_assertions", layer="gold").inc(len(all_assertions))
         logger.info(
-            "media_assertions complete: %d assertions from %d chunks (negated=%d, hedged=%d)",
-            len(all_assertions), len(media_chunks), negated_count, hedged_count,
+            "media_assertions complete for partition=%s: %d assertions from %d chunks (negated=%d, hedged=%d)",
+            partition_key, len(all_assertions), len(media_chunks), negated_count, hedged_count,
         )
         context.log.info(
             f"Extracted {len(all_assertions)} assertions from {len(media_chunks)} chunks "
@@ -138,8 +157,10 @@ def media_assertions(
         return Output(
             all_assertions,
             metadata={
+                "document_id": partition_key,
                 "assertion_count": len(all_assertions),
                 "negated_count": negated_count,
                 "hedged_count": hedged_count,
+                "chunk_count": len(media_chunks),
             },
         )

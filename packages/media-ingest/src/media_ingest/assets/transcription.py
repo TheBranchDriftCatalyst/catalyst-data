@@ -3,6 +3,8 @@
 Supports two backends:
 - faster-whisper (CTranslate2): CPU-optimized, default
 - openvino (OpenVINO GenAI WhisperPipeline): Intel GPU accelerated, 10-50x realtime
+
+Partitioned by document_id — each run transcribes a single media file.
 """
 
 import os
@@ -17,6 +19,7 @@ from dagster_io.observability import get_tracer, trace_operation
 from media_ingest.assets.discovery import NFS_VOLUMES_CONFIG
 from media_ingest.assets.documents import MediaDocument
 from media_ingest.config import MediaIngestConfig
+from media_ingest.partitions import media_partitions
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -315,22 +318,49 @@ def _transcribe_file(
 
 @asset(
     group_name="media_ingest",
-    description="Transcribe audio with speaker diarization (faster-whisper or OpenVINO)",
+    description="Transcribe audio with speaker diarization (faster-whisper or OpenVINO). One partition = one media file.",
     compute_kind="ml",
     metadata={"layer": "gold"},
+    partitions_def=media_partitions,
     op_tags=WHISPER_K8S_CONFIG,
 )
 def media_transcriptions(
     context: AssetExecutionContext,
     config: MediaIngestConfig,
     media_documents: list[MediaDocument],
-) -> Output[list[dict[str, Any]]]:
-    with trace_operation("media_transcriptions", tracer, {"code_location": "media_ingest", "layer": "gold", "record_count": len(media_documents), "whisper_model": config.whisper_model}):
-        audio_docs = [d for d in media_documents if d.metadata.get("has_audio")]
+) -> Output[dict[str, Any]]:
+    partition_key = context.partition_key
+    with trace_operation("media_transcriptions", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key}):
+        # Find the document matching this partition key
+        doc = None
+        for d in media_documents:
+            if d.id == partition_key:
+                doc = d
+                break
+
+        if doc is None:
+            raise ValueError(
+                f"Document with id '{partition_key}' not found in media_documents. "
+                f"Available ids: {[d.id for d in media_documents[:10]]}"
+            )
+
+        if not doc.metadata.get("has_audio"):
+            context.log.warning(f"Document '{doc.title}' has no audio — returning empty transcription")
+            return Output(
+                {
+                    "document_id": doc.id,
+                    "title": doc.title,
+                    "text": "",
+                    "language": "unknown",
+                    "error": "no_audio",
+                },
+                metadata={"skipped": True, "reason": "no_audio"},
+            )
+
         backend = config.whisper_backend
         logger.info(
-            "Starting media_transcriptions: %d audio files (backend=%s, model=%s, diarize=%s)",
-            len(audio_docs), backend, config.whisper_model, config.enable_diarization,
+            "Starting media_transcriptions for partition=%s (backend=%s, model=%s, diarize=%s)",
+            partition_key, backend, config.whisper_model, config.enable_diarization,
         )
 
         # Load model based on backend
@@ -349,43 +379,43 @@ def media_transcriptions(
             model = _load_faster_whisper(config)
             model_label = f"faster-whisper:{config.whisper_model}:{config.whisper_compute_type}"
 
-        results: list[dict[str, Any]] = []
-        errors = 0
+        context.log.info(f"Transcribing: {doc.title}")
+        logger.info("Transcribing file=%s id=%s backend=%s", doc.title, doc.id, backend)
 
-        for doc in audio_docs:
-            context.log.info(f"Transcribing: {doc.title}")
-            logger.info("Transcribing file=%s id=%s backend=%s", doc.title, doc.id, backend)
-            try:
-                result = _transcribe_file(model, doc, config, context)
-                results.append(result)
-            except Exception as e:
-                context.log.warning(f"Transcription failed for {doc.title}: {e}")
-                logger.error("Transcription failed file=%s error=%s", doc.title, str(e))
-                results.append({
-                    "document_id": doc.id,
-                    "title": doc.title,
-                    "text": "",
-                    "language": "unknown",
-                    "error": str(e),
-                })
-                errors += 1
+        try:
+            result = _transcribe_file(model, doc, config, context)
+        except Exception as e:
+            context.log.warning(f"Transcription failed for {doc.title}: {e}")
+            logger.error("Transcription failed file=%s error=%s", doc.title, str(e))
+            result = {
+                "document_id": doc.id,
+                "title": doc.title,
+                "text": "",
+                "language": "unknown",
+                "error": str(e),
+            }
 
-        total_speakers = sum(r.get("speaker_count", 0) for r in results)
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_transcriptions", layer="gold").inc(len(results))
-        logger.info("media_transcriptions complete: %d transcribed (%d errors)", len(results), errors)
-        context.log.info(f"Transcribed {len(results)} files ({errors} errors, {total_speakers} total speakers detected)")
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_transcriptions", layer="gold").inc(1)
+        logger.info("media_transcriptions complete for partition=%s", partition_key)
+        context.log.info(
+            f"Transcribed '{doc.title}' — "
+            f"{result.get('segment_count', 0)} segments, "
+            f"{result.get('speaker_count', 0)} speakers"
+        )
 
         return Output(
-            results,
+            result,
             metadata={
-                "total_transcribed": len(results),
-                "errors": errors,
+                "document_id": doc.id,
+                "title": doc.title,
                 "backend": backend,
                 "model": model_label,
                 "diarization_enabled": config.enable_diarization,
-                "total_speakers_detected": total_speakers,
-                "languages": MetadataValue.json(
-                    list({r["language"] for r in results if r.get("language") != "unknown"})
-                ),
+                "segment_count": result.get("segment_count", 0),
+                "speaker_count": result.get("speaker_count", 0),
+                "language": result.get("language", "unknown"),
+                "duration_s": MetadataValue.float(result.get("duration_s", 0.0)),
+                "transcription_time_s": MetadataValue.float(result.get("transcription_time_s", 0.0)),
+                "error": result.get("error"),
             },
         )

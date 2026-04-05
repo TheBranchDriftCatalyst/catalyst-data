@@ -2,6 +2,8 @@
 
 Uses 800/150 chunk sizes optimized for speech transcriptions — shorter chunks
 improve retrieval quality for conversational audio content.
+
+Partitioned by document_id — each run chunks a single transcription.
 """
 
 from typing import Any
@@ -12,6 +14,7 @@ from dagster_io import ChunkingResource, TextChunk
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
+from media_ingest.partitions import media_partitions
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -24,54 +27,61 @@ TRANSCRIPTION_CHUNK_OVERLAP = 150
 
 @asset(
     group_name="media_ingest",
-    description="Chunk media transcriptions for embedding",
+    description="Chunk a single media transcription for embedding. One partition = one document.",
     compute_kind="python",
     metadata={"layer": "silver"},
+    partitions_def=media_partitions,
 )
 def media_chunks(
     context: AssetExecutionContext,
     chunking: ChunkingResource,
-    media_transcriptions: list[dict[str, Any]],
+    media_transcriptions: dict[str, Any],
 ) -> Output[list[TextChunk]]:
-    with trace_operation("media_chunks", tracer, {"code_location": "media_ingest", "layer": "silver", "record_count": len(media_transcriptions)}):
-        logger.info("Starting media_chunks chunking for %d transcriptions", len(media_transcriptions))
-        all_chunks: list[TextChunk] = []
-        skipped = 0
+    partition_key = context.partition_key
+    with trace_operation("media_chunks", tracer, {"code_location": "media_ingest", "layer": "silver", "partition_key": partition_key}):
+        t = media_transcriptions
+        logger.info("Starting media_chunks chunking for partition=%s", partition_key)
 
-        for t in media_transcriptions:
-            # Prefer speaker-attributed text for richer chunks
-            text = t.get("speaker_text") or t.get("text", "")
-            if not text:
-                skipped += 1
-                continue
-
-            chunks = chunking.chunk_document(
-                document_id=t["document_id"],
-                title=t.get("title", ""),
-                content=text,
+        # Prefer speaker-attributed text for richer chunks
+        text = t.get("speaker_text") or t.get("text", "")
+        if not text:
+            context.log.info(f"No text for partition={partition_key} — returning empty chunks")
+            return Output(
+                [],
                 metadata={
-                    "source": "media_ingest",
-                    "language": t.get("language", "unknown"),
-                    "speaker_count": t.get("speaker_count", 0),
-                    "speakers": t.get("speakers", []),
+                    "document_id": t.get("document_id", partition_key),
+                    "chunk_count": 0,
+                    "skipped": True,
+                    "reason": "empty_text",
                 },
-                chunk_size=TRANSCRIPTION_CHUNK_SIZE,
-                chunk_overlap=TRANSCRIPTION_CHUNK_OVERLAP,
             )
-            all_chunks.extend(chunks)
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_chunks", layer="silver").inc(len(all_chunks))
-        logger.info("media_chunks complete: %d transcriptions -> %d chunks (skipped=%d)", len(media_transcriptions) - skipped, len(all_chunks), skipped)
+        chunks = chunking.chunk_document(
+            document_id=t["document_id"],
+            title=t.get("title", ""),
+            content=text,
+            metadata={
+                "source": "media_ingest",
+                "language": t.get("language", "unknown"),
+                "speaker_count": t.get("speaker_count", 0),
+                "speakers": t.get("speakers", []),
+            },
+            chunk_size=TRANSCRIPTION_CHUNK_SIZE,
+            chunk_overlap=TRANSCRIPTION_CHUNK_OVERLAP,
+        )
+
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_chunks", layer="silver").inc(len(chunks))
+        logger.info("media_chunks complete for partition=%s: %d chunks", partition_key, len(chunks))
         context.log.info(
-            f"Chunked {len(media_transcriptions) - skipped} transcriptions into {len(all_chunks)} chunks "
-            f"(skipped {skipped} empty, size={TRANSCRIPTION_CHUNK_SIZE}, overlap={TRANSCRIPTION_CHUNK_OVERLAP})"
+            f"Chunked transcription for '{t.get('title', partition_key)}' into {len(chunks)} chunks "
+            f"(size={TRANSCRIPTION_CHUNK_SIZE}, overlap={TRANSCRIPTION_CHUNK_OVERLAP})"
         )
         return Output(
-            all_chunks,
+            chunks,
             metadata={
-                "transcription_count": len(media_transcriptions),
-                "skipped": skipped,
-                "chunk_count": len(all_chunks),
+                "document_id": t.get("document_id", partition_key),
+                "title": t.get("title", ""),
+                "chunk_count": len(chunks),
                 "chunk_size": TRANSCRIPTION_CHUNK_SIZE,
                 "chunk_overlap": TRANSCRIPTION_CHUNK_OVERLAP,
             },

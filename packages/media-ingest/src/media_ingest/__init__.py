@@ -21,6 +21,7 @@ from media_ingest.assets import (
     media_metadata,
     media_transcriptions,
 )
+from media_ingest.sensors import media_document_sensor
 
 defs = Definitions(
     assets=[
@@ -32,6 +33,9 @@ defs = Definitions(
         media_mentions,
         media_assertions,
         media_embeddings,
+    ],
+    sensors=[
+        media_document_sensor,
     ],
     resources={
         "io_manager": MinioIOManager(),

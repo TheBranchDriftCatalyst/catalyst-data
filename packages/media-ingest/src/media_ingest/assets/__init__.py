@@ -8,9 +8,11 @@ from media_ingest.assets.metadata import media_metadata
 from media_ingest.assets.transcription import media_transcriptions
 
 __all__ = [
+    # Unpartitioned discovery assets
     "media_files",
     "media_metadata",
     "media_documents",
+    # Partitioned per-document assets
     "media_transcriptions",
     "media_chunks",
     "media_mentions",
