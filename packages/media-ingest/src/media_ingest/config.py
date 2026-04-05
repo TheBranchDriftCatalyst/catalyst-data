@@ -9,7 +9,7 @@ class MediaIngestConfig(Config):
     metube_path: str = "/data/metube"
     tubesync_path: str = "/data/tubesync"
     extensions: str = ".mp4,.mkv,.webm,.mp3,.m4a,.wav,.flac"
-    whisper_backend: str = "faster-whisper"  # "faster-whisper" or "openvino" (needs :gpu image)
+    whisper_backend: str = "openvino"  # "faster-whisper" (CPU) or "openvino" (Intel GPU, 50x realtime)
     whisper_model: str = "large-v3"
     whisper_device: str = "auto"
     whisper_compute_type: str = "int8"
