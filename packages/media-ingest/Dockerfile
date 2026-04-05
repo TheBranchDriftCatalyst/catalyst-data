@@ -14,11 +14,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /tmp/dagster-io/
 
 # 2. Install package dependencies — only re-runs when pyproject.toml changes
+#    Use CPU-only PyTorch wheels to avoid pulling ~2GB CUDA runtime
 COPY packages/media-ingest/pyproject.toml .
 RUN --mount=type=cache,target=/root/.cache/uv \
     mkdir -p src/media_ingest && \
     touch src/media_ingest/__init__.py && \
-    uv pip install --system . && \
+    uv pip install --system \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        . && \
     rm -rf src/media_ingest
 
 # 3. Copy real source — changes most often, deps already cached
@@ -29,9 +32,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---------- stage 2: runtime ----------
 FROM python:3.12-slim
 
-# Runtime system dependency: ffmpeg for media processing
+# Runtime system dependencies:
+#   ffmpeg       - media processing / audio extraction
+#   libsndfile1  - soundfile (required by pyannote.audio)
+#   libgomp1     - OpenMP (required by ctranslate2/faster-whisper)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends ffmpeg libsndfile1 libgomp1 && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

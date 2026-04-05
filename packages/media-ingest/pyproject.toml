@@ -14,7 +14,10 @@ dependencies = [
     "dagster-io",
     "boto3>=1.34",
     "pydantic>=2.0",
-    "openai-whisper>=20231117",
+    "faster-whisper>=1.1",
+    "pyannote.audio>=3.3",
+    "torch>=2.6,<2.8",
+    "torchaudio>=2.6,<2.8",
 ]
 
 [project.optional-dependencies]

@@ -39,7 +39,8 @@ def media_chunks(
         skipped = 0
 
         for t in media_transcriptions:
-            text = t.get("text", "")
+            # Prefer speaker-attributed text for richer chunks
+            text = t.get("speaker_text") or t.get("text", "")
             if not text:
                 skipped += 1
                 continue
@@ -51,6 +52,8 @@ def media_chunks(
                 metadata={
                     "source": "media_ingest",
                     "language": t.get("language", "unknown"),
+                    "speaker_count": t.get("speaker_count", 0),
+                    "speakers": t.get("speakers", []),
                 },
                 chunk_size=TRANSCRIPTION_CHUNK_SIZE,
                 chunk_overlap=TRANSCRIPTION_CHUNK_OVERLAP,
