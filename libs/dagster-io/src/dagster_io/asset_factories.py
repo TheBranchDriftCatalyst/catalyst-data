@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from dagster import AssetExecutionContext, Output, asset
+from dagster import AssetExecutionContext, AssetIn, Output, asset
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from dagster_io.extraction_schemas import (
@@ -174,7 +174,7 @@ def make_ner_asset(
         compute_kind="llm",
         metadata={"layer": layer},
         op_tags=LLM_ASSET_K8S_CONFIG,
-        ins={input_key: {}},
+        ins={input_key: AssetIn()},
     )
     def _ner_asset(
         context: AssetExecutionContext,
@@ -257,7 +257,7 @@ def make_proposition_asset(
         compute_kind="llm",
         metadata={"layer": layer},
         op_tags=LLM_ASSET_K8S_CONFIG,
-        ins={input_key: {}},
+        ins={input_key: AssetIn()},
     )
     def _proposition_asset(
         context: AssetExecutionContext,
