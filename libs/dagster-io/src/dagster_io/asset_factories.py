@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from dagster import AssetIn, OpExecutionContext, Output, asset
+from dagster import AssetIn, Output, asset
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from dagster_io.extraction_schemas import (
@@ -177,7 +177,7 @@ def make_ner_asset(
         ins={input_key: AssetIn()},
     )
     def _ner_asset(
-        context: OpExecutionContext,
+        context,
         llm: LLMResource,
         **kwargs: Any,
     ) -> Output[list[dict[str, Any]]]:
@@ -260,7 +260,7 @@ def make_proposition_asset(
         ins={input_key: AssetIn()},
     )
     def _proposition_asset(
-        context: OpExecutionContext,
+        context,
         llm: LLMResource,
         **kwargs: Any,
     ) -> Output[list[dict[str, Any]]]:
