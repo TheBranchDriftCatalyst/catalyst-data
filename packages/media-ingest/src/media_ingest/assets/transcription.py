@@ -94,7 +94,14 @@ def _load_openvino(config: MediaIngestConfig):
         snapshot_download(config.openvino_model_id, local_dir=model_dir)
 
     import openvino_genai
-    return openvino_genai.WhisperPipeline(model_dir, config.openvino_device)
+    device = config.openvino_device
+    try:
+        return openvino_genai.WhisperPipeline(model_dir, device)
+    except RuntimeError as e:
+        if "GPU" in device and "Context was not initialized" in str(e):
+            logger.warning("GPU not available, falling back to CPU: %s", e)
+            return openvino_genai.WhisperPipeline(model_dir, "CPU")
+        raise
 
 
 def _transcribe_openvino(pipe, audio_path: str, word_timestamps: bool) -> dict:
