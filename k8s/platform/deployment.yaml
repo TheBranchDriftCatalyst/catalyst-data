@@ -73,6 +73,9 @@ spec:
               value: dagster-homelab
             - name: DAGSTER_POSTGRES_DB
               value: dagster
+          envFrom:
+            - secretRef:
+                name: dagster-s3-credentials
           volumeMounts:
             - name: dagster-home
               mountPath: /opt/dagster/dagster_home
@@ -178,6 +181,9 @@ spec:
               value: dagster-homelab
             - name: DAGSTER_POSTGRES_DB
               value: dagster
+          envFrom:
+            - secretRef:
+                name: dagster-s3-credentials
           volumeMounts:
             - name: dagster-home
               mountPath: /opt/dagster/dagster_home

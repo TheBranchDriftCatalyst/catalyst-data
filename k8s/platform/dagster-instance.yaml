@@ -94,5 +94,18 @@ data:
           job_spec_config:
             ttl_seconds_after_finished: 3600
 
+    compute_logs:
+      module: dagster_aws.s3.compute_log_manager
+      class: S3ComputeLogManager
+      config:
+        bucket: catalyst-data
+        prefix: compute-logs
+        endpoint_url:
+          env: DAGSTER_S3_ENDPOINT_URL
+        access_key:
+          env: DAGSTER_S3_ACCESS_KEY
+        secret_key:
+          env: DAGSTER_S3_SECRET_KEY
+
     telemetry:
       enabled: false
