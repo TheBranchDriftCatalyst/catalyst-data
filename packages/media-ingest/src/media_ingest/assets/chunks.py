@@ -35,11 +35,11 @@ TRANSCRIPTION_CHUNK_OVERLAP = 150
 def media_chunks(
     context: AssetExecutionContext,
     chunking: ChunkingResource,
-    media_transcriptions: dict[str, Any],
+    media_diarization: dict[str, Any],
 ) -> Output[list[TextChunk]]:
     partition_key = context.partition_key
     with trace_operation("media_chunks", tracer, {"code_location": "media_ingest", "layer": "silver", "partition_key": partition_key}):
-        t = media_transcriptions
+        t = media_diarization
         logger.info("Starting media_chunks chunking for partition=%s", partition_key)
 
         # Prefer speaker-attributed text for richer chunks

@@ -15,6 +15,7 @@ from dagster_io import ChunkingResource, EmbeddingResource, LLMResource, MinioIO
 from media_ingest.assets import (
     media_assertions,
     media_chunks,
+    media_diarization,
     media_documents,
     media_embeddings,
     media_files,
@@ -34,6 +35,7 @@ defs = Definitions(
         media_documents,
         # Partitioned per-document
         media_transcriptions,
+        media_diarization,
         media_chunks,
         media_mentions,
         media_assertions,
