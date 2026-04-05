@@ -104,12 +104,36 @@ def _load_openvino(config: MediaIngestConfig):
         raise
 
 
+def _extract_audio_to_wav(audio_path: str) -> str:
+    """Extract audio from any media container to a temp WAV file using ffmpeg."""
+    import subprocess
+    import tempfile
+
+    wav_path = tempfile.mktemp(suffix=".wav")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", audio_path, "-vn",
+         "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav_path],
+        capture_output=True, check=True, timeout=300,
+    )
+    return wav_path
+
+
 def _transcribe_openvino(pipe, audio_path: str, word_timestamps: bool) -> dict:
     """Transcribe with OpenVINO GenAI WhisperPipeline, return normalized result."""
-    import librosa
+    import numpy as np
+    import soundfile as sf
 
-    raw_speech, sr = librosa.load(audio_path, sr=16000)
-    duration_s = len(raw_speech) / sr
+    # Extract audio from container format (MP4/MKV) to raw WAV
+    wav_path = _extract_audio_to_wav(audio_path)
+    try:
+        raw_speech, sr = sf.read(wav_path, dtype="float32")
+        # Ensure mono
+        if raw_speech.ndim > 1:
+            raw_speech = raw_speech.mean(axis=1)
+        duration_s = len(raw_speech) / sr
+    finally:
+        import os
+        os.unlink(wav_path)
 
     result = pipe.generate(
         raw_speech.tolist(),
