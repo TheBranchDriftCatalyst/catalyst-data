@@ -20,15 +20,19 @@ from media_ingest.assets import (
     media_files,
     media_mentions,
     media_metadata,
+    media_transcode,
     media_transcriptions,
 )
 from media_ingest.sensors import media_document_sensor
 
 defs = Definitions(
     assets=[
+        # Unpartitioned: discovery + transcode
         media_files,
         media_metadata,
+        media_transcode,
         media_documents,
+        # Partitioned per-document
         media_transcriptions,
         media_chunks,
         media_mentions,

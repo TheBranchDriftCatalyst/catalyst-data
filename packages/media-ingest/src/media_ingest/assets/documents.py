@@ -53,11 +53,11 @@ def _file_to_document(file_info: dict[str, Any]) -> MediaDocument:
 )
 def media_documents(
     context: AssetExecutionContext,
-    media_metadata: list[dict[str, Any]],
+    media_transcode: list[dict[str, Any]],
 ) -> Output[list[MediaDocument]]:
-    with trace_operation("media_documents", tracer, {"code_location": "media_ingest", "layer": "silver", "record_count": len(media_metadata)}):
-        logger.info("Starting media_documents transformation for %d files", len(media_metadata))
-        documents = [_file_to_document(f) for f in media_metadata]
+    with trace_operation("media_documents", tracer, {"code_location": "media_ingest", "layer": "silver", "record_count": len(media_transcode)}):
+        logger.info("Starting media_documents transformation for %d files", len(media_transcode))
+        documents = [_file_to_document(f) for f in media_transcode]
 
         by_source: dict[str, int] = {}
         for doc in documents:

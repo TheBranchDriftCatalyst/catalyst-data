@@ -10,7 +10,7 @@ spec:
   capacity:
     storage: 10Gi
   accessModes:
-    - ReadOnlyMany
+    - ReadWriteMany
   nfs:
     server: 192.168.1.36
     path: /volume1/appdata/downloads/metube-downloads
@@ -27,7 +27,7 @@ metadata:
   name: metube-downloads
 spec:
   accessModes:
-    - ReadOnlyMany
+    - ReadWriteMany
   storageClassName: ""
   volumeName: catalyst-data-metube-downloads
   resources:
@@ -42,7 +42,7 @@ spec:
   capacity:
     storage: 10Gi
   accessModes:
-    - ReadOnlyMany
+    - ReadWriteMany
   nfs:
     server: 192.168.1.36
     path: /volume1/appdata/downloads/tubesync-downloads
@@ -59,7 +59,7 @@ metadata:
   name: tubesync-downloads
 spec:
   accessModes:
-    - ReadOnlyMany
+    - ReadWriteMany
   storageClassName: ""
   volumeName: catalyst-data-tubesync-downloads
   resources:
