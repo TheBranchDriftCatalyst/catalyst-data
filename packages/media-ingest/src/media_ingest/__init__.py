@@ -12,10 +12,12 @@ from dagster import Definitions
 from dagster_io import ChunkingResource, EmbeddingResource, LLMResource, MinioIOManager
 
 from media_ingest.assets import (
+    media_assertions,
     media_chunks,
     media_documents,
     media_embeddings,
     media_files,
+    media_mentions,
     media_metadata,
     media_transcriptions,
 )
@@ -27,6 +29,8 @@ defs = Definitions(
         media_documents,
         media_transcriptions,
         media_chunks,
+        media_mentions,
+        media_assertions,
         media_embeddings,
     ],
     resources={
