@@ -63,12 +63,12 @@ RUN apt-get update && \
         gnupg ca-certificates wget && \
     wget -qO- https://repositories.intel.com/gpu/intel-graphics.key | \
         gpg --dearmor -o /usr/share/keyrings/intel-graphics.gpg && \
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu-noble noble unified" \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu noble unified" \
         > /etc/apt/sources.list.d/intel-gpu.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         ocl-icd-libopencl1 intel-opencl-icd \
-        intel-level-zero-gpu level-zero && \
+        libze-intel-gpu1 libze1 && \
     apt-get purge -y gnupg wget && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
