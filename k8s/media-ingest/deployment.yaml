@@ -26,7 +26,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: code-server
-          image: ghcr.io/thebranchdriftcatalyst/media-ingest:latest
+          image: ghcr.io/thebranchdriftcatalyst/media-ingest:gpu
           ports:
             - name: grpc
               containerPort: 4000
@@ -48,7 +48,7 @@ spec:
             - name: METRICS_PORT
               value: "9090"
             - name: DAGSTER_CURRENT_IMAGE
-              value: ghcr.io/thebranchdriftcatalyst/media-ingest:latest
+              value: ghcr.io/thebranchdriftcatalyst/media-ingest:gpu
             - name: DAGSTER_S3_ENDPOINT_URL
               valueFrom:
                 secretKeyRef:
