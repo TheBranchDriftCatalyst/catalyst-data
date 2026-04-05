@@ -7,16 +7,17 @@ negation/hedging detection, and predicate normalization for leaked documents.
 from dagster import AssetExecutionContext, Output, asset
 from dagster_io import (
     Assertion,
+    AssertionExtractionResult,
+    LLM_ASSET_K8S_CONFIG,
     LLMResource,
-    Provenance,
     TextChunk,
+    build_assertions,
 )
 from dagster_io.prompts import load_prompt
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, Field
 
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSERTIONS_CREATED, ASSET_RECORDS_PROCESSED, LLM_REQUEST_DURATION, track_duration
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
 
 logger = get_logger(__name__)
@@ -47,57 +48,24 @@ For each assertion, provide:
 Be precise with predicates. Prefer canonical forms over variations.""",
 )
 
-
-class AssertionQualifiers(BaseModel):
-    """Qualifier fields for an assertion."""
-
-    time: str = Field(description="When this occurred (date/period), or empty string if unknown")
-    location: str = Field(description="Where (jurisdiction/country/embassy), or empty string if unknown")
-    condition: str = Field(description="Under what condition, or empty string if none")
-    manner: str = Field(description="How (secretly/through intermediaries/etc), or empty string if unknown")
-    source_attribution: str = Field(description="Who says so, or empty string if not attributed")
-
-
-class QualifiedAssertion(BaseModel):
-    """A single qualified assertion extracted by the LLM."""
-
-    subject: str = Field(description="Entity performing or being described")
-    predicate: str = Field(description="Normalized relationship or action")
-    object: str = Field(description="Target entity or value")
-    confidence: float = Field(description="Score 0-1 indicating how clearly the text supports this")
-    negated: bool = Field(description="True if this is a negative assertion")
-    hedged: bool = Field(description="True if this is uncertain/hedged")
-    qualifiers: AssertionQualifiers = Field(description="Qualifier fields for this assertion")
-
-
-class AssertionExtractionResult(BaseModel):
-    """Structured output from assertion extraction."""
-
-    assertions: list[QualifiedAssertion] = Field(description="Extracted assertions")
-
-
-def _normalize_predicate(predicate: str) -> str:
-    """Basic predicate normalization for leaked documents domain."""
-    norm = predicate.lower().strip()
-    mappings = {
-        "is owned by": "owned_by",
-        "owns": "owns",
-        "directed": "directs",
-        "directs": "directs",
-        "transferred to": "transfers_to",
-        "transferred funds to": "transfers_to",
-        "is registered in": "registered_in",
-        "registered in": "registered_in",
-        "incorporated in": "registered_in",
-        "associated with": "associated_with",
-        "is associated with": "associated_with",
-        "linked to": "associated_with",
-        "reports to": "reports_to",
-        "financed": "finances",
-        "finances": "finances",
-        "funded": "finances",
-    }
-    return mappings.get(norm, norm)
+LEAKS_PREDICATE_MAPPINGS = {
+    "is owned by": "owned_by",
+    "owns": "owns",
+    "directed": "directs",
+    "directs": "directs",
+    "transferred to": "transfers_to",
+    "transferred funds to": "transfers_to",
+    "is registered in": "registered_in",
+    "registered in": "registered_in",
+    "incorporated in": "registered_in",
+    "associated with": "associated_with",
+    "is associated with": "associated_with",
+    "linked to": "associated_with",
+    "reports to": "reports_to",
+    "financed": "finances",
+    "finances": "finances",
+    "funded": "finances",
+}
 
 
 @asset(
@@ -105,16 +73,7 @@ def _normalize_predicate(predicate: str) -> str:
     description="Extract qualified assertions from leak document chunks via LLM (EDC gold layer)",
     compute_kind="llm",
     metadata={"layer": "gold"},
-    op_tags={
-        "dagster-k8s/config": {
-            "container_config": {
-                "resources": {
-                    "requests": {"cpu": "500m", "memory": "2Gi"},
-                    "limits": {"cpu": "2", "memory": "4Gi"},
-                }
-            }
-        }
-    },
+    op_tags=LLM_ASSET_K8S_CONFIG,
 )
 def leak_assertions(
     context: AssetExecutionContext,
@@ -124,48 +83,22 @@ def leak_assertions(
     with trace_operation("leak_assertions", tracer, {"code_location": "open_leaks", "layer": "gold", "chunk_count": len(leak_chunks)}):
         logger.info("Starting leak_assertions extraction for %d chunks", len(leak_chunks))
         chain = llm.with_structured_output(AssertionExtractionResult)
-        all_assertions: list[Assertion] = []
+        results = llm.invoke_batch(
+            chain,
+            lambda chunk: [
+                SystemMessage(content=ASSERTION_SYSTEM_PROMPT),
+                HumanMessage(content=f"Extract qualified assertions from this text:\n\n{chunk.text}"),
+            ],
+            leak_chunks,
+            operation="assertion_extract",
+        )
 
-        for i, chunk in enumerate(leak_chunks):
-            logger.debug("Processing chunk %d/%d id=%s", i + 1, len(leak_chunks), chunk.chunk_id)
-            with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "assertion_extract"}):
-                result: AssertionExtractionResult = chain.invoke([
-                    SystemMessage(content=ASSERTION_SYSTEM_PROMPT),
-                    HumanMessage(
-                        content=f"Extract qualified assertions from this text:\n\n{chunk.text}"
-                    ),
-                ])
-
-            for ext in result.assertions:
-                # Convert structured qualifiers to dict, dropping empty values
-                quals = {k: v for k, v in ext.qualifiers.model_dump().items() if v}
-                assertion = Assertion(
-                    subject_text=ext.subject,
-                    predicate=ext.predicate,
-                    predicate_canonical=_normalize_predicate(ext.predicate),
-                    object_text=ext.object,
-                    qualifiers=quals,
-                    confidence=ext.confidence,
-                    negated=ext.negated,
-                    hedged=ext.hedged,
-                    provenance=Provenance(
-                        source_document_id=chunk.document_id,
-                        chunk_id=chunk.chunk_id,
-                        extraction_model=llm.model,
-                        confidence=ext.confidence,
-                        code_location="open_leaks",
-                    ),
-                )
-                all_assertions.append(assertion)
-                ASSERTIONS_CREATED.labels(code_location="open_leaks").inc()
-                if ext.confidence < 0.5:
-                    logger.warning("Low confidence assertion: subject=%s predicate=%s confidence=%.2f", ext.subject[:50], ext.predicate[:50], ext.confidence)
-
-            if (i + 1) % 50 == 0:
-                context.log.info(
-                    f"Processed {i + 1}/{len(leak_chunks)} chunks — {len(all_assertions)} assertions so far"
-                )
-                logger.info("Assertion progress: %d/%d chunks, %d assertions so far", i + 1, len(leak_chunks), len(all_assertions))
+        all_assertions = build_assertions(
+            leak_chunks, results,
+            llm_model=llm.model,
+            code_location="open_leaks",
+            predicate_mappings=LEAKS_PREDICATE_MAPPINGS,
+        )
 
         negated_count = sum(1 for a in all_assertions if a.negated)
         hedged_count = sum(1 for a in all_assertions if a.hedged)

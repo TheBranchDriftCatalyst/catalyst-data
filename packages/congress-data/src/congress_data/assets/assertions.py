@@ -7,16 +7,17 @@ negation/hedging detection, and predicate normalization.
 from dagster import AssetExecutionContext, Output, asset
 from dagster_io import (
     Assertion,
+    AssertionExtractionResult,
+    LLM_ASSET_K8S_CONFIG,
     LLMResource,
-    Provenance,
     TextChunk,
+    build_assertions,
 )
 from dagster_io.prompts import load_prompt
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, Field
 
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSERTIONS_CREATED, ASSET_RECORDS_PROCESSED, LLM_REQUEST_DURATION, track_duration
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
 
 logger = get_logger(__name__)
@@ -47,57 +48,23 @@ For each assertion, provide:
 Be precise with predicates. Prefer canonical forms over variations.""",
 )
 
-
-class AssertionQualifiers(BaseModel):
-    """Qualifier fields for an assertion."""
-
-    time: str = Field(description="When this occurred (date/session/period), or empty string if unknown")
-    location: str = Field(description="Where (committee/chamber/jurisdiction), or empty string if unknown")
-    condition: str = Field(description="Under what condition, or empty string if none")
-    manner: str = Field(description="How (unanimously/by voice vote/etc), or empty string if unknown")
-    source_attribution: str = Field(description="Who says so, or empty string if not attributed")
-
-
-class QualifiedAssertion(BaseModel):
-    """A single qualified assertion extracted by the LLM."""
-
-    subject: str = Field(description="Entity performing or being described")
-    predicate: str = Field(description="Normalized relationship or action")
-    object: str = Field(description="Target entity or value")
-    confidence: float = Field(description="Score 0-1 indicating how clearly the text supports this")
-    negated: bool = Field(description="True if this is a negative assertion")
-    hedged: bool = Field(description="True if this is uncertain/hedged")
-    qualifiers: AssertionQualifiers = Field(description="Qualifier fields for this assertion")
-
-
-class AssertionExtractionResult(BaseModel):
-    """Structured output from assertion extraction."""
-
-    assertions: list[QualifiedAssertion] = Field(description="Extracted assertions")
-
-
-def _normalize_predicate(predicate: str) -> str:
-    """Basic predicate normalization."""
-    norm = predicate.lower().strip()
-    # Common normalizations for congressional data
-    mappings = {
-        "is a member of": "member_of",
-        "is member of": "member_of",
-        "belongs to": "member_of",
-        "sponsored": "sponsors",
-        "co-sponsored": "co_sponsors",
-        "cosponsored": "co_sponsors",
-        "introduced": "introduces",
-        "voted for": "votes_for",
-        "voted against": "votes_against",
-        "chairs": "chairs",
-        "chaired": "chairs",
-        "opposes": "opposes",
-        "opposed": "opposes",
-        "supports": "supports",
-        "supported": "supports",
-    }
-    return mappings.get(norm, norm)
+CONGRESS_PREDICATE_MAPPINGS = {
+    "is a member of": "member_of",
+    "is member of": "member_of",
+    "belongs to": "member_of",
+    "sponsored": "sponsors",
+    "co-sponsored": "co_sponsors",
+    "cosponsored": "co_sponsors",
+    "introduced": "introduces",
+    "voted for": "votes_for",
+    "voted against": "votes_against",
+    "chairs": "chairs",
+    "chaired": "chairs",
+    "opposes": "opposes",
+    "opposed": "opposes",
+    "supports": "supports",
+    "supported": "supports",
+}
 
 
 @asset(
@@ -105,16 +72,7 @@ def _normalize_predicate(predicate: str) -> str:
     description="Extract qualified assertions from Congress document chunks via LLM (EDC gold layer)",
     compute_kind="llm",
     metadata={"layer": "gold"},
-    op_tags={
-        "dagster-k8s/config": {
-            "container_config": {
-                "resources": {
-                    "requests": {"cpu": "500m", "memory": "2Gi"},
-                    "limits": {"cpu": "2", "memory": "4Gi"},
-                }
-            }
-        }
-    },
+    op_tags=LLM_ASSET_K8S_CONFIG,
 )
 def congress_assertions(
     context: AssetExecutionContext,
@@ -124,48 +82,22 @@ def congress_assertions(
     with trace_operation("congress_assertions", tracer, {"code_location": "congress_data", "layer": "gold", "chunk_count": len(congress_chunks)}):
         logger.info("Starting congress_assertions extraction for %d chunks", len(congress_chunks))
         chain = llm.with_structured_output(AssertionExtractionResult)
-        all_assertions: list[Assertion] = []
+        results = llm.invoke_batch(
+            chain,
+            lambda chunk: [
+                SystemMessage(content=ASSERTION_SYSTEM_PROMPT),
+                HumanMessage(content=f"Extract qualified assertions from this text:\n\n{chunk.text}"),
+            ],
+            congress_chunks,
+            operation="assertion_extract",
+        )
 
-        for i, chunk in enumerate(congress_chunks):
-            logger.debug("Processing chunk %d/%d id=%s", i + 1, len(congress_chunks), chunk.chunk_id)
-            with track_duration(LLM_REQUEST_DURATION, {"model": llm.model, "operation": "assertion_extract"}):
-                result: AssertionExtractionResult = chain.invoke([
-                    SystemMessage(content=ASSERTION_SYSTEM_PROMPT),
-                    HumanMessage(
-                        content=f"Extract qualified assertions from this text:\n\n{chunk.text}"
-                    ),
-                ])
-
-            for ext in result.assertions:
-                # Convert structured qualifiers to dict, dropping empty values
-                quals = {k: v for k, v in ext.qualifiers.model_dump().items() if v}
-                assertion = Assertion(
-                    subject_text=ext.subject,
-                    predicate=ext.predicate,
-                    predicate_canonical=_normalize_predicate(ext.predicate),
-                    object_text=ext.object,
-                    qualifiers=quals,
-                    confidence=ext.confidence,
-                    negated=ext.negated,
-                    hedged=ext.hedged,
-                    provenance=Provenance(
-                        source_document_id=chunk.document_id,
-                        chunk_id=chunk.chunk_id,
-                        extraction_model=llm.model,
-                        confidence=ext.confidence,
-                        code_location="congress_data",
-                    ),
-                )
-                all_assertions.append(assertion)
-                ASSERTIONS_CREATED.labels(code_location="congress_data").inc()
-                if ext.confidence < 0.5:
-                    logger.warning("Low confidence assertion: subject=%s predicate=%s confidence=%.2f", ext.subject[:50], ext.predicate[:50], ext.confidence)
-
-            if (i + 1) % 50 == 0:
-                context.log.info(
-                    f"Processed {i + 1}/{len(congress_chunks)} chunks — {len(all_assertions)} assertions so far"
-                )
-                logger.info("Assertion progress: %d/%d chunks, %d assertions so far", i + 1, len(congress_chunks), len(all_assertions))
+        all_assertions = build_assertions(
+            congress_chunks, results,
+            llm_model=llm.model,
+            code_location="congress_data",
+            predicate_mappings=CONGRESS_PREDICATE_MAPPINGS,
+        )
 
         negated_count = sum(1 for a in all_assertions if a.negated)
         hedged_count = sum(1 for a in all_assertions if a.hedged)

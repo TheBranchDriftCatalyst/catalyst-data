@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from dagster import ConfigurableResource
 from langchain_core.language_models import BaseChatModel
@@ -31,6 +32,8 @@ from dagster_io.metrics import (
 )
 
 logger = get_logger(__name__)
+
+T = TypeVar("T")
 
 
 class LLMResource(ConfigurableResource):
@@ -159,6 +162,39 @@ class LLMResource(ConfigurableResource):
         logger.debug("LLM with_structured_output model=%s schema=%s", self.model, schema.__name__)
         return self._chat_model.with_structured_output(schema)
 
+    def invoke_batch(
+        self,
+        chain: Any,
+        messages_fn: Callable[[T], list],
+        items: list[T],
+        *,
+        log_every: int = 50,
+        operation: str = "batch",
+    ) -> list[Any]:
+        """Invoke a chain over a list of items with progress logging.
+
+        Args:
+            chain: LangChain runnable (e.g. from with_structured_output).
+            messages_fn: Function that takes an item and returns a messages list.
+            items: Items to process.
+            log_every: Log progress every N items.
+            operation: Label for metrics/logs.
+        """
+        logger.info("LLM %s starting: %d items, model=%s", operation, len(items), self.model)
+        results = []
+        for i, item in enumerate(items):
+            with track_duration(LLM_REQUEST_DURATION, {"model": self.model, "operation": operation}):
+                result = chain.invoke(messages_fn(item))
+            results.append(result)
+            LLM_REQUESTS.labels(model=self.model, operation=operation, status="success").inc()
+
+            if (i + 1) % log_every == 0 or (i + 1) == len(items):
+                logger.info(
+                    "LLM %s progress: %d/%d (%.0f%%)",
+                    operation, i + 1, len(items), (i + 1) / len(items) * 100,
+                )
+        return results
+
 
 class EmbeddingResource(ConfigurableResource):
     """Embedding resource shared across all code locations.
@@ -210,13 +246,22 @@ class EmbeddingResource(ConfigurableResource):
         return self._embeddings
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed a list of texts."""
-        logger.info("Embedding %d texts with model=%s", len(texts), self.model)
-        with track_duration(EMBEDDING_BATCH_DURATION, {"provider": self.provider, "model": self.model}):
-            result = self._embeddings.embed_documents(texts)
-        EMBEDDING_VECTORS_CREATED.labels(provider=self.provider, model=self.model).inc(len(result))
-        logger.info("Embedding complete count=%d dimensions=%d", len(result), len(result[0]) if result else 0)
-        return result
+        """Embed a list of texts, processing internally in batches with progress logging."""
+        logger.info("Embedding %d texts with model=%s (batch_size=%d)", len(texts), self.model, self.batch_size)
+        all_vectors: list[list[float]] = []
+        for batch_start in range(0, len(texts), self.batch_size):
+            batch = texts[batch_start:batch_start + self.batch_size]
+            with track_duration(EMBEDDING_BATCH_DURATION, {"provider": self.provider, "model": self.model}):
+                vectors = self._embeddings.embed_documents(batch)
+            all_vectors.extend(vectors)
+            EMBEDDING_VECTORS_CREATED.labels(provider=self.provider, model=self.model).inc(len(vectors))
+            processed = min(batch_start + self.batch_size, len(texts))
+            logger.info(
+                "Embedding progress: %d/%d texts (%.0f%%)",
+                processed, len(texts), processed / len(texts) * 100,
+            )
+        logger.info("Embedding complete count=%d dimensions=%d", len(all_vectors), len(all_vectors[0]) if all_vectors else 0)
+        return all_vectors
 
     def embed_single(self, text: str) -> list[float]:
         """Embed a single text string (uses query embedding for better retrieval)."""
