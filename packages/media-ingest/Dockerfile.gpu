@@ -3,13 +3,25 @@
 # Build: docker build -f packages/media-ingest/Dockerfile.gpu -t media-ingest:gpu .
 # Requires: gpu.intel.com/i915 resource in K8s pod spec
 #
+# Uses Ubuntu 24.04 throughout (Intel GPU packages require Ubuntu repos).
 # Includes both faster-whisper (CPU fallback) and OpenVINO GenAI (GPU).
-# Switch via config: whisper_backend="openvino", openvino_device="GPU"
 
-# ---------- stage 1: build ----------
-FROM python:3.12-slim AS builder
+# ---------- stage 1: build (Ubuntu + Python 3.12) ----------
+FROM ubuntu:24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3.12 python3.12-dev python3.12-venv \
+        python3-pip curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# Allow uv to install into system Python (Ubuntu marks it EXTERNALLY-MANAGED)
+RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
+ENV UV_PYTHON=/usr/bin/python3.12
 
 WORKDIR /app
 
@@ -17,16 +29,17 @@ WORKDIR /app
 COPY libs/catalyst-contracts-core/ /tmp/catalyst-contracts-core/
 COPY libs/dagster-io/              /tmp/dagster-io/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system /tmp/catalyst-contracts-core/ && \
-    uv pip install --system /tmp/dagster-io/
+    uv pip install --system --python /usr/bin/python3.12 \
+        /tmp/catalyst-contracts-core/ && \
+    uv pip install --system --python /usr/bin/python3.12 \
+        /tmp/dagster-io/
 
-# 2. Install package dependencies with OpenVINO extras
-#    CPU-only PyTorch (for pyannote diarization — runs on CPU regardless)
+# 2. Install package deps with OpenVINO extras + CPU-only PyTorch
 COPY packages/media-ingest/pyproject.toml .
 RUN --mount=type=cache,target=/root/.cache/uv \
     mkdir -p src/media_ingest && \
     touch src/media_ingest/__init__.py && \
-    uv pip install --system \
+    uv pip install --system --python /usr/bin/python3.12 \
         --extra-index-url https://download.pytorch.org/whl/cpu \
         ".[openvino]" && \
     rm -rf src/media_ingest
@@ -34,21 +47,23 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # 3. Copy real source
 COPY packages/media-ingest/src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --no-deps --reinstall-package media-ingest .
+    uv pip install --system --python /usr/bin/python3.12 \
+        --no-deps --reinstall-package media-ingest .
 
-# ---------- stage 2: runtime (Ubuntu for Intel GPU repo compat) ----------
+# ---------- stage 2: runtime (Ubuntu + Intel GPU) ----------
 FROM ubuntu:24.04
 
-# Install Python 3.12 + Intel GPU compute runtime
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System deps + Intel GPU compute runtime (OpenCL + Level Zero)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3.12 python3.12-venv python3-pip \
+        python3.12 python3.12-venv \
         ffmpeg libsndfile1 libgomp1 \
         gnupg ca-certificates wget && \
     wget -qO- https://repositories.intel.com/gpu/intel-graphics.key | \
         gpg --dearmor -o /usr/share/keyrings/intel-graphics.gpg && \
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] \
-        https://repositories.intel.com/gpu/ubuntu-noble noble unified" \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu-noble noble unified" \
         > /etc/apt/sources.list.d/intel-gpu.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -60,16 +75,22 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Copy Python packages from builder (Debian layout) to Ubuntu layout
-COPY --from=builder /usr/local/lib/python3.12/site-packages/ /usr/lib/python3/dist-packages/
-COPY --from=builder /usr/local/bin/dagster /usr/local/bin/dagster
+# Copy Python site-packages + binaries from builder (same Ubuntu layout)
+COPY --from=builder /usr/lib/python3/dist-packages/ /usr/lib/python3/dist-packages/
+COPY --from=builder /usr/local/lib/python3.12/dist-packages/ /usr/local/lib/python3.12/dist-packages/
+COPY --from=builder /usr/local/bin/ /usr/local/bin/
+
+# Ensure dagster CLI is on PATH
+RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python
 
 ENV DAGSTER_HOME=/opt/dagster/dagster_home
+ENV PYTHONPATH=/usr/local/lib/python3.12/dist-packages:/usr/lib/python3/dist-packages
 RUN mkdir -p $DAGSTER_HOME
 
 EXPOSE 4000
 
-CMD ["dagster", "code-server", "start", \
+CMD ["python3", "-m", "dagster", "code-server", "start", \
      "--host", "0.0.0.0", \
      "--port", "4000", \
      "--module-name", "media_ingest"]
