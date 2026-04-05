@@ -43,9 +43,6 @@ data:
               requests:
                 cpu: 500m
                 memory: 2Gi
-                gpu.intel.com/i915: "1"
-              limits:
-                gpu.intel.com/i915: "1"
             env:
               - name: DAGSTER_POSTGRES_HOST
                 value: dagster-postgres.catalyst-data.svc.cluster.local

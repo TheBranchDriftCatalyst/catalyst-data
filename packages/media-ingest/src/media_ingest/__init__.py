@@ -9,6 +9,7 @@ configure_tracing(service_name="catalyst-data.media_ingest")
 start_metrics_server()
 
 from dagster import Definitions
+from dagster_k8s import k8s_job_executor
 from dagster_io import ChunkingResource, EmbeddingResource, LLMResource, MinioIOManager
 
 from media_ingest.assets import (
@@ -37,6 +38,7 @@ defs = Definitions(
     sensors=[
         media_document_sensor,
     ],
+    executor=k8s_job_executor,
     resources={
         "io_manager": MinioIOManager(),
         "chunking": ChunkingResource(),
