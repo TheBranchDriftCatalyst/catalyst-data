@@ -1,0 +1,118 @@
+# Catalyst Repository Metadata
+# Used by the profile page generator (@TheBranchDriftCatalyst)
+
+name: "catalyst-data"
+description: "Multi-domain knowledge graph construction platform with LLM-based extraction, GPU-accelerated transcription, and cross-source entity resolution"
+repo_url: "https://github.com/TheBranchDriftCatalyst/catalyst-data"
+
+private: true
+status: "active"
+
+tech_stack:
+  languages:
+    - "python"
+  frameworks:
+    - "dagster"
+    - "langchain"
+    - "pydantic"
+    - "streamlit"
+  tools:
+    - "kubernetes"
+    - "argocd"
+    - "docker"
+    - "minio"
+    - "postgresql"
+    - "neo4j"
+    - "prometheus"
+    - "opentelemetry"
+  ml:
+    - "faster-whisper"
+    - "openvino"
+    - "pyannote"
+    - "openai-embeddings"
+    - "huggingface-transformers"
+
+groups:
+  - "catalyst-core"
+  - "data-engineering"
+  - "knowledge-graph"
+  - "ai-ml"
+
+badges:
+  stars: false
+  issues: false
+  prs: false
+  license: false
+
+highlights:
+  - "10-asset Dagster pipeline with Bronze/Silver/Gold/Platinum medallion architecture"
+  - "GPU-accelerated transcription: OpenVINO on Intel i915 (50x realtime)"
+  - "Speaker diarization with pyannote + word-level alignment"
+  - "LLM-based NER and qualified S-P-O assertion extraction with negation/hedge detection"
+  - "Cross-source entity resolution (EDC framework) across 4 domains"
+  - "Dual-write knowledge graph: PostgreSQL+pgvector + Neo4j"
+  - "Dynamic partitioning: per-file processing with auto-discovery sensor"
+  - "QSV AV1 hardware video transcoding for ultra compression"
+  - "12-page Streamlit data explorer with asset browser, semantic search, knowledge graph viz"
+  - "Cognitive Council: multi-agent deliberative architecture for architecture decisions"
+
+# Domain packages
+domains:
+  congress-data:
+    description: "U.S. Congressional legislative data from congress.gov API"
+    entities: ["legislators", "committees", "bills", "states"]
+    predicates: ["member_of", "sponsors", "votes_for", "votes_against", "chairs"]
+
+  open-leaks:
+    description: "Leaked documents: WikiLeaks cables, ICIJ Offshore Leaks, Epstein court docs"
+    entities: ["diplomats", "shell_companies", "offshore_entities", "jurisdictions"]
+    predicates: ["owns", "transfers", "operates"]
+
+  media-ingest:
+    description: "Audio/video processing: transcription, diarization, NER, assertions"
+    entities: ["speakers", "organizations", "people_mentioned"]
+    predicates: ["states", "claims", "denies", "acknowledges", "questions", "references"]
+    assets:
+      - media_files
+      - media_metadata
+      - media_transcode
+      - media_documents
+      - media_transcriptions
+      - media_diarization
+      - media_chunks
+      - media_mentions
+      - media_assertions
+      - media_embeddings
+
+  knowledge-graph:
+    description: "Cross-source entity resolution and unified assertion graph"
+    outputs: ["canonical_entities", "entity_alignments", "assertion_graph"]
+    storage: ["postgresql+pgvector", "neo4j"]
+
+# Infrastructure
+infrastructure:
+  cluster: "Talos Kubernetes (5 nodes, 2 GPU workers)"
+  gpu: "Intel i915 (4x per GPU node) via intel-device-plugins"
+  storage:
+    - "MinIO S3 (medallion layer asset storage)"
+    - "TrueNAS NFS (media files, whisper model cache)"
+    - "PostgreSQL (Dagster metadata + knowledge graph)"
+    - "Neo4j (graph traversal)"
+  observability:
+    - "Prometheus metrics (LLM latency, embedding throughput, entity counts)"
+    - "OpenTelemetry distributed tracing"
+    - "Grafana dashboards"
+  cicd:
+    - "GitHub Actions (pytest + matrix Docker builds)"
+    - "ArgoCD GitOps (auto-deploy on push to main)"
+  secrets: "External Secrets Operator + 1Password (per-asset scoping)"
+
+# Architecture
+architecture:
+  pattern: "Medallion (Bronze → Silver → Gold → Platinum)"
+  orchestrator: "Dagster with k8s_job_executor (per-step K8s pods)"
+  partitioning: "DynamicPartitionsDefinition (per-document)"
+  sensor: "media_document_sensor (auto-discovers new files every 5 min)"
+  extraction_framework: "EDC (Extract, Define, Canonicalize)"
+  shared_library: "dagster-io (asset factories, extraction schemas, IO manager, resources)"
+  contracts: "catalyst-contracts-core (Provenance, MentionType, AlignmentType enums)"
