@@ -36,16 +36,13 @@ COPY packages/media-ingest/src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --no-deps --reinstall-package media-ingest .
 
-# ---------- stage 2: runtime ----------
-FROM python:3.12-slim
+# ---------- stage 2: runtime (Ubuntu for Intel GPU repo compat) ----------
+FROM ubuntu:24.04
 
-# Runtime system dependencies:
-#   ffmpeg         - media processing / audio extraction
-#   libsndfile1    - soundfile (required by pyannote.audio + librosa)
-#   libgomp1       - OpenMP (required by ctranslate2/faster-whisper)
-#   Intel GPU compute runtime (OpenCL + Level Zero) from Intel APT repo
+# Install Python 3.12 + Intel GPU compute runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        python3.12 python3.12-venv python3-pip \
         ffmpeg libsndfile1 libgomp1 \
         gnupg ca-certificates wget && \
     wget -qO- https://repositories.intel.com/gpu/intel-graphics.key | \
@@ -63,8 +60,9 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY --from=builder /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
-COPY --from=builder /usr/local/bin/ /usr/local/bin/
+# Copy Python packages from builder (Debian layout) to Ubuntu layout
+COPY --from=builder /usr/local/lib/python3.12/site-packages/ /usr/lib/python3/dist-packages/
+COPY --from=builder /usr/local/bin/dagster /usr/local/bin/dagster
 
 ENV DAGSTER_HOME=/opt/dagster/dagster_home
 RUN mkdir -p $DAGSTER_HOME
