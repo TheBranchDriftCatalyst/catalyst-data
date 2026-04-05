@@ -1,6 +1,6 @@
 # Media Ingest & Transcription Architecture
 
-## 1. Media Ingest Asset Pipeline (Internal)
+## 1. Media Ingest Asset Pipeline (10 Assets)
 
 ```mermaid
 graph TD
@@ -9,75 +9,136 @@ graph TD
         MM[media_metadata<br/><i>ffprobe enrichment</i>]
     end
 
-    subgraph Silver["Silver Layer (Normalization)"]
+    subgraph Silver["Silver Layer (Processing)"]
+        MTC[media_transcode<br/><i>QSV AV1 encode<br/>gpu.intel.com/i915</i>]
         MD[media_documents<br/><i>MediaDocument model</i>]
-        MT[media_transcriptions<br/><i>faster-whisper + pyannote</i>]
-        MC[media_chunks<br/><i>800/150 recursive split</i>]
+        MC[media_chunks<br/><i>800/150 recursive split<br/>speaker-attributed</i>]
     end
 
-    subgraph Gold["Gold Layer (Vectors)"]
+    subgraph Gold["Gold Layer (ML + Extraction)"]
+        MT[media_transcriptions<br/><i>OpenVINO GPU whisper<br/>or faster-whisper CPU</i>]
+        MDIA[media_diarization<br/><i>pyannote speaker ID<br/>+ segment alignment</i>]
+        MME[media_mentions<br/><i>NER via LLM</i>]
+        MA[media_assertions<br/><i>S-P-O via LLM<br/>speech-act predicates</i>]
         ME[media_embeddings<br/><i>text-embedding-3-small</i>]
     end
 
-    MF --> MM --> MD --> MT --> MC --> ME
+    MF --> MM --> MTC --> MD
+    MD -.->|sensor registers partitions| MT
+    MT --> MDIA --> MC
+    MC --> MME
+    MC --> MA
+    MC --> ME
 
     style Bronze fill:#cd7f32,color:#fff
     style Silver fill:#c0c0c0,color:#000
     style Gold fill:#ffd700,color:#000
 ```
 
-## 2. Transcription as a Cross-Domain Service
+## 2. Partitioning Model
 
 ```mermaid
 graph LR
-    subgraph Sources["Media Sources"]
-        MeTube[MeTube<br/><i>YouTube downloads</i>]
-        TubeSync[TubeSync<br/><i>RSS video sync</i>]
-        Future1[Podcast Feeds<br/><i>planned</i>]
-        Future2[Meeting Recordings<br/><i>planned</i>]
+    subgraph Unpartitioned["Unpartitioned (run once)"]
+        A[media_files] --> B[media_metadata] --> C[media_transcode] --> D[media_documents]
     end
 
-    subgraph TranscriptionService["Transcription Service Layer"]
-        FW[faster-whisper<br/><i>large-v3 / int8</i>]
-        PA[pyannote<br/><i>speaker-diarization-3.1</i>]
-        FW --> PA
+    subgraph Sensor["Auto-Discovery"]
+        S[media_document_sensor<br/><i>every 5 min<br/>reads S3, registers partitions</i>]
+    end
+
+    subgraph Partitioned["Partitioned by document_id"]
+        direction TB
+        T[media_transcriptions<br/><i>GPU pod</i>]
+        DIA[media_diarization<br/><i>CPU pod</i>]
+        CH[media_chunks]
+        MEN[media_mentions]
+        ASS[media_assertions]
+        EMB[media_embeddings]
+        T --> DIA --> CH --> MEN
+        CH --> ASS
+        CH --> EMB
+    end
+
+    D --> S --> T
+
+    style Unpartitioned fill:#1a1a2e,color:#fff
+    style Sensor fill:#4a90d9,color:#fff
+    style Partitioned fill:#2d5016,color:#fff
+```
+
+## 3. S3 Storage Layout
+
+```
+s3://catalyst-data/
+├── bronze/default/media/
+│   ├── media_files/data.jsonl
+│   └── media_metadata/data.jsonl (not in use?)
+├── silver/default/media/
+│   ├── media_transcode/data.jsonl
+│   ├── media_documents/data.jsonl
+│   └── media_chunks/{document_id}/data.json       ← per partition
+├── gold/default/media/
+│   ├── media_transcriptions/{document_id}/data.json
+│   ├── media_diarization/{document_id}/data.json
+│   ├── media_mentions/{document_id}/data.json
+│   ├── media_assertions/{document_id}/data.json
+│   └── media_embeddings/{document_id}/data.json
+```
+
+## 4. Transcription Backend Architecture
+
+```mermaid
+graph LR
+    subgraph Input["Source Media"]
+        MP4[video.mp4<br/><i>NFS mount</i>]
+    end
+
+    subgraph Extract["Audio Extraction"]
+        FFM[ffmpeg<br/><i>-vn -ar 16000 -ac 1<br/>pcm_s16le WAV</i>]
+    end
+
+    subgraph Backends["Whisper Backend (config switch)"]
+        OV[OpenVINO GenAI<br/><i>WhisperPipeline<br/>GPU: gpu.intel.com/i915<br/>50x realtime</i>]
+        FW[faster-whisper<br/><i>CTranslate2<br/>CPU int8<br/>4x realtime</i>]
     end
 
     subgraph Output["Transcription Output"]
-        FT[Full Text]
-        ST[Speaker-Attributed Text<br/><i>[SPEAKER_00]: ...</i>]
-        SEG[Timed Segments<br/><i>word-level timestamps</i>]
-        SPK[Speaker Metadata<br/><i>count, IDs</i>]
+        SEG[Segments<br/><i>start, end, text, words</i>]
+        LANG[Language Detection]
     end
 
-    MeTube --> TranscriptionService
-    TubeSync --> TranscriptionService
-    Future1 -.-> TranscriptionService
-    Future2 -.-> TranscriptionService
+    MP4 --> FFM --> OV --> SEG
+    FFM -.-> FW -.-> SEG
+    OV --> LANG
+    FW --> LANG
 
-    TranscriptionService --> FT
-    TranscriptionService --> ST
-    TranscriptionService --> SEG
-    TranscriptionService --> SPK
-
-    subgraph Consumers["Any Domain Can Consume"]
-        MI[media-ingest<br/><i>media_transcriptions</i>]
-        CD[congress-data<br/><i>hearing transcripts</i>]
-        OL[open-leaks<br/><i>deposition audio</i>]
-        KG[knowledge-graph<br/><i>speaker-entity linking</i>]
-    end
-
-    FT --> MI
-    ST --> MI
-    FT -.-> CD
-    FT -.-> OL
-    SPK -.-> KG
-
-    style TranscriptionService fill:#4a90d9,color:#fff
-    style Consumers fill:#2d2d2d,color:#fff
+    style Backends fill:#0e2f4a,color:#fff
 ```
 
-## 3. Catalyst-Data Full Domain Model (Medallion Architecture)
+## 5. Diarization Pipeline
+
+```mermaid
+sequenceDiagram
+    participant T as media_transcriptions
+    participant D as media_diarization
+    participant S3 as MinIO S3
+
+    T->>S3: Save transcription<br/>(text, segments, language)
+    Note over T: GPU pod completes, freed
+
+    S3->>D: Load transcription
+    D->>D: ffmpeg extract audio → WAV
+    D->>D: pyannote speaker-diarization-3.1
+    D->>D: Align speaker turns to segments<br/>(midpoint matching + majority vote)
+    D->>D: Build speaker_text<br/>([SPEAKER_00]: ...)
+    D->>S3: Save diarized result<br/>(speaker_text, speakers, segments+speaker)
+
+    Note over D: CPU pod, no GPU needed
+    Note over D: If fails, transcription is safe in S3
+```
+
+## 6. Catalyst-Data Full Domain Model
 
 ```mermaid
 graph TB
@@ -88,18 +149,18 @@ graph TB
         MB[media_files<br/>media_metadata]
     end
 
-    subgraph Silver["SILVER — Normalized Documents & Chunks"]
+    subgraph Silver["SILVER — Normalized + Processed"]
         direction LR
         CS[congress_documents<br/>congress_chunks]
         LS[leak_documents<br/>leak_chunks]
-        MS[media_documents<br/>media_transcriptions<br/>media_chunks]
+        MS[media_transcode<br/>media_documents<br/>media_chunks]
     end
 
-    subgraph Gold["GOLD — LLM Extraction & Embeddings"]
+    subgraph Gold["GOLD — ML Extraction"]
         direction LR
         CG[congress_mentions<br/>congress_assertions<br/>congress_embeddings]
         LG[leak_mentions<br/>leak_assertions<br/>leak_embeddings]
-        MG[media_embeddings]
+        MG[media_transcriptions<br/>media_diarization<br/>media_mentions<br/>media_assertions<br/>media_embeddings]
     end
 
     subgraph Platinum["PLATINUM — Unified Knowledge Graph"]
@@ -115,7 +176,7 @@ graph TB
     end
 
     subgraph UI["Data Explorer"]
-        SE[Streamlit UI<br/><i>asset browser + semantic search</i>]
+        SE[Streamlit UI<br/><i>data.talos00<br/>12 pages</i>]
     end
 
     CB --> CS --> CG
@@ -145,101 +206,7 @@ graph TB
     style UI fill:#16213e,color:#fff
 ```
 
-## 4. Shared Infrastructure (dagster-io)
-
-```mermaid
-graph TB
-    subgraph SharedLib["dagster-io (Shared Library)"]
-        direction TB
-        subgraph Resources["Dagster Resources"]
-            LLM[LLMResource<br/><i>structured output, batching</i>]
-            EMB[EmbeddingResource<br/><i>OpenAI / HuggingFace</i>]
-            CHK[ChunkingResource<br/><i>recursive text splitting</i>]
-            IOM[MinioIOManager<br/><i>S3 medallion storage</i>]
-        end
-
-        subgraph Factories["Asset Factories"]
-            NER[make_ner_asset<br/><i>generic NER extraction</i>]
-            PROP[make_proposition_asset<br/><i>generic S-P-O extraction</i>]
-            BM[build_mentions<br/><i>LLM result → Mention</i>]
-            BA[build_assertions<br/><i>LLM result → Assertion</i>]
-        end
-
-        subgraph Schemas["Extraction Schemas"]
-            ME2[MentionExtraction]
-            AER[AssertionExtractionResult]
-            NR[NERResult]
-            PR[PropositionResult]
-        end
-
-        subgraph Obs["Observability"]
-            LOG[Structured Logging]
-            MET[Prometheus Metrics]
-            TRC[OpenTelemetry Tracing]
-        end
-    end
-
-    subgraph Contracts["catalyst-contracts-core"]
-        MT2[MentionType enum]
-        AT[AlignmentType enum]
-        EM[ExtractionMethod enum]
-        PV[Provenance model]
-    end
-
-    subgraph Domains["Domain Packages"]
-        CD2[congress-data<br/><i>+ domain prompts<br/>+ predicate mappings</i>]
-        OL2[open-leaks<br/><i>+ domain prompts<br/>+ predicate mappings</i>]
-        MI2[media-ingest<br/><i>+ whisper/pyannote<br/>+ audio processing</i>]
-        KG2[knowledge-graph<br/><i>+ entity resolution<br/>+ graph construction</i>]
-    end
-
-    Contracts --> SharedLib
-    SharedLib --> CD2
-    SharedLib --> OL2
-    SharedLib --> MI2
-    SharedLib --> KG2
-
-    style SharedLib fill:#2d5016,color:#fff
-    style Contracts fill:#4a1942,color:#fff
-    style Domains fill:#1a1a2e,color:#fff
-```
-
-## 5. Transcription Data Flow (Detailed)
-
-```mermaid
-sequenceDiagram
-    participant NFS as NFS Volume<br/>(metube/tubesync)
-    participant Whisper as faster-whisper<br/>(large-v3)
-    participant Pyannote as pyannote<br/>(diarization-3.1)
-    participant Align as Speaker Alignment
-    participant Chunk as ChunkingResource<br/>(800/150)
-    participant Embed as EmbeddingResource
-    participant S3 as MinIO S3
-
-    NFS->>Whisper: audio file path
-    Whisper->>Whisper: transcribe(word_timestamps=True)
-    Whisper-->>Align: segments[] + words[] + language info
-
-    NFS->>Pyannote: audio file path
-    Pyannote->>Pyannote: pipeline(audio)
-    Pyannote-->>Align: speaker turns[]
-
-    Align->>Align: word midpoint → speaker turn matching
-    Align->>Align: majority vote per segment
-    Note over Align: Output: full_text, speaker_text,<br/>segments with speaker labels
-
-    Align->>S3: media_transcriptions (gold/data.jsonl)
-
-    Align->>Chunk: speaker_text (preferred) or full_text
-    Chunk->>Chunk: recursive split with speaker context
-    Chunk->>S3: media_chunks (silver/data.jsonl)
-
-    Chunk->>Embed: chunk texts[]
-    Embed->>Embed: batch embed (100/batch)
-    Embed->>S3: media_embeddings (gold/data.jsonl)
-```
-
-## 6. K8s Runtime Architecture
+## 7. K8s Runtime Architecture
 
 ```mermaid
 graph TB
@@ -247,29 +214,32 @@ graph TB
         subgraph NS["catalyst-data namespace"]
             WS[dagster-webserver<br/><i>UI + API</i>]
             DM[dagster-daemon<br/><i>scheduler + sensor</i>]
-            PG2[(dagster-postgres<br/><i>run/event storage</i>)]
+            PG2[(dagster-postgres)]
 
             subgraph CodeServers["Code Servers (gRPC :4000)"]
                 CS2[congress-data]
                 OLS[open-leaks]
-                MIS[media-ingest]
+                MIS[media-ingest :gpu]
                 KGS[knowledge-graph]
+                DES[data-explorer :8501]
             end
 
-            subgraph RunJobs["K8sRunLauncher Jobs"]
-                RJ[dagster-run-*<br/><i>ephemeral pods<br/>no resource limits<br/>burst allowed</i>]
+            subgraph RunJobs["k8s_job_executor Step Pods"]
+                TP[transcription pod<br/><i>gpu.intel.com/i915:1<br/>OpenVINO whisper</i>]
+                DP[diarization pod<br/><i>CPU only<br/>pyannote</i>]
+                TC[transcode pod<br/><i>gpu.intel.com/i915:1<br/>ffmpeg av1_qsv</i>]
+                LP[LLM extraction pod<br/><i>mentions + assertions</i>]
             end
         end
 
         subgraph Storage2["Storage"]
-            MINIO[(MinIO<br/><i>S3-compatible</i>)]
-            NFS2[(TrueNAS NFS<br/><i>192.168.1.36</i>)]
-            WM[(whisper-models PVC<br/><i>20Gi local-path</i>)]
+            MINIO[(MinIO S3)]
+            NFS2[(TrueNAS NFS<br/><i>192.168.1.36<br/>metube + tubesync + whisper-models</i>)]
         end
 
         subgraph GPU["GPU Worker Nodes"]
-            T02[talos02-gpu]
-            T06[talos06-gpu]
+            T02[talos02-gpu<br/><i>14 CPU, 64Gi RAM<br/>4x i915 GPU</i>]
+            T06[talos06<br/><i>16 CPU, 64Gi RAM<br/>4x i915 GPU</i>]
         end
 
         subgraph LLM["catalyst-llm namespace"]
@@ -279,7 +249,8 @@ graph TB
         subgraph Secrets["External Secrets (1Password)"]
             S3C[dagster-s3-credentials]
             LLMC[llm-credentials]
-            HFC[hf-credentials<br/><i>HF_TOKEN</i>]
+            HFC[hf-credentials<br/><i>pyannote model access</i>]
+            CGC[congress-data-secrets<br/><i>scoped to congress assets</i>]
         end
     end
 
@@ -288,16 +259,72 @@ graph TB
     DM --> CodeServers
     DM --> RunJobs
 
-    RunJobs --> NFS2
+    TP --> NFS2
+    TP --> GPU
+    TC --> GPU
+    DP --> NFS2
     RunJobs --> MINIO
-    RunJobs --> WM
     RunJobs --> LIT
-    RunJobs --> GPU
 
-    Secrets --> RunJobs
+    Secrets -.-> RunJobs
 
     style NS fill:#1a1a2e,color:#fff
     style Storage2 fill:#2d2d2d,color:#fff
     style GPU fill:#4a0e0e,color:#fff
     style LLM fill:#0e2f4a,color:#fff
+```
+
+## 8. Data Models
+
+### Transcription Output (per partition)
+```json
+{
+  "document_id": "media-metube-interview-001",
+  "title": "Interview Episode 42",
+  "text": "Full concatenated text...",
+  "language": "en",
+  "language_probability": 0.98,
+  "segments": [
+    {"start": 0.0, "end": 5.3, "text": "Welcome to the show", "words": [...]}
+  ],
+  "segment_count": 150,
+  "duration_s": 3600.0,
+  "transcription_time_s": 72.0,
+  "source_path": "/data/metube/youtube.com/interview.mp4"
+}
+```
+
+### Diarization Output (extends transcription)
+```json
+{
+  "...all transcription fields...",
+  "speaker_text": "[SPEAKER_00]: Welcome to the show...\n[SPEAKER_01]: Thanks for having me...",
+  "speaker_count": 2,
+  "speakers": ["SPEAKER_00", "SPEAKER_01"],
+  "segments": [
+    {"start": 0.0, "end": 5.3, "text": "Welcome to the show", "speaker": "SPEAKER_00"}
+  ],
+  "diarization_time_s": 180.0
+}
+```
+
+### Assertion Output (speech-act predicates)
+```json
+{
+  "subject_text": "Senator Warren",
+  "predicate": "claims",
+  "predicate_canonical": "claims",
+  "object_text": "the bill will reduce costs by 30%",
+  "qualifiers": {"time": "during the hearing", "source_attribution": "SPEAKER_01"},
+  "confidence": 0.85,
+  "negated": false,
+  "hedged": true,
+  "provenance": {
+    "source_document_id": "media-metube-interview-001",
+    "chunk_id": "media-metube-interview-001:chunk-5",
+    "temporal_start_ms": 45000,
+    "temporal_end_ms": 52000,
+    "speaker_label": "SPEAKER_01"
+  }
+}
 ```
