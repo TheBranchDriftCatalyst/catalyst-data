@@ -49,3 +49,50 @@ spec:
           annotations:
             summary: "High memory usage in {{ $labels.pod }}"
             description: "Container {{ $labels.container }} in pod {{ $labels.pod }} using >90% memory"
+
+    - name: dagster.media-ingest.alerts
+      rules:
+        - alert: MediaTranscriptionSlow
+          expr: histogram_quantile(0.99, rate(catalyst_transcription_duration_seconds_bucket[15m])) > 300
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Slow media transcription"
+            description: "Transcription p99 duration > 5 minutes over the last 15m"
+
+        - alert: MediaDiarizationSlow
+          expr: histogram_quantile(0.99, rate(catalyst_diarization_duration_seconds_bucket[15m])) > 600
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Slow speaker diarization"
+            description: "Diarization p99 duration > 10 minutes over the last 15m"
+
+        - alert: MediaTranscodeSlow
+          expr: histogram_quantile(0.99, rate(catalyst_transcode_duration_seconds_bucket[15m])) > 1800
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Slow video transcode"
+            description: "Transcode p99 duration > 30 minutes over the last 15m"
+
+        - alert: MediaTranscodeLowCompression
+          expr: histogram_quantile(0.5, rate(catalyst_transcode_compression_ratio_bucket[30m])) < 1.5
+          for: 15m
+          labels:
+            severity: info
+          annotations:
+            summary: "Low transcode compression ratio"
+            description: "Median compression ratio < 1.5x — files may already be well-compressed"
+
+        - alert: MediaModelLoadSlow
+          expr: histogram_quantile(0.99, rate(catalyst_model_load_duration_seconds_bucket[15m])) > 120
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Slow ML model loading: {{ $labels.model_type }}"
+            description: "Model load p99 > 2 minutes for {{ $labels.model_type }} — possible cold start or I/O issue"

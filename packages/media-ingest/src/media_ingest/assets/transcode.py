@@ -13,7 +13,12 @@ from typing import Any
 from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.metrics import (
+    ASSET_RECORDS_PROCESSED,
+    TRANSCODE_COMPRESSION_RATIO,
+    TRANSCODE_DURATION,
+    TRANSCODE_SAVED_BYTES,
+)
 from dagster_io.observability import get_tracer, trace_operation
 from media_ingest.assets.discovery import NFS_VOLUMES_CONFIG
 from media_ingest.config import MediaIngestConfig
@@ -160,6 +165,14 @@ def media_transcode(
                 file_info["metadata"]["video_codec"] = "av1"
                 file_info["metadata"]["transcode"] = result
                 file_info["size_bytes"] = result["size_after"]
+
+                # Record transcode metrics
+                TRANSCODE_DURATION.observe(result["duration_s"])
+                TRANSCODE_COMPRESSION_RATIO.observe(result["compression_ratio"])
+                saved_bytes = result["size_before"] - result["size_after"]
+                if saved_bytes > 0:
+                    TRANSCODE_SAVED_BYTES.inc(saved_bytes)
+
                 context.log.info(
                     f"Transcoded {fname}: "
                     f"{result['compression_ratio']}x compression, "

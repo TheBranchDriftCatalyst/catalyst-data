@@ -144,6 +144,62 @@ GRAPH_DB_OPERATION_DURATION = Histogram(
     registry=REGISTRY,
 )
 
+# ── Media Ingest metrics ──
+TRANSCRIPTION_DURATION = Histogram(
+    "catalyst_transcription_duration_seconds",
+    "Duration of audio transcription",
+    ["backend", "model"],
+    buckets=(10, 30, 60, 120, 300, 600, 1200, 1800, 3600),
+    registry=REGISTRY,
+)
+
+DIARIZATION_DURATION = Histogram(
+    "catalyst_diarization_duration_seconds",
+    "Duration of speaker diarization",
+    [],
+    buckets=(10, 30, 60, 120, 300, 600, 1200, 1800, 3600),
+    registry=REGISTRY,
+)
+
+TRANSCODE_DURATION = Histogram(
+    "catalyst_transcode_duration_seconds",
+    "Duration of video transcode operations",
+    [],
+    buckets=(10, 30, 60, 120, 300, 600, 1800, 3600, 7200),
+    registry=REGISTRY,
+)
+
+TRANSCODE_COMPRESSION_RATIO = Histogram(
+    "catalyst_transcode_compression_ratio",
+    "Compression ratio achieved by transcode (original / compressed)",
+    [],
+    buckets=(1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0, 15.0, 20.0),
+    registry=REGISTRY,
+)
+
+TRANSCODE_SAVED_BYTES = Counter(
+    "catalyst_transcode_saved_bytes_total",
+    "Total bytes saved by transcoding",
+    [],
+    registry=REGISTRY,
+)
+
+MODEL_LOAD_DURATION = Histogram(
+    "catalyst_model_load_duration_seconds",
+    "Duration to load ML models",
+    ["model_type"],
+    buckets=(1, 5, 10, 30, 60, 120, 300),
+    registry=REGISTRY,
+)
+
+TRANSCRIPTION_REALTIME_FACTOR = Histogram(
+    "catalyst_transcription_realtime_factor",
+    "Ratio of audio duration to transcription time (>1 means faster than realtime)",
+    ["backend"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0),
+    registry=REGISTRY,
+)
+
 
 @contextmanager
 def track_duration(histogram, labels: dict):

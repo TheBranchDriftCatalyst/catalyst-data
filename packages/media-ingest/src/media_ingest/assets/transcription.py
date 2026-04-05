@@ -17,7 +17,12 @@ from typing import Any
 from dagster import AssetExecutionContext, AssetIn, MetadataValue, Output, asset
 
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.metrics import (
+    ASSET_RECORDS_PROCESSED,
+    MODEL_LOAD_DURATION,
+    TRANSCRIPTION_DURATION,
+    TRANSCRIPTION_REALTIME_FACTOR,
+)
 from dagster_io.observability import get_tracer, trace_operation
 from media_ingest.assets.discovery import NFS_VOLUMES_CONFIG
 from media_ingest.assets.documents import MediaDocument
@@ -192,23 +197,38 @@ def media_transcriptions(
 
         if backend == "openvino":
             context.log.info(f"Loading OpenVINO model '{config.openvino_model_id}' (device={config.openvino_device})")
+            model_load_start = time.monotonic()
             model = _load_openvino(config)
+            MODEL_LOAD_DURATION.labels(model_type="openvino").observe(time.monotonic() - model_load_start)
             model_label = f"openvino:{config.openvino_model_id}:{config.openvino_device}"
         else:
             context.log.info(f"Loading faster-whisper '{config.whisper_model}' (compute={config.whisper_compute_type})")
+            model_load_start = time.monotonic()
             model = _load_faster_whisper(config)
+            MODEL_LOAD_DURATION.labels(model_type="faster-whisper").observe(time.monotonic() - model_load_start)
             model_label = f"faster-whisper:{config.whisper_model}:{config.whisper_compute_type}"
 
         context.log.info(f"Transcribing: {doc.title}")
 
         try:
+            transcribe_start = time.monotonic()
             if backend == "openvino":
                 result = _transcribe_openvino(model, doc.source_path)
             else:
                 result = _transcribe_faster_whisper(model, doc.source_path)
 
             duration = time.monotonic() - start
+            transcribe_time = time.monotonic() - transcribe_start
             full_text = " ".join(s["text"] for s in result["segments"])
+
+            # Record transcription duration metric
+            TRANSCRIPTION_DURATION.labels(backend=backend, model=config.whisper_model).observe(transcribe_time)
+
+            # Record real-time factor (audio_duration / transcription_time)
+            audio_duration = result.get("duration_s", 0)
+            if transcribe_time > 0 and audio_duration > 0:
+                rtf = audio_duration / transcribe_time
+                TRANSCRIPTION_REALTIME_FACTOR.labels(backend=backend).observe(rtf)
 
             output = {
                 "document_id": doc.id,
