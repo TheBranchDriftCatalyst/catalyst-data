@@ -68,8 +68,6 @@ data:
                   name: dagster-s3-credentials
               - secretRef:
                   name: llm-credentials
-              - secretRef:
-                  name: congress-data-secrets
             volume_mounts:
               - name: metube-downloads
                 mountPath: /data/metube
@@ -77,6 +75,8 @@ data:
               - name: tubesync-downloads
                 mountPath: /data/tubesync
                 readOnly: true
+              - name: whisper-models
+                mountPath: /data/whisper-models
           pod_spec_config:
             service_account_name: dagster
             image_pull_secrets:
@@ -88,6 +88,9 @@ data:
               - name: tubesync-downloads
                 persistentVolumeClaim:
                   claimName: tubesync-downloads
+              - name: whisper-models
+                persistentVolumeClaim:
+                  claimName: whisper-models
           job_spec_config:
             ttl_seconds_after_finished: 3600
 

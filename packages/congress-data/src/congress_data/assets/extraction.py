@@ -12,12 +12,24 @@ from congress_data.entities import Bill, Committee, Member
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
+# Congress API assets need the congress-data-secrets (CONGRESS_API_KEY)
+CONGRESS_API_K8S_CONFIG = {
+    "dagster-k8s/config": {
+        "container_config": {
+            "env_from": [
+                {"secret_ref": {"name": "congress-data-secrets"}},
+            ],
+        },
+    },
+}
+
 
 @asset(
     group_name="congress",
     description="Extract bills from Congress.gov API",
     compute_kind="extract",
     metadata={"layer": "bronze"},
+    op_tags=CONGRESS_API_K8S_CONFIG,
 )
 def congress_bills(
     context: AssetExecutionContext, config: CongressionalConfig
@@ -51,6 +63,7 @@ def congress_bills(
     description="Extract members from Congress.gov API",
     compute_kind="extract",
     metadata={"layer": "bronze"},
+    op_tags=CONGRESS_API_K8S_CONFIG,
 )
 def congress_members(
     context: AssetExecutionContext, config: CongressionalConfig
@@ -86,6 +99,7 @@ def congress_members(
     description="Extract committees from Congress.gov API",
     compute_kind="extract",
     metadata={"layer": "bronze"},
+    op_tags=CONGRESS_API_K8S_CONFIG,
 )
 def congress_committees(
     context: AssetExecutionContext, config: CongressionalConfig

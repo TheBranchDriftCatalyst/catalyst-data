@@ -11,8 +11,10 @@ resources:
   - secrets/externalsecret-s3.yaml
   - secrets/externalsecret-congress.yaml
   - secrets/externalsecret-llm.yaml
+  - secrets/externalsecret-hf.yaml
   # Storage
   - storage/nfs-media-volumes.yaml
+  - storage/whisper-models-pvc.yaml
   # Platform (webserver, daemon, postgres)
   - platform/rbac.yaml
   - platform/pvc.yaml

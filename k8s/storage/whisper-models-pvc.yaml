@@ -1,0 +1,36 @@
+---
+# NFS PV/PVC for whisper + pyannote model cache (~6GB for large-v3 + diarization)
+# Uses TrueNAS NFS with ReadOnlyMany so any node can run transcription jobs.
+# Models are downloaded on first run, then cached. Re-create the NFS share
+# and re-run transcription to repopulate if lost.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: catalyst-data-whisper-models
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: 192.168.1.36
+    path: /volume1/appdata/catalyst-data/whisper-models
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+    - noatime
+    - nodiratime
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: whisper-models
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: catalyst-data-whisper-models
+  resources:
+    requests:
+      storage: 20Gi
