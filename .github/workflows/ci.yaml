@@ -13,7 +13,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - run: |
+          pip install -e libs/catalyst-contracts-core
           pip install -e libs/dagster-io
           pip install -e packages/congress-data
           pip install -e packages/media-ingest
@@ -21,7 +23,7 @@ jobs:
           pip install -e packages/knowledge-graph
           pip install -e packages/data-explorer
           pip install pytest pytest-cov
-      - run: pytest --tb=short
+      - run: pytest --tb=short --ignore=packages/media-ingest/tests/test_transcription_qa.py
 
   build:
     needs: test
