@@ -9,6 +9,7 @@ description = "Media file processing pipeline — Dagster code location"
 requires-python = ">=3.12"
 dependencies = [
     "dagster>=1.9",
+    "dagster-aws>=0.25",
     "dagster-k8s>=0.25",
     "dagster-postgres>=0.25",
     "dagster-io",
