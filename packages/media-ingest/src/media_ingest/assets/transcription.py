@@ -268,7 +268,13 @@ def _run_diarization(audio_path: str, hf_token: str, cache_dir: str):
             "Failed to load pyannote pipeline — accept license at "
             "https://hf.co/pyannote/speaker-diarization-3.1"
         )
-    return pipeline(audio_path)
+    # pyannote can't read MP4/MKV containers — extract audio to WAV first
+    wav_path = _extract_audio_to_wav(audio_path)
+    try:
+        return pipeline(wav_path)
+    finally:
+        if os.path.exists(wav_path):
+            os.unlink(wav_path)
 
 
 # ── Per-file transcription (backend-agnostic) ───────────────────────────────
