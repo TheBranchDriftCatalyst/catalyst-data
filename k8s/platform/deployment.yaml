@@ -73,6 +73,16 @@ spec:
               value: dagster-homelab
             - name: DAGSTER_POSTGRES_DB
               value: dagster
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_ACCESS_KEY
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_SECRET_KEY
           envFrom:
             - secretRef:
                 name: dagster-s3-credentials
@@ -181,6 +191,16 @@ spec:
               value: dagster-homelab
             - name: DAGSTER_POSTGRES_DB
               value: dagster
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_ACCESS_KEY
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-s3-credentials
+                  key: DAGSTER_S3_SECRET_KEY
           envFrom:
             - secretRef:
                 name: dagster-s3-credentials
