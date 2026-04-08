@@ -250,8 +250,80 @@ def track_asset_materialization(code_location: str, layer: str):
 _metrics_server_started = False
 
 
+def push_metrics(job_name: str = "dagster_step") -> None:
+    """Push all collected metrics to Alloy via OTLP, then flush.
+
+    Call this at the end of ephemeral step pods (k8s_job_executor)
+    so metrics survive pod cleanup. Uses the same OTLP endpoint as tracing.
+    """
+    try:
+        from prometheus_client.openmetrics.exposition import generate_latest
+        from prometheus_client.parser import text_string_to_metric_families
+
+        # Collect all current metric values from the registry
+        metrics_text = generate_latest(REGISTRY).decode("utf-8")
+
+        # Push via OTLP using the remote write approach
+        endpoint = os.getenv(
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "http://alloy.monitoring.svc.cluster.local:4317",
+        )
+
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.sdk.resources import Resource
+
+        resource = Resource.create({
+            "service.name": os.getenv("OTEL_SERVICE_NAME", "catalyst-data"),
+            "service.namespace": "catalyst-data",
+            "job": job_name,
+        })
+
+        exporter = OTLPMetricExporter(endpoint=endpoint, insecure=True)
+        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=1000)
+        provider = MeterProvider(resource=resource, metric_readers=[reader])
+
+        # Create OTLP metrics from prometheus_client values
+        meter = provider.get_meter("catalyst-data")
+        for family in text_string_to_metric_families(metrics_text):
+            for sample in family.samples:
+                name = sample.name
+                labels = sample.labels
+                value = sample.value
+                if value == 0:
+                    continue
+                # Record as gauge (point-in-time snapshot)
+                gauge = meter.create_gauge(name, description=family.documentation)
+                gauge.set(value, labels)
+
+        # Force flush and shutdown
+        provider.force_flush()
+        provider.shutdown()
+        logger.info("Pushed metrics to Alloy OTLP at %s (job=%s)", endpoint, job_name)
+    except ImportError:
+        logger.warning("OpenTelemetry metrics packages not installed, skipping push")
+    except Exception as e:
+        logger.warning("Failed to push metrics via OTLP: %s", e)
+
+
+def enable_push_on_exit(job_name: str = "dagster_step") -> None:
+    """Register an atexit handler to push metrics when the process exits.
+
+    Use this in step pods (k8s_job_executor) so metrics get pushed
+    to Alloy via OTLP before the pod is cleaned up.
+    """
+    import atexit
+    atexit.register(push_metrics, job_name=job_name)
+    logger.info("Registered atexit metric push (job=%s)", job_name)
+
+
 def start_metrics_server(port: int | None = None) -> None:
-    """Start Prometheus metrics HTTP server (idempotent)."""
+    """Start Prometheus metrics HTTP server (idempotent).
+
+    For long-lived code-server pods (scraped by ServiceMonitor).
+    Also registers atexit push for step pods running under k8s_job_executor.
+    """
     global _metrics_server_started
     if _metrics_server_started:
         return
@@ -261,4 +333,6 @@ def start_metrics_server(port: int | None = None) -> None:
         _metrics_server_started = True
         logger.info("Prometheus metrics server started on port %d", port)
     except OSError as e:
-        logger.warning("Could not start metrics server on port %d: %s", port, e)
+        # Port already in use — likely a step pod. Register push instead.
+        logger.info("Metrics port %d unavailable (step pod?) — enabling push-on-exit", port)
+        enable_push_on_exit()
