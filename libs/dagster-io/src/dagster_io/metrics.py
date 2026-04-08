@@ -307,32 +307,27 @@ def push_metrics(job_name: str = "dagster_step") -> None:
         logger.warning("Failed to push metrics via OTLP: %s", e)
 
 
-def enable_push_on_exit(job_name: str = "dagster_step") -> None:
-    """Register an atexit handler to push metrics when the process exits.
+def start_metrics_server(port: int | None = None) -> None:
+    """Initialize metrics: start HTTP server for scraping AND register push-on-exit.
 
-    Use this in step pods (k8s_job_executor) so metrics get pushed
-    to Alloy via OTLP before the pod is cleaned up.
+    Every process pushes metrics via OTLP to Alloy on exit. The HTTP server
+    is a bonus for live debugging but not the primary collection path.
     """
     import atexit
-    atexit.register(push_metrics, job_name=job_name)
-    logger.info("Registered atexit metric push (job=%s)", job_name)
 
-
-def start_metrics_server(port: int | None = None) -> None:
-    """Start Prometheus metrics HTTP server (idempotent).
-
-    For long-lived code-server pods (scraped by ServiceMonitor).
-    Also registers atexit push for step pods running under k8s_job_executor.
-    """
     global _metrics_server_started
     if _metrics_server_started:
         return
+    _metrics_server_started = True
+
+    # Always register push-on-exit — this is the primary collection path
+    atexit.register(push_metrics, job_name=os.getenv("OTEL_SERVICE_NAME", "dagster_step"))
+    logger.info("Registered atexit metric push via OTLP")
+
+    # Also try to start HTTP server for live debugging (non-critical)
     port = port or int(os.getenv("METRICS_PORT", "9090"))
     try:
         start_http_server(port, registry=REGISTRY)
-        _metrics_server_started = True
         logger.info("Prometheus metrics server started on port %d", port)
-    except OSError as e:
-        # Port already in use — likely a step pod. Register push instead.
-        logger.info("Metrics port %d unavailable (step pod?) — enabling push-on-exit", port)
-        enable_push_on_exit()
+    except OSError:
+        pass  # Fine — push-on-exit handles collection
