@@ -157,9 +157,11 @@ def configure_logging(
     root_logger.addHandler(handler)
 
     # Quiet noisy third-party loggers
-    for noisy in ("urllib3", "botocore", "boto3", "s3transfer", "httpx", "httpcore",
+    for noisy in ("botocore", "boto3", "s3transfer", "httpx", "httpcore",
                    "openai", "langchain", "chromadb", "fsspec", "aiobotocore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    # urllib3.connection spams HeaderParsingError warnings on MinIO responses
+    logging.getLogger("urllib3").setLevel(logging.ERROR)
 
 
 def get_logger(name: str) -> logging.Logger:
