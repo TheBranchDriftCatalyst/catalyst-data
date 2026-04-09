@@ -1,0 +1,17 @@
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: media-explorer
+  labels:
+    app: media-ingest
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`media-explorer.talos00`)
+      kind: Rule
+      services:
+        - name: media-ingest
+          port: 8080

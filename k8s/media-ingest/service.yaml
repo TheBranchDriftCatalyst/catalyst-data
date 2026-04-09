@@ -18,5 +18,9 @@ spec:
       port: 9090
       targetPort: 9090
       protocol: TCP
+    - name: viewer
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
   selector:
     app: media-ingest

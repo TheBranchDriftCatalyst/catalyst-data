@@ -32,6 +32,7 @@ resources:
   - congress-data/service.yaml
   - media-ingest/deployment.yaml
   - media-ingest/service.yaml
+  - media-ingest/ingressroute.yaml
   - open-leaks/deployment.yaml
   - open-leaks/service.yaml
   - knowledge-graph/deployment.yaml
