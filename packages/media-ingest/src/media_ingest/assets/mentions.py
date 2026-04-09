@@ -51,7 +51,15 @@ Important:
 - Do NOT extract speaker labels (SPEAKER_00, SPEAKER_01) as entities
 - DO extract people mentioned BY NAME within speaker dialogue
 - Preserve speaker context when relevant (who said what about whom)
-- Be exhaustive but avoid duplicates within the same span."""
+- Be exhaustive but avoid duplicates within the same span.
+
+IMPORTANT RULES:
+- Do NOT extract pronoun-only mentions (he, she, they, it, we, you, I, someone, people)
+- Resolve pronouns to the actual entity name when context makes it clear
+- White House is ORG (institution), not GPE. Government buildings are FACILITY or ORG.
+- Political parties and national groups (Republicans, Democrats, Cubans, Iranians) are NORP, not OTHER
+- Use the most complete form of names (Fidel Castro, not just Fidel)
+- If the same entity appears with different surface forms, prefer the most specific one"""
 
 
 @asset(

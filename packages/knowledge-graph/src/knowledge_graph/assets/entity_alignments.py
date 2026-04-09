@@ -41,18 +41,21 @@ def entity_alignments(
     graph_db: GraphDBResource,
     congress_entity_candidates: list[EntityCandidate],
     leak_entity_candidates: list[EntityCandidate],
+    media_entity_candidates: list[EntityCandidate],
 ) -> Output[list[AlignmentEdge]]:
-    with trace_operation("entity_alignments", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates)}):
-        logger.info("Starting entity_alignments: %d congress + %d leak candidates", len(congress_entity_candidates), len(leak_entity_candidates))
+    with trace_operation("entity_alignments", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates), "media_candidate_count": len(media_entity_candidates)}):
+        logger.info("Starting entity_alignments: %d congress + %d leak + %d media candidates", len(congress_entity_candidates), len(leak_entity_candidates), len(media_entity_candidates))
         context.log.info(
             f"Computing alignment edges: {len(congress_entity_candidates)} congress "
-            f"+ {len(leak_entity_candidates)} leak candidates"
+            f"+ {len(leak_entity_candidates)} leak "
+            f"+ {len(media_entity_candidates)} media candidates"
         )
 
         aligner = CrossSourceAligner()
         edges = aligner.align({
             "congress_data": congress_entity_candidates,
             "open_leaks": leak_entity_candidates,
+            "media_ingest": media_entity_candidates,
         })
 
         # Count by type

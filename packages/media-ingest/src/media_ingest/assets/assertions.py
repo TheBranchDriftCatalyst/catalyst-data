@@ -49,7 +49,14 @@ Prefer these canonical predicates for speech acts:
   states, claims, denies, confirms, acknowledges, questions,
   responds_to, references, discusses, criticizes, supports, opposes
 
-Be precise with predicates. Preserve speaker attribution in source_attribution qualifier."""
+Be precise with predicates. Preserve speaker attribution in source_attribution qualifier.
+
+IMPORTANT RULES:
+- Do NOT use pronouns as subjects or objects. Resolve to the actual entity name.
+- Use SPEAKER_XX labels exactly as they appear (e.g., SPEAKER_00, SPEAKER_01), not 'Speaker' or 'the speaker'
+- Skip meta-commentary about the conversation itself (e.g., 'this is just guessing', 'I want to get someone on the show')
+- Only extract factual claims, allegations, and substantive speech acts — not conversational filler
+- Each assertion should be independently meaningful without needing surrounding context"""
 
 # Speech-act predicates for media content, with bridges to congress/leaks vocabularies
 MEDIA_PREDICATE_MAPPINGS = {
@@ -93,6 +100,24 @@ MEDIA_PREDICATE_MAPPINGS = {
     "leads": "leads",
     "founded": "founded",
     "created": "created",
+    # Filter vague predicates (mapped to empty string = skip)
+    "is": "",
+    "are": "",
+    "was": "",
+    "were": "",
+    "have": "",
+    "has": "",
+    "had": "",
+    "got": "",
+    "came": "",
+    "went": "",
+    # Additional normalizations
+    "left": "departed",
+    "spiked": "increased",
+    "provided": "provides",
+    "rose": "increased",
+    "fell": "decreased",
+    "dropped": "decreased",
 }
 
 

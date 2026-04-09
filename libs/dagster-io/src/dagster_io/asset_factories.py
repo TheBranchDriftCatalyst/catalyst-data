@@ -102,15 +102,33 @@ def build_assertions(
     predicate_mappings: dict[str, str],
 ) -> list[Assertion]:
     """Convert LLM AssertionExtractionResult objects into Assertion domain models."""
+    # Post-filter: skip low-quality assertions
+    PRONOUN_SUBJECTS = {"he", "she", "they", "it", "we", "you", "i", "someone", "people", "them", "him", "her"}
+
     assertions: list[Assertion] = []
     for chunk, result in zip(chunks, results):
         for ext in result.assertions:
+            # Skip pronoun subjects
+            subj_lower = ext.subject.lower().strip()
+            if subj_lower in PRONOUN_SUBJECTS:
+                continue
+            # Skip very low confidence
+            if ext.confidence < 0.3:
+                continue
+            # Skip overly long objects (likely summaries)
+            if len(ext.object) > 200:
+                continue
+            # Skip filtered predicates (mapped to empty string)
+            canonical = normalize_predicate(ext.predicate, predicate_mappings)
+            if canonical == "":
+                continue
+
             quals = {k: v for k, v in ext.qualifiers.model_dump().items() if v}
             assertions.append(
                 Assertion(
                     subject_text=ext.subject,
                     predicate=ext.predicate,
-                    predicate_canonical=normalize_predicate(ext.predicate, predicate_mappings),
+                    predicate_canonical=canonical,
                     object_text=ext.object,
                     qualifiers=quals,
                     confidence=ext.confidence,

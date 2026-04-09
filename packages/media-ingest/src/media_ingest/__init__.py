@@ -32,6 +32,7 @@ from media_ingest.assets import (
     media_diarization,
     media_documents,
     media_embeddings,
+    media_entity_candidates,
     media_files,
     media_mentions,
     media_metadata,
@@ -54,6 +55,7 @@ defs = Definitions(
         media_mentions,
         media_assertions,
         media_embeddings,
+        media_entity_candidates,
     ],
     sensors=[
         media_document_sensor,

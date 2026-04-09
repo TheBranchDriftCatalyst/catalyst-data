@@ -42,12 +42,14 @@ def canonical_entities(
     graph_db: GraphDBResource,
     congress_entity_candidates: list[EntityCandidate],
     leak_entity_candidates: list[EntityCandidate],
+    media_entity_candidates: list[EntityCandidate],
 ) -> Output[list[CanonicalEntity]]:
-    with trace_operation("canonical_entities", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates)}):
-        logger.info("Starting canonical_entities resolution: %d congress + %d leak candidates", len(congress_entity_candidates), len(leak_entity_candidates))
+    with trace_operation("canonical_entities", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates), "media_candidate_count": len(media_entity_candidates)}):
+        logger.info("Starting canonical_entities resolution: %d congress + %d leak + %d media candidates", len(congress_entity_candidates), len(leak_entity_candidates), len(media_entity_candidates))
         context.log.info(
             f"Resolving canonical entities from {len(congress_entity_candidates)} congress "
-            f"+ {len(leak_entity_candidates)} leak candidates"
+            f"+ {len(leak_entity_candidates)} leak "
+            f"+ {len(media_entity_candidates)} media candidates"
         )
 
         # Run cross-source alignment
@@ -55,12 +57,13 @@ def canonical_entities(
         sources = {
             "congress_data": congress_entity_candidates,
             "open_leaks": leak_entity_candidates,
+            "media_ingest": media_entity_candidates,
         }
         alignment_edges = aligner.align(sources)
         context.log.info(f"Found {len(alignment_edges)} cross-source alignment edges")
 
         # Build canonical entities from all candidates
-        all_candidates = congress_entity_candidates + leak_entity_candidates
+        all_candidates = congress_entity_candidates + leak_entity_candidates + media_entity_candidates
         canonical_list: list[CanonicalEntity] = []
 
         # Build alignment groups (union-find on sameAs edges)

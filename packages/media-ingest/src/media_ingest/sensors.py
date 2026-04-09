@@ -75,6 +75,7 @@ def _load_document_ids(client: S3Client) -> list[str]:
         AssetKey("media_mentions"),
         AssetKey("media_assertions"),
         AssetKey("media_embeddings"),
+        AssetKey("media_entity_candidates"),
     ],
 )
 def media_document_sensor(context: SensorEvaluationContext):

@@ -45,6 +45,16 @@ _leak_assertions = SourceAsset(
     description="Assertions from open_leaks code location",
     metadata={"layer": "gold", "source_code_location": "open_leaks"},
 )
+_media_entity_candidates = SourceAsset(
+    key="media_entity_candidates",
+    description="Entity candidates from media_ingest code location",
+    metadata={"layer": "gold", "source_code_location": "media_ingest"},
+)
+_media_assertions = SourceAsset(
+    key="media_assertions",
+    description="Assertions from media_ingest code location",
+    metadata={"layer": "gold", "source_code_location": "media_ingest"},
+)
 
 # Import platinum layer assets
 from knowledge_graph.assets import assertion_graph, canonical_entities, entity_alignments  # noqa: E402
@@ -54,8 +64,10 @@ defs = Definitions(
         # Source assets (from other code locations)
         _congress_entity_candidates,
         _leak_entity_candidates,
+        _media_entity_candidates,
         _congress_assertions,
         _leak_assertions,
+        _media_assertions,
         # Platinum layer assets
         canonical_entities,
         entity_alignments,

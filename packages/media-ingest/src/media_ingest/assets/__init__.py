@@ -4,6 +4,7 @@ from media_ingest.assets.diarization import media_diarization
 from media_ingest.assets.discovery import media_files
 from media_ingest.assets.documents import media_documents
 from media_ingest.assets.embeddings import media_embeddings
+from media_ingest.assets.entity_candidates import media_entity_candidates
 from media_ingest.assets.mentions import media_mentions
 from media_ingest.assets.metadata import media_metadata
 from media_ingest.assets.transcode import media_transcode
@@ -22,4 +23,5 @@ __all__ = [
     "media_mentions",
     "media_assertions",
     "media_embeddings",
+    "media_entity_candidates",
 ]
