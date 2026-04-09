@@ -43,7 +43,7 @@ spec:
               memory: 32Mi
       containers:
         - name: webserver
-          image: dagster/dagster-k8s:latest
+          image: dagster/dagster-k8s:1.13.0
           ports:
             - name: http
               containerPort: 3000
@@ -168,7 +168,7 @@ spec:
               memory: 32Mi
       containers:
         - name: daemon
-          image: dagster/dagster-k8s:latest
+          image: dagster/dagster-k8s:1.13.0
           command: ["dagster-daemon"]
           args:
             - "run"

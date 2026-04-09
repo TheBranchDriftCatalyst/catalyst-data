@@ -38,6 +38,10 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            # Signal to media_ingest __init__ that this is the code-server pod
+            # (enables the viewer daemon thread; run/step pods skip it)
+            - name: DAGSTER_IS_CODE_SERVER
+              value: "1"
             # Dagster instance postgres (needed for sensor context.instance access)
             - name: DAGSTER_POSTGRES_HOST
               value: dagster-postgres.catalyst-data.svc.cluster.local
