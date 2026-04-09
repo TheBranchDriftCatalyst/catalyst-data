@@ -26,7 +26,7 @@ _CACHE_TTL = 60
 # Partitioned:    {layer}/{code_location}/{group}/{asset}/{partition_key}/data.{ext}
 
 _CODE_LOCATION = "default"
-_GROUP = "media_ingest"
+_GROUP = "media"
 
 # silver layer — unpartitioned list
 DOCUMENTS_KEY = f"silver/{_CODE_LOCATION}/{_GROUP}/media_documents/data.jsonl"
