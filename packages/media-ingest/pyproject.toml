@@ -19,6 +19,8 @@ dependencies = [
     "pyannote.audio>=3.3",
     "torch>=2.6,<2.8",
     "torchaudio>=2.6,<2.8",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
 ]
 
 [project.optional-dependencies]

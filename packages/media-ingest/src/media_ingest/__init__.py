@@ -8,6 +8,20 @@ configure_logging()
 configure_tracing(service_name="catalyst-data.media_ingest")
 start_metrics_server()
 
+# ── Media Viewer (FastAPI) — runs as a daemon thread on port 8080 ────────────
+import threading
+
+
+def _start_viewer() -> None:
+    import uvicorn
+
+    from media_ingest.viewer.app import create_viewer_app
+
+    uvicorn.run(create_viewer_app(), host="0.0.0.0", port=8080, log_level="warning")
+
+
+threading.Thread(target=_start_viewer, daemon=True, name="media-viewer").start()
+
 from dagster import Definitions
 from dagster_k8s import k8s_job_executor
 from dagster_io import ChunkingResource, EmbeddingResource, LLMResource, MinioIOManager
