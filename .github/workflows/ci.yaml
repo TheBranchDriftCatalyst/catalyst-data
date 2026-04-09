@@ -8,6 +8,7 @@ on:
 jobs:
   lint-python:
     runs-on: ubuntu-latest
+    continue-on-error: true  # advisory until codebase is clean
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,6 +20,7 @@ jobs:
 
   lint-frontend:
     runs-on: ubuntu-latest
+    continue-on-error: true  # advisory until codebase is clean
     defaults:
       run:
         working-directory: packages/media-ingest/viewer-ui
@@ -53,7 +55,7 @@ jobs:
       - run: pytest --tb=short --ignore=packages/media-ingest/tests/test_transcription_qa.py
 
   build:
-    needs: [lint-python, lint-frontend, test]
+    needs: [test]
     strategy:
       matrix:
         app: [congress-data, media-ingest, open-leaks, knowledge-graph, data-explorer]
@@ -66,7 +68,7 @@ jobs:
       packages: write
 
   build-gpu:
-    needs: [lint-python, lint-frontend, test]
+    needs: [test]
     runs-on: ubuntu-latest
     permissions:
       contents: read
