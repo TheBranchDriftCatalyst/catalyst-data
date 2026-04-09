@@ -1,5 +1,6 @@
 """Stage 3: Transform media metadata into Document objects."""
 
+import hashlib
 import os
 from typing import Any
 
@@ -26,6 +27,17 @@ class MediaDocument(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+def _make_document_id(source: str, path: str) -> str:
+    """Create a deterministic, filesystem/S3-safe document ID from the file path.
+
+    Uses a short SHA-256 hash of the full path, prefixed with source for readability.
+    This avoids Unicode, emoji, fullwidth chars, slashes, and other characters
+    that break S3 keys, Dagster partition names, and LLM JSON payloads.
+    """
+    digest = hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
+    return f"media-{source}-{digest}"
+
+
 def _file_to_document(file_info: dict[str, Any]) -> MediaDocument:
     """Convert enriched file info to a MediaDocument."""
     filename = file_info["filename"]
@@ -33,7 +45,7 @@ def _file_to_document(file_info: dict[str, Any]) -> MediaDocument:
     source = "metube" if "metube" in file_info["source_dir"] else "tubesync"
 
     return MediaDocument(
-        id=f"media-{source}-{title}",
+        id=_make_document_id(source, file_info["path"]),
         title=title,
         source_path=file_info["path"],
         source=source,
