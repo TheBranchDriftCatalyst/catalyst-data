@@ -72,10 +72,7 @@ function findWordIndex(segment: Segment, time: number): number {
  * Hook: tracks which segment and word are active at the given currentTime.
  * Uses binary search for O(log n) performance on every timeupdate tick.
  */
-export function useMediaSync(
-  segments: Segment[],
-  currentTime: number
-): MediaSyncResult {
+export function useMediaSync(segments: Segment[], currentTime: number): MediaSyncResult {
   return useMemo(() => {
     if (segments.length === 0) {
       return { activeSegmentIndex: -1, activeWordIndex: -1, activeSegment: null };

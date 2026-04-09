@@ -1,10 +1,4 @@
-import type {
-  MediaDocument,
-  Transcription,
-  Diarization,
-  Mention,
-  Assertion,
-} from "@/types/media";
+import type { MediaDocument, Transcription, Diarization, Mention, Assertion } from "@/types/media";
 
 const API_BASE = "/viewer/api";
 
@@ -26,27 +20,19 @@ export function fetchDocument(id: string): Promise<MediaDocument> {
 }
 
 export function fetchTranscription(id: string): Promise<Transcription> {
-  return apiFetch<Transcription>(
-    `/documents/${encodeURIComponent(id)}/transcription`
-  );
+  return apiFetch<Transcription>(`/documents/${encodeURIComponent(id)}/transcription`);
 }
 
 export function fetchDiarization(id: string): Promise<Diarization> {
-  return apiFetch<Diarization>(
-    `/documents/${encodeURIComponent(id)}/diarization`
-  );
+  return apiFetch<Diarization>(`/documents/${encodeURIComponent(id)}/diarization`);
 }
 
 export function fetchMentions(id: string): Promise<Mention[]> {
-  return apiFetch<Mention[]>(
-    `/documents/${encodeURIComponent(id)}/mentions`
-  );
+  return apiFetch<Mention[]>(`/documents/${encodeURIComponent(id)}/mentions`);
 }
 
 export function fetchAssertions(id: string): Promise<Assertion[]> {
-  return apiFetch<Assertion[]>(
-    `/documents/${encodeURIComponent(id)}/assertions`
-  );
+  return apiFetch<Assertion[]>(`/documents/${encodeURIComponent(id)}/assertions`);
 }
 
 /**
@@ -69,16 +55,7 @@ export function getMediaUrl(doc: MediaDocument): string {
 }
 
 /** File extensions that should render as video */
-const VIDEO_EXTENSIONS = new Set([
-  ".mp4",
-  ".mkv",
-  ".webm",
-  ".avi",
-  ".mov",
-  ".m4v",
-  ".flv",
-  ".wmv",
-]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv"]);
 
 /** Returns true if the document contains video content */
 export function isVideoFile(doc: MediaDocument): boolean {

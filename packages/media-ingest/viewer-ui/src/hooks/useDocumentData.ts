@@ -22,45 +22,39 @@ export function useDocumentData(documentId: string | undefined) {
     staleTime: 60_000,
   });
 
-  const [transcriptionQuery, diarizationQuery, mentionsQuery, assertionsQuery] =
-    useQueries({
-      queries: [
-        {
-          queryKey: ["transcription", id],
-          queryFn: () => fetchTranscription(id),
-          enabled,
-          staleTime: 60_000,
-        },
-        {
-          queryKey: ["diarization", id],
-          queryFn: () => fetchDiarization(id),
-          enabled,
-          staleTime: 60_000,
-        },
-        {
-          queryKey: ["mentions", id],
-          queryFn: () => fetchMentions(id),
-          enabled,
-          staleTime: 60_000,
-        },
-        {
-          queryKey: ["assertions", id],
-          queryFn: () => fetchAssertions(id),
-          enabled,
-          staleTime: 60_000,
-        },
-      ],
-    });
+  const [transcriptionQuery, diarizationQuery, mentionsQuery, assertionsQuery] = useQueries({
+    queries: [
+      {
+        queryKey: ["transcription", id],
+        queryFn: () => fetchTranscription(id),
+        enabled,
+        staleTime: 60_000,
+      },
+      {
+        queryKey: ["diarization", id],
+        queryFn: () => fetchDiarization(id),
+        enabled,
+        staleTime: 60_000,
+      },
+      {
+        queryKey: ["mentions", id],
+        queryFn: () => fetchMentions(id),
+        enabled,
+        staleTime: 60_000,
+      },
+      {
+        queryKey: ["assertions", id],
+        queryFn: () => fetchAssertions(id),
+        enabled,
+        staleTime: 60_000,
+      },
+    ],
+  });
 
   const isLoading =
-    documentQuery.isLoading ||
-    transcriptionQuery.isLoading ||
-    diarizationQuery.isLoading;
+    documentQuery.isLoading || transcriptionQuery.isLoading || diarizationQuery.isLoading;
 
-  const isError =
-    documentQuery.isError ||
-    transcriptionQuery.isError ||
-    diarizationQuery.isError;
+  const isError = documentQuery.isError || transcriptionQuery.isError || diarizationQuery.isError;
 
   return {
     document: documentQuery.data,

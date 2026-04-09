@@ -1,5 +1,8 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from "@thebranchdriftcatalyst/catalyst-ui";
+import { Users } from "lucide-react";
 import type { Segment } from "@/types/media";
 import { speakerIndex, formatTime } from "@/lib/speakers";
+import { cn } from "@/lib/utils";
 
 interface SpeakerBreakdownProps {
   segments: Segment[];
@@ -37,11 +40,7 @@ interface SpeakerStats {
   percentage: number;
 }
 
-function computeSpeakerStats(
-  segments: Segment[],
-  speakers: string[],
-  _duration: number
-): SpeakerStats[] {
+function computeSpeakerStats(segments: Segment[], speakers: string[]): SpeakerStats[] {
   const timeMap = new Map<string, { total: number; count: number }>();
 
   for (const seg of segments) {
@@ -52,10 +51,7 @@ function computeSpeakerStats(
     timeMap.set(key, entry);
   }
 
-  const totalSpeaking = Array.from(timeMap.values()).reduce(
-    (sum, v) => sum + v.total,
-    0
-  );
+  const totalSpeaking = Array.from(timeMap.values()).reduce((sum, v) => sum + v.total, 0);
   const denominator = totalSpeaking > 0 ? totalSpeaking : 1;
 
   return speakers
@@ -74,15 +70,21 @@ function computeSpeakerStats(
 export default function SpeakerBreakdown({
   segments,
   speakers,
-  duration,
+  duration: _duration,
   className = "",
 }: SpeakerBreakdownProps) {
-  const stats = computeSpeakerStats(segments, speakers, duration);
+  const stats = computeSpeakerStats(segments, speakers);
 
   if (stats.length === 0) {
     return (
-      <div className={`text-zinc-500 text-sm ${className}`}>
-        No speaker data available
+      <div
+        className={cn(
+          "flex flex-col items-center justify-center gap-2 text-zinc-500 py-8",
+          className,
+        )}
+      >
+        <Users className="h-6 w-6 text-zinc-700" />
+        <p className="text-sm">No speaker data available</p>
       </div>
     );
   }
@@ -90,54 +92,62 @@ export default function SpeakerBreakdown({
   return (
     <div className={className}>
       {/* Stacked bar chart */}
-      <div className="flex w-full h-6 rounded-md overflow-hidden bg-surface-2">
+      <div className="flex w-full h-7 rounded-md overflow-hidden bg-surface-2">
         {stats.map(({ speaker, percentage }) => {
           const idx = speakerIndex(speaker);
           return (
-            <div
-              key={speaker}
-              className={`${BG_CLASSES[idx]} h-full transition-all duration-300 relative group`}
-              style={{ width: `${Math.max(percentage, 1)}%` }}
-              title={`${speaker}: ${percentage.toFixed(1)}%`}
-            >
-              {/* Show label if wide enough */}
-              {percentage > 12 && (
-                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-white/90 truncate px-1">
-                  {speaker.replace("SPEAKER_", "S")}
-                </span>
-              )}
-            </div>
+            <Tooltip key={speaker}>
+              <TooltipTrigger asChild>
+                <div
+                  className={cn(
+                    BG_CLASSES[idx],
+                    "h-full transition-all duration-300 relative group cursor-default",
+                  )}
+                  style={{ width: `${Math.max(percentage, 1)}%` }}
+                >
+                  {/* Show label if wide enough */}
+                  {percentage > 12 && (
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-white/90 truncate px-1">
+                      {speaker.replace("SPEAKER_", "S")}
+                    </span>
+                  )}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                {speaker}: {percentage.toFixed(1)}%
+              </TooltipContent>
+            </Tooltip>
           );
         })}
       </div>
 
       {/* Per-speaker details */}
-      <div className="mt-3 space-y-2">
+      <div className="mt-4 space-y-3">
         {stats.map(({ speaker, totalTime, segmentCount, percentage }) => {
           const idx = speakerIndex(speaker);
           return (
             <div key={speaker} className="flex items-center gap-3 text-sm">
               {/* Color dot */}
-              <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${BG_CLASSES[idx]}`} />
+              <div className={cn("w-2.5 h-2.5 rounded-full flex-shrink-0", BG_CLASSES[idx])} />
 
               {/* Speaker name */}
-              <span className={`${TEXT_CLASSES[idx]} font-medium min-w-[100px]`}>
+              <span className={cn(TEXT_CLASSES[idx], "font-medium min-w-[100px] text-xs")}>
                 {speaker}
               </span>
 
               {/* Progress bar */}
               <div className="flex-1 h-1.5 bg-surface-2 rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full ${BG_CLASSES[idx]} opacity-70`}
+                  className={cn("h-full rounded-full opacity-70", BG_CLASSES[idx])}
                   style={{ width: `${percentage}%` }}
                 />
               </div>
 
               {/* Stats */}
-              <span className="text-zinc-400 text-xs tabular-nums min-w-[110px] text-right">
+              <span className="text-zinc-400 text-xs tabular-nums min-w-[100px] text-right font-mono">
                 {formatTime(totalTime)} ({percentage.toFixed(0)}%)
               </span>
-              <span className="text-zinc-600 text-xs tabular-nums min-w-[50px] text-right">
+              <span className="text-zinc-600 text-xs tabular-nums min-w-[45px] text-right">
                 {segmentCount} seg
               </span>
             </div>

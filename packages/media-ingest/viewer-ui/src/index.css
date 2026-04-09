@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@source "../../node_modules/@thebranchdriftcatalyst/catalyst-ui/dist";
+
 @theme {
   /* Speaker color palette — 8 distinct contrasting colors */
   --color-speaker-0: #3b82f6; /* blue */
@@ -15,7 +17,7 @@
   --color-accent: #facc15;
   --color-accent-dim: #854d0e;
 
-  /* Base surface colors */
+  /* Base surface colors for the dark theme */
   --color-surface-0: #09090b;
   --color-surface-1: #18181b;
   --color-surface-2: #27272a;
@@ -45,9 +47,34 @@
 
 /* Active segment pulse animation */
 @keyframes segment-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.85; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
+  }
 }
 .segment-active {
   animation: segment-pulse 2s ease-in-out infinite;
+}
+
+/* Loading skeleton shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-1) 25%,
+    var(--color-surface-2) 50%,
+    var(--color-surface-1) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
 }

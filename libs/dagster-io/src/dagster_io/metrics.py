@@ -251,28 +251,27 @@ _metrics_server_started = False
 
 
 def push_metrics(job_name: str = "dagster_step") -> None:
-    """Push all collected metrics to Alloy via OTLP, then flush.
+    """Push all collected metrics to Alloy via synchronous OTLP export.
 
-    Call this at the end of ephemeral step pods (k8s_job_executor)
-    so metrics survive pod cleanup. Uses the same OTLP endpoint as tracing.
+    Uses InMemoryMetricReader + direct exporter.export() — no background
+    threads, no PeriodicExportingMetricReader. Safe to call during atexit
+    or SIGTERM handling.
     """
     try:
         from prometheus_client.openmetrics.exposition import generate_latest
         from prometheus_client.parser import text_string_to_metric_families
 
-        # Collect all current metric values from the registry
-        metrics_text = generate_latest(REGISTRY).decode("utf-8")
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+        from opentelemetry.sdk.resources import Resource
 
-        # Push via OTLP using the remote write approach
         endpoint = os.getenv(
             "OTEL_EXPORTER_OTLP_ENDPOINT",
             "http://alloy.monitoring.svc.cluster.local:4317",
         )
 
-        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
-        from opentelemetry.sdk.metrics import MeterProvider
-        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-        from opentelemetry.sdk.resources import Resource
+        metrics_text = generate_latest(REGISTRY).decode("utf-8")
 
         resource = Resource.create({
             "service.name": os.getenv("OTEL_SERVICE_NAME", "catalyst-data"),
@@ -280,25 +279,22 @@ def push_metrics(job_name: str = "dagster_step") -> None:
             "job": job_name,
         })
 
-        exporter = OTLPMetricExporter(endpoint=endpoint, insecure=True)
-        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=1000)
+        reader = InMemoryMetricReader()
         provider = MeterProvider(resource=resource, metric_readers=[reader])
-
-        # Create OTLP metrics from prometheus_client values
         meter = provider.get_meter("catalyst-data")
+
         for family in text_string_to_metric_families(metrics_text):
             for sample in family.samples:
-                name = sample.name
-                labels = sample.labels
-                value = sample.value
-                if value == 0:
+                if sample.value == 0:
                     continue
-                # Record as gauge (point-in-time snapshot)
-                gauge = meter.create_gauge(name, description=family.documentation)
-                gauge.set(value, labels)
+                gauge = meter.create_gauge(sample.name, description=family.documentation)
+                gauge.set(sample.value, sample.labels)
 
-        # Force flush and shutdown
-        provider.force_flush()
+        # Synchronous: read collected metrics, then export directly (no threads)
+        exporter = OTLPMetricExporter(endpoint=endpoint, insecure=True)
+        metrics_data = reader.get_metrics_data()
+        exporter.export(metrics_data, timeout_millis=10000)
+        exporter.shutdown()
         provider.shutdown()
         logger.info("Pushed metrics to Alloy OTLP at %s (job=%s)", endpoint, job_name)
     except ImportError:
@@ -310,19 +306,35 @@ def push_metrics(job_name: str = "dagster_step") -> None:
 def start_metrics_server(port: int | None = None) -> None:
     """Initialize metrics: start HTTP server for scraping AND register push-on-exit.
 
-    Every process pushes metrics via OTLP to Alloy on exit. The HTTP server
-    is a bonus for live debugging but not the primary collection path.
+    Every process pushes metrics via synchronous OTLP on exit. Also registers
+    a SIGTERM handler so metrics are pushed when K8s terminates step pods.
+    The HTTP server is a bonus for live debugging but not the primary path.
     """
     import atexit
+    import signal
 
     global _metrics_server_started
     if _metrics_server_started:
         return
     _metrics_server_started = True
 
-    # Always register push-on-exit — this is the primary collection path
-    atexit.register(push_metrics, job_name=os.getenv("OTEL_SERVICE_NAME", "dagster_step"))
-    logger.info("Registered atexit metric push via OTLP")
+    _job_name = os.getenv("OTEL_SERVICE_NAME", "dagster_step")
+
+    # Register push-on-exit (atexit fires on clean sys.exit)
+    atexit.register(push_metrics, job_name=_job_name)
+
+    # Register SIGTERM handler (K8s sends SIGTERM before SIGKILL)
+    _prev_handler = signal.getsignal(signal.SIGTERM)
+
+    def _sigterm_handler(signum, frame):
+        push_metrics(job_name=_job_name)
+        # Chain to previous handler if it was callable
+        if callable(_prev_handler) and _prev_handler not in (signal.SIG_DFL, signal.SIG_IGN):
+            _prev_handler(signum, frame)
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+    logger.info("Registered atexit + SIGTERM metric push via OTLP")
 
     # Also try to start HTTP server for live debugging (non-critical)
     port = port or int(os.getenv("METRICS_PORT", "9090"))

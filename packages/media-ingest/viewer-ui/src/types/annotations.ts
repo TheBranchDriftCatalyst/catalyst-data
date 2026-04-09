@@ -4,7 +4,7 @@ export interface Annotation {
   target_type: "mention" | "assertion" | "segment" | "speaker";
   target_id: string;
   action: "approve" | "reject" | "edit" | "flag";
-  edits?: Record<string, any>;
+  edits?: Record<string, unknown>;
   reviewer?: string;
   notes?: string;
   created_at: string;

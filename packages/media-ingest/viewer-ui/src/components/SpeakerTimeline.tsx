@@ -1,6 +1,8 @@
 import { useCallback, useRef } from "react";
+// Tooltip from catalyst-ui is used at the parent level via TooltipProvider
 import type { Segment } from "@/types/media";
 import { speakerColor, speakerIndex, formatTime } from "@/lib/speakers";
+import { cn } from "@/lib/utils";
 
 interface SpeakerTimelineProps {
   segments: Segment[];
@@ -10,6 +12,28 @@ interface SpeakerTimelineProps {
   onSeek: (time: number) => void;
   className?: string;
 }
+
+const SPEAKER_BG_SWATCH = [
+  "bg-[#3b82f6]",
+  "bg-[#ef4444]",
+  "bg-[#22c55e]",
+  "bg-[#f59e0b]",
+  "bg-[#a855f7]",
+  "bg-[#06b6d4]",
+  "bg-[#f97316]",
+  "bg-[#ec4899]",
+] as const;
+
+const SPEAKER_TEXT_SWATCH = [
+  "text-[#3b82f6]",
+  "text-[#ef4444]",
+  "text-[#22c55e]",
+  "text-[#f59e0b]",
+  "text-[#a855f7]",
+  "text-[#06b6d4]",
+  "text-[#f97316]",
+  "text-[#ec4899]",
+] as const;
 
 export default function SpeakerTimeline({
   segments,
@@ -29,13 +53,13 @@ export default function SpeakerTimeline({
       const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       onSeek(fraction * duration);
     },
-    [duration, onSeek]
+    [duration, onSeek],
   );
 
   const playheadPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className={`select-none ${className}`}>
+    <div className={cn("select-none", className)}>
       {/* Timeline bar */}
       <div
         ref={barRef}
@@ -75,15 +99,10 @@ export default function SpeakerTimeline({
           className="absolute top-0 h-full w-0.5 bg-white shadow-[0_0_6px_rgba(255,255,255,0.5)] z-10 pointer-events-none transition-[left] duration-75"
           style={{ left: `${playheadPercent}%` }}
         />
-
-        {/* Hover time indicator */}
-        <div className="absolute inset-0 opacity-0 group-hover:opacity-100 pointer-events-none">
-          <div className="absolute top-0 h-full w-px bg-white/30" />
-        </div>
       </div>
 
       {/* Time markers */}
-      <div className="flex justify-between mt-1 text-[10px] text-zinc-500">
+      <div className="flex justify-between mt-1 text-[10px] text-zinc-500 font-mono tabular-nums">
         <span>{formatTime(currentTime)}</span>
         <span>{formatTime(duration)}</span>
       </div>
@@ -95,12 +114,8 @@ export default function SpeakerTimeline({
             const idx = speakerIndex(speaker);
             return (
               <div key={speaker} className="flex items-center gap-1.5 text-xs">
-                <div
-                  className={`w-3 h-3 rounded-sm ${SPEAKER_BG_SWATCH[idx]}`}
-                />
-                <span className={`${SPEAKER_TEXT_SWATCH[idx]}`}>
-                  {speaker}
-                </span>
+                <div className={cn("w-3 h-3 rounded-sm", SPEAKER_BG_SWATCH[idx])} />
+                <span className={SPEAKER_TEXT_SWATCH[idx]}>{speaker}</span>
               </div>
             );
           })}
@@ -109,26 +124,3 @@ export default function SpeakerTimeline({
     </div>
   );
 }
-
-// Pre-built class arrays to avoid dynamic class generation
-const SPEAKER_BG_SWATCH = [
-  "bg-[#3b82f6]",
-  "bg-[#ef4444]",
-  "bg-[#22c55e]",
-  "bg-[#f59e0b]",
-  "bg-[#a855f7]",
-  "bg-[#06b6d4]",
-  "bg-[#f97316]",
-  "bg-[#ec4899]",
-] as const;
-
-const SPEAKER_TEXT_SWATCH = [
-  "text-[#3b82f6]",
-  "text-[#ef4444]",
-  "text-[#22c55e]",
-  "text-[#f59e0b]",
-  "text-[#a855f7]",
-  "text-[#06b6d4]",
-  "text-[#f97316]",
-  "text-[#ec4899]",
-] as const;

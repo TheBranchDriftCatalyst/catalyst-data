@@ -1,16 +1,31 @@
 import { useState, useRef, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
+import {
+  Button,
+  Badge,
+  Separator,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@thebranchdriftcatalyst/catalyst-ui";
+import { ArrowLeft, Clock, Users, Globe, X, Highlighter } from "lucide-react";
 import { useDocumentData } from "@/hooks/useDocumentData";
 import { useMediaSync } from "@/hooks/useMediaSync";
+import { useMarkerData } from "@/hooks/useMarkerData";
 import MediaPlayer, { type MediaPlayerHandle } from "@/components/MediaPlayer";
 import SpeakerTimeline from "@/components/SpeakerTimeline";
 import Transcript from "@/components/Transcript";
 import SpeakerBreakdown from "@/components/SpeakerBreakdown";
 import EntityPanel from "@/components/EntityPanel";
 import AssertionPanel from "@/components/AssertionPanel";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { PlayerSkeleton } from "@/components/Skeleton";
 import { formatTime } from "@/lib/speakers";
-
-type BottomTab = "entities" | "assertions";
+import type { TimelineMarker } from "@/types/media";
 
 export default function PlayerPage() {
   const { documentId } = useParams<{ documentId: string }>();
@@ -28,19 +43,25 @@ export default function PlayerPage() {
   const playerRef = useRef<MediaPlayerHandle>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [bottomTab, setBottomTab] = useState<BottomTab>("entities");
   const [highlightText, setHighlightText] = useState<string | undefined>();
+  const [selectedEntityText, setSelectedEntityText] = useState<string | null>(null);
+  const [selectedAssertionId, setSelectedAssertionId] = useState<string | null>(null);
 
   // Prefer diarization segments over plain transcription
   const segments = diarization?.segments ?? transcription?.segments ?? [];
   const speakers = diarization?.speakers ?? [];
-  const effectiveDuration =
-    duration || diarization?.duration_s || transcription?.duration_s || 0;
+  const effectiveDuration = duration || diarization?.duration_s || transcription?.duration_s || 0;
 
-  const { activeSegmentIndex, activeWordIndex } = useMediaSync(
-    segments,
-    currentTime
-  );
+  const { activeSegmentIndex, activeWordIndex } = useMediaSync(segments, currentTime);
+
+  // Compute timeline markers from mentions/assertions + selection state
+  const markers = useMarkerData({
+    mentions,
+    assertions,
+    transcription: diarization ?? transcription ?? null,
+    selectedEntityText,
+    selectedAssertionId,
+  });
 
   const handleSeek = useCallback((time: number) => {
     playerRef.current?.seek(time);
@@ -59,16 +80,28 @@ export default function PlayerPage() {
     setHighlightText((prev) => (prev === text ? undefined : text));
   }, []);
 
+  const handleEntitySelect = useCallback((entityText: string | null) => {
+    setSelectedEntityText(entityText);
+    // Clear assertion selection when selecting an entity
+    if (entityText) setSelectedAssertionId(null);
+  }, []);
+
+  const handleAssertionSelect = useCallback((assertionId: string | null) => {
+    setSelectedAssertionId(assertionId);
+    // Clear entity selection when selecting an assertion
+    if (assertionId) setSelectedEntityText(null);
+  }, []);
+
+  const handleMarkerClick = useCallback(
+    (marker: TimelineMarker) => {
+      handleSeek(marker.timestamp);
+    },
+    [handleSeek],
+  );
+
   // Loading state
   if (isLoading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
-          <span className="text-sm text-zinc-400">Loading media...</span>
-        </div>
-      </div>
-    );
+    return <PlayerSkeleton />;
   }
 
   // Error state
@@ -76,100 +109,135 @@ export default function PlayerPage() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="max-w-md text-center">
-          <div className="text-red-400 mb-3">
-            <svg className="w-12 h-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-            </svg>
+          <div className="rounded-full bg-red-950/50 p-4 mb-4 inline-flex">
+            <X className="h-8 w-8 text-red-400" />
           </div>
           <h2 className="text-lg font-medium text-zinc-200 mb-2">Failed to load document</h2>
           <p className="text-sm text-zinc-500 mb-4">
             {errors.map((e) => (e as Error).message).join("; ") || "Document not found"}
           </p>
-          <Link
-            to="/"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-surface-2 text-sm text-zinc-300 hover:bg-surface-3 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-            </svg>
-            Back to library
-          </Link>
+          <Button variant="outline" asChild>
+            <Link to="/" className="gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back to library
+            </Link>
+          </Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {/* Top header bar */}
-      <header className="flex items-center gap-4 px-4 py-2.5 bg-surface-1 border-b border-white/5 flex-shrink-0">
-        <Link
-          to="/"
-          className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-          </svg>
-          <span className="text-xs">Back</span>
-        </Link>
+    <ErrorBoundary>
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* Top header bar */}
+        <header className="flex items-center gap-3 px-4 py-2 bg-surface-1 border-b border-white/5 flex-shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" asChild>
+                <Link to="/">
+                  <ArrowLeft className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Back to library</TooltipContent>
+          </Tooltip>
 
-        <div className="flex-1 min-w-0">
-          <h1 className="text-sm font-medium text-zinc-200 truncate">{doc.title}</h1>
-        </div>
+          <Separator orientation="vertical" className="h-5" />
 
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-zinc-500 uppercase font-medium">
-            {doc.source}
-          </span>
-          {doc.metadata.extension && (
-            <span className="text-[10px] text-zinc-600 uppercase">
-              {doc.metadata.extension}
-            </span>
-          )}
-          {effectiveDuration > 0 && (
-            <span className="text-xs text-zinc-400 tabular-nums">
-              {formatTime(effectiveDuration)}
-            </span>
-          )}
-          {speakers.length > 0 && (
-            <span className="text-[10px] text-zinc-500">
-              {speakers.length} speaker{speakers.length !== 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
-      </header>
-
-      {/* Main content area — two columns */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* Left column: media + timeline + breakdown */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          {/* Media player */}
-          <div className="flex-shrink-0 p-4 pb-2">
-            <MediaPlayer
-              ref={playerRef}
-              document={doc}
-              onTimeUpdate={handleTimeUpdate}
-              onDurationChange={handleDurationChange}
-              className="max-h-[50vh]"
-            />
+          <div className="flex-1 min-w-0">
+            <h1 className="text-sm font-medium text-zinc-200 truncate">{doc.title}</h1>
           </div>
 
-          {/* Speaker timeline */}
-          <div className="flex-shrink-0 px-4 pb-2">
-            <SpeakerTimeline
-              segments={segments}
-              duration={effectiveDuration}
-              currentTime={currentTime}
-              speakers={speakers}
-              onSeek={handleSeek}
-            />
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Badge variant="secondary" className="text-[10px] uppercase">
+              {doc.source}
+            </Badge>
+            {doc.metadata.extension && (
+              <Badge variant="outline" className="text-[10px] uppercase">
+                {doc.metadata.extension}
+              </Badge>
+            )}
+            {effectiveDuration > 0 && (
+              <span className="flex items-center gap-1 text-xs text-zinc-400 tabular-nums font-mono">
+                <Clock className="h-3 w-3" />
+                {formatTime(effectiveDuration)}
+              </span>
+            )}
+            {speakers.length > 0 && (
+              <span className="flex items-center gap-1 text-xs text-zinc-500">
+                <Users className="h-3 w-3" />
+                {speakers.length}
+              </span>
+            )}
+            {transcription?.language && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="flex items-center gap-1 text-xs text-zinc-600">
+                    <Globe className="h-3 w-3" />
+                    {transcription.language.toUpperCase()}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Language: {transcription.language} (
+                  {(transcription.language_probability * 100).toFixed(0)}% confidence)
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
+        </header>
 
-          {/* Bottom section: breakdown + entities/assertions tabs */}
-          <div className="flex-1 flex min-h-0 overflow-hidden">
+        {/* Highlight bar */}
+        {highlightText && (
+          <div className="flex items-center gap-2 px-4 py-1.5 bg-amber-950/30 border-b border-amber-900/30 flex-shrink-0">
+            <Highlighter className="h-3 w-3 text-amber-500" />
+            <span className="text-xs text-amber-300">
+              Highlighting: <strong>{highlightText}</strong>
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setHighlightText(undefined)}
+              className="h-5 w-5 ml-auto"
+            >
+              <X className="h-3 w-3 text-amber-500" />
+            </Button>
+          </div>
+        )}
+
+        {/* Main content area — three columns */}
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          {/* Left column: media player + timeline */}
+          <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 border-r border-white/5">
+            {/* Media player */}
+            <div className="flex-shrink-0 p-4 pb-2">
+              <MediaPlayer
+                ref={playerRef}
+                document={doc}
+                markers={markers}
+                onMarkerClick={handleMarkerClick}
+                onTimeUpdate={handleTimeUpdate}
+                onDurationChange={handleDurationChange}
+                className="max-h-[50vh]"
+              />
+            </div>
+
+            {/* Speaker timeline */}
+            <div className="flex-shrink-0 px-4 pb-3">
+              <SpeakerTimeline
+                segments={segments}
+                duration={effectiveDuration}
+                currentTime={currentTime}
+                speakers={speakers}
+                onSeek={handleSeek}
+              />
+            </div>
+
+            <Separator />
+
             {/* Speaker breakdown */}
-            <div className="w-1/2 border-r border-white/5 p-4 overflow-y-auto">
-              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-3">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4">
+              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
                 Speaker Breakdown
               </h3>
               <SpeakerBreakdown
@@ -178,98 +246,106 @@ export default function PlayerPage() {
                 duration={effectiveDuration}
               />
             </div>
+          </div>
 
-            {/* Entities / Assertions tabs */}
-            <div className="w-1/2 flex flex-col min-h-0">
-              {/* Tab bar */}
-              <div className="flex border-b border-white/5 flex-shrink-0">
-                <button
-                  onClick={() => setBottomTab("entities")}
-                  className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
-                    bottomTab === "entities"
-                      ? "text-zinc-200 border-b-2 border-blue-500"
-                      : "text-zinc-500 hover:text-zinc-300"
-                  }`}
+          {/* Center column: transcript */}
+          <div className="flex-1 min-w-[300px] flex flex-col min-h-0 border-r border-white/5">
+            <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between flex-shrink-0">
+              <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                Transcript
+              </h2>
+              {segments.length > 0 && (
+                <span className="text-[10px] text-zinc-600">{segments.length} segments</span>
+              )}
+            </div>
+            <Transcript
+              segments={segments}
+              activeSegmentIndex={activeSegmentIndex}
+              activeWordIndex={activeWordIndex}
+              onSeek={handleSeek}
+              highlightText={highlightText}
+              className="flex-1 min-h-0"
+            />
+          </div>
+
+          {/* Right column: Entities / Assertions tabbed panel */}
+          <div className="w-[320px] xl:w-[380px] flex flex-col min-h-0 flex-shrink-0">
+            <Tabs defaultValue="entities" className="flex flex-col h-full">
+              <TabsList className="flex-shrink-0 w-full rounded-none border-b border-white/5 bg-surface-1 h-10 px-1">
+                <TabsTrigger
+                  value="entities"
+                  className="flex-1 text-xs data-[state=active]:bg-surface-2"
                 >
                   Entities
                   {mentions.length > 0 && (
-                    <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-surface-2 text-[10px] tabular-nums">
+                    <Badge
+                      variant="secondary"
+                      className="ml-1.5 text-[9px] px-1 py-0 h-4 tabular-nums"
+                    >
                       {mentions.length}
-                    </span>
+                    </Badge>
                   )}
-                </button>
-                <button
-                  onClick={() => setBottomTab("assertions")}
-                  className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
-                    bottomTab === "assertions"
-                      ? "text-zinc-200 border-b-2 border-blue-500"
-                      : "text-zinc-500 hover:text-zinc-300"
-                  }`}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="assertions"
+                  className="flex-1 text-xs data-[state=active]:bg-surface-2"
                 >
                   Assertions
                   {assertions.length > 0 && (
-                    <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-surface-2 text-[10px] tabular-nums">
+                    <Badge
+                      variant="secondary"
+                      className="ml-1.5 text-[9px] px-1 py-0 h-4 tabular-nums"
+                    >
                       {assertions.length}
-                    </span>
+                    </Badge>
                   )}
-                </button>
-              </div>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="speakers"
+                  className="flex-1 text-xs data-[state=active]:bg-surface-2"
+                >
+                  Speakers
+                  {speakers.length > 0 && (
+                    <Badge
+                      variant="secondary"
+                      className="ml-1.5 text-[9px] px-1 py-0 h-4 tabular-nums"
+                    >
+                      {speakers.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              </TabsList>
 
-              {/* Tab content */}
-              <div className="flex-1 min-h-0 overflow-hidden">
-                {bottomTab === "entities" && (
-                  <EntityPanel
-                    mentions={mentions}
-                    onEntityClick={handleEntityClick}
-                    className="h-full"
-                  />
-                )}
-                {bottomTab === "assertions" && (
-                  <AssertionPanel assertions={assertions} className="h-full" />
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+              <TabsContent value="entities" className="flex-1 min-h-0 overflow-hidden mt-0">
+                <EntityPanel
+                  mentions={mentions}
+                  onEntityClick={handleEntityClick}
+                  onEntitySelect={handleEntitySelect}
+                  selectedEntityText={selectedEntityText}
+                  className="h-full"
+                />
+              </TabsContent>
 
-        {/* Right column: transcript */}
-        <div className="w-[400px] xl:w-[480px] flex flex-col min-h-0 border-l border-white/5 flex-shrink-0">
-          <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between flex-shrink-0">
-            <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
-              Transcript
-            </h2>
-            {transcription?.language && (
-              <span className="text-[10px] text-zinc-600 uppercase">
-                {transcription.language}
-                {transcription.language_probability > 0 && (
-                  <span className="ml-1 opacity-50">
-                    {(transcription.language_probability * 100).toFixed(0)}%
-                  </span>
-                )}
-              </span>
-            )}
-            {highlightText && (
-              <button
-                onClick={() => setHighlightText(undefined)}
-                className="text-[10px] text-amber-500 hover:text-amber-400 transition-colors flex items-center gap-1"
-              >
-                <span>Highlighting: {highlightText}</span>
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )}
+              <TabsContent value="assertions" className="flex-1 min-h-0 overflow-hidden mt-0">
+                <AssertionPanel
+                  assertions={assertions}
+                  onAssertionSelect={handleAssertionSelect}
+                  selectedAssertionId={selectedAssertionId}
+                  className="h-full"
+                />
+              </TabsContent>
+
+              <TabsContent value="speakers" className="flex-1 min-h-0 overflow-hidden mt-0 p-4">
+                <SpeakerBreakdown
+                  segments={segments}
+                  speakers={speakers}
+                  duration={effectiveDuration}
+                />
+              </TabsContent>
+            </Tabs>
           </div>
-          <Transcript
-            segments={segments}
-            activeSegmentIndex={activeSegmentIndex}
-            activeWordIndex={activeWordIndex}
-            onSeek={handleSeek}
-            highlightText={highlightText}
-            className="flex-1 min-h-0"
-          />
         </div>
       </div>
-    </div>
+    </ErrorBoundary>
   );
 }
