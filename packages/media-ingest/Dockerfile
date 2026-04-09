@@ -1,5 +1,13 @@
 # syntax=docker/dockerfile:1
-# ---------- stage 1: build ----------
+# ---------- stage 0: build React SPA ----------
+FROM node:22-slim AS ui-builder
+WORKDIR /ui
+COPY packages/media-ingest/viewer-ui/package.json packages/media-ingest/viewer-ui/package-lock.json ./
+RUN npm ci
+COPY packages/media-ingest/viewer-ui/ .
+RUN npm run build
+
+# ---------- stage 1: build Python ----------
 FROM python:3.12-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -48,7 +56,10 @@ COPY --from=builder /usr/local/bin/ /usr/local/bin/
 ENV DAGSTER_HOME=/opt/dagster/dagster_home
 RUN mkdir -p $DAGSTER_HOME
 
-EXPOSE 4000
+# Copy React SPA build
+COPY --from=ui-builder /ui/dist /app/viewer-static
+
+EXPOSE 4000 8080
 
 CMD ["dagster", "code-server", "start", \
      "--host", "0.0.0.0", \

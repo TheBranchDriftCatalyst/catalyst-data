@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",
-    "@thebranchdriftcatalyst/catalyst-ui": "file:../../../../catalyst-ui",
+    "@thebranchdriftcatalyst/catalyst-ui": "^2.1.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.0"
