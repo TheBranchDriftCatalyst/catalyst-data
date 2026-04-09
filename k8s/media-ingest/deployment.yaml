@@ -46,6 +46,17 @@ spec:
               value: dagster-homelab
             - name: DAGSTER_POSTGRES_DB
               value: dagster
+            # Knowledge graph postgres (for annotation store)
+            - name: KG_PG_HOST
+              value: postgres-knowledge.catalyst-data.svc.cluster.local
+            - name: KG_PG_PORT
+              value: "5432"
+            - name: KG_PG_DB
+              value: knowledge_graph
+            - name: KG_PG_USER
+              value: kg
+            - name: KG_PG_PASSWORD
+              value: kg-homelab
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://alloy.monitoring.svc.cluster.local:4317"
             - name: OTEL_SERVICE_NAME

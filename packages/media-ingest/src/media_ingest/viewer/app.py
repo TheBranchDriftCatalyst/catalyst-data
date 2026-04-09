@@ -18,7 +18,9 @@ from fastapi.staticfiles import StaticFiles
 from dagster_io.logging import get_logger
 
 from media_ingest.viewer.routes.api import router as api_router
+from media_ingest.viewer.routes.annotations import router as annotations_router, set_store
 from media_ingest.viewer.routes.media import router as media_router
+from media_ingest.viewer.services.annotation_store import AnnotationStore
 
 logger = get_logger(__name__)
 
@@ -48,9 +50,18 @@ def create_viewer_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Mount API and media routes
+    # Mount API, annotation, and media routes
     app.include_router(api_router)
+    app.include_router(annotations_router)
     app.include_router(media_router)
+
+    # Initialize annotation store
+    store = AnnotationStore()
+    set_store(store)
+
+    @app.on_event("shutdown")
+    def shutdown_store():
+        store.close()
 
     # Health check
     @app.get("/viewer/health")
