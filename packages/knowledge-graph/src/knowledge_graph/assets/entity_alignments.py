@@ -4,7 +4,7 @@ Materializes AlignmentEdge objects produced by the CrossSourceAligner,
 writes to PostgreSQL + Neo4j for graph traversal.
 """
 
-from dagster import AssetExecutionContext, Output, asset
+from dagster import AssetExecutionContext, AssetIn, Output, asset
 from dagster_io import (
     AlignmentEdge,
     CrossSourceAligner,
@@ -39,10 +39,12 @@ tracer = get_tracer(__name__)
 def entity_alignments(
     context: AssetExecutionContext,
     graph_db: GraphDBResource,
-    congress_entity_candidates: list[EntityCandidate],
-    leak_entity_candidates: list[EntityCandidate],
     media_entity_candidates: list[EntityCandidate],
+    congress_entity_candidates: list[EntityCandidate] | None = None,
+    leak_entity_candidates: list[EntityCandidate] | None = None,
 ) -> Output[list[AlignmentEdge]]:
+    congress_entity_candidates = congress_entity_candidates or []
+    leak_entity_candidates = leak_entity_candidates or []
     with trace_operation("entity_alignments", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates), "media_candidate_count": len(media_entity_candidates)}):
         logger.info("Starting entity_alignments: %d congress + %d leak + %d media candidates", len(congress_entity_candidates), len(leak_entity_candidates), len(media_entity_candidates))
         context.log.info(

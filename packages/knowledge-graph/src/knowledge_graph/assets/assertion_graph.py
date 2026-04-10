@@ -69,10 +69,12 @@ def assertion_graph(
     context: AssetExecutionContext,
     graph_db: GraphDBResource,
     canonical_entities: list[CanonicalEntity],
-    congress_assertions: list[Assertion],
-    leak_assertions: list[Assertion],
     media_assertions: list[Assertion],
+    congress_assertions: list[Assertion] | None = None,
+    leak_assertions: list[Assertion] | None = None,
 ) -> Output[dict[str, Any]]:
+    congress_assertions = congress_assertions or []
+    leak_assertions = leak_assertions or []
     with trace_operation("assertion_graph", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "record_count": len(congress_assertions) + len(leak_assertions) + len(media_assertions), "canonical_entity_count": len(canonical_entities)}):
         all_assertions = congress_assertions + leak_assertions + media_assertions
         logger.info("Starting assertion_graph: %d assertions against %d canonical entities", len(all_assertions), len(canonical_entities))

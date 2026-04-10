@@ -5,7 +5,7 @@ runs CrossSourceAligner, and produces CanonicalEntity objects.
 Dual-writes to PostgreSQL + Neo4j.
 """
 
-from dagster import AssetExecutionContext, Output, asset
+from dagster import AssetExecutionContext, AssetIn, Output, asset
 from dagster_io import (
     CanonicalEntity,
     CrossSourceAligner,
@@ -40,10 +40,12 @@ tracer = get_tracer(__name__)
 def canonical_entities(
     context: AssetExecutionContext,
     graph_db: GraphDBResource,
-    congress_entity_candidates: list[EntityCandidate],
-    leak_entity_candidates: list[EntityCandidate],
     media_entity_candidates: list[EntityCandidate],
+    congress_entity_candidates: list[EntityCandidate] | None = None,
+    leak_entity_candidates: list[EntityCandidate] | None = None,
 ) -> Output[list[CanonicalEntity]]:
+    congress_entity_candidates = congress_entity_candidates or []
+    leak_entity_candidates = leak_entity_candidates or []
     with trace_operation("canonical_entities", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates), "media_candidate_count": len(media_entity_candidates)}):
         logger.info("Starting canonical_entities resolution: %d congress + %d leak + %d media candidates", len(congress_entity_candidates), len(leak_entity_candidates), len(media_entity_candidates))
         context.log.info(
@@ -52,7 +54,7 @@ def canonical_entities(
             f"+ {len(media_entity_candidates)} media candidates"
         )
 
-        # Run cross-source alignment
+        # Run cross-source alignment — only include sources that have data
         aligner = CrossSourceAligner()
         sources = {
             "congress_data": congress_entity_candidates,

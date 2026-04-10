@@ -9,6 +9,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Workaround: catalyst-ui ThemeProvider doesn't load CSS in consumer builds.
+      // TODO: Fix in catalyst-ui 2.2.0 — make ThemeProvider CSS imports work cross-package.
+      "catalyst-theme": path.resolve(
+        __dirname,
+        "node_modules/@thebranchdriftcatalyst/catalyst-ui/dist/contexts/Theme/styles/catalyst.css",
+      ),
     },
   },
   server: {
