@@ -13,7 +13,7 @@ from dagster_io import (
     Mention,
 )
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED, ENTITY_REDUCTION_RATIO
 from dagster_io.observability import get_tracer, trace_operation
 
 logger = get_logger(__name__)
@@ -80,6 +80,10 @@ def congress_entity_candidates(
             asset_key="congress_entity_candidates",
             layer="gold",
         ).inc(len(candidates))
+
+        reduction_ratio = round(len(candidates) / max(len(unique_texts), 1), 3)
+        ENTITY_REDUCTION_RATIO.labels(code_location="congress_data").observe(reduction_ratio)
+
         logger.info(
             "congress_entity_candidates complete: %d mentions -> %d candidates",
             len(congress_mentions),
@@ -93,6 +97,6 @@ def congress_entity_candidates(
                 "mention_count": len(congress_mentions),
                 "candidate_count": len(candidates),
                 "unique_surface_forms": len(unique_texts),
-                "reduction_ratio": round(len(candidates) / max(len(unique_texts), 1), 3),
+                "reduction_ratio": reduction_ratio,
             },
         )

@@ -13,7 +13,7 @@ from dagster_io import (
     Mention,
 )
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED, ENTITY_REDUCTION_RATIO
 from dagster_io.observability import get_tracer, trace_operation
 
 logger = get_logger(__name__)
@@ -78,6 +78,10 @@ def leak_entity_candidates(
         ASSET_RECORDS_PROCESSED.labels(
             code_location="open_leaks", asset_key="leak_entity_candidates", layer="gold"
         ).inc(len(candidates))
+
+        reduction_ratio = round(len(candidates) / max(len(unique_texts), 1), 3)
+        ENTITY_REDUCTION_RATIO.labels(code_location="open_leaks").observe(reduction_ratio)
+
         logger.info(
             "leak_entity_candidates complete: %d mentions -> %d candidates",
             len(leak_mentions),
@@ -91,6 +95,6 @@ def leak_entity_candidates(
                 "mention_count": len(leak_mentions),
                 "candidate_count": len(candidates),
                 "unique_surface_forms": len(unique_texts),
-                "reduction_ratio": round(len(candidates) / max(len(unique_texts), 1), 3),
+                "reduction_ratio": reduction_ratio,
             },
         )

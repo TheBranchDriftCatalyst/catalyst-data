@@ -13,7 +13,7 @@ from dagster_io import (
     Mention,
 )
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED, ENTITY_REDUCTION_RATIO
 from dagster_io.observability import get_tracer, trace_operation
 from media_ingest.partitions import media_partitions
 
@@ -96,6 +96,13 @@ def media_entity_candidates(
             asset_key="media_entity_candidates",
             layer="gold",
         ).inc(len(candidates))
+
+        # Concordance dedup effectiveness — observed as a histogram so Grafana
+        # can show distribution / percentiles alongside the existing asset
+        # metadata emission (which is lost at the asset boundary).
+        reduction_ratio = round(len(candidates) / max(len(unique_texts), 1), 3)
+        ENTITY_REDUCTION_RATIO.labels(code_location="media_ingest").observe(reduction_ratio)
+
         logger.info(
             "media_entity_candidates complete for partition=%s: %d mentions -> %d candidates",
             partition_key,
@@ -111,6 +118,6 @@ def media_entity_candidates(
                 "mention_count": len(media_mentions),
                 "candidate_count": len(candidates),
                 "unique_surface_forms": len(unique_texts),
-                "reduction_ratio": round(len(candidates) / max(len(unique_texts), 1), 3),
+                "reduction_ratio": reduction_ratio,
             },
         )

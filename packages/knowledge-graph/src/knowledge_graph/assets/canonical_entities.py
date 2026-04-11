@@ -51,7 +51,7 @@ def _flatten_partition_fanin(value, model_cls=None) -> list:
 
 
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSET_RECORDS_PROCESSED
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED, CANONICAL_ENTITIES_TOTAL
 from dagster_io.observability import get_tracer, trace_operation
 from knowledge_graph.resources import GraphDBResource
 
@@ -184,6 +184,27 @@ def canonical_entities(
             asset_key="canonical_entities",
             layer="platinum",
         ).inc(len(canonical_list))
+
+        # Per-canonical observability: bucket by cross-source merge count so
+        # Grafana can distinguish singletons (source_count_bucket="1" — the
+        # aligner found no cross-source match, platinum is a pass-through)
+        # from actual cross-source merges ("2", "3+").
+        for canonical in canonical_list:
+            source_count = len(canonical.source_code_locations or [])
+            if source_count <= 1:
+                bucket = "1"
+            elif source_count == 2:
+                bucket = "2"
+            else:
+                bucket = "3+"
+            entity_type = (
+                canonical.entity_type.value if hasattr(canonical.entity_type, "value") else str(canonical.entity_type)
+            )
+            CANONICAL_ENTITIES_TOTAL.labels(
+                entity_type=entity_type,
+                source_count_bucket=bucket,
+            ).inc()
+
         logger.info(
             "canonical_entities complete: %d canonical entities from %d candidates",
             len(canonical_list),

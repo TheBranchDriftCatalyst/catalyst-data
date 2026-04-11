@@ -129,6 +129,47 @@ ASSERTIONS_CREATED = Counter(
     registry=REGISTRY,
 )
 
+# ── Concordance / entity resolution metrics ──
+ALIGNMENT_EDGES_TOTAL = Counter(
+    "catalyst_alignment_edges_total",
+    "Cross-source entity alignment edges produced by CrossSourceAligner",
+    # source_location/target_location: e.g. media_ingest / congress_data
+    # alignment_type: sameAs | possibleSameAs
+    # top_signal: exact_name | substring | jaccard | embedding — the highest-weight
+    #             signal on the edge, used to track which signal is actually firing.
+    ["source_location", "target_location", "alignment_type", "top_signal"],
+    registry=REGISTRY,
+)
+
+CANONICAL_ENTITIES_TOTAL = Counter(
+    "catalyst_canonical_entities_total",
+    "Canonical entities produced by the platinum resolver, bucketed by cross-source merge count",
+    # source_count_bucket: "1" (no merge — singleton) | "2" | "3+"
+    # A dominance of "1" means the aligner isn't finding cross-source matches
+    # and the platinum layer is acting as a pass-through.
+    ["entity_type", "source_count_bucket"],
+    registry=REGISTRY,
+)
+
+ENTITY_REDUCTION_RATIO = Histogram(
+    "catalyst_entity_reduction_ratio",
+    "Ratio of candidates to mentions in per-document concordance (lower = more dedup)",
+    ["code_location"],
+    buckets=(0.1, 0.25, 0.5, 0.75, 0.9, 1.0),
+    registry=REGISTRY,
+)
+
+LLM_TOKENS_CACHED_TOTAL = Counter(
+    "catalyst_llm_tokens_cached_total",
+    "Prompt tokens served from LLM prompt cache (cache hit)",
+    # Pulled from LangChain usage_metadata.input_token_details.cache_read (nested
+    # path in current langchain-core) with a fallback to the legacy flat
+    # `cache_read_input_tokens` field. Only populated when the underlying model +
+    # proxy support prompt caching (Anthropic prompt caching, OpenAI cached_tokens).
+    ["model"],
+    registry=REGISTRY,
+)
+
 # ── Graph DB metrics ──
 GRAPH_DB_OPERATIONS = Counter(
     "catalyst_graph_db_operations_total",

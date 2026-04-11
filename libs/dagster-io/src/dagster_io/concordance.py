@@ -10,6 +10,7 @@ import math
 from collections import defaultdict
 
 from dagster_io.logging import get_logger
+from dagster_io.metrics import ALIGNMENT_EDGES_TOTAL
 from dagster_io.models import (
     AlignmentEdge,
     AlignmentType,
@@ -19,6 +20,38 @@ from dagster_io.models import (
 )
 
 logger = get_logger(__name__)
+
+# Signal weight map used by CrossSourceAligner._score_pair. Keep in sync with
+# the scoring logic below — this lets observability code rank an edge's
+# evidence list by the same weights the scorer uses without re-running the
+# scorer.
+_SIGNAL_WEIGHTS: dict[str, float] = {
+    "exact_name": 0.95,
+    "substring": 0.80,
+    "embedding": 0.75,
+    "jaccard": 0.70,
+}
+
+
+def _pick_top_signal(evidence: list[str]) -> str:
+    """Return the highest-weight signal name from an edge's evidence list.
+
+    Falls back to ``"unknown"`` when ``evidence`` is empty or contains only
+    signals we don't have a weight for (forward-compat: new signal types
+    should be added to ``_SIGNAL_WEIGHTS``).
+    """
+    if not evidence:
+        return "unknown"
+    best: tuple[float, str] | None = None
+    for sig in evidence:
+        weight = _SIGNAL_WEIGHTS.get(sig)
+        if weight is None:
+            continue
+        if best is None or weight > best[0]:
+            best = (weight, sig)
+    if best is None:
+        return "unknown"
+    return best[1]
 
 
 class _UnionFind:
@@ -283,6 +316,17 @@ class CrossSourceAligner:
                         edge = self._score_pair(cand_a, cand_b)
                         if edge is not None:
                             edges.append(edge)
+                            # AlignmentEdge itself doesn't carry the source /
+                            # target code_location (it's implicit in the
+                            # candidate ids), so we emit the metric from the
+                            # outer-loop scope where loc_a/loc_b are known.
+                            top_signal = _pick_top_signal(edge.evidence)
+                            ALIGNMENT_EDGES_TOTAL.labels(
+                                source_location=loc_a,
+                                target_location=loc_b,
+                                alignment_type=edge.alignment_type.value,
+                                top_signal=top_signal,
+                            ).inc()
 
         logger.info("Cross-source alignment complete: %d edges produced", len(edges))
         return edges

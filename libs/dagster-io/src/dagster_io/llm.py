@@ -27,9 +27,44 @@ from dagster_io.metrics import (
     EMBEDDING_VECTORS_CREATED,
     LLM_REQUEST_DURATION,
     LLM_REQUESTS,
+    LLM_TOKENS_CACHED_TOTAL,
     LLM_TOKENS_USED,
     track_duration,
 )
+
+
+def _extract_cached_tokens(usage: object) -> int:
+    """Pull prompt-cache-hit token count out of a LangChain UsageMetadata.
+
+    Current langchain-core surfaces prompt cache stats under
+    ``usage_metadata["input_token_details"]["cache_read"]`` (nested dict).
+    Older langchain-openai / LiteLLM passthroughs sometimes expose a flat
+    ``cache_read_input_tokens`` key. We probe both so the metric works
+    regardless of which shape the backend returns, and return 0 if neither
+    path is populated (models that don't support prompt caching).
+    """
+    # Nested path: usage_metadata.input_token_details.cache_read
+    details: object | None = (
+        usage.get("input_token_details")  # type: ignore[union-attr]
+        if hasattr(usage, "get")
+        else getattr(usage, "input_token_details", None)
+    )
+    if details is not None:
+        nested = (
+            details.get("cache_read", 0)  # type: ignore[union-attr]
+            if hasattr(details, "get")
+            else getattr(details, "cache_read", 0)
+        )
+        if nested:
+            return int(nested)
+    # Legacy flat path: usage_metadata.cache_read_input_tokens
+    flat = (
+        usage.get("cache_read_input_tokens", 0)  # type: ignore[union-attr]
+        if hasattr(usage, "get")
+        else getattr(usage, "cache_read_input_tokens", 0)
+    )
+    return int(flat or 0)
+
 
 logger = get_logger(__name__)
 
@@ -110,6 +145,9 @@ class LLMResource(ConfigurableResource):
                     completion_tokens = getattr(usage, "output_tokens", 0)
                 LLM_TOKENS_USED.labels(model=self.model, token_type="prompt").inc(prompt_tokens)
                 LLM_TOKENS_USED.labels(model=self.model, token_type="completion").inc(completion_tokens)
+                cached_tokens = _extract_cached_tokens(usage)
+                if cached_tokens:
+                    LLM_TOKENS_CACHED_TOTAL.labels(model=self.model).inc(cached_tokens)
             logger.info(
                 "LLM complete done model=%s duration=%.2fs response_len=%d",
                 self.model,
@@ -152,6 +190,9 @@ class LLMResource(ConfigurableResource):
                     completion_tokens = getattr(usage, "output_tokens", 0)
                 LLM_TOKENS_USED.labels(model=self.model, token_type="prompt").inc(prompt_tokens)
                 LLM_TOKENS_USED.labels(model=self.model, token_type="completion").inc(completion_tokens)
+                cached_tokens = _extract_cached_tokens(usage)
+                if cached_tokens:
+                    LLM_TOKENS_CACHED_TOTAL.labels(model=self.model).inc(cached_tokens)
             logger.info(
                 "LLM complete_json done model=%s duration=%.2fs response_len=%d",
                 self.model,
