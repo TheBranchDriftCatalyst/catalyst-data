@@ -8,8 +8,9 @@ PostgreSQL + Neo4j.
 from collections import defaultdict
 from typing import Any
 
-from dagster import AssetExecutionContext, AssetIn, Output, asset
+from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, Output, asset
 from dagster_io import Assertion, CanonicalEntity
+from knowledge_graph.assets.canonical_entities import _flatten_partition_fanin
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
@@ -55,6 +56,10 @@ def _resolve_entity_id(text: str, name_index: dict[str, str]) -> str | None:
     compute_kind="python",
     metadata={"layer": "platinum"},
     ins={
+        "media_assertions": AssetIn(
+            partition_mapping=AllPartitionMapping(),
+            input_manager_key="optional_io_manager",
+        ),
         "congress_assertions": AssetIn(input_manager_key="optional_io_manager"),
         "leak_assertions": AssetIn(input_manager_key="optional_io_manager"),
     },
@@ -73,10 +78,11 @@ def assertion_graph(
     context: AssetExecutionContext,
     graph_db: GraphDBResource,
     canonical_entities: list[CanonicalEntity],
-    media_assertions: list[Assertion],
+    media_assertions,  # dict[str, list[Assertion]] fan-in (or None)
     congress_assertions: list[Assertion] | None = None,
     leak_assertions: list[Assertion] | None = None,
 ) -> Output[dict[str, Any]]:
+    media_assertions = _flatten_partition_fanin(media_assertions)
     congress_assertions = congress_assertions or []
     leak_assertions = leak_assertions or []
     with trace_operation("assertion_graph", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "record_count": len(congress_assertions) + len(leak_assertions) + len(media_assertions), "canonical_entity_count": len(canonical_entities)}):

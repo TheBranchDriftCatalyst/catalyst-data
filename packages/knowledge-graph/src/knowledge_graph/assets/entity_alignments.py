@@ -4,12 +4,13 @@ Materializes AlignmentEdge objects produced by the CrossSourceAligner,
 writes to PostgreSQL + Neo4j for graph traversal.
 """
 
-from dagster import AssetExecutionContext, AssetIn, Output, asset
+from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, Output, asset
 from dagster_io import (
     AlignmentEdge,
     CrossSourceAligner,
     EntityCandidate,
 )
+from knowledge_graph.assets.canonical_entities import _flatten_partition_fanin
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
@@ -26,6 +27,10 @@ tracer = get_tracer(__name__)
     compute_kind="python",
     metadata={"layer": "platinum"},
     ins={
+        "media_entity_candidates": AssetIn(
+            partition_mapping=AllPartitionMapping(),
+            input_manager_key="optional_io_manager",
+        ),
         "congress_entity_candidates": AssetIn(input_manager_key="optional_io_manager"),
         "leak_entity_candidates": AssetIn(input_manager_key="optional_io_manager"),
     },
@@ -43,10 +48,11 @@ tracer = get_tracer(__name__)
 def entity_alignments(
     context: AssetExecutionContext,
     graph_db: GraphDBResource,
-    media_entity_candidates: list[EntityCandidate],
+    media_entity_candidates,  # dict[str, list[EntityCandidate]] fan-in (or None)
     congress_entity_candidates: list[EntityCandidate] | None = None,
     leak_entity_candidates: list[EntityCandidate] | None = None,
 ) -> Output[list[AlignmentEdge]]:
+    media_entity_candidates = _flatten_partition_fanin(media_entity_candidates)
     congress_entity_candidates = congress_entity_candidates or []
     leak_entity_candidates = leak_entity_candidates or []
     with trace_operation("entity_alignments", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates), "media_candidate_count": len(media_entity_candidates)}):

@@ -5,12 +5,37 @@ runs CrossSourceAligner, and produces CanonicalEntity objects.
 Dual-writes to PostgreSQL + Neo4j.
 """
 
-from dagster import AssetExecutionContext, AssetIn, Output, asset
+from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, Output, asset
 from dagster_io import (
     CanonicalEntity,
     CrossSourceAligner,
     EntityCandidate,
 )
+
+
+def _flatten_partition_fanin(value) -> list:
+    """Flatten a partition fan-in dict into a flat list.
+
+    The MinioIOManager returns a ``dict[partition_key, value]`` when an
+    unpartitioned asset consumes all partitions of an upstream partitioned
+    asset via ``AllPartitionMapping``. We flatten that into a single list.
+    Passes through None / list / single-value inputs unchanged.
+    """
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        flat: list = []
+        for part in value.values():
+            if part is None:
+                continue
+            if isinstance(part, list):
+                flat.extend(part)
+            else:
+                flat.append(part)
+        return flat
+    if isinstance(value, list):
+        return value
+    return [value]
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
@@ -27,6 +52,13 @@ tracer = get_tracer(__name__)
     compute_kind="python",
     metadata={"layer": "platinum"},
     ins={
+        # media_entity_candidates is partitioned by document_id in media_ingest;
+        # we fan in all partitions into an unpartitioned view here. Individual
+        # missing partitions are tolerated by OptionalMinioIOManager.
+        "media_entity_candidates": AssetIn(
+            partition_mapping=AllPartitionMapping(),
+            input_manager_key="optional_io_manager",
+        ),
         # Optional cross-source inputs — if the source code location has
         # never materialized these, the OptionalMinioIOManager returns None
         # and the asset body falls back to an empty list.
@@ -47,10 +79,11 @@ tracer = get_tracer(__name__)
 def canonical_entities(
     context: AssetExecutionContext,
     graph_db: GraphDBResource,
-    media_entity_candidates: list[EntityCandidate],
+    media_entity_candidates,  # dict[str, list[EntityCandidate]] fan-in (or None)
     congress_entity_candidates: list[EntityCandidate] | None = None,
     leak_entity_candidates: list[EntityCandidate] | None = None,
 ) -> Output[list[CanonicalEntity]]:
+    media_entity_candidates = _flatten_partition_fanin(media_entity_candidates)
     congress_entity_candidates = congress_entity_candidates or []
     leak_entity_candidates = leak_entity_candidates or []
     with trace_operation("canonical_entities", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates), "media_candidate_count": len(media_entity_candidates)}):

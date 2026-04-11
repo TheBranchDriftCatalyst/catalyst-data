@@ -350,19 +350,59 @@ class OptionalMinioIOManager(MinioIOManager):
     https://docs.dagster.io/guides/build/jobs/unconnected-inputs
     """
 
-    def load_input(self, context: InputContext) -> typing.Any:
-        from botocore.exceptions import ClientError
+    _MISSING_CODES = {"NoSuchKey", "404", "NoSuchBucket"}
 
+    @classmethod
+    def _is_missing(cls, exc: Exception) -> bool:
+        """Return True iff exc is a boto3 ClientError for a missing key/bucket."""
+        from botocore.exceptions import ClientError
+        if not isinstance(exc, ClientError):
+            return False
+        code = exc.response.get("Error", {}).get("Code", "")
+        return code in cls._MISSING_CODES
+
+    def load_input(self, context: InputContext) -> typing.Any:
+        if context.has_asset_partitions:
+            # Partition fan-in: load each partition independently and skip any
+            # that are missing. An unpartitioned consumer using
+            # ``AllPartitionMapping()`` will receive a dict keyed by partition,
+            # and the asset body is responsible for flattening.
+            keys = context.asset_partition_keys
+            result: dict[str, typing.Any] = {}
+            for k in keys:
+                try:
+                    result[k] = self._load_single(context, k)
+                except Exception as e:
+                    if self._is_missing(e):
+                        logger.info(
+                            "OptionalMinioIOManager: partition %s of %s not "
+                            "materialized — skipping",
+                            k, context.asset_key.to_user_string(),
+                        )
+                        continue
+                    raise
+            if not result:
+                logger.info(
+                    "OptionalMinioIOManager: no partitions of %s materialized — "
+                    "returning None",
+                    context.asset_key.to_user_string(),
+                )
+                return None
+            if len(result) == 1 and len(keys) == 1:
+                # Single-partition load: return the value directly, matching
+                # MinioIOManager.load_input semantics.
+                return next(iter(result.values()))
+            return result
+
+        # Unpartitioned input
         try:
-            return super().load_input(context)
-        except ClientError as e:
-            code = e.response.get("Error", {}).get("Code", "")
-            if code in ("NoSuchKey", "404", "NoSuchBucket"):
+            return self._load_single(context)
+        except Exception as e:
+            if self._is_missing(e):
                 logger.info(
                     "OptionalMinioIOManager: upstream asset %s not materialized "
-                    "(%s) — returning None for optional input",
+                    "— returning None for optional input",
                     context.asset_key.to_user_string(),
-                    code,
                 )
                 return None
             raise

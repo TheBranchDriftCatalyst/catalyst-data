@@ -13,13 +13,20 @@ configure_logging()
 configure_tracing(service_name="catalyst-data.knowledge_graph")
 start_metrics_server()
 
-from dagster import Definitions, SourceAsset
+from dagster import Definitions, DynamicPartitionsDefinition, SourceAsset
 from dagster_io import MinioIOManager, OptionalMinioIOManager
 
 from knowledge_graph.resources import GraphDBResource
 
 # Import assets AFTER SourceAsset definitions to avoid circular issues
 # The assets module does not import from __init__
+
+# media_ingest uses a dynamic partition set keyed by document_id. We declare
+# the same DynamicPartitionsDefinition here so this code location knows the
+# media_* sources are partitioned and fans in all partitions when loading.
+# Dagster identifies dynamic partitions by name, so "media_document" here
+# references the same partition set media_ingest writes to.
+_media_partitions = DynamicPartitionsDefinition(name="media_document")
 
 # Source assets from other code locations (gold layer inputs)
 # Keys must match the actual asset keys in their respective code locations.
@@ -49,11 +56,13 @@ _media_entity_candidates = SourceAsset(
     key="media_entity_candidates",
     description="Entity candidates from media_ingest code location",
     metadata={"layer": "gold", "source_code_location": "media_ingest"},
+    partitions_def=_media_partitions,
 )
 _media_assertions = SourceAsset(
     key="media_assertions",
     description="Assertions from media_ingest code location",
     metadata={"layer": "gold", "source_code_location": "media_ingest"},
+    partitions_def=_media_partitions,
 )
 
 # Import platinum layer assets
