@@ -1,0 +1,34 @@
+{
+  "name": "@catalyst-data/knowledge-graph-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "GraphQL read API over the catalyst-data Neo4j knowledge graph (MVP)",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@apollo/server": "^5.5.0",
+    "@neo4j/graphql": "^7.5.1",
+    "@neo4j/introspector": "^5.0.1",
+    "dotenv": "^16.4.7",
+    "graphql": "^16.13.2",
+    "neo4j-driver": "^6.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "~5.7.0"
+  },
+  "overrides": {
+    "@neo4j/introspector": {
+      "neo4j-driver": "$neo4j-driver"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
