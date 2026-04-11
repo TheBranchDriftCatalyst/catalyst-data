@@ -13,13 +13,20 @@ from dagster_io import (
 )
 
 
-def _flatten_partition_fanin(value) -> list:
+def _flatten_partition_fanin(value, model_cls=None) -> list:
     """Flatten a partition fan-in dict into a flat list.
 
     The MinioIOManager returns a ``dict[partition_key, value]`` when an
     unpartitioned asset consumes all partitions of an upstream partitioned
     asset via ``AllPartitionMapping``. We flatten that into a single list.
     Passes through None / list / single-value inputs unchanged.
+
+    If ``model_cls`` is provided, any dict entries are coerced to instances
+    of that pydantic model via ``model_cls(**d)``. The io manager's
+    deserializer returns plain dicts when it can't resolve a concrete type
+    hint (e.g. fan-in inputs whose function annotation is just a comment),
+    so downstream code that expects model instances needs explicit
+    reconstruction.
     """
     if value is None:
         return []
@@ -32,10 +39,14 @@ def _flatten_partition_fanin(value) -> list:
                 flat.extend(part)
             else:
                 flat.append(part)
-        return flat
-    if isinstance(value, list):
-        return value
-    return [value]
+    elif isinstance(value, list):
+        flat = value
+    else:
+        flat = [value]
+
+    if model_cls is not None:
+        flat = [model_cls(**item) if isinstance(item, dict) else item for item in flat]
+    return flat
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
@@ -83,7 +94,7 @@ def canonical_entities(
     congress_entity_candidates: list[EntityCandidate] | None = None,
     leak_entity_candidates: list[EntityCandidate] | None = None,
 ) -> Output[list[CanonicalEntity]]:
-    media_entity_candidates = _flatten_partition_fanin(media_entity_candidates)
+    media_entity_candidates = _flatten_partition_fanin(media_entity_candidates, EntityCandidate)
     congress_entity_candidates = congress_entity_candidates or []
     leak_entity_candidates = leak_entity_candidates or []
     with trace_operation("canonical_entities", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates), "media_candidate_count": len(media_entity_candidates)}):

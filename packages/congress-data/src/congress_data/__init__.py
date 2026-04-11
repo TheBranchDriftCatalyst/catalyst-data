@@ -9,7 +9,15 @@ configure_tracing(service_name="catalyst-data.congress_data")
 start_metrics_server()
 
 from dagster import Definitions
+from dagster_k8s import k8s_job_executor
 from dagster_io import ChunkingResource, EmbeddingResource, LLMResource, MinioIOManager
+
+# Forward DAGSTER_CODE_LOCATION from the code-server to step pods — required
+# by dagster_io.path_builder for S3 path construction.
+_k8s_executor = k8s_job_executor.configured(
+    {"env_vars": ["DAGSTER_CODE_LOCATION"]},
+    name="k8s_job_executor_with_code_location",
+)
 
 from congress_data.assets import (
     congress_assertions,
@@ -46,6 +54,7 @@ defs = Definitions(
         congress_embeddings,
         congress_graph,
     ],
+    executor=_k8s_executor,
     resources={
         "io_manager": MinioIOManager(),
         "chunking": ChunkingResource(),

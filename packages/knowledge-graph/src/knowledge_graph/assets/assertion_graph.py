@@ -82,7 +82,7 @@ def assertion_graph(
     congress_assertions: list[Assertion] | None = None,
     leak_assertions: list[Assertion] | None = None,
 ) -> Output[dict[str, Any]]:
-    media_assertions = _flatten_partition_fanin(media_assertions)
+    media_assertions = _flatten_partition_fanin(media_assertions, Assertion)
     congress_assertions = congress_assertions or []
     leak_assertions = leak_assertions or []
     with trace_operation("assertion_graph", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "record_count": len(congress_assertions) + len(leak_assertions) + len(media_assertions), "canonical_entity_count": len(canonical_entities)}):

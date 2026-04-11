@@ -27,6 +27,15 @@ if os.environ.get("DAGSTER_IS_CODE_SERVER", "").lower() in ("1", "true"):
 
 from dagster import Definitions
 from dagster_k8s import k8s_job_executor
+
+# Forward DAGSTER_CODE_LOCATION from the code-server's env to every step
+# pod spawned by this executor. dagster_io.path_builder requires this env
+# var to build S3 paths (it used to silently default to "default" and
+# caused a P0 data-routing bug).
+_k8s_executor = k8s_job_executor.configured(
+    {"env_vars": ["DAGSTER_CODE_LOCATION"]},
+    name="k8s_job_executor_with_code_location",
+)
 from dagster_io import ChunkingResource, EmbeddingResource, LLMResource, MinioIOManager
 
 from media_ingest.assets import (
@@ -63,7 +72,7 @@ defs = Definitions(
     sensors=[
         media_document_sensor,
     ],
-    executor=k8s_job_executor,
+    executor=_k8s_executor,
     resources={
         "io_manager": MinioIOManager(),
         "chunking": ChunkingResource(),

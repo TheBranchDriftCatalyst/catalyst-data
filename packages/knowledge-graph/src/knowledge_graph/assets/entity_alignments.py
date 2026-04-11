@@ -52,7 +52,7 @@ def entity_alignments(
     congress_entity_candidates: list[EntityCandidate] | None = None,
     leak_entity_candidates: list[EntityCandidate] | None = None,
 ) -> Output[list[AlignmentEdge]]:
-    media_entity_candidates = _flatten_partition_fanin(media_entity_candidates)
+    media_entity_candidates = _flatten_partition_fanin(media_entity_candidates, EntityCandidate)
     congress_entity_candidates = congress_entity_candidates or []
     leak_entity_candidates = leak_entity_candidates or []
     with trace_operation("entity_alignments", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates), "media_candidate_count": len(media_entity_candidates)}):

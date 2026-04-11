@@ -14,9 +14,17 @@ configure_tracing(service_name="catalyst-data.knowledge_graph")
 start_metrics_server()
 
 from dagster import Definitions, DynamicPartitionsDefinition, SourceAsset
+from dagster_k8s import k8s_job_executor
 from dagster_io import MinioIOManager, OptionalMinioIOManager
 
 from knowledge_graph.resources import GraphDBResource
+
+# Forward DAGSTER_CODE_LOCATION from the code-server to step pods — required
+# by dagster_io.path_builder for S3 path construction.
+_k8s_executor = k8s_job_executor.configured(
+    {"env_vars": ["DAGSTER_CODE_LOCATION"]},
+    name="k8s_job_executor_with_code_location",
+)
 
 # Import assets AFTER SourceAsset definitions to avoid circular issues
 # The assets module does not import from __init__
@@ -82,6 +90,7 @@ defs = Definitions(
         entity_alignments,
         assertion_graph,
     ],
+    executor=_k8s_executor,
     resources={
         "io_manager": MinioIOManager(),
         # Used via AssetIn(input_manager_key="optional_io_manager") for
