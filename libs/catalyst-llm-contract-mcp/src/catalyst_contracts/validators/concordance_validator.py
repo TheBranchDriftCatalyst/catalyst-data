@@ -40,11 +40,7 @@ def validate_concordance(
             # Score bounds check
             for field in score_fields:
                 score = cand.get(field)
-                if score is not None and (
-                    not isinstance(score, (int, float))
-                    or score < 0.0
-                    or score > 1.0
-                ):
+                if score is not None and (not isinstance(score, (int, float)) or score < 0.0 or score > 1.0):
                     item_errors.append(
                         ValidationErrorItem(
                             path=f"{cand_path}.{field}",
@@ -60,20 +56,16 @@ def validate_concordance(
                 if isinstance(s, (int, float)):
                     component_scores.append(s)
             combined = cand.get("combined")
-            if (
+            if (component_scores and isinstance(combined, (int, float)) and 0.0 <= combined <= 1.0) and combined > max(
                 component_scores
-                and isinstance(combined, (int, float))
-                and 0.0 <= combined <= 1.0
-            ):
-                if combined > max(component_scores) + 0.01:
-                    warnings.append(
-                        ValidationErrorItem(
-                            path=f"{cand_path}.combined",
-                            code=IssueCode.INCONSISTENT_SCORES.value,
-                            message=f"Combined score {combined} exceeds max "
-                            f"component score {max(component_scores):.4f}",
-                        )
+            ) + 0.01:
+                warnings.append(
+                    ValidationErrorItem(
+                        path=f"{cand_path}.combined",
+                        code=IssueCode.INCONSISTENT_SCORES.value,
+                        message=f"Combined score {combined} exceeds max component score {max(component_scores):.4f}",
                     )
+                )
 
         if item_errors:
             errors.extend(item_errors)

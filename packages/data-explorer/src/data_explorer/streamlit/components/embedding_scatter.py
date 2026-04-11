@@ -22,14 +22,21 @@ except ImportError:
     _HAS_UMAP = False
 
 COLORS = [
-    "#00fcd6", "#c026d3", "#ff6ec7", "#00d4ff",
-    "#fbbf24", "#ff2975", "#22c55e", "#6366f1",
+    "#00fcd6",
+    "#c026d3",
+    "#ff6ec7",
+    "#00d4ff",
+    "#fbbf24",
+    "#ff2975",
+    "#22c55e",
+    "#6366f1",
 ]
 
 
 # ---------------------------------------------------------------------------
 # Dimensionality reduction
 # ---------------------------------------------------------------------------
+
 
 def _embedding_cache_key(embeddings: np.ndarray, method: str) -> str:
     h = hashlib.sha256()
@@ -78,6 +85,7 @@ def _reduce_dimensions(
 # Sidebar controls
 # ---------------------------------------------------------------------------
 
+
 def render_reduction_controls() -> tuple[str, dict]:
     """Render sidebar widgets for reduction settings. Returns (method, params)."""
     with st.sidebar:
@@ -99,6 +107,7 @@ def render_reduction_controls() -> tuple[str, dict]:
 # ---------------------------------------------------------------------------
 # Main scatter
 # ---------------------------------------------------------------------------
+
 
 def render_embedding_scatter(
     embeddings: np.ndarray,
@@ -156,22 +165,37 @@ def render_embedding_scatter(
         idx = [i for i in range(n_points) if colour_key[i] == key and i not in highlight_set]
         if not idx:
             continue
-        fig.add_trace(go.Scatter(
-            x=x[idx], y=y[idx], mode="markers",
-            marker=dict(size=6, color=key_to_colour[key], opacity=0.75),
-            name=key, text=[hover_texts[i] for i in idx],
-            hovertemplate="%{text}<extra></extra>", legendgroup=key,
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=x[idx],
+                y=y[idx],
+                mode="markers",
+                marker=dict(size=6, color=key_to_colour[key], opacity=0.75),
+                name=key,
+                text=[hover_texts[i] for i in idx],
+                hovertemplate="%{text}<extra></extra>",
+                legendgroup=key,
+            )
+        )
 
     if highlight_set:
         hi_idx = sorted(highlight_set)
-        fig.add_trace(go.Scatter(
-            x=x[hi_idx], y=y[hi_idx], mode="markers",
-            marker=dict(size=12, color=[point_colours[i] for i in hi_idx],
-                        opacity=1.0, line=dict(width=2, color="white")),
-            name="Highlighted", text=[hover_texts[i] for i in hi_idx],
-            hovertemplate="%{text}<extra></extra>",
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=x[hi_idx],
+                y=y[hi_idx],
+                mode="markers",
+                marker=dict(
+                    size=12,
+                    color=[point_colours[i] for i in hi_idx],
+                    opacity=1.0,
+                    line=dict(width=2, color="white"),
+                ),
+                name="Highlighted",
+                text=[hover_texts[i] for i in hi_idx],
+                hovertemplate="%{text}<extra></extra>",
+            )
+        )
 
     # Cluster convex hulls
     if show_clusters:
@@ -196,12 +220,19 @@ def render_embedding_scatter(
                 hy = np.append(y[hp], y[hp[0]])
                 hc = COLORS[cid % len(COLORS)]
                 r, g, b = int(hc[1:3], 16), int(hc[3:5], 16), int(hc[5:7], 16)
-                fig.add_trace(go.Scatter(
-                    x=hx, y=hy, mode="lines",
-                    line=dict(color=hc, width=1, dash="dot"),
-                    fill="toself", fillcolor=f"rgba({r},{g},{b},0.06)",
-                    opacity=0.3, showlegend=False, hoverinfo="skip",
-                ))
+                fig.add_trace(
+                    go.Scatter(
+                        x=hx,
+                        y=hy,
+                        mode="lines",
+                        line=dict(color=hc, width=1, dash="dot"),
+                        fill="toself",
+                        fillcolor=f"rgba({r},{g},{b},0.06)",
+                        opacity=0.3,
+                        showlegend=False,
+                        hoverinfo="skip",
+                    )
+                )
 
     fig.update_layout(
         title=dict(text=title),

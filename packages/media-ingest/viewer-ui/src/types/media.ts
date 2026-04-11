@@ -99,6 +99,6 @@ export interface TimelineMarker {
   endTimestamp?: number;
   label: string;
   color: string;
-  type: 'entity' | 'assertion';
+  type: "entity" | "assertion";
   category?: string;
 }

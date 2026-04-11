@@ -18,14 +18,28 @@ NFS_VOLUMES_CONFIG = {
     "dagster-k8s/config": {
         "container_config": {
             "volume_mounts": [
-                {"name": "metube-downloads", "mountPath": "/data/metube", "readOnly": True},
-                {"name": "tubesync-downloads", "mountPath": "/data/tubesync", "readOnly": True},
+                {
+                    "name": "metube-downloads",
+                    "mountPath": "/data/metube",
+                    "readOnly": True,
+                },
+                {
+                    "name": "tubesync-downloads",
+                    "mountPath": "/data/tubesync",
+                    "readOnly": True,
+                },
             ]
         },
         "pod_spec_config": {
             "volumes": [
-                {"name": "metube-downloads", "persistentVolumeClaim": {"claimName": "metube-downloads"}},
-                {"name": "tubesync-downloads", "persistentVolumeClaim": {"claimName": "tubesync-downloads"}},
+                {
+                    "name": "metube-downloads",
+                    "persistentVolumeClaim": {"claimName": "metube-downloads"},
+                },
+                {
+                    "name": "tubesync-downloads",
+                    "persistentVolumeClaim": {"claimName": "tubesync-downloads"},
+                },
             ]
         },
     }
@@ -43,14 +57,16 @@ def _scan_directory(root: str, extensions: set[str]) -> list[dict[str, Any]]:
             if ext in extensions:
                 full_path = os.path.join(dirpath, fname)
                 stat = os.stat(full_path)
-                files.append({
-                    "path": full_path,
-                    "filename": fname,
-                    "extension": ext,
-                    "size_bytes": stat.st_size,
-                    "mtime": stat.st_mtime,
-                    "source_dir": root,
-                })
+                files.append(
+                    {
+                        "path": full_path,
+                        "filename": fname,
+                        "extension": ext,
+                        "size_bytes": stat.st_size,
+                        "mtime": stat.st_mtime,
+                        "source_dir": root,
+                    }
+                )
     return files
 
 
@@ -61,9 +77,7 @@ def _scan_directory(root: str, extensions: set[str]) -> list[dict[str, Any]]:
     metadata={"layer": "bronze"},
     op_tags=NFS_VOLUMES_CONFIG,
 )
-def media_files(
-    context: AssetExecutionContext, config: MediaIngestConfig
-) -> Output[list[dict[str, Any]]]:
+def media_files(context: AssetExecutionContext, config: MediaIngestConfig) -> Output[list[dict[str, Any]]]:
     with trace_operation("media_files", tracer, {"code_location": "media_ingest", "layer": "bronze"}):
         logger.info("Starting media_files discovery scan")
         extensions = {e.strip() for e in config.extensions.split(",")}
@@ -78,8 +92,14 @@ def media_files(
             all_files.extend(found)
 
         total_size = sum(f["size_bytes"] for f in all_files)
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_files", layer="bronze").inc(len(all_files))
-        logger.info("media_files discovery complete: %d files, %.2f GiB", len(all_files), total_size / (1024**3))
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_files", layer="bronze").inc(
+            len(all_files)
+        )
+        logger.info(
+            "media_files discovery complete: %d files, %.2f GiB",
+            len(all_files),
+            total_size / (1024**3),
+        )
         context.log.info(f"Total: {len(all_files)} files, {total_size / (1024**3):.2f} GiB")
 
         return Output(
@@ -88,10 +108,17 @@ def media_files(
                 "file_count": len(all_files),
                 "total_size_gib": round(total_size / (1024**3), 2),
                 "by_extension": MetadataValue.json(
-                    {ext: sum(1 for f in all_files if f["extension"] == ext) for ext in extensions if any(f["extension"] == ext for f in all_files)}
+                    {
+                        ext: sum(1 for f in all_files if f["extension"] == ext)
+                        for ext in extensions
+                        if any(f["extension"] == ext for f in all_files)
+                    }
                 ),
                 "by_source": MetadataValue.json(
-                    {path: sum(1 for f in all_files if f["source_dir"] == path) for path in [config.metube_path, config.tubesync_path]}
+                    {
+                        path: sum(1 for f in all_files if f["source_dir"] == path)
+                        for path in [config.metube_path, config.tubesync_path]
+                    }
                 ),
             },
         )

@@ -5,13 +5,13 @@ using multi-pass resolution (exact match, substring, Jaccard, embedding cosine).
 """
 
 from dagster import AssetExecutionContext, Output, asset
+
 from dagster_io import (
     ConcordanceEngine,
     EmbeddingResource,
     EntityCandidate,
     Mention,
 )
-
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -44,13 +44,33 @@ def media_entity_candidates(
     media_mentions: list[Mention],
 ) -> Output[list[EntityCandidate]]:
     partition_key = context.partition_key
-    with trace_operation("media_entity_candidates", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key, "mention_count": len(media_mentions)}):
-        logger.info("Starting media_entity_candidates resolution for partition=%s (%d mentions)", partition_key, len(media_mentions))
+    with trace_operation(
+        "media_entity_candidates",
+        tracer,
+        {
+            "code_location": "media_ingest",
+            "layer": "gold",
+            "partition_key": partition_key,
+            "mention_count": len(media_mentions),
+        },
+    ):
+        logger.info(
+            "Starting media_entity_candidates resolution for partition=%s (%d mentions)",
+            partition_key,
+            len(media_mentions),
+        )
         context.log.info(f"Resolving {len(media_mentions)} mentions into entity candidates")
 
         if not media_mentions:
             context.log.info(f"No mentions for partition={partition_key} — returning empty candidates")
-            return Output([], metadata={"mention_count": 0, "candidate_count": 0, "document_id": partition_key})
+            return Output(
+                [],
+                metadata={
+                    "mention_count": 0,
+                    "candidate_count": 0,
+                    "document_id": partition_key,
+                },
+            )
 
         # Collect unique surface forms for embedding
         unique_texts = sorted({m.text.lower().strip() for m in media_mentions})
@@ -59,7 +79,7 @@ def media_entity_candidates(
         # Embed all unique surface forms
         if unique_texts:
             vectors = embeddings.embed(unique_texts)
-            embedding_map = dict(zip(unique_texts, vectors))
+            embedding_map = dict(zip(unique_texts, vectors, strict=False))
         else:
             embedding_map = {}
 
@@ -71,11 +91,18 @@ def media_entity_candidates(
             embeddings=embedding_map,
         )
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_entity_candidates", layer="gold").inc(len(candidates))
-        logger.info("media_entity_candidates complete for partition=%s: %d mentions -> %d candidates", partition_key, len(media_mentions), len(candidates))
-        context.log.info(
-            f"Resolved {len(media_mentions)} mentions -> {len(candidates)} entity candidates"
+        ASSET_RECORDS_PROCESSED.labels(
+            code_location="media_ingest",
+            asset_key="media_entity_candidates",
+            layer="gold",
+        ).inc(len(candidates))
+        logger.info(
+            "media_entity_candidates complete for partition=%s: %d mentions -> %d candidates",
+            partition_key,
+            len(media_mentions),
+            len(candidates),
         )
+        context.log.info(f"Resolved {len(media_mentions)} mentions -> {len(candidates)} entity candidates")
 
         return Output(
             candidates,

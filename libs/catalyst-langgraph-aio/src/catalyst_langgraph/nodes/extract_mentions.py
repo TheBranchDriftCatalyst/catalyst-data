@@ -5,14 +5,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from catalyst_contracts.models.extraction_output import MentionExtractionResult
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_langgraph.clients.llm import LLMClient
 from catalyst_langgraph.nodes._audit import make_audit_event
 from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
-
-from catalyst_contracts.models.extraction_output import MentionExtractionResult
 
 logger = logging.getLogger(__name__)
 

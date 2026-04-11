@@ -28,9 +28,7 @@ class ValidatePropositions:
                 "validate_propositions",
                 {
                     "propositions": candidates,
-                    "known_mention_ids": [
-                        m["id"] for m in accepted_mentions if "id" in m
-                    ],
+                    "known_mention_ids": [m["id"] for m in accepted_mentions if "id" in m],
                     "source_text": raw_text,
                 },
             )
@@ -40,7 +38,13 @@ class ValidatePropositions:
             update: dict[str, Any] = {
                 "latest_proposition_validation": result,
                 "audit_events": state.get("audit_events", [])
-                + [make_audit_event("validate_propositions", verdict, errors=result.get("errors", []))],
+                + [
+                    make_audit_event(
+                        "validate_propositions",
+                        verdict,
+                        errors=result.get("errors", []),
+                    )
+                ],
             }
 
             if verdict == "valid":

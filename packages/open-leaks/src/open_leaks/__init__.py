@@ -9,6 +9,7 @@ configure_tracing(service_name="catalyst-data.open_leaks")
 start_metrics_server()
 
 from dagster import Definitions
+
 from dagster_io import (
     ChunkingResource,
     EmbeddingResource,

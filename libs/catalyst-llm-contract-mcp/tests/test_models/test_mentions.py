@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from catalyst_contracts.models.mentions import MentionExtraction
+from pydantic import ValidationError
 
 
 class TestMentionExtraction:
@@ -41,14 +40,10 @@ class TestMentionExtraction:
             )
 
     def test_confidence_boundaries(self):
-        m0 = MentionExtraction(
-            text="x", mention_type="ORG", span_start=0, span_end=1, confidence=0.0
-        )
+        m0 = MentionExtraction(text="x", mention_type="ORG", span_start=0, span_end=1, confidence=0.0)
         assert m0.confidence == 0.0
 
-        m1 = MentionExtraction(
-            text="x", mention_type="ORG", span_start=0, span_end=1, confidence=1.0
-        )
+        m1 = MentionExtraction(text="x", mention_type="ORG", span_start=0, span_end=1, confidence=1.0)
         assert m1.confidence == 1.0
 
     def test_optional_context(self):

@@ -67,7 +67,15 @@ def media_documents(
     context: AssetExecutionContext,
     media_transcode: list[dict[str, Any]],
 ) -> Output[list[MediaDocument]]:
-    with trace_operation("media_documents", tracer, {"code_location": "media_ingest", "layer": "silver", "record_count": len(media_transcode)}):
+    with trace_operation(
+        "media_documents",
+        tracer,
+        {
+            "code_location": "media_ingest",
+            "layer": "silver",
+            "record_count": len(media_transcode),
+        },
+    ):
         logger.info("Starting media_documents transformation for %d files", len(media_transcode))
         documents = [_file_to_document(f) for f in media_transcode]
 
@@ -75,7 +83,9 @@ def media_documents(
         for doc in documents:
             by_source[doc.source] = by_source.get(doc.source, 0) + 1
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_documents", layer="silver").inc(len(documents))
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_documents", layer="silver").inc(
+            len(documents)
+        )
         logger.info("media_documents complete: %d documents", len(documents))
         context.log.info(f"Produced {len(documents)} documents")
 

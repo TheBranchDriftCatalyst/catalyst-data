@@ -8,8 +8,12 @@ from catalyst_contracts.audit.repository import AuditRepository
 from catalyst_contracts.models.validation import ValidationResult
 from catalyst_contracts.validators.concordance_validator import validate_concordance
 from catalyst_contracts.validators.math_validator import validate_math
-from catalyst_contracts.validators.mention_validator import validate_mentions as _validate_mentions
-from catalyst_contracts.validators.proposition_validator import validate_propositions as _validate_propositions
+from catalyst_contracts.validators.mention_validator import (
+    validate_mentions as _validate_mentions,
+)
+from catalyst_contracts.validators.proposition_validator import (
+    validate_propositions as _validate_propositions,
+)
 from catalyst_contracts.validators.repair_generator import generate_repair_plan
 from catalyst_contracts.validators.spatial_validator import validate_spatial
 
@@ -65,10 +69,7 @@ def get_contract_schemas() -> dict[str, Any]:
         ValidationResult,
     ]
 
-    return {
-        m.__name__: m.model_json_schema()
-        for m in models
-    }
+    return {m.__name__: m.model_json_schema() for m in models}
 
 
 @mcp.tool()
@@ -89,9 +90,7 @@ def validate_propositions(
     source_text: str,
 ) -> dict[str, Any]:
     """Validate a list of propositions against known mention IDs."""
-    result = _validate_propositions(
-        propositions, set(known_mention_ids), source_text
-    )
+    result = _validate_propositions(propositions, set(known_mention_ids), source_text)
     return _result_to_dict(result, "validate_propositions")
 
 

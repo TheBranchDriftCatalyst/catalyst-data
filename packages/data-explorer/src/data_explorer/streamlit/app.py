@@ -142,9 +142,12 @@ def main() -> None:
     with chart_right:
         st.subheader("Layer Distribution")
         layer_order = ["bronze", "silver", "gold", "platinum"]
-        sorted_layers = sorted(layers.keys(), key=lambda x: layer_order.index(x) if x in layer_order else 99)
+        sorted_layers = sorted(
+            layers.keys(),
+            key=lambda x: layer_order.index(x) if x in layer_order else 99,
+        )
         layer_names = list(sorted_layers)
-        layer_values = [layers[l] for l in sorted_layers]
+        layer_values = [layers[name] for name in sorted_layers]
         colorway = tpl["layout"]["colorway"]
 
         fig_bar = go.Figure(
@@ -185,19 +188,18 @@ def main() -> None:
     for row_start in range(0, len(page_items), 3):
         row_items = page_items[row_start : row_start + 3]
         cols = st.columns(3)
-        for col, (page_path, page_name) in zip(cols, row_items):
-            with col:
-                with st.container(border=True):
-                    st.subheader(page_name, anchor=False)
-                    description = PAGE_DESCRIPTIONS.get(page_name, "")
-                    if description:
-                        st.caption(description)
-                    if st.button(
-                        f"Open {page_name}",
-                        key=f"nav_{page_path}",
-                        use_container_width=True,
-                    ):
-                        navigate_to(page_path)
+        for col, (page_path, page_name) in zip(cols, row_items, strict=False):
+            with col, st.container(border=True):
+                st.subheader(page_name, anchor=False)
+                description = PAGE_DESCRIPTIONS.get(page_name, "")
+                if description:
+                    st.caption(description)
+                if st.button(
+                    f"Open {page_name}",
+                    key=f"nav_{page_path}",
+                    use_container_width=True,
+                ):
+                    navigate_to(page_path)
 
 
 # Streamlit pages are discovered from the pages/ directory alongside this file.

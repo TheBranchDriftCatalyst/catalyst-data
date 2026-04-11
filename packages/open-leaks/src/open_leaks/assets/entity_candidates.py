@@ -5,13 +5,13 @@ using multi-pass resolution (exact match, substring, Jaccard, embedding cosine).
 """
 
 from dagster import AssetExecutionContext, Output, asset
+
 from dagster_io import (
     ConcordanceEngine,
     EmbeddingResource,
     EntityCandidate,
     Mention,
 )
-
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -41,8 +41,19 @@ def leak_entity_candidates(
     embeddings: EmbeddingResource,
     leak_mentions: list[Mention],
 ) -> Output[list[EntityCandidate]]:
-    with trace_operation("leak_entity_candidates", tracer, {"code_location": "open_leaks", "layer": "gold", "mention_count": len(leak_mentions)}):
-        logger.info("Starting leak_entity_candidates resolution for %d mentions", len(leak_mentions))
+    with trace_operation(
+        "leak_entity_candidates",
+        tracer,
+        {
+            "code_location": "open_leaks",
+            "layer": "gold",
+            "mention_count": len(leak_mentions),
+        },
+    ):
+        logger.info(
+            "Starting leak_entity_candidates resolution for %d mentions",
+            len(leak_mentions),
+        )
         context.log.info(f"Resolving {len(leak_mentions)} mentions into entity candidates")
 
         # Collect unique surface forms for embedding
@@ -52,7 +63,7 @@ def leak_entity_candidates(
         # Embed all unique surface forms
         if unique_texts:
             vectors = embeddings.embed(unique_texts)
-            embedding_map = dict(zip(unique_texts, vectors))
+            embedding_map = dict(zip(unique_texts, vectors, strict=False))
         else:
             embedding_map = {}
 
@@ -64,11 +75,15 @@ def leak_entity_candidates(
             embeddings=embedding_map,
         )
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_entity_candidates", layer="gold").inc(len(candidates))
-        logger.info("leak_entity_candidates complete: %d mentions -> %d candidates", len(leak_mentions), len(candidates))
-        context.log.info(
-            f"Resolved {len(leak_mentions)} mentions → {len(candidates)} entity candidates"
+        ASSET_RECORDS_PROCESSED.labels(
+            code_location="open_leaks", asset_key="leak_entity_candidates", layer="gold"
+        ).inc(len(candidates))
+        logger.info(
+            "leak_entity_candidates complete: %d mentions -> %d candidates",
+            len(leak_mentions),
+            len(candidates),
         )
+        context.log.info(f"Resolved {len(leak_mentions)} mentions → {len(candidates)} entity candidates")
 
         return Output(
             candidates,

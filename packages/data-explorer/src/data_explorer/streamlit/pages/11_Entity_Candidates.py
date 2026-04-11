@@ -10,7 +10,6 @@ import streamlit as st
 
 from dagster_io.logging import get_logger
 from data_explorer.streamlit.components.entity_chip import (
-    render_entity_chip,
     render_entity_chip_list,
 )
 from data_explorer.streamlit.config import get_s3_config
@@ -53,23 +52,46 @@ def _get_client() -> DataClient:
 
 @st.cache_data(ttl=300, show_spinner="Discovering sources...")
 def _list_sources(endpoint_url: str, access_key: str, secret_key: str, bucket: str) -> list[str]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.list_sources()
 
 
 @st.cache_data(ttl=300, show_spinner="Loading entity candidates...")
 def _load_entity_candidates(
-    endpoint_url: str, access_key: str, secret_key: str, bucket: str, source: str,
+    endpoint_url: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str,
+    source: str,
 ) -> list[dict]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.load_entity_candidates(source)
 
 
 @st.cache_data(ttl=300, show_spinner="Loading mentions...")
 def _load_mentions(
-    endpoint_url: str, access_key: str, secret_key: str, bucket: str, source: str,
+    endpoint_url: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str,
+    source: str,
 ) -> list[dict]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.load_mentions(source)
 
 
@@ -91,7 +113,19 @@ with st.sidebar:
     selected_source = st.selectbox("Source", sources, key="ec_source")
 
     st.subheader("Filters")
-    entity_types = ["All", "PERSON", "ORG", "GPE", "DATE", "LAW", "EVENT", "LOC", "MONEY", "NORP", "FACILITY"]
+    entity_types = [
+        "All",
+        "PERSON",
+        "ORG",
+        "GPE",
+        "DATE",
+        "LAW",
+        "EVENT",
+        "LOC",
+        "MONEY",
+        "NORP",
+        "FACILITY",
+    ]
     selected_type = st.selectbox("Entity Type", entity_types, key="ec_type")
 
     search_query = st.text_input("Search by name/alias", key="ec_search")
@@ -128,7 +162,12 @@ for m in mentions:
     if cid:
         mention_by_candidate.setdefault(cid, []).append(m)
 
-logger.info("Loaded %d candidates and %d mentions for source=%s", len(candidates), len(mentions), selected_source)
+logger.info(
+    "Loaded %d candidates and %d mentions for source=%s",
+    len(candidates),
+    len(mentions),
+    selected_source,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -142,9 +181,9 @@ if selected_type != "All":
 if search_query:
     q = search_query.lower()
     filtered = [
-        c for c in filtered
-        if q in c.get("representative_name", "").lower()
-        or any(q in a.lower() for a in c.get("aliases", []))
+        c
+        for c in filtered
+        if q in c.get("representative_name", "").lower() or any(q in a.lower() for a in c.get("aliases", []))
     ]
 
 if min_mentions > 1:
@@ -212,7 +251,13 @@ with chart_col2:
     mention_counts = [c.get("mention_count", 0) for c in candidates]
     if mention_counts:
         import numpy as np
-        bins = np.histogram(mention_counts, bins=min(20, max(mention_counts) - min(mention_counts) + 1) if max(mention_counts) > min(mention_counts) else 1)
+
+        bins = np.histogram(
+            mention_counts,
+            bins=min(20, max(mention_counts) - min(mention_counts) + 1)
+            if max(mention_counts) > min(mention_counts)
+            else 1,
+        )
         bin_edges = [(bins[1][i] + bins[1][i + 1]) / 2 for i in range(len(bins[1]) - 1)]
         fig = go.Figure(
             go.Bar(
@@ -245,17 +290,25 @@ if not filtered:
     st.info("No candidates match the current filters.")
     st.stop()
 
-df = pd.DataFrame([{
-    "Name": c.get("representative_name", ""),
-    "Type": c.get("entity_type", ""),
-    "Mentions": c.get("mention_count", 0),
-    "Aliases": ", ".join(c.get("aliases", [])[:3]),
-    "Alias Count": len(c.get("aliases", [])),
-} for c in filtered])
+df = pd.DataFrame(
+    [
+        {
+            "Name": c.get("representative_name", ""),
+            "Type": c.get("entity_type", ""),
+            "Mentions": c.get("mention_count", 0),
+            "Aliases": ", ".join(c.get("aliases", [])[:3]),
+            "Alias Count": len(c.get("aliases", [])),
+        }
+        for c in filtered
+    ]
+)
 
 selected_idx = st.dataframe(
-    df, use_container_width=True, hide_index=True,
-    on_select="rerun", selection_mode="single-row",
+    df,
+    use_container_width=True,
+    hide_index=True,
+    on_select="rerun",
+    selection_mode="single-row",
 )
 
 # ---------------------------------------------------------------------------
@@ -269,9 +322,13 @@ if selected_idx and selected_idx.selection and selected_idx.selection.rows:
     st.divider()
     st.subheader(f"Candidate: {candidate.get('representative_name', '')}")
 
-    tab_identity, tab_mentions, tab_resolution = st.tabs([
-        "Identity", "Source Mentions", "Resolution Details",
-    ])
+    tab_identity, tab_mentions, tab_resolution = st.tabs(
+        [
+            "Identity",
+            "Source Mentions",
+            "Resolution Details",
+        ]
+    )
 
     with tab_identity:
         id_col1, id_col2 = st.columns(2)
@@ -289,7 +346,11 @@ if selected_idx and selected_idx.selection and selected_idx.selection.rows:
             if aliases:
                 st.write("**Aliases:**")
                 chip_data = [
-                    {"text": a, "label": candidate.get("entity_type", "UNKNOWN"), "count": None}
+                    {
+                        "text": a,
+                        "label": candidate.get("entity_type", "UNKNOWN"),
+                        "count": None,
+                    }
                     for a in aliases
                 ]
                 render_entity_chip_list(chip_data, max_display=12, columns=3)
@@ -321,22 +382,24 @@ if selected_idx and selected_idx.selection and selected_idx.selection.rows:
             # Fallback: match mentions by representative_name text
             rep_name = candidate.get("representative_name", "").lower()
             all_names = {rep_name} | {a.lower() for a in candidate.get("aliases", [])}
-            candidate_mentions = [
-                m for m in mentions
-                if m.get("text", "").lower() in all_names
-            ]
+            candidate_mentions = [m for m in mentions if m.get("text", "").lower() in all_names]
 
         if candidate_mentions:
             st.caption(f"{len(candidate_mentions)} source mentions")
-            mention_df = pd.DataFrame([{
-                "Text": m.get("text", ""),
-                "Type": m.get("mention_type", ""),
-                "Document": m.get("document_id", ""),
-                "Chunk": m.get("chunk_id", ""),
-                "Span": f"{m.get('span_start', '?')}-{m.get('span_end', '?')}",
-                "Context": (m.get("context", "") or "")[:100],
-                "Confidence": (m.get("provenance", {}) or {}).get("confidence", ""),
-            } for m in candidate_mentions])
+            mention_df = pd.DataFrame(
+                [
+                    {
+                        "Text": m.get("text", ""),
+                        "Type": m.get("mention_type", ""),
+                        "Document": m.get("document_id", ""),
+                        "Chunk": m.get("chunk_id", ""),
+                        "Span": f"{m.get('span_start', '?')}-{m.get('span_end', '?')}",
+                        "Context": (m.get("context", "") or "")[:100],
+                        "Confidence": (m.get("provenance", {}) or {}).get("confidence", ""),
+                    }
+                    for m in candidate_mentions
+                ]
+            )
             st.dataframe(mention_df, use_container_width=True, hide_index=True, height=400)
         else:
             st.info("No linked mentions found for this candidate.")
@@ -354,8 +417,7 @@ if selected_idx and selected_idx.selection and selected_idx.selection.rows:
         candidate_mentions = mention_by_candidate.get(cid, [])
         if candidate_mentions:
             doc_counts: Counter[str] = Counter(
-                m.get("document_id", "unknown") for m in candidate_mentions
-                if m.get("document_id")
+                m.get("document_id", "unknown") for m in candidate_mentions if m.get("document_id")
             )
             if doc_counts:
                 st.divider()

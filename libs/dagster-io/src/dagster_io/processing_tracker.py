@@ -37,16 +37,36 @@ class ProcessingTracker:
         try:
             data = self._s3.get_object(self._key)
             self._hashes = set(json.loads(data))
-            logger.info("Loaded %d processed hashes from %s", len(self._hashes), self._key, extra={"tracker_key": self._key, "hash_count": len(self._hashes)})
+            logger.info(
+                "Loaded %d processed hashes from %s",
+                len(self._hashes),
+                self._key,
+                extra={"tracker_key": self._key, "hash_count": len(self._hashes)},
+            )
         except Exception:
             self._hashes = set()
-            logger.info("No existing tracker at %s — starting fresh", self._key, extra={"tracker_key": self._key})
+            logger.info(
+                "No existing tracker at %s — starting fresh",
+                self._key,
+                extra={"tracker_key": self._key},
+            )
 
     def filter_unprocessed(self, chunks: list) -> list:
         """Return only chunks whose content_hash is not yet processed."""
         unprocessed = [c for c in chunks if getattr(c, "content_hash", "") not in self._hashes]
         skipped = len(chunks) - len(unprocessed)
-        logger.info("Tracker filter: %d total, %d unprocessed, %d skipped", len(chunks), len(unprocessed), skipped, extra={"total": len(chunks), "unprocessed": len(unprocessed), "skipped": skipped, "tracker_key": self._key})
+        logger.info(
+            "Tracker filter: %d total, %d unprocessed, %d skipped",
+            len(chunks),
+            len(unprocessed),
+            skipped,
+            extra={
+                "total": len(chunks),
+                "unprocessed": len(unprocessed),
+                "skipped": skipped,
+                "tracker_key": self._key,
+            },
+        )
         return unprocessed
 
     def mark_processed(self, content_hash: str) -> None:
@@ -63,7 +83,12 @@ class ProcessingTracker:
         payload = json.dumps(sorted(self._hashes), indent=0).encode("utf-8")
         self._s3.put_object(self._key, payload)
         self._dirty = False
-        logger.info("Saved %d processed hashes to %s", len(self._hashes), self._key, extra={"tracker_key": self._key, "hash_count": len(self._hashes)})
+        logger.info(
+            "Saved %d processed hashes to %s",
+            len(self._hashes),
+            self._key,
+            extra={"tracker_key": self._key, "hash_count": len(self._hashes)},
+        )
 
     @property
     def processed_count(self) -> int:

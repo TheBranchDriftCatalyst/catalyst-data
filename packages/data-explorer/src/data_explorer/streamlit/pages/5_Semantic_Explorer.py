@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 import numpy as np
 import streamlit as st
 
-from data_explorer.streamlit.config import get_s3_config
-from data_explorer.streamlit.data_client import DataClient
-from data_explorer.streamlit.llm_client import get_llm_client
-from data_explorer.streamlit.components.model_selector import embedding_model_selector
-from data_explorer.streamlit.navigation import get_nav_params, navigate_to, render_breadcrumbs
-from data_explorer.streamlit.theme import apply_theme
 from data_explorer.streamlit.components.embedding_scatter import (
     render_embedding_scatter,
     render_reduction_controls,
 )
 from data_explorer.streamlit.components.entity_chip import render_entity_chip_html
+from data_explorer.streamlit.components.model_selector import embedding_model_selector
+from data_explorer.streamlit.config import get_s3_config
+from data_explorer.streamlit.data_client import DataClient
+from data_explorer.streamlit.llm_client import get_llm_client
+from data_explorer.streamlit.navigation import (
+    get_nav_params,
+    navigate_to,
+    render_breadcrumbs,
+)
+from data_explorer.streamlit.theme import apply_theme
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +113,19 @@ with st.sidebar:
     # Mention type filter
     mention_type_filter = st.multiselect(
         "Mention Type",
-        options=["PERSON", "ORG", "GPE", "LOC", "DATE", "LAW", "EVENT", "MONEY", "NORP", "FACILITY", "OTHER"],
+        options=[
+            "PERSON",
+            "ORG",
+            "GPE",
+            "LOC",
+            "DATE",
+            "LAW",
+            "EVENT",
+            "MONEY",
+            "NORP",
+            "FACILITY",
+            "OTHER",
+        ],
         default=[],
         key="se_mention_type_filter",
         help="Filter entity chips by mention type (leave empty for all)",
@@ -152,7 +169,9 @@ if query:
     # 2. Search embeddings
     with st.spinner("Searching embeddings..."):
         results = _get_client().search_embeddings(
-            query_vec, selected_asset["root"], top_k=top_k,
+            query_vec,
+            selected_asset["root"],
+            top_k=top_k,
         )
 
     # 3. Apply score threshold
@@ -170,16 +189,14 @@ if query:
     source_prefix = asset_name.rsplit("_", 1)[0] if "_" in asset_name else ""
     all_mentions: list[dict] = []
     if source_prefix:
-        try:
+        # mentions are optional enrichment — tolerate any load failure
+        with contextlib.suppress(Exception):
             all_mentions = _load_mentions_for_source(source_prefix)
-        except Exception:
-            pass  # mentions are optional enrichment
 
     # Apply mention type filter if set
     if mention_type_filter and all_mentions:
         all_mentions = [
-            m for m in all_mentions
-            if str(m.get("mention_type") or m.get("label", "")).upper() in mention_type_filter
+            m for m in all_mentions if str(m.get("mention_type") or m.get("label", "")).upper() in mention_type_filter
         ]
 
     # Build a chunk_id -> mentions lookup
@@ -229,15 +246,14 @@ if query:
                 )
 
             # -- Document link
-            if doc_id:
-                if st.button(
-                    f"Open document: {str(doc_id)[:60]}",
-                    key=f"nav_doc_{i}",
-                ):
-                    navigate_to(
-                        "pages/2_Document_Explorer.py",
-                        document_id=doc_id,
-                    )
+            if doc_id and st.button(
+                f"Open document: {str(doc_id)[:60]}",
+                key=f"nav_doc_{i}",
+            ):
+                navigate_to(
+                    "pages/2_Document_Explorer.py",
+                    document_id=doc_id,
+                )
 
             # -- Mention/entity chips for this chunk
             chunk_mentions = chunk_mention_map.get(chunk_id, [])
@@ -260,8 +276,7 @@ if query:
                     for m in unique_mentions[:12]
                 )
                 st.markdown(
-                    f'<div style="display:flex;flex-wrap:wrap;gap:0.35rem;'
-                    f'padding:0.4rem 0;">{chips_html}</div>',
+                    f'<div style="display:flex;flex-wrap:wrap;gap:0.35rem;padding:0.4rem 0;">{chips_html}</div>',
                     unsafe_allow_html=True,
                 )
 
@@ -269,10 +284,18 @@ if query:
             extra = {
                 k: v
                 for k, v in row.items()
-                if k not in (
-                    "score", "text", "content", "chunk_text",
-                    "embedding", "vector", "document_id",
-                    "source_doc_id", "id", "chunk_id",
+                if k
+                not in (
+                    "score",
+                    "text",
+                    "content",
+                    "chunk_text",
+                    "embedding",
+                    "vector",
+                    "document_id",
+                    "source_doc_id",
+                    "id",
+                    "chunk_id",
                 )
             }
             if extra:
@@ -286,8 +309,7 @@ if query:
     st.divider()
     st.subheader("Embedding Space Visualization")
     st.caption(
-        "All embeddings from the selected asset projected to 2D. "
-        "Search results are highlighted with white borders."
+        "All embeddings from the selected asset projected to 2D. Search results are highlighted with white borders."
     )
 
     with st.spinner("Loading embeddings for visualization..."):
@@ -302,13 +324,7 @@ if query:
             emb = r.get("embedding") or r.get("vector")
             if emb and isinstance(emb, list):
                 embeddings.append(emb)
-                embed_labels.append(
-                    str(
-                        r.get("document_id")
-                        or r.get("source_doc_id")
-                        or r.get("id", "")
-                    )[:30]
-                )
+                embed_labels.append(str(r.get("document_id") or r.get("source_doc_id") or r.get("id", ""))[:30])
                 embed_metadata.append(r)
 
         if len(embeddings) > 2:
@@ -333,12 +349,8 @@ if query:
                 labels=None,
                 metadata=[
                     {
-                        "text": str(
-                            m.get("text") or m.get("content") or m.get("chunk_text", "")
-                        ),
-                        "document_id": str(
-                            m.get("document_id") or m.get("source_doc_id") or m.get("id", "")
-                        ),
+                        "text": str(m.get("text") or m.get("content") or m.get("chunk_text", "")),
+                        "document_id": str(m.get("document_id") or m.get("source_doc_id") or m.get("id", "")),
                     }
                     for m in embed_metadata
                 ],

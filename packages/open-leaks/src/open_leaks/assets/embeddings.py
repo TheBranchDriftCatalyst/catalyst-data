@@ -3,8 +3,8 @@
 from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
-from dagster_io import EmbeddingResource, TextChunk
 
+from dagster_io import EmbeddingResource, TextChunk
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -34,15 +34,29 @@ def leak_embeddings(
     embeddings: EmbeddingResource,
     leak_chunks: list[TextChunk],
 ) -> Output[list[dict[str, Any]]]:
-    with trace_operation("leak_embeddings", tracer, {"code_location": "open_leaks", "layer": "gold", "chunk_count": len(leak_chunks)}):
+    with trace_operation(
+        "leak_embeddings",
+        tracer,
+        {
+            "code_location": "open_leaks",
+            "layer": "gold",
+            "chunk_count": len(leak_chunks),
+        },
+    ):
         logger.info("Starting leak_embeddings for %d chunks", len(leak_chunks))
         texts = [chunk.text for chunk in leak_chunks]
 
         context.log.info(f"Embedding {len(texts)} chunks with model={embeddings.model}")
         vectors = embeddings.embed(texts)
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_embeddings", layer="gold").inc(len(vectors))
-        logger.info("leak_embeddings complete: %d vectors (%dd)", len(vectors), len(vectors[0]) if vectors else 0)
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_embeddings", layer="gold").inc(
+            len(vectors)
+        )
+        logger.info(
+            "leak_embeddings complete: %d vectors (%dd)",
+            len(vectors),
+            len(vectors[0]) if vectors else 0,
+        )
         results = [
             {
                 "chunk_id": chunk.chunk_id,
@@ -51,7 +65,7 @@ def leak_embeddings(
                 "model": embeddings.model,
                 "dimensions": len(vec),
             }
-            for chunk, vec in zip(leak_chunks, vectors)
+            for chunk, vec in zip(leak_chunks, vectors, strict=False)
         ]
 
         context.log.info(f"Generated {len(results)} embeddings ({len(vectors[0])}d)")

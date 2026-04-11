@@ -15,20 +15,17 @@ import json
 from typing import Any
 
 import pytest
-
-from catalyst_langgraph.clients.mcp import DirectMCPClient
-from catalyst_langgraph.graph import build_extraction_graph
-from catalyst_langgraph.repository.jsonl import JsonlRepository
-
-from catalyst_contracts.validators.mention_validator import validate_mentions
-from catalyst_contracts.validators.proposition_validator import validate_propositions
-
 from catalyst_contracts.models.extraction_output import (
     MentionCandidate,
     MentionExtractionResult,
     PropositionCandidate,
     PropositionExtractionResult,
 )
+from catalyst_contracts.validators.mention_validator import validate_mentions
+from catalyst_contracts.validators.proposition_validator import validate_propositions
+from catalyst_langgraph.clients.mcp import DirectMCPClient
+from catalyst_langgraph.graph import build_extraction_graph
+from catalyst_langgraph.repository.jsonl import JsonlRepository
 
 # ---------------------------------------------------------------------------
 # Source text used by all tests
@@ -95,13 +92,9 @@ class CorrectSchemaLLM:
 
     async def structured_output(self, schema: Any, messages: list) -> Any:
         if schema is MentionExtractionResult:
-            return MentionExtractionResult(
-                mentions=[MentionCandidate(**m) for m in self._mentions]
-            )
+            return MentionExtractionResult(mentions=[MentionCandidate(**m) for m in self._mentions])
         elif schema is PropositionExtractionResult:
-            return PropositionExtractionResult(
-                propositions=[PropositionCandidate(**p) for p in self._propositions]
-            )
+            return PropositionExtractionResult(propositions=[PropositionCandidate(**p) for p in self._propositions])
         return None
 
 
@@ -142,18 +135,18 @@ class PromptSchemaLLM:
         if schema is MentionExtractionResult:
             canonical = []
             for m in self._mentions:
-                canonical.append(MentionCandidate(
-                    text=m.get("text", m.get("surface_form", "")),
-                    mention_type=m.get("mention_type", m.get("entity_type", "OTHER")),
-                    span_start=m.get("span_start", m.get("start_offset", 0)),
-                    span_end=m.get("span_end", m.get("end_offset", 0)),
-                    confidence=m.get("confidence", 1.0),
-                ))
+                canonical.append(
+                    MentionCandidate(
+                        text=m.get("text", m.get("surface_form", "")),
+                        mention_type=m.get("mention_type", m.get("entity_type", "OTHER")),
+                        span_start=m.get("span_start", m.get("start_offset", 0)),
+                        span_end=m.get("span_end", m.get("end_offset", 0)),
+                        confidence=m.get("confidence", 1.0),
+                    )
+                )
             return MentionExtractionResult(mentions=canonical)
         elif schema is PropositionExtractionResult:
-            return PropositionExtractionResult(
-                propositions=[PropositionCandidate(**p) for p in self._propositions]
-            )
+            return PropositionExtractionResult(propositions=[PropositionCandidate(**p) for p in self._propositions])
         return None
 
 
@@ -233,9 +226,7 @@ class TestRealValidatorIntegration:
         result = await graph.ainvoke(_make_state("doc-correct-schema"))
 
         # Core assertions: pipeline completed successfully
-        assert result["status"] != "failed", (
-            f"Pipeline failed with error: {result.get('error', 'unknown')}"
-        )
+        assert result["status"] != "failed", f"Pipeline failed with error: {result.get('error', 'unknown')}"
         assert result["status"] == "completed"
         assert len(result["accepted_mentions"]) == 2
         assert len(result["accepted_propositions"]) == 1
@@ -287,9 +278,7 @@ class TestRealValidatorIntegration:
         repo = JsonlRepository(tmp_path)
         graph = build_extraction_graph(llm, mcp, repo)
 
-        result = await graph.ainvoke(
-            _make_state("doc-wrong-schema", max_retries=1)
-        )
+        result = await graph.ainvoke(_make_state("doc-wrong-schema", max_retries=1))
 
         # With prompt-schema fields, validators reject the mentions.
         # The graph should either complete (which means the bug is fixed)
@@ -378,7 +367,7 @@ class TestRealValidatorIntegration:
         ]
         # Pre-flight check: spans actually match
         for m in mentions:
-            assert SOURCE_TEXT[m["span_start"]:m["span_end"]] == m["text"]
+            assert SOURCE_TEXT[m["span_start"] : m["span_end"]] == m["text"]
 
         propositions = [
             {
@@ -417,7 +406,7 @@ class TestRealValidatorIntegration:
                 "text": "United Nations",
                 "mention_type": "ORG",
                 "span_start": 0,  # Wrong — should be 4
-                "span_end": 14,   # Wrong — should be 18
+                "span_end": 14,  # Wrong — should be 18
                 "confidence": 0.95,
             },
         ]
@@ -455,13 +444,9 @@ class TestRealValidatorIntegration:
                 if schema is MentionExtractionResult:
                     call_count["n"] += 1
                     data = bad_mentions if call_count["n"] <= 1 else good_mentions
-                    return MentionExtractionResult(
-                        mentions=[MentionCandidate(**m) for m in data]
-                    )
+                    return MentionExtractionResult(mentions=[MentionCandidate(**m) for m in data])
                 elif schema is PropositionExtractionResult:
-                    return PropositionExtractionResult(
-                        propositions=[PropositionCandidate(**p) for p in propositions]
-                    )
+                    return PropositionExtractionResult(propositions=[PropositionCandidate(**p) for p in propositions])
 
         llm = RepairingLLM()
         mcp = DirectMCPClient(RealValidatorHandler())
@@ -564,14 +549,9 @@ class TestRealValidatorIntegration:
         direct_mcp = DirectMCPClient(RealValidatorHandler())
         direct_repo = JsonlRepository(tmp_path / "direct")
         direct_graph = build_extraction_graph(direct_llm, direct_mcp, direct_repo)
-        direct_result = await direct_graph.ainvoke(
-            _make_state("doc-direct", max_retries=1)
-        )
+        direct_result = await direct_graph.ainvoke(_make_state("doc-direct", max_retries=1))
         # Real validator should reject this — pipeline fails or has no accepted mentions
-        assert (
-            direct_result["status"] != "completed"
-            or len(direct_result.get("accepted_mentions", [])) == 0
-        )
+        assert direct_result["status"] != "completed" or len(direct_result.get("accepted_mentions", [])) == 0
 
     @pytest.mark.asyncio
     async def test_validator_returns_proper_verdict_values(self, tmp_path):
@@ -581,7 +561,12 @@ class TestRealValidatorIntegration:
         # Valid mentions
         valid_result = handler.validate_mentions(
             mentions=[
-                {"text": "United Nations", "mention_type": "ORG", "span_start": 4, "span_end": 18},
+                {
+                    "text": "United Nations",
+                    "mention_type": "ORG",
+                    "span_start": 4,
+                    "span_end": 18,
+                },
             ],
             source_text=SOURCE_TEXT,
             document_id="test",
@@ -618,6 +603,4 @@ class TestRealValidatorIntegration:
         )
         valid_codes = {c.value for c in IssueCode}
         for error in result.get("errors", []):
-            assert error["code"] in valid_codes, (
-                f"Error code '{error['code']}' is not a valid IssueCode"
-            )
+            assert error["code"] in valid_codes, f"Error code '{error['code']}' is not a valid IssueCode"

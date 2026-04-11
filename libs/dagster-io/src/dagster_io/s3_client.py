@@ -51,7 +51,10 @@ class S3Client:
 
         size = os.path.getsize(file_path)
         logger.debug("S3 put_object_file bucket=%s key=%s size=%d", self.bucket, key, size)
-        with track_duration(S3_OPERATION_DURATION, {"operation": "put_object_file", "bucket": self.bucket}):
+        with track_duration(
+            S3_OPERATION_DURATION,
+            {"operation": "put_object_file", "bucket": self.bucket},
+        ):
             self._client.upload_file(file_path, self.bucket, key)
         S3_OPERATIONS.labels(operation="put_object_file", bucket=self.bucket).inc()
         S3_BYTES_TRANSFERRED.labels(direction="upload", bucket=self.bucket).inc(size)
@@ -91,7 +94,10 @@ class S3Client:
     def list_all_objects(self, prefix: str) -> list[str]:
         """Paginated listing that returns all keys under a prefix."""
         logger.debug("S3 list_all_objects bucket=%s prefix=%s", self.bucket, prefix)
-        with track_duration(S3_OPERATION_DURATION, {"operation": "list_all_objects", "bucket": self.bucket}):
+        with track_duration(
+            S3_OPERATION_DURATION,
+            {"operation": "list_all_objects", "bucket": self.bucket},
+        ):
             paginator = self._client.get_paginator("list_objects_v2")
             keys: list[str] = []
             for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
@@ -103,7 +109,10 @@ class S3Client:
     def head_object(self, key: str) -> dict | None:
         logger.debug("S3 head_object bucket=%s key=%s", self.bucket, key)
         try:
-            with track_duration(S3_OPERATION_DURATION, {"operation": "head_object", "bucket": self.bucket}):
+            with track_duration(
+                S3_OPERATION_DURATION,
+                {"operation": "head_object", "bucket": self.bucket},
+            ):
                 result = self._client.head_object(Bucket=self.bucket, Key=key)
             S3_OPERATIONS.labels(operation="head_object", bucket=self.bucket).inc()
             return result
@@ -137,7 +146,10 @@ class S3Client:
         logger.debug("S3 delete_objects bucket=%s count=%d", self.bucket, len(keys))
         deleted = 0
         errors: list[dict] = []
-        with track_duration(S3_OPERATION_DURATION, {"operation": "delete_objects", "bucket": self.bucket}):
+        with track_duration(
+            S3_OPERATION_DURATION,
+            {"operation": "delete_objects", "bucket": self.bucket},
+        ):
             for i in range(0, len(keys), 1000):
                 batch = keys[i : i + 1000]
                 try:
@@ -152,20 +164,27 @@ class S3Client:
                     # MinIO requires Content-MD5 for DeleteObjects; fall back to singles.
                     if "MissingContentMD5" in str(e) or "Content-Md5" in str(e):
                         logger.warning(
-                            "S3 delete_objects batch unsupported (MissingContentMD5), "
-                            "falling back to per-key deletes"
+                            "S3 delete_objects batch unsupported (MissingContentMD5), falling back to per-key deletes"
                         )
                         for k in batch:
                             try:
                                 self._client.delete_object(Bucket=self.bucket, Key=k)
                                 deleted += 1
                             except Exception as inner:
-                                errors.append({"Key": k, "Code": type(inner).__name__, "Message": str(inner)})
+                                errors.append(
+                                    {
+                                        "Key": k,
+                                        "Code": type(inner).__name__,
+                                        "Message": str(inner),
+                                    }
+                                )
                     else:
                         raise
         S3_OPERATIONS.labels(operation="delete_objects", bucket=self.bucket).inc()
         logger.info(
             "S3 delete_objects complete deleted=%d errors=%d total=%d",
-            deleted, len(errors), len(keys),
+            deleted,
+            len(errors),
+            len(keys),
         )
         return deleted, errors

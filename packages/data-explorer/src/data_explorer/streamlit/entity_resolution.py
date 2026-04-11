@@ -42,7 +42,7 @@ class EntityResolver:
 
         # Union-Find for merging
         parent: dict[str, str] = {}
-        for (text, _label) in text_label_count:
+        for text, _label in text_label_count:
             parent[text] = text
 
         def find(x: str) -> str:
@@ -58,7 +58,7 @@ class EntityResolver:
 
         # --- Pass 1: Exact case-insensitive ---
         lower_groups: dict[str, list[str]] = defaultdict(list)
-        for (text, _label) in text_label_count:
+        for text, _label in text_label_count:
             lower_groups[text.strip().lower()].append(text)
         for _key, variants in lower_groups.items():
             if len(variants) > 1:
@@ -66,12 +66,12 @@ class EntityResolver:
                     union(variants[0], v)
 
         # --- Pass 2: Substring containment (same label, ≥2 shared tokens) ---
-        for label, texts in by_label.items():
+        for _label, texts in by_label.items():
             sorted_texts = sorted(texts, key=len)
             for i, shorter in enumerate(sorted_texts):
                 shorter_lower = shorter.lower()
                 shorter_tokens = set(shorter_lower.split())
-                for longer in sorted_texts[i + 1:]:
+                for longer in sorted_texts[i + 1 :]:
                     longer_lower = longer.lower()
                     if shorter_lower in longer_lower:
                         longer_tokens = set(longer_lower.split())
@@ -80,12 +80,12 @@ class EntityResolver:
                             union(shorter, longer)
 
         # --- Pass 3: Jaccard token overlap (same label, >0.6, ≥2 shared) ---
-        for label, texts in by_label.items():
+        for _label, texts in by_label.items():
             for i, a in enumerate(texts):
                 a_tokens = set(a.lower().split())
                 if not a_tokens:
                     continue
-                for b in texts[i + 1:]:
+                for b in texts[i + 1 :]:
                     b_tokens = set(b.lower().split())
                     if not b_tokens:
                         continue
@@ -98,13 +98,14 @@ class EntityResolver:
 
         # Build canonical map: pick the most frequent form in each group
         groups: dict[str, list[str]] = defaultdict(list)
-        for (text, _label) in text_label_count:
+        for text, _label in text_label_count:
             groups[find(text)].append(text)
 
         for _root, members in groups.items():
-            canonical = max(members, key=lambda t: sum(
-                c for (tx, _l), c in text_label_count.items() if tx == t
-            ))
+            canonical = max(
+                members,
+                key=lambda t: sum(c for (tx, _l), c in text_label_count.items() if tx == t),
+            )
             for m in members:
                 self._canonical_map[m] = canonical
 

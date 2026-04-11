@@ -5,10 +5,10 @@ from __future__ import annotations
 import numpy as np
 import streamlit as st
 
+from data_explorer.streamlit.components.model_selector import embedding_model_selector
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
 from data_explorer.streamlit.llm_client import get_llm_client
-from data_explorer.streamlit.components.model_selector import embedding_model_selector
 from data_explorer.streamlit.navigation import render_breadcrumbs
 from data_explorer.streamlit.theme import apply_theme
 
@@ -148,10 +148,16 @@ with tab_existing:
 
         with st.spinner("Searching both configs..."):
             results_a = _get_client().search_embeddings_with_config(
-                query_vec, selected_asset["root"], config_a, top_k=top_k,
+                query_vec,
+                selected_asset["root"],
+                config_a,
+                top_k=top_k,
             )
             results_b = _get_client().search_embeddings_with_config(
-                query_vec, selected_asset["root"], config_b, top_k=top_k,
+                query_vec,
+                selected_asset["root"],
+                config_b,
+                top_k=top_k,
             )
 
         st.divider()
@@ -317,11 +323,13 @@ with tab_experiment:
             results = []
             for idx in top_idx:
                 preview = chunks[idx][:200] + "..." if len(chunks[idx]) > 200 else chunks[idx]
-                results.append({
-                    "text": preview,
-                    "score": float(scores[idx]),
-                    "chunk_index": int(idx),
-                })
+                results.append(
+                    {
+                        "text": preview,
+                        "score": float(scores[idx]),
+                        "chunk_index": int(idx),
+                    }
+                )
             return results
 
         exp_results_a = _search_inmemory(chunks_a, embeddings_a, top_k)
@@ -360,6 +368,5 @@ with tab_experiment:
 
         total_embed_calls = len(chunks_a) + len(chunks_b)
         st.caption(
-            f"Experiment used {total_embed_calls} embedding API calls "
-            f"({len(chunks_a)} + {len(chunks_b)} chunks)."
+            f"Experiment used {total_embed_calls} embedding API calls ({len(chunks_a)} + {len(chunks_b)} chunks)."
         )

@@ -6,14 +6,13 @@ import json
 import logging
 from typing import Any
 
+from catalyst_contracts.models.extraction_output import PropositionExtractionResult
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_langgraph.clients.llm import LLMClient
 from catalyst_langgraph.nodes._audit import make_audit_event
 from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
-
-from catalyst_contracts.models.extraction_output import PropositionExtractionResult
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,14 @@ class RepairPropositions:
                     "retry": retry_count,
                 },
                 "audit_events": state.get("audit_events", [])
-                + [make_audit_event("repair_propositions", "completed", retry_count=retry_count, repaired_count=len(repaired))],
+                + [
+                    make_audit_event(
+                        "repair_propositions",
+                        "completed",
+                        retry_count=retry_count,
+                        repaired_count=len(repaired),
+                    )
+                ],
             }
         except Exception as e:
             logger.exception("repair_propositions failed")

@@ -10,17 +10,17 @@ from catalyst_contracts.models.evidence import (
     IssueCode,
     IssueSeverity,
 )
-from catalyst_contracts.models.math import (
-    MathObject,
-    MathObjectKind,
-    MathProposition,
-    MathPropositionKind,
-)
 from catalyst_contracts.models.extraction_output import (
     MentionCandidate,
     MentionExtractionResult,
     PropositionCandidate,
     PropositionExtractionResult,
+)
+from catalyst_contracts.models.math import (
+    MathObject,
+    MathObjectKind,
+    MathProposition,
+    MathPropositionKind,
 )
 from catalyst_contracts.models.mentions import MentionExtraction
 from catalyst_contracts.models.propositions import (

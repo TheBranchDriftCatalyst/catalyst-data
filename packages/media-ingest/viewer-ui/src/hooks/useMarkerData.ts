@@ -67,7 +67,8 @@ function getMentionTimestamp(
   if (prov?.temporal_start_ms != null) {
     return {
       start: prov.temporal_start_ms / 1000,
-      end: prov.temporal_end_ms != null ? prov.temporal_end_ms / 1000 : prov.temporal_start_ms / 1000,
+      end:
+        prov.temporal_end_ms != null ? prov.temporal_end_ms / 1000 : prov.temporal_start_ms / 1000,
     };
   }
 
@@ -95,7 +96,8 @@ function getAssertionTimestamp(
   if (prov.temporal_start_ms != null) {
     return {
       start: prov.temporal_start_ms / 1000,
-      end: prov.temporal_end_ms != null ? prov.temporal_end_ms / 1000 : prov.temporal_start_ms / 1000,
+      end:
+        prov.temporal_end_ms != null ? prov.temporal_end_ms / 1000 : prov.temporal_start_ms / 1000,
     };
   }
 

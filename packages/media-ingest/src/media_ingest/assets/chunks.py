@@ -9,8 +9,8 @@ Partitioned by document_id — each run chunks a single transcription.
 from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
-from dagster_io import ChunkingResource, TextChunk
 
+from dagster_io import ChunkingResource, TextChunk
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -52,7 +52,15 @@ def media_chunks(
     media_diarization: dict[str, Any],
 ) -> Output[list[TextChunk]]:
     partition_key = context.partition_key
-    with trace_operation("media_chunks", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key}):
+    with trace_operation(
+        "media_chunks",
+        tracer,
+        {
+            "code_location": "media_ingest",
+            "layer": "gold",
+            "partition_key": partition_key,
+        },
+    ):
         t = media_diarization
         logger.info("Starting media_chunks chunking for partition=%s", partition_key)
 
@@ -84,8 +92,14 @@ def media_chunks(
             chunk_overlap=TRANSCRIPTION_CHUNK_OVERLAP,
         )
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_chunks", layer="gold").inc(len(chunks))
-        logger.info("media_chunks complete for partition=%s: %d chunks", partition_key, len(chunks))
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_chunks", layer="gold").inc(
+            len(chunks)
+        )
+        logger.info(
+            "media_chunks complete for partition=%s: %d chunks",
+            partition_key,
+            len(chunks),
+        )
         context.log.info(
             f"Chunked transcription for '{t.get('title', partition_key)}' into {len(chunks)} chunks "
             f"(size={TRANSCRIPTION_CHUNK_SIZE}, overlap={TRANSCRIPTION_CHUNK_OVERLAP})"

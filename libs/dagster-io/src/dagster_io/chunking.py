@@ -20,7 +20,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field
 
 from dagster_io.logging import get_logger
-from dagster_io.metrics import CHUNKS_CREATED, CHUNK_PROCESSING_DURATION, track_duration
+from dagster_io.metrics import CHUNK_PROCESSING_DURATION, CHUNKS_CREATED, track_duration
 
 logger = get_logger(__name__)
 
@@ -110,7 +110,13 @@ class ChunkingResource(ConfigurableResource):
         """
         size = chunk_size or self.chunk_size
         overlap = chunk_overlap or self.chunk_overlap
-        logger.debug("Chunking document=%s size=%d overlap=%d content_len=%d", document_id, size, overlap, len(content))
+        logger.debug(
+            "Chunking document=%s size=%d overlap=%d content_len=%d",
+            document_id,
+            size,
+            overlap,
+            len(content),
+        )
         with track_duration(CHUNK_PROCESSING_DURATION, {"strategy": "recursive"}):
             raw_chunks = self.split_text(content, chunk_size=size, chunk_overlap=overlap)
 
@@ -119,7 +125,13 @@ class ChunkingResource(ConfigurableResource):
 
         total = len(raw_chunks)
         CHUNKS_CREATED.labels(strategy="recursive").inc(total)
-        logger.info("Chunked document=%s into %d chunks (size=%d, overlap=%d)", document_id, total, size, overlap)
+        logger.info(
+            "Chunked document=%s into %d chunks (size=%d, overlap=%d)",
+            document_id,
+            total,
+            size,
+            overlap,
+        )
         base_meta = {
             **(metadata or {}),
             "chunk_size": size,
@@ -174,6 +186,7 @@ class ChunkingResource(ConfigurableResource):
 # Standalone helpers (for notebooks / non-Dagster usage)
 # ---------------------------------------------------------------------------
 
+
 def chunk_text(
     text: str,
     chunk_size: int = 1000,
@@ -207,7 +220,11 @@ def chunk_document(
         return []
 
     total = len(raw_chunks)
-    base_meta = {**(metadata or {}), "chunk_size": chunk_size, "chunk_overlap": chunk_overlap}
+    base_meta = {
+        **(metadata or {}),
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
+    }
 
     return [
         TextChunk(

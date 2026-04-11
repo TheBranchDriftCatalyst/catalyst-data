@@ -1,7 +1,6 @@
 """Test the full extraction graph — happy path (all validations pass)."""
 
 import pytest
-
 from catalyst_langgraph.graph import build_extraction_graph
 from catalyst_langgraph.repository.jsonl import JsonlRepository
 
@@ -15,12 +14,8 @@ async def test_happy_path(tmp_path, mock_llm, mock_mcp, sample_mentions, sample_
     mock_llm.set_default_mentions(sample_mentions)
     mock_llm.set_default_propositions(sample_propositions)
 
-    mock_mcp.set_response(
-        "validate_mentions", {"verdict": "valid", "errors": []}
-    )
-    mock_mcp.set_response(
-        "validate_propositions", {"verdict": "valid", "errors": []}
-    )
+    mock_mcp.set_response("validate_mentions", {"verdict": "valid", "errors": []})
+    mock_mcp.set_response("validate_propositions", {"verdict": "valid", "errors": []})
 
     repo = JsonlRepository(tmp_path)
     graph = build_extraction_graph(mock_llm, mock_mcp, repo)

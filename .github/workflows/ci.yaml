@@ -8,7 +8,6 @@ on:
 jobs:
   lint-python:
     runs-on: ubuntu-latest
-    continue-on-error: true  # advisory until codebase is clean
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,7 +19,6 @@ jobs:
 
   lint-frontend:
     runs-on: ubuntu-latest
-    continue-on-error: true  # advisory until codebase is clean
     defaults:
       run:
         working-directory: packages/media-ingest/viewer-ui

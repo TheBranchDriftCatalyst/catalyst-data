@@ -6,15 +6,13 @@ import json
 from typing import Any
 
 import pytest
-
-from catalyst_langgraph.clients.mcp import MockMCPClient
-
 from catalyst_contracts.models.extraction_output import (
     MentionCandidate,
     MentionExtractionResult,
     PropositionCandidate,
     PropositionExtractionResult,
 )
+from catalyst_langgraph.clients.mcp import MockMCPClient
 
 
 class MockLLMClient:
@@ -38,15 +36,11 @@ class MockLLMClient:
 
     def set_default_mentions(self, mentions: list[dict]) -> None:
         self._mention_data = mentions
-        self.complete_responses["_default_mentions"] = json.dumps(
-            {"mentions": mentions}
-        )
+        self.complete_responses["_default_mentions"] = json.dumps({"mentions": mentions})
 
     def set_default_propositions(self, propositions: list[dict]) -> None:
         self._proposition_data = propositions
-        self.complete_responses["_default_propositions"] = json.dumps(
-            {"propositions": propositions}
-        )
+        self.complete_responses["_default_propositions"] = json.dumps({"propositions": propositions})
 
     async def complete(self, prompt: str, *, system: str = "") -> str:
         self.complete_calls.append((prompt, system))
@@ -60,12 +54,14 @@ class MockLLMClient:
         # Check for default responses based on system prompt content.
         # Check propositions first — proposition prompts also contain "mention"
         # so checking mention first would incorrectly match.
-        if "proposition" in system.lower() or "triple" in system.lower():
-            if "_default_propositions" in self.complete_responses:
-                return self.complete_responses["_default_propositions"]
-        if "entity" in system.lower() or "mention" in system.lower():
-            if "_default_mentions" in self.complete_responses:
-                return self.complete_responses["_default_mentions"]
+        if (
+            "proposition" in system.lower() or "triple" in system.lower()
+        ) and "_default_propositions" in self.complete_responses:
+            return self.complete_responses["_default_propositions"]
+        if (
+            "entity" in system.lower() or "mention" in system.lower()
+        ) and "_default_mentions" in self.complete_responses:
+            return self.complete_responses["_default_mentions"]
 
         # Fallback — return empty
         return json.dumps({"mentions": [], "propositions": []})

@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-
 from catalyst_langgraph.clients.mcp import StdioMCPClient
 
 

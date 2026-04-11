@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from catalyst_contracts.audit.repository import AuditRepository
 from catalyst_contracts.server import (
     generate_repair_instructions,
@@ -48,9 +47,7 @@ class TestServerTools:
         )
         assert result["verdict"] == "invalid"
 
-    def test_validate_propositions_valid(
-        self, valid_propositions_data, source_text
-    ):
+    def test_validate_propositions_valid(self, valid_propositions_data, source_text):
         result = validate_propositions(
             propositions=valid_propositions_data,
             known_mention_ids=["mention_0", "mention_1", "mention_2"],
@@ -135,17 +132,13 @@ class TestServerToolsNegativePaths:
     """Negative and edge-case tests for server tool functions."""
 
     def test_validate_mentions_empty_list(self, source_text):
-        result = validate_mentions(
-            mentions=[], source_text=source_text, document_id="doc1"
-        )
+        result = validate_mentions(mentions=[], source_text=source_text, document_id="doc1")
         assert result["verdict"] == "invalid"
         assert result["valid_count"] == 0
         assert any(e["code"] == "EMPTY_EXTRACTION" for e in result["errors"])
 
     def test_validate_propositions_empty_list(self, source_text):
-        result = validate_propositions(
-            propositions=[], known_mention_ids=[], source_text=source_text
-        )
+        result = validate_propositions(propositions=[], known_mention_ids=[], source_text=source_text)
         assert result["verdict"] == "valid"
 
     def test_validate_spatial_empty_list(self, source_text):
@@ -157,18 +150,14 @@ class TestServerToolsNegativePaths:
         assert result["verdict"] == "valid"
 
     def test_validate_concordance_empty_list(self):
-        result = validate_concordance_candidates(
-            candidate_sets=[], known_entity_ids=[]
-        )
+        result = validate_concordance_candidates(candidate_sets=[], known_entity_ids=[])
         assert result["verdict"] == "valid"
 
     def test_audit_records_written(self, tmp_path, source_text, valid_mentions_data):
         """Verify that audit entries are written on validation calls."""
         import catalyst_contracts.server as srv
 
-        validate_mentions(
-            mentions=valid_mentions_data, source_text=source_text, document_id="doc1"
-        )
+        validate_mentions(mentions=valid_mentions_data, source_text=source_text, document_id="doc1")
         entries = srv.audit.read_all()
         assert len(entries) >= 1
         assert entries[-1]["tool_name"] == "validate_mentions"

@@ -7,8 +7,8 @@ Routes by document_type for optimal chunk sizes:
 """
 
 from dagster import AssetExecutionContext, Output, asset
-from dagster_io import ChunkingResource, TextChunk
 
+from dagster_io import ChunkingResource, TextChunk
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -35,7 +35,15 @@ def leak_chunks(
     chunking: ChunkingResource,
     leak_documents: list[Document],
 ) -> Output[list[TextChunk]]:
-    with trace_operation("leak_chunks", tracer, {"code_location": "open_leaks", "layer": "silver", "document_count": len(leak_documents)}):
+    with trace_operation(
+        "leak_chunks",
+        tracer,
+        {
+            "code_location": "open_leaks",
+            "layer": "silver",
+            "document_count": len(leak_documents),
+        },
+    ):
         logger.info("Starting leak_chunks chunking for %d documents", len(leak_documents))
         all_chunks: list[TextChunk] = []
         stats: dict[str, int] = {}
@@ -51,15 +59,19 @@ def leak_chunks(
                 chunks = chunking.passthrough(doc.id, doc.title, doc.content, metadata=meta)
             else:
                 profile = CHUNK_PROFILES.get(doc.document_type, {})
-                chunks = chunking.chunk_document(
-                    doc.id, doc.title, doc.content, metadata=meta, **profile
-                )
+                chunks = chunking.chunk_document(doc.id, doc.title, doc.content, metadata=meta, **profile)
 
             all_chunks.extend(chunks)
             stats[doc.document_type] = stats.get(doc.document_type, 0) + len(chunks)
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_chunks", layer="silver").inc(len(all_chunks))
-        logger.info("leak_chunks complete: %d documents -> %d chunks", len(leak_documents), len(all_chunks))
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_chunks", layer="silver").inc(
+            len(all_chunks)
+        )
+        logger.info(
+            "leak_chunks complete: %d documents -> %d chunks",
+            len(leak_documents),
+            len(all_chunks),
+        )
         context.log.info(
             f"Chunked {len(leak_documents)} documents into {len(all_chunks)} chunks: "
             + ", ".join(f"{k}={v}" for k, v in stats.items())

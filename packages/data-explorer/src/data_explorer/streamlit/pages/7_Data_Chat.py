@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import streamlit as st
 
+from data_explorer.streamlit.components.model_selector import chat_model_selector
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
 from data_explorer.streamlit.llm_client import (
-    LLMClient,
     build_rag_context,
     get_llm_client,
 )
-from data_explorer.streamlit.components.model_selector import chat_model_selector
 from data_explorer.streamlit.navigation import render_breadcrumbs
 from data_explorer.streamlit.prompt_registry import get_prompt
 from data_explorer.streamlit.theme import apply_theme
@@ -93,9 +92,7 @@ for msg in st.session_state["chat_messages"]:
                     score = src.get("score", 0)
                     doc_id = src.get("document_id", "unknown")
                     preview = src.get("text_preview", "")
-                    st.markdown(
-                        f"**{doc_id}** &mdash; similarity: `{score:.4f}`"
-                    )
+                    st.markdown(f"**{doc_id}** &mdash; similarity: `{score:.4f}`")
                     if preview:
                         st.caption(preview)
                     st.divider()
@@ -123,17 +120,15 @@ if query:
             st.stop()
 
     with st.spinner("Searching for relevant chunks..."):
-        results = _get_client().search_embeddings(
-            query_vec, selected_asset["root"], top_k=max_chunks
-        )
+        results = _get_client().search_embeddings(query_vec, selected_asset["root"], top_k=max_chunks)
 
     if not results:
         with st.chat_message("assistant"):
-            no_results_msg = "I could not find any relevant chunks in the selected embedding source to answer your question."
+            no_results_msg = (
+                "I could not find any relevant chunks in the selected embedding source to answer your question."
+            )
             st.markdown(no_results_msg)
-        st.session_state["chat_messages"].append(
-            {"role": "assistant", "content": no_results_msg, "sources": []}
-        )
+        st.session_state["chat_messages"].append({"role": "assistant", "content": no_results_msg, "sources": []})
         st.stop()
 
     # --- Build RAG context and stream response --- #
@@ -169,25 +164,27 @@ if query:
         for r in results:
             text_val = r.get("text") or r.get("content") or r.get("chunk_text", "")
             preview = str(text_val)[:200] + "..." if len(str(text_val)) > 200 else str(text_val)
-            source_records.append({
-                "document_id": r.get("document_id") or r.get("id", "unknown"),
-                "score": r.get("score", 0),
-                "text_preview": preview,
-            })
+            source_records.append(
+                {
+                    "document_id": r.get("document_id") or r.get("id", "unknown"),
+                    "score": r.get("score", 0),
+                    "text_preview": preview,
+                }
+            )
 
         # Show sources expander
         with st.expander("Sources"):
             for src in source_records:
-                st.markdown(
-                    f"**{src['document_id']}** &mdash; similarity: `{src['score']:.4f}`"
-                )
+                st.markdown(f"**{src['document_id']}** &mdash; similarity: `{src['score']:.4f}`")
                 if src["text_preview"]:
                     st.caption(src["text_preview"])
                 st.divider()
 
     # Persist to session state
-    st.session_state["chat_messages"].append({
-        "role": "assistant",
-        "content": response_text,
-        "sources": source_records,
-    })
+    st.session_state["chat_messages"].append(
+        {
+            "role": "assistant",
+            "content": response_text,
+            "sources": source_records,
+        }
+    )

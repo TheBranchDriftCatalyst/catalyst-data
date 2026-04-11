@@ -52,12 +52,8 @@ class LLMResource(ConfigurableResource):
             chat_model = llm.get_model()
     """
 
-    base_url: str = os.environ.get(
-        "LLM_BASE_URL", "https://api.openai.com/v1"
-    )
-    api_key: str = os.environ.get(
-        "LLM_API_KEY", os.environ.get("OPENAI_API_KEY", "")
-    )
+    base_url: str = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1")
+    api_key: str = os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
     model: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
     temperature: float = float(os.environ.get("LLM_TEMPERATURE", "0.0"))
     max_tokens: int = int(os.environ.get("LLM_MAX_TOKENS", "4096"))
@@ -108,7 +104,12 @@ class LLMResource(ConfigurableResource):
                     completion_tokens = getattr(usage, "output_tokens", 0)
                 LLM_TOKENS_USED.labels(model=self.model, token_type="prompt").inc(prompt_tokens)
                 LLM_TOKENS_USED.labels(model=self.model, token_type="completion").inc(completion_tokens)
-            logger.info("LLM complete done model=%s duration=%.2fs response_len=%d", self.model, duration, len(result))
+            logger.info(
+                "LLM complete done model=%s duration=%.2fs response_len=%d",
+                self.model,
+                duration,
+                len(result),
+            )
             return result
         except Exception:
             LLM_REQUESTS.labels(model=self.model, operation="complete", status="error").inc()
@@ -126,7 +127,10 @@ class LLMResource(ConfigurableResource):
         LLM_REQUESTS.labels(model=self.model, operation="complete_json", status="pending").inc()
         start = time.monotonic()
         try:
-            with track_duration(LLM_REQUEST_DURATION, {"model": self.model, "operation": "complete_json"}):
+            with track_duration(
+                LLM_REQUEST_DURATION,
+                {"model": self.model, "operation": "complete_json"},
+            ):
                 response = model.invoke(messages)
             duration = time.monotonic() - start
             result = str(response.content)
@@ -141,7 +145,12 @@ class LLMResource(ConfigurableResource):
                     completion_tokens = getattr(usage, "output_tokens", 0)
                 LLM_TOKENS_USED.labels(model=self.model, token_type="prompt").inc(prompt_tokens)
                 LLM_TOKENS_USED.labels(model=self.model, token_type="completion").inc(completion_tokens)
-            logger.info("LLM complete_json done model=%s duration=%.2fs response_len=%d", self.model, duration, len(result))
+            logger.info(
+                "LLM complete_json done model=%s duration=%.2fs response_len=%d",
+                self.model,
+                duration,
+                len(result),
+            )
             return result
         except Exception:
             LLM_REQUESTS.labels(model=self.model, operation="complete_json", status="error").inc()
@@ -191,7 +200,10 @@ class LLMResource(ConfigurableResource):
             if (i + 1) % log_every == 0 or (i + 1) == len(items):
                 logger.info(
                     "LLM %s progress: %d/%d (%.0f%%)",
-                    operation, i + 1, len(items), (i + 1) / len(items) * 100,
+                    operation,
+                    i + 1,
+                    len(items),
+                    (i + 1) / len(items) * 100,
                 )
         return results
 
@@ -226,7 +238,11 @@ class EmbeddingResource(ConfigurableResource):
     _embeddings: Any = PrivateAttr()
 
     def setup_for_execution(self, context) -> None:  # noqa: ANN001
-        logger.info("Initializing EmbeddingResource provider=%s model=%s", self.provider, self.model)
+        logger.info(
+            "Initializing EmbeddingResource provider=%s model=%s",
+            self.provider,
+            self.model,
+        )
         if self.provider == "huggingface":
             from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -247,20 +263,34 @@ class EmbeddingResource(ConfigurableResource):
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of texts, processing internally in batches with progress logging."""
-        logger.info("Embedding %d texts with model=%s (batch_size=%d)", len(texts), self.model, self.batch_size)
+        logger.info(
+            "Embedding %d texts with model=%s (batch_size=%d)",
+            len(texts),
+            self.model,
+            self.batch_size,
+        )
         all_vectors: list[list[float]] = []
         for batch_start in range(0, len(texts), self.batch_size):
-            batch = texts[batch_start:batch_start + self.batch_size]
-            with track_duration(EMBEDDING_BATCH_DURATION, {"provider": self.provider, "model": self.model}):
+            batch = texts[batch_start : batch_start + self.batch_size]
+            with track_duration(
+                EMBEDDING_BATCH_DURATION,
+                {"provider": self.provider, "model": self.model},
+            ):
                 vectors = self._embeddings.embed_documents(batch)
             all_vectors.extend(vectors)
             EMBEDDING_VECTORS_CREATED.labels(provider=self.provider, model=self.model).inc(len(vectors))
             processed = min(batch_start + self.batch_size, len(texts))
             logger.info(
                 "Embedding progress: %d/%d texts (%.0f%%)",
-                processed, len(texts), processed / len(texts) * 100,
+                processed,
+                len(texts),
+                processed / len(texts) * 100,
             )
-        logger.info("Embedding complete count=%d dimensions=%d", len(all_vectors), len(all_vectors[0]) if all_vectors else 0)
+        logger.info(
+            "Embedding complete count=%d dimensions=%d",
+            len(all_vectors),
+            len(all_vectors[0]) if all_vectors else 0,
+        )
         return all_vectors
 
     def embed_single(self, text: str) -> list[float]:

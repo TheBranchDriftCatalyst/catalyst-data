@@ -11,9 +11,7 @@ from data_explorer.streamlit.navigation import render_breadcrumbs
 from data_explorer.streamlit.prompt_registry import PromptEntry, list_prompts
 from data_explorer.streamlit.theme import apply_theme
 
-st.set_page_config(
-    page_title="Prompt Catalog", page_icon=":material/menu_book:", layout="wide"
-)
+st.set_page_config(page_title="Prompt Catalog", page_icon=":material/menu_book:", layout="wide")
 apply_theme()
 render_breadcrumbs([("Home", "app.py"), ("Prompt Catalog", None)])
 st.header("Prompt Catalog")
@@ -95,9 +93,7 @@ st.subheader("Test Playground")
 with st.sidebar:
     st.subheader("Playground Settings")
     playground_model = chat_model_selector(key="playground_model")
-    playground_temp = st.slider(
-        "Temperature", 0.0, 1.0, selected.temperature, step=0.05, key="playground_temp"
-    )
+    playground_temp = st.slider("Temperature", 0.0, 1.0, selected.temperature, step=0.05, key="playground_temp")
 
 user_input = st.text_area(
     "User message",

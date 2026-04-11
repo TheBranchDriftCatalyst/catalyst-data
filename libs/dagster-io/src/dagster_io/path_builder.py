@@ -163,9 +163,7 @@ def hive_partition_path(context: OutputContext | InputContext, key=None) -> str:
         if isinstance(partition_key, MultiPartitionKey):
             # Sort dimensions alphabetically for deterministic paths
             dims = sorted(partition_key.keys_by_dimension.items())
-            return "/".join(
-                f"{dim}={_hive_partition_segment(val)}" for dim, val in dims
-            )
+            return "/".join(f"{dim}={_hive_partition_segment(val)}" for dim, val in dims)
     except ImportError:
         pass
 

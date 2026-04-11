@@ -37,33 +37,13 @@ class LLMClient:
         max_retries: int | None = None,
         timeout: int | None = None,
     ) -> None:
-        self.base_url = base_url or os.environ.get(
-            "LLM_BASE_URL", "https://api.openai.com/v1"
-        )
-        self.api_key = api_key or os.environ.get(
-            "LLM_API_KEY", os.environ.get("OPENAI_API_KEY", "")
-        )
+        self.base_url = base_url or os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1")
+        self.api_key = api_key or os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
         self.model = model or os.environ.get("LLM_MODEL", "gpt-4o-mini")
-        self.temperature = (
-            temperature
-            if temperature is not None
-            else float(os.environ.get("LLM_TEMPERATURE", "0.0"))
-        )
-        self.max_tokens = (
-            max_tokens
-            if max_tokens is not None
-            else int(os.environ.get("LLM_MAX_TOKENS", "4096"))
-        )
-        self.max_retries = (
-            max_retries
-            if max_retries is not None
-            else int(os.environ.get("LLM_MAX_RETRIES", "5"))
-        )
-        self.timeout = (
-            timeout
-            if timeout is not None
-            else int(os.environ.get("LLM_TIMEOUT", "300"))
-        )
+        self.temperature = temperature if temperature is not None else float(os.environ.get("LLM_TEMPERATURE", "0.0"))
+        self.max_tokens = max_tokens if max_tokens is not None else int(os.environ.get("LLM_MAX_TOKENS", "4096"))
+        self.max_retries = max_retries if max_retries is not None else int(os.environ.get("LLM_MAX_RETRIES", "5"))
+        self.timeout = timeout if timeout is not None else int(os.environ.get("LLM_TIMEOUT", "300"))
 
         self._chat_model = ChatOpenAI(
             base_url=self.base_url,
@@ -85,9 +65,7 @@ class LLMClient:
         response = await self._chat_model.ainvoke(messages)
         return str(response.content)
 
-    async def structured_output(
-        self, schema: type[BaseModel], messages: list[Any]
-    ) -> BaseModel:
+    async def structured_output(self, schema: type[BaseModel], messages: list[Any]) -> BaseModel:
         """Invoke with structured output, returning a Pydantic model instance."""
         chain = self._chat_model.with_structured_output(schema)
         return await chain.ainvoke(messages)

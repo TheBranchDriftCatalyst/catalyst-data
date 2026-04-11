@@ -31,7 +31,6 @@ def test_definitions_has_sensor():
 def test_partitioned_assets_share_partition_def():
     """Verify partitioned assets all use the same DynamicPartitionsDefinition."""
     from dagster import AssetKey
-
     from media_ingest.partitions import media_partitions
 
     partitioned_keys = {
@@ -45,13 +44,9 @@ def test_partitioned_assets_share_partition_def():
     matched = 0
     for spec in specs:
         if spec.key in partitioned_keys:
-            assert spec.partitions_def is media_partitions, (
-                f"{spec.key} does not use media_partitions"
-            )
+            assert spec.partitions_def is media_partitions, f"{spec.key} does not use media_partitions"
             matched += 1
-    assert matched == len(partitioned_keys), (
-        f"Expected {len(partitioned_keys)} partitioned assets, found {matched}"
-    )
+    assert matched == len(partitioned_keys), f"Expected {len(partitioned_keys)} partitioned assets, found {matched}"
 
 
 def test_unpartitioned_assets():
@@ -66,9 +61,7 @@ def test_unpartitioned_assets():
     specs = defs.resolve_all_asset_specs()
     for spec in specs:
         if spec.key in unpartitioned_keys:
-            assert spec.partitions_def is None, (
-                f"{spec.key} should not be partitioned"
-            )
+            assert spec.partitions_def is None, f"{spec.key} should not be partitioned"
 
 
 def test_sensor_asset_selections_are_closed():

@@ -69,16 +69,26 @@ def _transcode_to_av1(
     temp_output = f"{base}_av1_temp.mkv"
 
     cmd = [
-        "ffmpeg", "-y",
-        "-hwaccel", "qsv",
-        "-hwaccel_output_format", "qsv",
-        "-i", input_path,
-        "-c:v", "av1_qsv",
-        "-preset", preset,
-        "-global_quality", str(global_quality),
-        "-c:a", "copy",        # preserve audio losslessly
-        "-c:s", "copy",        # preserve subtitles
-        "-map", "0",           # keep all streams
+        "ffmpeg",
+        "-y",
+        "-hwaccel",
+        "qsv",
+        "-hwaccel_output_format",
+        "qsv",
+        "-i",
+        input_path,
+        "-c:v",
+        "av1_qsv",
+        "-preset",
+        preset,
+        "-global_quality",
+        str(global_quality),
+        "-c:a",
+        "copy",  # preserve audio losslessly
+        "-c:s",
+        "copy",  # preserve subtitles
+        "-map",
+        "0",  # keep all streams
         temp_output,
     ]
 
@@ -129,7 +139,15 @@ def media_transcode(
     config: MediaIngestConfig,
     media_metadata: list[dict[str, Any]],
 ) -> Output[list[dict[str, Any]]]:
-    with trace_operation("media_transcode", tracer, {"code_location": "media_ingest", "layer": "silver", "record_count": len(media_metadata)}):
+    with trace_operation(
+        "media_transcode",
+        tracer,
+        {
+            "code_location": "media_ingest",
+            "layer": "silver",
+            "record_count": len(media_metadata),
+        },
+    ):
         video_files = [f for f in media_metadata if f.get("metadata", {}).get("has_video")]
         already_av1 = [f for f in video_files if _is_already_av1(f)]
         to_transcode = [f for f in video_files if not _is_already_av1(f)]
@@ -137,7 +155,11 @@ def media_transcode(
 
         logger.info(
             "media_transcode: %d total files (%d video, %d already AV1, %d to transcode, %d audio-only)",
-            len(media_metadata), len(video_files), len(already_av1), len(to_transcode), len(audio_only),
+            len(media_metadata),
+            len(video_files),
+            len(already_av1),
+            len(to_transcode),
+            len(audio_only),
         )
         context.log.info(
             f"Transcode: {len(to_transcode)} files to encode, "
@@ -182,14 +204,17 @@ def media_transcode(
         # Pass through all files (transcoded + already AV1 + audio-only)
         all_files = media_metadata
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_transcode", layer="silver").inc(len(to_transcode))
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_transcode", layer="silver").inc(
+            len(to_transcode)
+        )
         logger.info(
             "media_transcode complete: %d transcoded (%d errors), saved %.1f MB total",
-            len(to_transcode) - errors, errors, total_saved_mb,
+            len(to_transcode) - errors,
+            errors,
+            total_saved_mb,
         )
         context.log.info(
-            f"Transcode complete: {len(to_transcode) - errors} encoded, "
-            f"{errors} errors, saved {total_saved_mb:.0f} MB"
+            f"Transcode complete: {len(to_transcode) - errors} encoded, {errors} errors, saved {total_saved_mb:.0f} MB"
         )
 
         return Output(

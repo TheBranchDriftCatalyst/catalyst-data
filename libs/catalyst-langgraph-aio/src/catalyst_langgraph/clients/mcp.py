@@ -56,14 +56,10 @@ class StdioMCPClient(MCPClient):
         await self._process.stdin.drain()
 
         try:
-            line = await asyncio.wait_for(
-                self._process.stdout.readline(), timeout=self._timeout
-            )
-        except asyncio.TimeoutError:
+            line = await asyncio.wait_for(self._process.stdout.readline(), timeout=self._timeout)
+        except TimeoutError:
             await self.stop()
-            raise TimeoutError(
-                f"MCP server did not respond within {self._timeout}s"
-            )
+            raise TimeoutError(f"MCP server did not respond within {self._timeout}s") from None
         response = json.loads(line.decode())
 
         if "error" in response:

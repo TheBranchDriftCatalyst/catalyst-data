@@ -5,20 +5,20 @@ negation/hedging detection, and predicate normalization.
 """
 
 from dagster import AssetExecutionContext, Output, asset
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from dagster_io import (
+    LLM_ASSET_K8S_CONFIG,
     Assertion,
     AssertionExtractionResult,
-    LLM_ASSET_K8S_CONFIG,
     LLMResource,
     TextChunk,
     build_assertions,
 )
-from dagster_io.prompts import load_prompt
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
+from dagster_io.prompts import load_prompt
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -79,8 +79,19 @@ def congress_assertions(
     llm: LLMResource,
     congress_chunks: list[TextChunk],
 ) -> Output[list[Assertion]]:
-    with trace_operation("congress_assertions", tracer, {"code_location": "congress_data", "layer": "gold", "chunk_count": len(congress_chunks)}):
-        logger.info("Starting congress_assertions extraction for %d chunks", len(congress_chunks))
+    with trace_operation(
+        "congress_assertions",
+        tracer,
+        {
+            "code_location": "congress_data",
+            "layer": "gold",
+            "chunk_count": len(congress_chunks),
+        },
+    ):
+        logger.info(
+            "Starting congress_assertions extraction for %d chunks",
+            len(congress_chunks),
+        )
         chain = llm.with_structured_output(AssertionExtractionResult)
         results = llm.invoke_batch(
             chain,
@@ -93,7 +104,8 @@ def congress_assertions(
         )
 
         all_assertions = build_assertions(
-            congress_chunks, results,
+            congress_chunks,
+            results,
             llm_model=llm.model,
             code_location="congress_data",
             predicate_mappings=CONGRESS_PREDICATE_MAPPINGS,
@@ -101,8 +113,16 @@ def congress_assertions(
 
         negated_count = sum(1 for a in all_assertions if a.negated)
         hedged_count = sum(1 for a in all_assertions if a.hedged)
-        ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_assertions", layer="gold").inc(len(all_assertions))
-        logger.info("congress_assertions complete: %d assertions from %d chunks (negated=%d, hedged=%d)", len(all_assertions), len(congress_chunks), negated_count, hedged_count)
+        ASSET_RECORDS_PROCESSED.labels(
+            code_location="congress_data", asset_key="congress_assertions", layer="gold"
+        ).inc(len(all_assertions))
+        logger.info(
+            "congress_assertions complete: %d assertions from %d chunks (negated=%d, hedged=%d)",
+            len(all_assertions),
+            len(congress_chunks),
+            negated_count,
+            hedged_count,
+        )
         context.log.info(
             f"Extracted {len(all_assertions)} assertions from {len(congress_chunks)} chunks "
             f"({negated_count} negated, {hedged_count} hedged)"

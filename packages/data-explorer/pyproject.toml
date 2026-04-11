@@ -28,9 +28,3 @@ umap = ["umap-learn>=0.5"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/data_explorer"]
-
-[tool.ruff]
-target-version = "py312"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP"]

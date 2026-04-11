@@ -38,7 +38,10 @@ def get_s3_config() -> S3Config:
 
 def get_llm_config() -> LLMConfig:
     return LLMConfig(
-        base_url=os.environ.get("EMBEDDING_BASE_URL", os.environ.get("LLM_BASE_URL", "http://localhost:4000/v1")),
+        base_url=os.environ.get(
+            "EMBEDDING_BASE_URL",
+            os.environ.get("LLM_BASE_URL", "http://localhost:4000/v1"),
+        ),
         api_key=os.environ.get("OPENAI_API_KEY", os.environ.get("LLM_API_KEY", "")),
         embedding_model=os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small"),
     )

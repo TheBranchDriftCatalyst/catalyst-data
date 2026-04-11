@@ -6,14 +6,13 @@ import json
 import logging
 from typing import Any
 
+from catalyst_contracts.models.extraction_output import PropositionExtractionResult
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_langgraph.clients.llm import LLMClient
 from catalyst_langgraph.nodes._audit import make_audit_event
 from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
-
-from catalyst_contracts.models.extraction_output import PropositionExtractionResult
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +35,7 @@ class ExtractPropositions:
             raw_text = state.get("raw_text", "")
             accepted_mentions = state.get("accepted_mentions", [])
 
-            prompt = (
-                f"Accepted mentions:\n{json.dumps(accepted_mentions, indent=2)}\n\n"
-                f"Text:\n{raw_text}"
-            )
+            prompt = f"Accepted mentions:\n{json.dumps(accepted_mentions, indent=2)}\n\nText:\n{raw_text}"
 
             result = await self.llm_client.structured_output(
                 PropositionExtractionResult,
@@ -52,7 +48,13 @@ class ExtractPropositions:
                 "current_proposition_candidates": candidates,
                 "status": WorkflowStatus.VALIDATING_PROPOSITIONS.value,
                 "audit_events": state.get("audit_events", [])
-                + [make_audit_event("extract_propositions", "completed", candidate_count=len(candidates))],
+                + [
+                    make_audit_event(
+                        "extract_propositions",
+                        "completed",
+                        candidate_count=len(candidates),
+                    )
+                ],
             }
         except Exception as e:
             logger.exception("extract_propositions failed")

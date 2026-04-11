@@ -8,10 +8,6 @@ from collections import Counter
 import pandas as pd
 import streamlit as st
 
-from data_explorer.streamlit.config import get_s3_config
-from data_explorer.streamlit.data_client import DataClient
-from data_explorer.streamlit.theme import apply_theme
-from data_explorer.streamlit.navigation import get_nav_params, render_breadcrumbs
 from data_explorer.streamlit.components.document_renderer import (
     render_document,
     render_document_with_mentions,
@@ -19,6 +15,10 @@ from data_explorer.streamlit.components.document_renderer import (
     render_mention_legend,
 )
 from data_explorer.streamlit.components.entity_chip import render_entity_chip_list
+from data_explorer.streamlit.config import get_s3_config
+from data_explorer.streamlit.data_client import DataClient
+from data_explorer.streamlit.navigation import get_nav_params, render_breadcrumbs
+from data_explorer.streamlit.theme import apply_theme
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +131,7 @@ with st.sidebar:
                 doc_index = i
                 break
 
-    selected_label = st.selectbox(
-        "Document", doc_labels, index=doc_index, key="dl_document"
-    )
+    selected_label = st.selectbox("Document", doc_labels, index=doc_index, key="dl_document")
 
     st.divider()
     show_chunks = st.toggle("Show chunk boundaries", value=True, key="dl_chunks")
@@ -191,8 +189,7 @@ if show_entities:
     if mentions:
         legend_html = render_mention_legend()
         st.markdown(
-            f'<div style="display:flex;flex-wrap:wrap;gap:4px;padding:0.5rem 0;">'
-            f'{legend_html}</div>',
+            f'<div style="display:flex;flex-wrap:wrap;gap:4px;padding:0.5rem 0;">{legend_html}</div>',
             unsafe_allow_html=True,
         )
     elif entities:
@@ -278,10 +275,7 @@ with col_entities:
             st.markdown(f"**{mtype}** ({count} mentions)")
 
             text_counts = Counter(m.get("text", "") for m in type_mentions if m.get("text"))
-            chip_data = [
-                {"text": text, "label": mtype, "count": cnt}
-                for text, cnt in text_counts.most_common()
-            ]
+            chip_data = [{"text": text, "label": mtype, "count": cnt} for text, cnt in text_counts.most_common()]
             render_entity_chip_list(chip_data, max_display=12, columns=3)
 
         # Mention detail panel
@@ -333,8 +327,7 @@ with col_entities:
 
                 text_counts = Counter(e.get("text", "") for e in group if e.get("text"))
                 chip_data = [
-                    {"text": text, "label": label, "count": count}
-                    for text, count in text_counts.most_common()
+                    {"text": text, "label": label, "count": count} for text, count in text_counts.most_common()
                 ]
                 render_entity_chip_list(chip_data, max_display=12, columns=3)
         else:
@@ -346,10 +339,7 @@ with col_propositions:
 
     if propositions:
         prop_df = pd.DataFrame(propositions)
-        display_cols = [
-            c for c in ["subject", "predicate", "object", "confidence"]
-            if c in prop_df.columns
-        ]
+        display_cols = [c for c in ["subject", "predicate", "object", "confidence"] if c in prop_df.columns]
         if display_cols:
             st.dataframe(
                 prop_df[display_cols],

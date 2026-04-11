@@ -113,7 +113,12 @@ for _, row in df.head(50).iterrows():
         if "content" in row and pd.notna(row["content"]):
             content = str(row["content"])
             if len(content) > 2000:
-                st.text_area("Content", content[:2000] + "\n\n... (truncated)", height=300, disabled=True)
+                st.text_area(
+                    "Content",
+                    content[:2000] + "\n\n... (truncated)",
+                    height=300,
+                    disabled=True,
+                )
             else:
                 st.text_area("Content", content, height=200, disabled=True)
 

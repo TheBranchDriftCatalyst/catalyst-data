@@ -34,7 +34,14 @@ class PersistArtifacts:
             return {
                 "status": WorkflowStatus.COMPLETED.value,
                 "audit_events": audit_events
-                + [make_audit_event("persist_artifacts", "completed", mentions_saved=len(mentions), propositions_saved=len(propositions))],
+                + [
+                    make_audit_event(
+                        "persist_artifacts",
+                        "completed",
+                        mentions_saved=len(mentions),
+                        propositions_saved=len(propositions),
+                    )
+                ],
             }
         except Exception as e:
             logger.exception("persist_artifacts failed")

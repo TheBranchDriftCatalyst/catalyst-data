@@ -18,22 +18,15 @@ from pydantic import BaseModel, Field
 class MentionCandidate(BaseModel):
     """A single named entity mention extracted from source text."""
 
-    text: str = Field(
-        description="The exact surface form as it appears in the source text"
-    )
+    text: str = Field(description="The exact surface form as it appears in the source text")
     mention_type: str = Field(
-        description=(
-            "Entity type, one of: PERSON, ORG, GPE, LOC, DATE, LAW, "
-            "EVENT, MONEY, NORP, FACILITY, OTHER"
-        )
+        description=("Entity type, one of: PERSON, ORG, GPE, LOC, DATE, LAW, EVENT, MONEY, NORP, FACILITY, OTHER")
     )
     span_start: int = Field(
         ge=0,
         description="Character offset where the mention starts in the source text",
     )
-    span_end: int = Field(
-        description="Character offset where the mention ends in the source text"
-    )
+    span_end: int = Field(description="Character offset where the mention ends in the source text")
     confidence: float = Field(
         default=1.0,
         ge=0.0,
@@ -49,23 +42,15 @@ class MentionExtractionResult(BaseModel):
     mentions found in the source text.
     """
 
-    mentions: list[MentionCandidate] = Field(
-        description="All named entity mentions extracted from the source text"
-    )
+    mentions: list[MentionCandidate] = Field(description="All named entity mentions extracted from the source text")
 
 
 class PropositionCandidate(BaseModel):
     """A Subject-Predicate-Object triple extracted from text."""
 
-    subject: str = Field(
-        description="The subject entity text (should match an accepted mention text)"
-    )
-    predicate: str = Field(
-        description="The relationship verb or phrase (prefer snake_case, e.g., 'works_for')"
-    )
-    object: str = Field(
-        description="The object entity text (should match an accepted mention text)"
-    )
+    subject: str = Field(description="The subject entity text (should match an accepted mention text)")
+    predicate: str = Field(description="The relationship verb or phrase (prefer snake_case, e.g., 'works_for')")
+    object: str = Field(description="The object entity text (should match an accepted mention text)")
     confidence: float = Field(
         ge=0.0,
         le=1.0,

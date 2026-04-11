@@ -4,7 +4,11 @@ from congress_data.assets.documents import congress_documents
 from congress_data.assets.embeddings import congress_embeddings
 from congress_data.assets.entities_ner import congress_entities
 from congress_data.assets.entity_candidates import congress_entity_candidates
-from congress_data.assets.extraction import congress_bills, congress_committees, congress_members
+from congress_data.assets.extraction import (
+    congress_bills,
+    congress_committees,
+    congress_members,
+)
 from congress_data.assets.graph import congress_graph
 from congress_data.assets.mentions import congress_mentions
 from congress_data.assets.propositions import congress_propositions

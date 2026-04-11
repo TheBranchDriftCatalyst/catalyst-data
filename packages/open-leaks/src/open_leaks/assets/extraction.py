@@ -19,7 +19,12 @@ from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
 from open_leaks.config import OpenLeaksConfig
-from open_leaks.entities import Cable, CourtDocument, OffshoreEntity, OffshoreRelationship
+from open_leaks.entities import (
+    Cable,
+    CourtDocument,
+    OffshoreEntity,
+    OffshoreRelationship,
+)
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -65,11 +70,9 @@ def _retry_on_network_error(
             return func(*args, **kwargs)
         except _RETRYABLE_ERRORS as exc:
             if attempt == max_retries:
-                context.log.error(
-                    f"{description}: failed after {max_retries} attempts — {type(exc).__name__}: {exc}"
-                )
+                context.log.error(f"{description}: failed after {max_retries} attempts — {type(exc).__name__}: {exc}")
                 raise
-            delay = _RETRY_BACKOFF_BASE ** attempt
+            delay = _RETRY_BACKOFF_BASE**attempt
             context.log.warning(
                 f"{description}: attempt {attempt}/{max_retries} failed "
                 f"({type(exc).__name__}: {exc}), retrying in {delay}s…"
@@ -122,9 +125,7 @@ def _download_file(
         except _RETRYABLE_ERRORS:
             # If HEAD fails, fall through to download (cache might be fine)
             if dest.stat().st_size > 0:
-                context.log.warning(
-                    f"HEAD request failed; using potentially-complete cached file: {dest}"
-                )
+                context.log.warning(f"HEAD request failed; using potentially-complete cached file: {dest}")
                 return dest
 
     def _do_download():
@@ -137,14 +138,17 @@ def _download_file(
         if resume_offset > 0:
             headers["Range"] = f"bytes={resume_offset}-"
             context.log.info(
-                f"Resuming download of {url} from byte {resume_offset} "
-                f"({resume_offset / 1024 / 1024:.1f} MB)"
+                f"Resuming download of {url} from byte {resume_offset} ({resume_offset / 1024 / 1024:.1f} MB)"
             )
         else:
             context.log.info(f"Downloading {url} → {dest}")
 
         with httpx.stream(
-            "GET", url, headers=headers, follow_redirects=True, timeout=_STREAM_TIMEOUT,
+            "GET",
+            url,
+            headers=headers,
+            follow_redirects=True,
+            timeout=_STREAM_TIMEOUT,
         ) as r:
             r.raise_for_status()
 
@@ -152,9 +156,7 @@ def _download_file(
             is_partial = r.status_code == 206
             if resume_offset > 0 and not is_partial:
                 # Server ignored Range header — restart from scratch
-                context.log.warning(
-                    "Server returned 200 (not 206); restarting full download"
-                )
+                context.log.warning("Server returned 200 (not 206); restarting full download")
                 resume_offset = 0
 
             total = int(r.headers.get("content-length", 0))
@@ -170,8 +172,7 @@ def _download_file(
                     if total and downloaded % (_PROGRESS_INTERVAL_MB * 1024 * 1024) < 65_536:
                         pct = downloaded / total * 100
                         context.log.info(
-                            f"  {downloaded / 1024 / 1024:.1f} / "
-                            f"{total / 1024 / 1024:.1f} MB ({pct:.0f}%)"
+                            f"  {downloaded / 1024 / 1024:.1f} / {total / 1024 / 1024:.1f} MB ({pct:.0f}%)"
                         )
 
     _retry_on_network_error(
@@ -418,9 +419,7 @@ def _check_api_reachable(
             timeout=_HTTP_TIMEOUT,
         )
         if resp.status_code < 400:
-            context.log.info(
-                f"API health check passed: {api_base} (status {resp.status_code})"
-            )
+            context.log.info(f"API health check passed: {api_base} (status {resp.status_code})")
             return True
         context.log.error(
             f"API health check failed: {api_base} returned HTTP {resp.status_code} — "
@@ -435,9 +434,7 @@ def _check_api_reachable(
         )
         return False
     except httpx.HTTPStatusError as exc:
-        context.log.error(
-            f"API health check failed: {api_base} returned {exc.response.status_code}"
-        )
+        context.log.error(f"API health check failed: {api_base} returned {exc.response.status_code}")
         return False
 
 
@@ -514,8 +511,7 @@ def _fetch_epstein_api(
                 payload = resp.json()
             except Exception as e:
                 context.log.warning(
-                    f"Page {page} returned non-JSON response — {type(e).__name__}: {e}. "
-                    f"Stopping pagination."
+                    f"Page {page} returned non-JSON response — {type(e).__name__}: {e}. Stopping pagination."
                 )
                 break
 
@@ -523,9 +519,7 @@ def _fetch_epstein_api(
             total = payload.get("total", 0) if isinstance(payload, dict) else 0
 
             if page == 1:
-                context.log.info(
-                    f"API reports {total:,} total documents (page_size={page_size})"
-                )
+                context.log.info(f"API reports {total:,} total documents (page_size={page_size})")
 
             if not items:
                 context.log.info(f"Page {page} returned empty data — pagination complete")
@@ -579,7 +573,11 @@ def _fetch_epstein_api(
         "dagster-k8s/config": {
             "container_config": {
                 "resources": {
-                    "requests": {"cpu": "500m", "memory": "2Gi", "ephemeral-storage": "4Gi"},
+                    "requests": {
+                        "cpu": "500m",
+                        "memory": "2Gi",
+                        "ephemeral-storage": "4Gi",
+                    },
                     "limits": {"cpu": "2", "memory": "4Gi", "ephemeral-storage": "8Gi"},
                 }
             }
@@ -596,7 +594,9 @@ def wikileaks_cables(
         csv_path = cache / "cables.csv"
         _download_file(config.cablegate_csv_url, csv_path, context)
         cables = _parse_cables_csv(csv_path, context, max_count=config.max_cables)
-        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="wikileaks_cables", layer="bronze").inc(len(cables))
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="wikileaks_cables", layer="bronze").inc(
+            len(cables)
+        )
         logger.info("wikileaks_cables extraction complete count=%d", len(cables))
 
         return Output(
@@ -629,13 +629,21 @@ def icij_offshore_entities(
     context: AssetExecutionContext,
     config: OpenLeaksConfig,
 ) -> Output[list[OffshoreEntity]]:
-    with trace_operation("icij_offshore_entities", tracer, {"code_location": "open_leaks", "layer": "bronze"}):
+    with trace_operation(
+        "icij_offshore_entities",
+        tracer,
+        {"code_location": "open_leaks", "layer": "bronze"},
+    ):
         logger.info("Starting icij_offshore_entities extraction")
         cache = _ensure_cache(config)
         zip_path = cache / "icij-offshoreleaks.zip"
         _download_file(config.icij_bulk_url, zip_path, context)
         entities = _parse_icij_entities_from_zip(zip_path, context, max_count=config.max_icij_entities)
-        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="icij_offshore_entities", layer="bronze").inc(len(entities))
+        ASSET_RECORDS_PROCESSED.labels(
+            code_location="open_leaks",
+            asset_key="icij_offshore_entities",
+            layer="bronze",
+        ).inc(len(entities))
         logger.info("icij_offshore_entities extraction complete count=%d", len(entities))
 
         datasets = {}
@@ -673,13 +681,21 @@ def icij_offshore_relationships(
     context: AssetExecutionContext,
     config: OpenLeaksConfig,
 ) -> Output[list[OffshoreRelationship]]:
-    with trace_operation("icij_offshore_relationships", tracer, {"code_location": "open_leaks", "layer": "bronze"}):
+    with trace_operation(
+        "icij_offshore_relationships",
+        tracer,
+        {"code_location": "open_leaks", "layer": "bronze"},
+    ):
         logger.info("Starting icij_offshore_relationships extraction")
         cache = _ensure_cache(config)
         zip_path = cache / "icij-offshoreleaks.zip"
         _download_file(config.icij_bulk_url, zip_path, context)
         rels = _parse_icij_relationships_from_zip(zip_path, context, max_count=config.max_icij_relationships)
-        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="icij_offshore_relationships", layer="bronze").inc(len(rels))
+        ASSET_RECORDS_PROCESSED.labels(
+            code_location="open_leaks",
+            asset_key="icij_offshore_relationships",
+            layer="bronze",
+        ).inc(len(rels))
         logger.info("icij_offshore_relationships extraction complete count=%d", len(rels))
 
         rel_types = {}
@@ -719,7 +735,9 @@ def epstein_court_docs(
     with trace_operation("epstein_court_docs", tracer, {"code_location": "open_leaks", "layer": "bronze"}):
         logger.info("Starting epstein_court_docs extraction")
         docs = _fetch_epstein_api(config.epstein_api_url, context, max_count=config.max_epstein_docs)
-        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="epstein_court_docs", layer="bronze").inc(len(docs))
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="epstein_court_docs", layer="bronze").inc(
+            len(docs)
+        )
         logger.info("epstein_court_docs extraction complete count=%d", len(docs))
 
         doc_types = {}

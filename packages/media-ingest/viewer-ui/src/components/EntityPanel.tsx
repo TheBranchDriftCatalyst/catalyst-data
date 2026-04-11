@@ -78,7 +78,13 @@ function getTypeConfig(type: string) {
   return TYPE_CONFIG[type.toUpperCase()] ?? DEFAULT_CONFIG;
 }
 
-export default function EntityPanel({ mentions, onEntityClick, onEntitySelect, selectedEntityText, className = "" }: EntityPanelProps) {
+export default function EntityPanel({
+  mentions,
+  onEntityClick,
+  onEntitySelect,
+  selectedEntityText,
+  className = "",
+}: EntityPanelProps) {
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
   const [searchText, setSearchText] = useState("");
 
@@ -243,12 +249,14 @@ export default function EntityPanel({ mentions, onEntityClick, onEntitySelect, s
                               }
                             }}
                           >
-                            <span className={cn(
-                              "text-sm truncate mr-2 transition-colors",
-                              selectedEntityText?.toLowerCase() === entity.text.toLowerCase()
-                                ? "text-zinc-100 font-medium"
-                                : "text-zinc-300 group-hover:text-zinc-100",
-                            )}>
+                            <span
+                              className={cn(
+                                "text-sm truncate mr-2 transition-colors",
+                                selectedEntityText?.toLowerCase() === entity.text.toLowerCase()
+                                  ? "text-zinc-100 font-medium"
+                                  : "text-zinc-300 group-hover:text-zinc-100",
+                              )}
+                            >
                               {entity.text}
                             </span>
                             {entity.count > 1 && (

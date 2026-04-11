@@ -26,9 +26,3 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/knowledge_graph"]
-
-[tool.ruff]
-target-version = "py312"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP"]

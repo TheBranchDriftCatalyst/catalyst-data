@@ -97,9 +97,7 @@ def validate_propositions(
         # Confidence bounds
         confidence = prop.get("confidence")
         if confidence is not None and (
-            not isinstance(confidence, (int, float))
-            or confidence < 0.0
-            or confidence > 1.0
+            not isinstance(confidence, (int, float)) or confidence < 0.0 or confidence > 1.0
         ):
             item_errors.append(
                 ValidationErrorItem(

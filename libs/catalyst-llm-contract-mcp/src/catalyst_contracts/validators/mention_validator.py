@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from catalyst_contracts_core.enums import MentionType
-
 from catalyst_contracts.models.evidence import IssueCode
 from catalyst_contracts.models.validation import (
     ValidationErrorItem,
     ValidationResult,
     ValidationVerdict,
 )
+from catalyst_contracts_core.enums import MentionType
 
 # Alias map for common LLM entity type variations
 ENTITY_TYPE_ALIASES = {
@@ -106,17 +105,14 @@ def validate_mentions(
                 ValidationErrorItem(
                     path=f"{path}.mention_type",
                     code=IssueCode.INVALID_TYPE.value,
-                    message=f"Invalid mention type '{mention_type}'. "
-                    f"Must be one of: {sorted(valid_types)}",
+                    message=f"Invalid mention type '{mention_type}'. Must be one of: {sorted(valid_types)}",
                 )
             )
 
         # Confidence bounds
         confidence = m.get("confidence")
         if confidence is not None and (
-            not isinstance(confidence, (int, float))
-            or confidence < 0.0
-            or confidence > 1.0
+            not isinstance(confidence, (int, float)) or confidence < 0.0 or confidence > 1.0
         ):
             item_errors.append(
                 ValidationErrorItem(
@@ -144,20 +140,17 @@ def validate_mentions(
             ev_text = ev.get("text", "")
             ev_start = ev.get("span_start")
             ev_end = ev.get("span_end")
-            if (
-                isinstance(ev_start, int)
-                and isinstance(ev_end, int)
-                and ev_end > ev_start
-            ):
-                if len(ev_text) != ev_end - ev_start:
-                    warnings.append(
-                        ValidationErrorItem(
-                            path=f"{path}.evidence[{j}].text",
-                            code=IssueCode.SPAN_MISMATCH.value,
-                            message=f"Evidence text length ({len(ev_text)}) "
-                            f"does not match span length ({ev_end - ev_start})",
-                        )
+            if (isinstance(ev_start, int) and isinstance(ev_end, int) and ev_end > ev_start) and len(
+                ev_text
+            ) != ev_end - ev_start:
+                warnings.append(
+                    ValidationErrorItem(
+                        path=f"{path}.evidence[{j}].text",
+                        code=IssueCode.SPAN_MISMATCH.value,
+                        message=f"Evidence text length ({len(ev_text)}) "
+                        f"does not match span length ({ev_end - ev_start})",
                     )
+                )
 
         if item_errors:
             errors.extend(item_errors)

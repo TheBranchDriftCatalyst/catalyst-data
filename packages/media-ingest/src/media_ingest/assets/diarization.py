@@ -62,6 +62,7 @@ def _patch_pyannote_auth():
             if "use_auth_token" in kwargs:
                 kwargs.setdefault("token", kwargs.pop("use_auth_token"))
             return fn(*args, **kwargs)
+
         return wrapper
 
     for target in ("hf_hub_download", "cached_download"):
@@ -83,6 +84,7 @@ def _patch_pyannote_auth():
 def _run_diarization(audio_path: str, hf_token: str, cache_dir: str):
     """Run pyannote speaker diarization pipeline."""
     import torch
+
     _patch_pyannote_auth()
     _orig_load = torch.load
 
@@ -101,8 +103,7 @@ def _run_diarization(audio_path: str, hf_token: str, cache_dir: str):
     )
     if pipeline is None:
         raise RuntimeError(
-            "Failed to load pyannote pipeline — accept license at "
-            "https://hf.co/pyannote/speaker-diarization-3.1"
+            "Failed to load pyannote pipeline — accept license at https://hf.co/pyannote/speaker-diarization-3.1"
         )
     # pyannote can't read MP4/MKV — extract audio first
     wav_path = extract_audio_to_wav(audio_path)
@@ -171,7 +172,15 @@ def media_diarization(
     media_transcriptions: dict[str, Any],
 ) -> Output[dict[str, Any]]:
     partition_key = context.partition_key
-    with trace_operation("media_diarization", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key}):
+    with trace_operation(
+        "media_diarization",
+        tracer,
+        {
+            "code_location": "media_ingest",
+            "layer": "gold",
+            "partition_key": partition_key,
+        },
+    ):
         t = media_transcriptions
 
         # Skip if transcription failed or no text
@@ -179,7 +188,11 @@ def media_diarization(
             context.log.info(f"Skipping diarization for partition={partition_key} — no transcription")
             return Output(
                 {**t, "speaker_text": None, "speaker_count": 0, "speakers": []},
-                metadata={"document_id": partition_key, "skipped": True, "reason": t.get("error", "empty_text")},
+                metadata={
+                    "document_id": partition_key,
+                    "skipped": True,
+                    "reason": t.get("error", "empty_text"),
+                },
             )
 
         source_path = t.get("source_path", "")
@@ -187,7 +200,11 @@ def media_diarization(
             context.log.warning(f"Source audio not found: {source_path}")
             return Output(
                 {**t, "speaker_text": None, "speaker_count": 0, "speakers": []},
-                metadata={"document_id": partition_key, "skipped": True, "reason": "source_not_found"},
+                metadata={
+                    "document_id": partition_key,
+                    "skipped": True,
+                    "reason": "source_not_found",
+                },
             )
 
         hf_token = config.hf_token or os.environ.get("HF_TOKEN", "")
@@ -195,7 +212,11 @@ def media_diarization(
             context.log.warning("No HF_TOKEN — skipping diarization")
             return Output(
                 {**t, "speaker_text": None, "speaker_count": 0, "speakers": []},
-                metadata={"document_id": partition_key, "skipped": True, "reason": "no_hf_token"},
+                metadata={
+                    "document_id": partition_key,
+                    "skipped": True,
+                    "reason": "no_hf_token",
+                },
             )
 
         context.log.info(f"Running speaker diarization for: {t.get('title', partition_key)}")
@@ -220,9 +241,7 @@ def media_diarization(
                 "diarization_time_s": diarization_time,
             }
 
-            context.log.info(
-                f"Diarization complete: {len(unique_speakers)} speakers detected in {diarization_time}s"
-            )
+            context.log.info(f"Diarization complete: {len(unique_speakers)} speakers detected in {diarization_time}s")
         except Exception as e:
             context.log.warning(f"Diarization failed: {e}")
             logger.error("Diarization failed partition=%s error=%s", partition_key, str(e))

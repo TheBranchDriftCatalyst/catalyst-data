@@ -21,6 +21,7 @@ def _patch_hf_hub_auth():
     level so every import picks it up.
     """
     import functools
+
     import huggingface_hub
     import huggingface_hub.file_download as _fd
 
@@ -30,6 +31,7 @@ def _patch_hf_hub_auth():
             if "use_auth_token" in kw:
                 kw.setdefault("token", kw.pop("use_auth_token"))
             return fn(*a, **kw)
+
         return wrapper
 
     for target in ("hf_hub_download", "cached_download"):
@@ -42,6 +44,7 @@ def _patch_hf_hub_auth():
 
     # Patch any already-imported pyannote modules
     import sys
+
     for name, mod in sys.modules.items():
         if "pyannote" in name and mod is not None:
             for attr in ("hf_hub_download", "cached_download"):
@@ -64,15 +67,23 @@ def download_sample_audio(dest):
         parts.append(part)
 
     output = os.path.join(dest, "multi_speaker_test.wav")
-    filter_complex = (
-        "[0:a]aresample=16000[a0];"
-        "[1:a]aresample=16000[a1];"
-        "[a0][a1]concat=n=2:v=0:a=1[out]"
-    )
+    filter_complex = "[0:a]aresample=16000[a0];[1:a]aresample=16000[a1];[a0][a1]concat=n=2:v=0:a=1[out]"
     subprocess.run(
-        ["ffmpeg", "-y", "-i", parts[0], "-i", parts[1],
-         "-filter_complex", filter_complex, "-map", "[out]", output],
-        check=True, capture_output=True,
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            parts[0],
+            "-i",
+            parts[1],
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[out]",
+            output,
+        ],
+        check=True,
+        capture_output=True,
     )
     print(f"[setup] Created test audio: {output}")
     return output
@@ -154,6 +165,7 @@ def test_diarization(audio_path, hf_token):
     # contain custom types. lightning_fabric passes weights_only=True
     # explicitly, so we must override it, not just set a default.
     import torch
+
     _orig_load = torch.load
 
     def _patched_load(*a, **kw):
@@ -170,8 +182,7 @@ def test_diarization(audio_path, hf_token):
     )
     if pipeline is None:
         raise RuntimeError(
-            "Failed to load pyannote pipeline. "
-            "Accept the license at https://hf.co/pyannote/speaker-diarization-3.1"
+            "Failed to load pyannote pipeline. Accept the license at https://hf.co/pyannote/speaker-diarization-3.1"
         )
     load_time = time.monotonic() - start
     print(f"[model] Loaded in {load_time:.1f}s")
@@ -236,12 +247,14 @@ def test_aligned_output(segments_list, diarization):
             if valid:
                 speaker = max(set(valid), key=valid.count)
 
-        aligned.append({
-            "start": round(s.start, 2),
-            "end": round(s.end, 2),
-            "text": s.text.strip(),
-            "speaker": speaker,
-        })
+        aligned.append(
+            {
+                "start": round(s.start, 2),
+                "end": round(s.end, 2),
+                "text": s.text.strip(),
+                "speaker": speaker,
+            }
+        )
 
     # Print speaker-attributed transcript
     current_speaker = None
@@ -258,10 +271,7 @@ def test_aligned_output(segments_list, diarization):
 
     # Summary
     speakers = {s["speaker"] for s in aligned if s["speaker"]}
-    print(
-        f"\n[summary] {len(aligned)} segments, "
-        f"{len(speakers)} speakers: {sorted(speakers)}"
-    )
+    print(f"\n[summary] {len(aligned)} segments, {len(speakers)} speakers: {sorted(speakers)}")
 
     result = {
         "segment_count": len(aligned),
@@ -276,9 +286,7 @@ def test_aligned_output(segments_list, diarization):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="QA test for transcription + diarization"
-    )
+    parser = argparse.ArgumentParser(description="QA test for transcription + diarization")
     parser.add_argument("--audio", help="Path to audio file")
     parser.add_argument("--model", default="base", help="Whisper model")
     parser.add_argument(
@@ -287,11 +295,13 @@ def main():
         help="HuggingFace token (or HF_TOKEN env var)",
     )
     parser.add_argument(
-        "--skip-diarize", action="store_true",
+        "--skip-diarize",
+        action="store_true",
         help="Skip diarization test",
     )
     parser.add_argument(
-        "--output-dir", default=None,
+        "--output-dir",
+        default=None,
         help="Directory to write JSON results",
     )
     args = parser.parse_args()
@@ -313,9 +323,7 @@ def main():
             print(f"[config] Output dir: {output_dir}")
 
         # Test 1: Whisper transcription
-        segments_list, info, whisper_result = test_whisper_only(
-            audio_path, args.model
-        )
+        segments_list, info, whisper_result = test_whisper_only(audio_path, args.model)
         if output_dir:
             save_json(whisper_result, os.path.join(output_dir, "whisper.json"))
 
@@ -325,9 +333,7 @@ def main():
                 return
 
             # Test 2: Diarization
-            diarization, diarize_result = test_diarization(
-                audio_path, args.hf_token
-            )
+            diarization, diarize_result = test_diarization(audio_path, args.hf_token)
             if output_dir:
                 save_json(
                     diarize_result,

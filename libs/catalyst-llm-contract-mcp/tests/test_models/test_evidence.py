@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from catalyst_contracts.models.evidence import (
     EvidenceSpan,
     ExtractionIssue,
     IssueCode,
     IssueSeverity,
 )
+from pydantic import ValidationError
 
 
 class TestEvidenceSpan:

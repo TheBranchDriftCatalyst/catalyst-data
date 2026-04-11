@@ -21,7 +21,6 @@ from data_explorer.streamlit.components.entity_chip import (
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
 from data_explorer.streamlit.navigation import (
-    ENTITY_COLORS,
     get_nav_params,
     render_breadcrumbs,
 )
@@ -35,10 +34,12 @@ st.set_page_config(
     layout="wide",
 )
 apply_theme()
-render_breadcrumbs([
-    ("Home", "app.py"),
-    ("Entity Concordance", None),
-])
+render_breadcrumbs(
+    [
+        ("Home", "app.py"),
+        ("Entity Concordance", None),
+    ]
+)
 st.header("Entity Concordance")
 
 # ---------------------------------------------------------------------------
@@ -53,7 +54,18 @@ nav_entity_label = nav.get("entity_label", "")
 # Data client
 # ---------------------------------------------------------------------------
 
-MENTION_TYPE_OPTIONS = ["PERSON", "ORG", "GPE", "DATE", "LAW", "EVENT", "LOC", "MONEY", "NORP", "FACILITY"]
+MENTION_TYPE_OPTIONS = [
+    "PERSON",
+    "ORG",
+    "GPE",
+    "DATE",
+    "LAW",
+    "EVENT",
+    "LOC",
+    "MONEY",
+    "NORP",
+    "FACILITY",
+]
 
 
 @st.cache_resource
@@ -69,25 +81,45 @@ def _get_client() -> DataClient:
 
 @st.cache_data(ttl=300, show_spinner="Discovering sources...")
 def _list_sources(endpoint_url: str, access_key: str, secret_key: str, bucket: str) -> list[str]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.list_sources()
 
 
 @st.cache_data(ttl=300, show_spinner="Loading mentions...")
 def _load_mentions(endpoint_url: str, access_key: str, secret_key: str, bucket: str, source: str) -> list[dict]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.load_mentions(source)
 
 
 @st.cache_data(ttl=300, show_spinner="Loading assertions...")
 def _load_assertions(endpoint_url: str, access_key: str, secret_key: str, bucket: str, source: str) -> list[dict]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.load_assertions(source)
 
 
 @st.cache_data(ttl=300, show_spinner="Loading canonical entities...")
 def _load_canonical_entities(endpoint_url: str, access_key: str, secret_key: str, bucket: str) -> list[dict]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.load_canonical_entities()
 
 
@@ -160,7 +192,9 @@ for src in selected_sources:
 canonical_entities = _load_canonical_entities(*conn)
 logger.info(
     "Loaded %d mentions, %d assertions, %d canonical entities",
-    len(all_mentions), len(all_assertions), len(canonical_entities),
+    len(all_mentions),
+    len(all_assertions),
+    len(canonical_entities),
 )
 
 if not all_mentions and not all_assertions:
@@ -183,9 +217,9 @@ filtered_assertions = all_assertions
 if search_text:
     needle = search_text.lower()
     filtered_assertions = [
-        a for a in filtered_assertions
-        if needle in a.get("subject_text", "").lower()
-        or needle in a.get("object_text", "").lower()
+        a
+        for a in filtered_assertions
+        if needle in a.get("subject_text", "").lower() or needle in a.get("object_text", "").lower()
     ]
 
 # ---------------------------------------------------------------------------
@@ -205,11 +239,13 @@ st.divider()
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab_mentions, tab_assertions, tab_profile = st.tabs([
-    "Mentions",
-    "Assertions",
-    "Entity Profile",
-])
+tab_mentions, tab_assertions, tab_profile = st.tabs(
+    [
+        "Mentions",
+        "Assertions",
+        "Entity Profile",
+    ]
+)
 
 # ===== Tab 1: Mentions =====================================================
 
@@ -246,8 +282,7 @@ with tab_assertions:
         # Top predicates by predicate_canonical
         st.markdown("**Top Predicates**")
         pred_counts: Counter[str] = Counter(
-            a.get("predicate_canonical") or a.get("predicate", "unknown")
-            for a in filtered_assertions
+            a.get("predicate_canonical") or a.get("predicate", "unknown") for a in filtered_assertions
         )
         pred_df = pd.DataFrame(
             [{"Predicate": p, "Count": c} for p, c in pred_counts.most_common(15)],
@@ -257,13 +292,16 @@ with tab_assertions:
         # Qualifier breakdown
         st.divider()
         st.markdown("**Qualifier Coverage**")
-        qualifier_keys = ["time", "location", "condition", "manner", "source_attribution"]
+        qualifier_keys = [
+            "time",
+            "location",
+            "condition",
+            "manner",
+            "source_attribution",
+        ]
         qual_counts: dict[str, int] = {}
         for qk in qualifier_keys:
-            qual_counts[qk] = sum(
-                1 for a in filtered_assertions
-                if a.get("qualifiers", {}).get(qk)
-            )
+            qual_counts[qk] = sum(1 for a in filtered_assertions if a.get("qualifiers", {}).get(qk))
         qual_df = pd.DataFrame(
             [{"Qualifier": k, "Count": v} for k, v in qual_counts.items()],
         )
@@ -340,18 +378,22 @@ with tab_profile:
         st.divider()
 
         # --- Profile tabs ---
-        ptab_identity, ptab_mentions, ptab_assertions, ptab_cross = st.tabs([
-            "Identity", "Mentions", "Assertions", "Cross-Source",
-        ])
+        ptab_identity, ptab_mentions, ptab_assertions, ptab_cross = st.tabs(
+            [
+                "Identity",
+                "Mentions",
+                "Assertions",
+                "Cross-Source",
+            ]
+        )
 
         with ptab_identity:
             # Check for canonical entity match
             canonical_match = None
             for ce in canonical_entities:
-                if (
-                    ce.get("canonical_name", "").lower() == selected_entity.lower()
-                    or selected_entity.lower() in [a.lower() for a in ce.get("aliases", [])]
-                ):
+                if ce.get("canonical_name", "").lower() == selected_entity.lower() or selected_entity.lower() in [
+                    a.lower() for a in ce.get("aliases", [])
+                ]:
                     canonical_match = ce
                     break
 
@@ -361,7 +403,10 @@ with tab_profile:
                     st.write("**Canonical Name:**", canonical_match.get("canonical_name", ""))
                     st.write("**Type:**", canonical_match.get("entity_type", ""))
                     st.write("**Mention Count:**", canonical_match.get("mention_count", 0))
-                    st.write("**Sources:**", ", ".join(canonical_match.get("source_code_locations", [])))
+                    st.write(
+                        "**Sources:**",
+                        ", ".join(canonical_match.get("source_code_locations", [])),
+                    )
                 with id_c2:
                     aliases = canonical_match.get("aliases", [])
                     if aliases:
@@ -378,9 +423,7 @@ with tab_profile:
             # Per-source frequency
             st.divider()
             st.markdown("**Frequency by Source**")
-            source_counts: Counter[str] = Counter(
-                m.get("_source", "unknown") for m in entity_mentions
-            )
+            source_counts: Counter[str] = Counter(m.get("_source", "unknown") for m in entity_mentions)
             source_df = pd.DataFrame(
                 [{"Source": src, "Count": cnt} for src, cnt in source_counts.most_common()],
             )
@@ -388,17 +431,22 @@ with tab_profile:
 
         with ptab_mentions:
             if entity_mentions:
-                mention_df = pd.DataFrame([{
-                    "Text": m.get("text", ""),
-                    "Type": m.get("mention_type", ""),
-                    "Document": m.get("document_id", ""),
-                    "Chunk": m.get("chunk_id", ""),
-                    "Span": f"{m.get('span_start', '?')}-{m.get('span_end', '?')}",
-                    "Context": (m.get("context", "") or "")[:120],
-                    "Method": (m.get("provenance", {}) or {}).get("extraction_method", ""),
-                    "Confidence": (m.get("provenance", {}) or {}).get("confidence", ""),
-                    "Source": m.get("_source", ""),
-                } for m in entity_mentions])
+                mention_df = pd.DataFrame(
+                    [
+                        {
+                            "Text": m.get("text", ""),
+                            "Type": m.get("mention_type", ""),
+                            "Document": m.get("document_id", ""),
+                            "Chunk": m.get("chunk_id", ""),
+                            "Span": f"{m.get('span_start', '?')}-{m.get('span_end', '?')}",
+                            "Context": (m.get("context", "") or "")[:120],
+                            "Method": (m.get("provenance", {}) or {}).get("extraction_method", ""),
+                            "Confidence": (m.get("provenance", {}) or {}).get("confidence", ""),
+                            "Source": m.get("_source", ""),
+                        }
+                        for m in entity_mentions
+                    ]
+                )
                 st.dataframe(mention_df, use_container_width=True, hide_index=True, height=400)
             else:
                 st.info("No mentions found for this entity.")
@@ -406,7 +454,8 @@ with tab_profile:
         with ptab_assertions:
             # Find assertions where entity is subject or object
             entity_assertions = [
-                a for a in all_assertions
+                a
+                for a in all_assertions
                 if a.get("subject_text", "").lower() == selected_entity.lower()
                 or a.get("object_text", "").lower() == selected_entity.lower()
             ]
@@ -423,30 +472,27 @@ with tab_profile:
                     st.code(cid)
 
                 # Show other entities in the same aliases group
-                other_aliases = [
-                    a for a in canonical_match.get("aliases", [])
-                    if a.lower() != selected_entity.lower()
-                ]
+                other_aliases = [a for a in canonical_match.get("aliases", []) if a.lower() != selected_entity.lower()]
                 if other_aliases:
                     st.divider()
                     st.markdown("**Related Aliases**")
                     alias_chips = [
-                        {"text": a, "label": entity_type, "count": entity_freq.get(a, 0)}
+                        {
+                            "text": a,
+                            "label": entity_type,
+                            "count": entity_freq.get(a, 0),
+                        }
                         for a in other_aliases
                     ]
                     render_entity_chip_list(alias_chips, max_display=12, columns=4)
             else:
-                st.info(
-                    "No canonical entity match found. This entity has not been resolved "
-                    "in the platinum layer yet."
-                )
+                st.info("No canonical entity match found. This entity has not been resolved in the platinum layer yet.")
 
         # --- Source documents ---
         st.divider()
         st.markdown("**Source Documents**")
         doc_counts: Counter[str] = Counter(
-            m.get("document_id", "unknown") for m in entity_mentions
-            if m.get("document_id")
+            m.get("document_id", "unknown") for m in entity_mentions if m.get("document_id")
         )
         if doc_counts:
             doc_df = pd.DataFrame(

@@ -1,9 +1,9 @@
 """Shared enums used across the KG pipeline."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class MentionType(str, Enum):
+class MentionType(StrEnum):
     PERSON = "PERSON"
     ORG = "ORG"
     GPE = "GPE"
@@ -17,14 +17,14 @@ class MentionType(str, Enum):
     OTHER = "OTHER"
 
 
-class AlignmentType(str, Enum):
+class AlignmentType(StrEnum):
     SAME_AS = "sameAs"
     POSSIBLE_SAME_AS = "possibleSameAs"
     RELATED_TO = "relatedTo"
     PART_OF = "partOf"
 
 
-class ExtractionMethod(str, Enum):
+class ExtractionMethod(StrEnum):
     LLM = "llm"
     SPACY = "spacy"
     REGEX = "regex"

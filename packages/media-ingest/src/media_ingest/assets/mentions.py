@@ -4,6 +4,8 @@ Partitioned by document_id — each run extracts mentions from one document's ch
 """
 
 from dagster import AssetExecutionContext, Output, asset
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from dagster_io import (
     LLM_ASSET_K8S_CONFIG,
     LLMResource,
@@ -12,8 +14,6 @@ from dagster_io import (
     TextChunk,
     build_mentions,
 )
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -76,8 +76,21 @@ def media_mentions(
     media_chunks: list[TextChunk],
 ) -> Output[list[Mention]]:
     partition_key = context.partition_key
-    with trace_operation("media_mentions", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key, "chunk_count": len(media_chunks)}):
-        logger.info("Starting media_mentions extraction for partition=%s (%d chunks)", partition_key, len(media_chunks))
+    with trace_operation(
+        "media_mentions",
+        tracer,
+        {
+            "code_location": "media_ingest",
+            "layer": "gold",
+            "partition_key": partition_key,
+            "chunk_count": len(media_chunks),
+        },
+    ):
+        logger.info(
+            "Starting media_mentions extraction for partition=%s (%d chunks)",
+            partition_key,
+            len(media_chunks),
+        )
 
         if not media_chunks:
             context.log.info(f"No chunks for partition={partition_key} — returning empty mentions")
@@ -95,11 +108,21 @@ def media_mentions(
         )
 
         all_mentions = build_mentions(
-            media_chunks, results, llm_model=llm.model, code_location="media_ingest",
+            media_chunks,
+            results,
+            llm_model=llm.model,
+            code_location="media_ingest",
         )
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_mentions", layer="gold").inc(len(all_mentions))
-        logger.info("media_mentions complete for partition=%s: %d mentions from %d chunks", partition_key, len(all_mentions), len(media_chunks))
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_mentions", layer="gold").inc(
+            len(all_mentions)
+        )
+        logger.info(
+            "media_mentions complete for partition=%s: %d mentions from %d chunks",
+            partition_key,
+            len(all_mentions),
+            len(media_chunks),
+        )
         context.log.info(f"Extracted {len(all_mentions)} mentions from {len(media_chunks)} chunks")
         return Output(
             all_mentions,

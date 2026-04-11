@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Generator
+from collections.abc import Generator
 
 import streamlit as st
 
@@ -22,8 +22,7 @@ except ImportError:
     openai = None  # type: ignore[assignment]
 
 _OPENAI_MISSING_MSG = (
-    "The 'openai' package is required for LLMClient but is not installed. "
-    "Install it with:  pip install openai"
+    "The 'openai' package is required for LLMClient but is not installed. Install it with:  pip install openai"
 )
 
 
@@ -58,18 +57,12 @@ class LLMClient:
     def list_chat_models(self) -> list[str]:
         """Return model IDs suitable for chat completions (excludes embedding models)."""
         models = self.list_models()
-        return [
-            m["id"] for m in models
-            if not any(pat in m["id"].lower() for pat in _EMBEDDING_PATTERNS)
-        ]
+        return [m["id"] for m in models if not any(pat in m["id"].lower() for pat in _EMBEDDING_PATTERNS)]
 
     def list_embedding_models(self) -> list[str]:
         """Return model IDs suitable for embeddings."""
         models = self.list_models()
-        return [
-            m["id"] for m in models
-            if any(pat in m["id"].lower() for pat in _EMBEDDING_PATTERNS)
-        ]
+        return [m["id"] for m in models if any(pat in m["id"].lower() for pat in _EMBEDDING_PATTERNS)]
 
     # --------------------------------------------------------------------- #
     # Chat completions
@@ -95,14 +88,10 @@ class LLMClient:
                 return response.choices[0].message.content or ""
             except Exception as exc:
                 last_exc = exc
-                logger.warning(
-                    "Chat completion attempt %d failed: %s", attempt + 1, exc
-                )
+                logger.warning("Chat completion attempt %d failed: %s", attempt + 1, exc)
                 time.sleep(2**attempt)
 
-        raise RuntimeError(
-            f"Chat completion failed after 3 attempts: {last_exc}"
-        ) from last_exc
+        raise RuntimeError(f"Chat completion failed after 3 attempts: {last_exc}") from last_exc
 
     def stream_chat(
         self,
@@ -136,9 +125,7 @@ class LLMClient:
         )
         return response.data[0].embedding
 
-    def embed_batch(
-        self, texts: list[str], batch_size: int = 100
-    ) -> list[list[float]]:
+    def embed_batch(self, texts: list[str], batch_size: int = 100) -> list[list[float]]:
         """Embed multiple texts, batching requests to avoid payload limits."""
         all_embeddings: list[list[float]] = []
         for i in range(0, len(texts), batch_size):

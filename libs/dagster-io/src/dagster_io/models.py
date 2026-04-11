@@ -13,13 +13,20 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-# Canonical source: catalyst-contracts-core — re-exported for backward compat
-from catalyst_contracts_core.enums import AlignmentType, ExtractionMethod, MentionType
+# Canonical source: catalyst-contracts-core — re-exported for backward compat.
+# ExtractionMethod is re-exported via dagster_io/__init__.py even though it is
+# not referenced directly in this module; the noqa prevents ruff from stripping
+# it as an "unused" import on future autofix passes.
+from catalyst_contracts_core.enums import (
+    AlignmentType,
+    ExtractionMethod,  # noqa: F401
+    MentionType,
+)
 from catalyst_contracts_core.types import Provenance
 
 
@@ -52,13 +59,9 @@ class Mention(BaseModel):
     @model_validator(mode="after")
     def _compute_ids(self) -> Mention:
         if not self.mention_id:
-            self.mention_id = _deterministic_id(
-                self.document_id, self.chunk_id, self.text, self.mention_type.value
-            )
+            self.mention_id = _deterministic_id(self.document_id, self.chunk_id, self.text, self.mention_type.value)
         if not self.content_hash:
-            self.content_hash = _content_hash(
-                self.document_id, self.chunk_id, self.text, self.mention_type.value
-            )
+            self.content_hash = _content_hash(self.document_id, self.chunk_id, self.text, self.mention_type.value)
         return self
 
 
@@ -80,9 +83,7 @@ class EntityCandidate(BaseModel):
     @model_validator(mode="after")
     def _compute_ids(self) -> EntityCandidate:
         if not self.candidate_id:
-            self.candidate_id = _deterministic_id(
-                self.canonical_name, self.candidate_type.value, self.code_location
-            )
+            self.candidate_id = _deterministic_id(self.canonical_name, self.candidate_type.value, self.code_location)
         if not self.content_hash:
             self.content_hash = _content_hash(
                 self.canonical_name,
@@ -109,8 +110,8 @@ class CanonicalEntity(BaseModel):
     source_code_locations: list[str] = Field(default_factory=list)
     embedding: list[float] | None = None
     mention_count: int = 0
-    first_seen: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    last_seen: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    first_seen: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    last_seen: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class Assertion(BaseModel):
@@ -137,13 +138,18 @@ class Assertion(BaseModel):
     def _compute_ids(self) -> Assertion:
         if not self.assertion_id:
             self.assertion_id = _deterministic_id(
-                self.subject_text, self.predicate, self.object_text,
+                self.subject_text,
+                self.predicate,
+                self.object_text,
                 self.provenance.chunk_id if self.provenance else "",
             )
         if not self.content_hash:
             self.content_hash = _content_hash(
-                self.subject_text, self.predicate, self.object_text,
-                str(self.negated), str(self.hedged),
+                self.subject_text,
+                self.predicate,
+                self.object_text,
+                str(self.negated),
+                str(self.hedged),
             )
         return self
 
@@ -163,7 +169,5 @@ class AlignmentEdge(BaseModel):
     def _compute_ids(self) -> AlignmentEdge:
         if not self.edge_id:
             ids = sorted([self.source_entity_id, self.target_entity_id])
-            self.edge_id = _deterministic_id(
-                ids[0], ids[1], self.alignment_type.value
-            )
+            self.edge_id = _deterministic_id(ids[0], ids[1], self.alignment_type.value)
         return self

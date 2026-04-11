@@ -6,8 +6,8 @@ Partitioned by document_id — each run embeds one document's chunks.
 from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
-from dagster_io import EmbeddingResource, TextChunk
 
+from dagster_io import EmbeddingResource, TextChunk
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -40,8 +40,21 @@ def media_embeddings(
     media_chunks: list[TextChunk],
 ) -> Output[list[dict[str, Any]]]:
     partition_key = context.partition_key
-    with trace_operation("media_embeddings", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key, "chunk_count": len(media_chunks)}):
-        logger.info("Starting media_embeddings for partition=%s (%d chunks)", partition_key, len(media_chunks))
+    with trace_operation(
+        "media_embeddings",
+        tracer,
+        {
+            "code_location": "media_ingest",
+            "layer": "gold",
+            "partition_key": partition_key,
+            "chunk_count": len(media_chunks),
+        },
+    ):
+        logger.info(
+            "Starting media_embeddings for partition=%s (%d chunks)",
+            partition_key,
+            len(media_chunks),
+        )
 
         if not media_chunks:
             context.log.info(f"No chunks for partition={partition_key} — returning empty embeddings")
@@ -57,8 +70,15 @@ def media_embeddings(
 
         context.log.info(f"Embedding {len(texts)} chunks with model={embeddings.model}")
         vectors = embeddings.embed(texts)
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_embeddings", layer="gold").inc(len(vectors))
-        logger.info("media_embeddings complete for partition=%s: %d vectors (%dd)", partition_key, len(vectors), len(vectors[0]) if vectors else 0)
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_embeddings", layer="gold").inc(
+            len(vectors)
+        )
+        logger.info(
+            "media_embeddings complete for partition=%s: %d vectors (%dd)",
+            partition_key,
+            len(vectors),
+            len(vectors[0]) if vectors else 0,
+        )
 
         results = [
             {
@@ -68,7 +88,7 @@ def media_embeddings(
                 "model": embeddings.model,
                 "dimensions": len(vec),
             }
-            for chunk, vec in zip(media_chunks, vectors)
+            for chunk, vec in zip(media_chunks, vectors, strict=False)
         ]
 
         context.log.info(f"Generated {len(results)} embeddings ({len(vectors[0])}d)")

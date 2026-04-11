@@ -13,7 +13,6 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from dagster_io.logging import get_logger
-
 from media_ingest.viewer.services.s3_data import S3DataService
 
 logger = get_logger(__name__)

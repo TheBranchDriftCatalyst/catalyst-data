@@ -1,7 +1,6 @@
 """Tests for individual node functions."""
 
 import pytest
-
 from catalyst_langgraph.nodes.extract_mentions import make_extract_mentions
 from catalyst_langgraph.nodes.extract_propositions import make_extract_propositions
 from catalyst_langgraph.nodes.persist_artifacts import make_persist_artifacts
@@ -26,9 +25,7 @@ async def test_extract_mentions_node(mock_llm, sample_state, sample_mentions):
 
 @pytest.mark.asyncio
 async def test_validate_mentions_accepted(mock_mcp, sample_state, sample_mentions):
-    mock_mcp.set_response(
-        "validate_mentions", {"verdict": "valid", "errors": []}
-    )
+    mock_mcp.set_response("validate_mentions", {"verdict": "valid", "errors": []})
     sample_state["current_mention_candidates"] = sample_mentions
 
     node = make_validate_mentions(mock_mcp)
@@ -55,7 +52,15 @@ async def test_validate_mentions_rejected(mock_mcp, sample_state, sample_mention
 
 @pytest.mark.asyncio
 async def test_repair_mentions_node(mock_llm, sample_state, sample_mentions):
-    repaired = [{"text": "Acme Corp", "mention_type": "ORG", "span_start": 0, "span_end": 9, "confidence": 1.0}]
+    repaired = [
+        {
+            "text": "Acme Corp",
+            "mention_type": "ORG",
+            "span_start": 0,
+            "span_end": 9,
+            "confidence": 1.0,
+        }
+    ]
     mock_llm.set_default_mentions(repaired)
     sample_state["current_mention_candidates"] = sample_mentions
     sample_state["latest_mention_validation"] = {
@@ -72,9 +77,7 @@ async def test_repair_mentions_node(mock_llm, sample_state, sample_mentions):
 
 
 @pytest.mark.asyncio
-async def test_extract_propositions_node(
-    mock_llm, sample_state, sample_mentions, sample_propositions
-):
+async def test_extract_propositions_node(mock_llm, sample_state, sample_mentions, sample_propositions):
     mock_llm.set_default_propositions(sample_propositions)
     sample_state["accepted_mentions"] = sample_mentions
 
@@ -86,12 +89,8 @@ async def test_extract_propositions_node(
 
 
 @pytest.mark.asyncio
-async def test_validate_propositions_accepted(
-    mock_mcp, sample_state, sample_mentions, sample_propositions
-):
-    mock_mcp.set_response(
-        "validate_propositions", {"verdict": "valid", "errors": []}
-    )
+async def test_validate_propositions_accepted(mock_mcp, sample_state, sample_mentions, sample_propositions):
+    mock_mcp.set_response("validate_propositions", {"verdict": "valid", "errors": []})
     sample_state["accepted_mentions"] = sample_mentions
     sample_state["current_proposition_candidates"] = sample_propositions
 
@@ -103,9 +102,7 @@ async def test_validate_propositions_accepted(
 
 
 @pytest.mark.asyncio
-async def test_validate_propositions_rejected(
-    mock_mcp, sample_state, sample_mentions, sample_propositions
-):
+async def test_validate_propositions_rejected(mock_mcp, sample_state, sample_mentions, sample_propositions):
     mock_mcp.set_response(
         "validate_propositions",
         {"verdict": "invalid", "errors": ["Unknown subject"]},
@@ -121,9 +118,7 @@ async def test_validate_propositions_rejected(
 
 
 @pytest.mark.asyncio
-async def test_repair_propositions_node(
-    mock_llm, sample_state, sample_mentions, sample_propositions
-):
+async def test_repair_propositions_node(mock_llm, sample_state, sample_mentions, sample_propositions):
     repaired = [
         {
             "subject": "John Smith",
@@ -188,10 +183,7 @@ async def test_extract_mentions_llm_error(sample_state):
 
     assert result["status"] == "failed"
     assert "LLM schema validation failed" in result["error"]
-    assert any(
-        ev["node_name"] == "extract_mentions" and ev["status"] == "error"
-        for ev in result["audit_events"]
-    )
+    assert any(ev["node_name"] == "extract_mentions" and ev["status"] == "error" for ev in result["audit_events"])
 
 
 @pytest.mark.asyncio
@@ -204,10 +196,7 @@ async def test_extract_propositions_llm_error(sample_state, sample_mentions):
 
     assert result["status"] == "failed"
     assert "LLM schema validation failed" in result["error"]
-    assert any(
-        ev["node_name"] == "extract_propositions" and ev["status"] == "error"
-        for ev in result["audit_events"]
-    )
+    assert any(ev["node_name"] == "extract_propositions" and ev["status"] == "error" for ev in result["audit_events"])
 
 
 @pytest.mark.asyncio
@@ -224,16 +213,11 @@ async def test_repair_mentions_llm_error(sample_state, sample_mentions):
 
     assert result["status"] == "failed"
     assert "LLM schema validation failed" in result["error"]
-    assert any(
-        ev["node_name"] == "repair_mentions" and ev["status"] == "error"
-        for ev in result["audit_events"]
-    )
+    assert any(ev["node_name"] == "repair_mentions" and ev["status"] == "error" for ev in result["audit_events"])
 
 
 @pytest.mark.asyncio
-async def test_repair_propositions_llm_error(
-    sample_state, sample_mentions, sample_propositions
-):
+async def test_repair_propositions_llm_error(sample_state, sample_mentions, sample_propositions):
     """When the LLM raises an exception, repair_propositions should set status to failed."""
     llm = FailingLLM()
     sample_state["accepted_mentions"] = sample_mentions
@@ -247,10 +231,7 @@ async def test_repair_propositions_llm_error(
 
     assert result["status"] == "failed"
     assert "LLM schema validation failed" in result["error"]
-    assert any(
-        ev["node_name"] == "repair_propositions" and ev["status"] == "error"
-        for ev in result["audit_events"]
-    )
+    assert any(ev["node_name"] == "repair_propositions" and ev["status"] == "error" for ev in result["audit_events"])
 
 
 # --- A3 edge-case tests: composite ID generation in validate_mentions ---

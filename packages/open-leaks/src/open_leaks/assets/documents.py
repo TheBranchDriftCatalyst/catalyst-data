@@ -102,7 +102,17 @@ def leak_documents(
     icij_offshore_entities: list[OffshoreEntity],
     epstein_court_docs: list[CourtDocument],
 ) -> Output[list[Document]]:
-    with trace_operation("leak_documents", tracer, {"code_location": "open_leaks", "layer": "silver", "cable_count": len(wikileaks_cables), "entity_count": len(icij_offshore_entities), "court_doc_count": len(epstein_court_docs)}):
+    with trace_operation(
+        "leak_documents",
+        tracer,
+        {
+            "code_location": "open_leaks",
+            "layer": "silver",
+            "cable_count": len(wikileaks_cables),
+            "entity_count": len(icij_offshore_entities),
+            "court_doc_count": len(epstein_court_docs),
+        },
+    ):
         logger.info("Starting leak_documents transformation")
         documents: list[Document] = []
 
@@ -115,7 +125,9 @@ def leak_documents(
         for doc in epstein_court_docs:
             documents.append(_court_doc_to_document(doc))
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_documents", layer="silver").inc(len(documents))
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_documents", layer="silver").inc(
+            len(documents)
+        )
         logger.info("leak_documents transformation complete count=%d", len(documents))
         context.log.info(
             f"Produced {len(documents)} documents "
@@ -127,10 +139,12 @@ def leak_documents(
             documents,
             metadata={
                 "total_documents": len(documents),
-                "by_source": MetadataValue.json({
-                    "wikileaks_cables": len(wikileaks_cables),
-                    "icij_offshore_entities": len(icij_offshore_entities),
-                    "epstein_court_docs": len(epstein_court_docs),
-                }),
+                "by_source": MetadataValue.json(
+                    {
+                        "wikileaks_cables": len(wikileaks_cables),
+                        "icij_offshore_entities": len(icij_offshore_entities),
+                        "epstein_court_docs": len(epstein_court_docs),
+                    }
+                ),
             },
         )

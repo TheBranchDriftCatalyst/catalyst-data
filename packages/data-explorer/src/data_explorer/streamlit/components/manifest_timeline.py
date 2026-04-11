@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import plotly.express as px
-import plotly.io as pio
 import streamlit as st
-from dagster_io.manifest import AssetManifest
 
+from dagster_io.manifest import AssetManifest
 from data_explorer.streamlit.theme import get_plotly_template
 
 

@@ -14,8 +14,8 @@ configure_tracing(service_name="catalyst-data.knowledge_graph")
 start_metrics_server()
 
 from dagster import Definitions, DynamicPartitionsDefinition, SourceAsset
-from dagster_io import MinioIOManager, OptionalMinioIOManager, make_k8s_executor
 
+from dagster_io import MinioIOManager, OptionalMinioIOManager, make_k8s_executor
 from knowledge_graph.resources import GraphDBResource
 
 _k8s_executor = make_k8s_executor("knowledge_graph")
@@ -68,7 +68,11 @@ _media_assertions = SourceAsset(
 )
 
 # Import platinum layer assets
-from knowledge_graph.assets import assertion_graph, canonical_entities, entity_alignments  # noqa: E402
+from knowledge_graph.assets import (  # noqa: E402
+    assertion_graph,
+    canonical_entities,
+    entity_alignments,
+)
 
 defs = Definitions(
     assets=[

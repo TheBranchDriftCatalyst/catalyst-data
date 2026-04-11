@@ -217,7 +217,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=24.0" },
     { name = "catalyst-contracts-core", editable = "../catalyst-contracts-core" },
     { name = "catalyst-llm-contract-mcp", editable = "../catalyst-llm-contract-mcp" },
-    { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.0" },
+    { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "jupyter", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "langchain-core", specifier = ">=0.3" },
     { name = "langchain-openai", specifier = ">=0.3" },

@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 
 from catalyst_contracts_core.enums import MentionType
 
-
 # ── Mention extraction ──────────────────────────────────────────────
 
 
@@ -18,9 +17,7 @@ class MentionExtraction(BaseModel):
     """A single mention extracted by the LLM."""
 
     text: str = Field(description="Entity mention as it appears in text")
-    label: str = Field(
-        description="Entity type: PERSON, ORG, GPE, LOC, DATE, LAW, EVENT, MONEY, NORP, FACILITY, OTHER"
-    )
+    label: str = Field(description="Entity type: PERSON, ORG, GPE, LOC, DATE, LAW, EVENT, MONEY, NORP, FACILITY, OTHER")
     context: str = Field(description="Sentence fragment containing the entity")
     span_start: int = Field(description="Character offset start (0-based), or -1 if unknown")
     span_end: int = Field(description="Character offset end (exclusive), or -1 if unknown")

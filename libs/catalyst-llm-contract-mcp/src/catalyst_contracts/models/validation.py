@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ValidationVerdict(str, Enum):
+class ValidationVerdict(StrEnum):
     VALID = "valid"
     INVALID = "invalid"
     AMBIGUOUS = "ambiguous"

@@ -28,9 +28,7 @@ class JsonlRepository:
                 "hyphens, underscores, or dots (no path separators or '..')."
             )
 
-    async def _append(
-        self, document_id: str, artifact_type: str, records: list[dict[str, Any]]
-    ) -> None:
+    async def _append(self, document_id: str, artifact_type: str, records: list[dict[str, Any]]) -> None:
         self._validate_document_id(document_id)
         dir_path = self._base_dir / document_id
         dir_path.mkdir(parents=True, exist_ok=True)
@@ -40,17 +38,11 @@ class JsonlRepository:
             for record in records:
                 await f.write(json.dumps(record, default=str) + "\n")
 
-    async def save_mentions(
-        self, document_id: str, mentions: list[dict[str, Any]]
-    ) -> None:
+    async def save_mentions(self, document_id: str, mentions: list[dict[str, Any]]) -> None:
         await self._append(document_id, "mentions", mentions)
 
-    async def save_propositions(
-        self, document_id: str, propositions: list[dict[str, Any]]
-    ) -> None:
+    async def save_propositions(self, document_id: str, propositions: list[dict[str, Any]]) -> None:
         await self._append(document_id, "propositions", propositions)
 
-    async def save_audit_trail(
-        self, document_id: str, events: list[dict[str, Any]]
-    ) -> None:
+    async def save_audit_trail(self, document_id: str, events: list[dict[str, Any]]) -> None:
         await self._append(document_id, "audit_trail", events)

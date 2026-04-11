@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
-
 from catalyst_contracts.audit.repository import AuditRepository
 
 

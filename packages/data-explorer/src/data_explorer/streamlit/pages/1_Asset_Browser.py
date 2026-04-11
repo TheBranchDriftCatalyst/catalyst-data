@@ -6,7 +6,9 @@ import pandas as pd
 import streamlit as st
 
 from data_explorer.streamlit.components.asset_card import render_asset_card
-from data_explorer.streamlit.components.manifest_timeline import render_manifest_timeline
+from data_explorer.streamlit.components.manifest_timeline import (
+    render_manifest_timeline,
+)
 from data_explorer.streamlit.components.metadata_panel import render_metadata_panel
 from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient

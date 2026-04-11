@@ -10,8 +10,17 @@ from catalyst_contracts_core.enums import AlignmentType, ExtractionMethod, Menti
 class TestMentionType:
     def test_all_values_exist(self):
         expected = {
-            "PERSON", "ORG", "GPE", "LOC", "DATE",
-            "LAW", "EVENT", "MONEY", "NORP", "FACILITY", "OTHER",
+            "PERSON",
+            "ORG",
+            "GPE",
+            "LOC",
+            "DATE",
+            "LAW",
+            "EVENT",
+            "MONEY",
+            "NORP",
+            "FACILITY",
+            "OTHER",
         }
         assert {t.value for t in MentionType} == expected
 

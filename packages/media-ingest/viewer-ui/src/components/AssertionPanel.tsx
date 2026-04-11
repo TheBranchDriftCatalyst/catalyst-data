@@ -30,7 +30,12 @@ interface AssertionPanelProps {
 
 type SortField = "confidence" | "predicate" | "subject";
 
-export default function AssertionPanel({ assertions, onAssertionSelect, selectedAssertionId, className = "" }: AssertionPanelProps) {
+export default function AssertionPanel({
+  assertions,
+  onAssertionSelect,
+  selectedAssertionId,
+  className = "",
+}: AssertionPanelProps) {
   const [sortBy, setSortBy] = useState<SortField>("confidence");
   const [sortAsc, setSortAsc] = useState(false);
   const [filterText, setFilterText] = useState("");
@@ -134,7 +139,9 @@ export default function AssertionPanel({ assertions, onAssertionSelect, selected
           </TableHeader>
           <TableBody>
             {sorted.map((assertion, i) => {
-              const aid = assertion.assertion_id ?? `${assertion.subject_text}_${assertion.predicate}_${assertion.object_text}`;
+              const aid =
+                assertion.assertion_id ??
+                `${assertion.subject_text}_${assertion.predicate}_${assertion.object_text}`;
               return (
                 <AssertionRow
                   key={i}

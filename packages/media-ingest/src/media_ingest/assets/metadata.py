@@ -21,8 +21,10 @@ def _ffprobe(path: str) -> dict[str, Any]:
         result = subprocess.run(
             [
                 "ffprobe",
-                "-v", "quiet",
-                "-print_format", "json",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
                 "-show_format",
                 "-show_streams",
                 path,
@@ -80,7 +82,15 @@ def media_metadata(
     context: AssetExecutionContext,
     media_files: list[dict[str, Any]],
 ) -> Output[list[dict[str, Any]]]:
-    with trace_operation("media_metadata", tracer, {"code_location": "media_ingest", "layer": "silver", "record_count": len(media_files)}):
+    with trace_operation(
+        "media_metadata",
+        tracer,
+        {
+            "code_location": "media_ingest",
+            "layer": "silver",
+            "record_count": len(media_files),
+        },
+    ):
         logger.info("Starting media_metadata extraction for %d files", len(media_files))
         enriched = []
         errors = 0
@@ -95,8 +105,14 @@ def media_metadata(
                 file_info["metadata"] = _extract_metadata(probe)
             enriched.append(file_info)
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_metadata", layer="silver").inc(len(enriched))
-        logger.info("media_metadata complete: %d files probed (%d errors)", len(enriched), errors)
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_metadata", layer="silver").inc(
+            len(enriched)
+        )
+        logger.info(
+            "media_metadata complete: %d files probed (%d errors)",
+            len(enriched),
+            errors,
+        )
         context.log.info(f"Probed {len(enriched)} files ({errors} errors)")
 
         return Output(
@@ -107,7 +123,10 @@ def media_metadata(
                 "with_video": sum(1 for f in enriched if f.get("metadata", {}).get("has_video")),
                 "with_audio": sum(1 for f in enriched if f.get("metadata", {}).get("has_audio")),
                 "total_duration_hours": MetadataValue.float(
-                    round(sum(f.get("metadata", {}).get("duration_seconds", 0) for f in enriched) / 3600, 2)
+                    round(
+                        sum(f.get("metadata", {}).get("duration_seconds", 0) for f in enriched) / 3600,
+                        2,
+                    )
                 ),
             },
         )

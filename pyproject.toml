@@ -16,10 +16,20 @@ addopts = "--import-mode=importlib"
 target-version = "py312"
 line-length = 120
 src = ["libs", "packages"]
+# .claude/worktrees/ holds temporary subagent scratch worktrees — full
+# copies of the repo with their own pyproject.toml files that would
+# trip ruff's config discovery and double-count every error.
+extend-exclude = [".claude", ".beads", "packages/media-ingest/viewer-ui/node_modules"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # line too long — we have a 120 limit, but some long strings/URLs legitimately exceed
+    "E402",   # module level import not at top — dagster_io code locations deliberately call
+              # configure_logging() / start_metrics_server() BEFORE importing dagster
+    "B008",   # function calls in default args — pydantic Field(default=...) and dagster
+              # AssetIn(...) patterns use this idiomatically
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["dagster_io", "catalyst_contracts_core"]

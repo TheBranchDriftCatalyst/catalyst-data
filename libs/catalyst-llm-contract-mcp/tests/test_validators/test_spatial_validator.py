@@ -86,30 +86,22 @@ class TestValidateSpatial:
         assert result.verdict == ValidationVerdict.VALID
 
     def test_lat_boundary_positive_valid(self, source_text):
-        candidates = [
-            {"mention_id": "m1", "lat": 90.0, "lon": 0.0, "confidence": 0.5}
-        ]
+        candidates = [{"mention_id": "m1", "lat": 90.0, "lon": 0.0, "confidence": 0.5}]
         result = validate_spatial(candidates, source_text)
         assert result.verdict == ValidationVerdict.VALID
 
     def test_lat_boundary_negative_valid(self, source_text):
-        candidates = [
-            {"mention_id": "m1", "lat": -90.0, "lon": 0.0, "confidence": 0.5}
-        ]
+        candidates = [{"mention_id": "m1", "lat": -90.0, "lon": 0.0, "confidence": 0.5}]
         result = validate_spatial(candidates, source_text)
         assert result.verdict == ValidationVerdict.VALID
 
     def test_lon_boundary_positive_valid(self, source_text):
-        candidates = [
-            {"mention_id": "m1", "lat": 0.0, "lon": 180.0, "confidence": 0.5}
-        ]
+        candidates = [{"mention_id": "m1", "lat": 0.0, "lon": 180.0, "confidence": 0.5}]
         result = validate_spatial(candidates, source_text)
         assert result.verdict == ValidationVerdict.VALID
 
     def test_lon_boundary_negative_valid(self, source_text):
-        candidates = [
-            {"mention_id": "m1", "lat": 0.0, "lon": -180.0, "confidence": 0.5}
-        ]
+        candidates = [{"mention_id": "m1", "lat": 0.0, "lon": -180.0, "confidence": 0.5}]
         result = validate_spatial(candidates, source_text)
         assert result.verdict == ValidationVerdict.VALID
 

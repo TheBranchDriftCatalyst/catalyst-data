@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, TypedDict
 
 # TODO: rename this to catalyst-extraction-graph .... or something like that
 
-class WorkflowStatus(str, Enum):
+
+class WorkflowStatus(StrEnum):
     PENDING = "pending"
     EXTRACTING_MENTIONS = "extracting_mentions"
     VALIDATING_MENTIONS = "validating_mentions"
@@ -32,9 +33,7 @@ class SourceMetadata:
 
 @dataclass
 class AuditEvent:
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     node_name: str = ""
     status: str = ""
     details: dict[str, Any] = field(default_factory=dict)

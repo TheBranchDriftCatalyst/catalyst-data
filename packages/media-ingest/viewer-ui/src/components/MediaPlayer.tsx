@@ -27,7 +27,16 @@ interface MediaPlayerProps {
 }
 
 const MediaPlayer = forwardRef<MediaPlayerHandle, MediaPlayerProps>(function MediaPlayer(
-  { document: doc, markers = [], onMarkerClick, onTimeUpdate, onDurationChange, onPlay, onPause, className = "" },
+  {
+    document: doc,
+    markers = [],
+    onMarkerClick,
+    onTimeUpdate,
+    onDurationChange,
+    onPlay,
+    onPause,
+    className = "",
+  },
   ref,
 ) {
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
@@ -113,11 +122,7 @@ const MediaPlayer = forwardRef<MediaPlayerHandle, MediaPlayerProps>(function Med
   const markerOverlay =
     markers.length > 0 && mediaDuration > 0 && onMarkerClick ? (
       <div className="relative w-full h-4 bg-surface-2/50 flex-shrink-0">
-        <ScrubberMarkers
-          markers={markers}
-          duration={mediaDuration}
-          onMarkerClick={onMarkerClick}
-        />
+        <ScrubberMarkers markers={markers} duration={mediaDuration} onMarkerClick={onMarkerClick} />
       </div>
     ) : null;
 

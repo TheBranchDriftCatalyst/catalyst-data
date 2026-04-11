@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections import defaultdict
 
 import numpy as np
 import streamlit as st
+
 from dagster_io.logging import get_logger
 from dagster_io.manifest import AssetManifest
 from dagster_io.models import (
     AlignmentEdge,
-    AlignmentType,
     Assertion,
     CanonicalEntity,
     EntityCandidate,
     Mention,
-    MentionType,
-    Provenance,
 )
 from dagster_io.s3_client import S3Client
 from dagster_io.serializers import deserialize
@@ -28,6 +27,7 @@ logger = get_logger(__name__)
 # ------------------------------------------------------------------
 # Module-level cached loaders (st.cache_data cannot hash `self`)
 # ------------------------------------------------------------------
+
 
 @st.cache_data(ttl=300, show_spinner="Loading asset data...")
 def _load_asset_data(
@@ -83,7 +83,7 @@ def _list_partitions_cached(
     keys = s3.list_all_objects(prefix)
     partitions: set[str] = set()
     for k in keys:
-        suffix = k[len(prefix):].lstrip("/")
+        suffix = k[len(prefix) :].lstrip("/")
         parts = suffix.split("/")
         if len(parts) >= 2:
             partitions.add(parts[0])
@@ -139,14 +139,16 @@ class DataClient:
                 continue
             layer, code_location, group, asset = parts[0], parts[1], parts[2], parts[3]
             asset_root = "/".join(parts)
-            assets.append({
-                "layer": layer,
-                "code_location": code_location,
-                "group": group,
-                "asset": asset,
-                "root": asset_root,
-                "metadata_key": mk,
-            })
+            assets.append(
+                {
+                    "layer": layer,
+                    "code_location": code_location,
+                    "group": group,
+                    "asset": asset,
+                    "root": asset_root,
+                    "metadata_key": mk,
+                }
+            )
         return assets
 
     # ------------------------------------------------------------------
@@ -178,7 +180,11 @@ class DataClient:
     def load_data(self, asset_root: str, limit: int = 100) -> list[dict]:
         """Fetch data file(s) under an asset root, deserialize, return dicts."""
         keys = self.s3.list_all_objects(asset_root + "/")
-        data_keys = [k for k in keys if "/data." in k or k.endswith("/data.jsonl") or k.endswith("/data.json") or k.endswith("/data.pkl")]
+        data_keys = [
+            k
+            for k in keys
+            if "/data." in k or k.endswith("/data.jsonl") or k.endswith("/data.json") or k.endswith("/data.pkl")
+        ]
         if not data_keys:
             return []
 
@@ -192,10 +198,8 @@ class DataClient:
             meta_keys = [k for k in keys if k.startswith(dir_prefix) and k.endswith("_metadata.json")]
             metadata = {}
             if meta_keys:
-                try:
+                with contextlib.suppress(Exception):
                     metadata = json.loads(self.s3.get_object(meta_keys[0]))
-                except Exception:
-                    pass
 
             raw = self.s3.get_object(dk)
             result = deserialize(raw, ext, metadata, type_hint=None)
@@ -267,9 +271,17 @@ class DataClient:
         """
         assets = _list_assets_cached(*self._conn_args())
         suffixes = {
-            "entities", "propositions", "chunks", "embeddings",
-            "documents", "transcriptions", "metadata", "bills",
-            "mentions", "assertions", "entity_candidates",
+            "entities",
+            "propositions",
+            "chunks",
+            "embeddings",
+            "documents",
+            "transcriptions",
+            "metadata",
+            "bills",
+            "mentions",
+            "assertions",
+            "entity_candidates",
         }
         sources: set[str] = set()
         for a in assets:
@@ -389,7 +401,10 @@ class DataClient:
         logger.info("Loading mentions for source=%s", source)
         root = self._find_asset_root(source, "mentions", "gold")
         if root is None:
-            logger.warning("No mentions found for source=%s, falling back to legacy entities", source)
+            logger.warning(
+                "No mentions found for source=%s, falling back to legacy entities",
+                source,
+            )
             return self.load_entities(source, partition, legacy=True)
 
         asset_root = f"{root}/{partition}" if partition else root
@@ -420,7 +435,10 @@ class DataClient:
         logger.info("Loading assertions for source=%s", source)
         root = self._find_asset_root(source, "assertions", "gold")
         if root is None:
-            logger.warning("No assertions found for source=%s, falling back to propositions", source)
+            logger.warning(
+                "No assertions found for source=%s, falling back to propositions",
+                source,
+            )
             return self.load_propositions(source, partition, limit=limit)
 
         asset_root = f"{root}/{partition}" if partition else root
@@ -584,9 +602,9 @@ class DataClient:
         assertions = self.load_assertions(source, partition)
         needle = entity_text.lower()
         return [
-            a for a in assertions
-            if a.get("subject_text", "").lower() == needle
-            or a.get("object_text", "").lower() == needle
+            a
+            for a in assertions
+            if a.get("subject_text", "").lower() == needle or a.get("object_text", "").lower() == needle
         ]
 
     def get_canonical_entity_by_name(self, name: str) -> dict | None:
@@ -611,10 +629,7 @@ class DataClient:
         """Find all text chunks containing a given entity (uses mentions, falls back to legacy)."""
         mentions = self.load_mentions(source, partition)
         matching_chunk_ids = {
-            m["chunk_id"]
-            for m in mentions
-            if m.get("text", "").lower() == entity_text.lower()
-            and "chunk_id" in m
+            m["chunk_id"] for m in mentions if m.get("text", "").lower() == entity_text.lower() and "chunk_id" in m
         }
         if not matching_chunk_ids:
             return []
@@ -631,9 +646,7 @@ class DataClient:
         propositions = self.load_propositions(source, partition)
         needle = entity_text.lower()
         return [
-            p for p in propositions
-            if p.get("subject", "").lower() == needle
-            or p.get("object", "").lower() == needle
+            p for p in propositions if p.get("subject", "").lower() == needle or p.get("object", "").lower() == needle
         ]
 
     def get_document_entities(
@@ -671,7 +684,7 @@ class DataClient:
         has_bare_data = False
 
         for k in keys:
-            suffix = k[len(asset_root):].lstrip("/")
+            suffix = k[len(asset_root) :].lstrip("/")
             parts = suffix.split("/")
             for p in parts:
                 if p.startswith("config="):
@@ -689,10 +702,7 @@ class DataClient:
 
     def load_config_metadata(self, asset_root: str, config_key: str) -> dict | None:
         """Load ``_metadata.json`` for a specific config variant."""
-        if config_key == "default":
-            prefix = asset_root
-        else:
-            prefix = f"{asset_root}/config={config_key}"
+        prefix = asset_root if config_key == "default" else f"{asset_root}/config={config_key}"
         try:
             raw = self.s3.get_object(f"{prefix}/_metadata.json")
             return json.loads(raw)
@@ -707,10 +717,7 @@ class DataClient:
         top_k: int = 10,
     ) -> list[dict]:
         """Search embeddings under a specific config variant."""
-        if config_key == "default":
-            prefix = asset_root
-        else:
-            prefix = f"{asset_root}/config={config_key}"
+        prefix = asset_root if config_key == "default" else f"{asset_root}/config={config_key}"
         return self.search_embeddings(query_vec, prefix, top_k=top_k)
 
     # ------------------------------------------------------------------
@@ -736,14 +743,14 @@ class DataClient:
             text_lower = m.get("text", "").lower()
             if text_lower in target_set and "chunk_id" in m:
                 # Include mention_type in the key for richer co-occurrence
-                mention_type = m.get("mention_type", "OTHER")
+                m.get("mention_type", "OTHER")
                 chunk_entities[m["chunk_id"]].add(text_lower)
 
         cooccurrence: dict[tuple[str, str], int] = defaultdict(int)
         for _chunk_id, ent_set in chunk_entities.items():
             ents = sorted(ent_set)
             for i, a in enumerate(ents):
-                for b in ents[i + 1:]:
+                for b in ents[i + 1 :]:
                     cooccurrence[(a, b)] += 1
 
         return dict(cooccurrence)

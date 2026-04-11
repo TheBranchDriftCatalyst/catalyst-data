@@ -1,7 +1,6 @@
 """Tests for MCP client implementations."""
 
 import pytest
-
 from catalyst_langgraph.clients.mcp import DirectMCPClient, MockMCPClient
 
 
@@ -48,9 +47,7 @@ async def test_mock_mcp_callable_response():
     result_empty = await client.call_tool("validate_mentions", {"mentions": []})
     assert result_empty["verdict"] == "rejected"
 
-    result_full = await client.call_tool(
-        "validate_mentions", {"mentions": [{"name": "x"}]}
-    )
+    result_full = await client.call_tool("validate_mentions", {"mentions": [{"name": "x"}]})
     assert result_full["verdict"] == "accepted"
 
 

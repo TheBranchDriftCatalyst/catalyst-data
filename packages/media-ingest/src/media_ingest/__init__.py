@@ -26,6 +26,7 @@ if os.environ.get("DAGSTER_IS_CODE_SERVER", "").lower() in ("1", "true"):
     threading.Thread(target=_start_viewer, daemon=True, name="media-viewer").start()
 
 from dagster import Definitions
+
 from dagster_io import (
     ChunkingResource,
     EmbeddingResource,

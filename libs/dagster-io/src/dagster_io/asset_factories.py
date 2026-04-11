@@ -16,7 +16,6 @@ from dagster import AssetIn, Output, asset
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from dagster_io.extraction_schemas import (
-    AssertionExtractionResult,
     MentionExtraction,
     NERResult,
     PropositionResult,
@@ -62,12 +61,10 @@ def build_mentions(
 ) -> list[Mention]:
     """Convert LLM MentionExtractionResult objects into Mention domain models."""
     mentions: list[Mention] = []
-    for chunk, result in zip(chunks, results):
+    for chunk, result in zip(chunks, results, strict=False):
         ext: MentionExtraction
         for ext in result.mentions:
-            ENTITIES_EXTRACTED.labels(
-                code_location=code_location, entity_type=ext.label, method="llm"
-            ).inc()
+            ENTITIES_EXTRACTED.labels(code_location=code_location, entity_type=ext.label, method="llm").inc()
             mentions.append(
                 Mention(
                     document_id=chunk.document_id,
@@ -103,10 +100,23 @@ def build_assertions(
 ) -> list[Assertion]:
     """Convert LLM AssertionExtractionResult objects into Assertion domain models."""
     # Post-filter: skip low-quality assertions
-    PRONOUN_SUBJECTS = {"he", "she", "they", "it", "we", "you", "i", "someone", "people", "them", "him", "her"}
+    PRONOUN_SUBJECTS = {
+        "he",
+        "she",
+        "they",
+        "it",
+        "we",
+        "you",
+        "i",
+        "someone",
+        "people",
+        "them",
+        "him",
+        "her",
+    }
 
     assertions: list[Assertion] = []
-    for chunk, result in zip(chunks, results):
+    for chunk, result in zip(chunks, results, strict=False):
         for ext in result.assertions:
             # Skip pronoun subjects
             subj_lower = ext.subject.lower().strip()
@@ -201,7 +211,13 @@ def make_ner_asset(
     ) -> Output[list[dict[str, Any]]]:
         chunks = kwargs[input_key]
         with trace_operation(
-            asset_name, tracer, {"code_location": code_location, "layer": layer, "chunk_count": len(chunks)}
+            asset_name,
+            tracer,
+            {
+                "code_location": code_location,
+                "layer": layer,
+                "chunk_count": len(chunks),
+            },
         ):
             logger.info("Starting %s NER extraction for %d chunks", asset_name, len(chunks))
             chain = llm.with_structured_output(NERResult)
@@ -216,21 +232,26 @@ def make_ner_asset(
             )
 
             all_entities: list[dict[str, Any]] = []
-            for chunk, result in zip(chunks, results):
+            for chunk, result in zip(chunks, results, strict=False):
                 for ent in result.entities:
-                    all_entities.append({
-                        **ent.model_dump(),
-                        "source_doc_id": chunk.document_id,
-                        "chunk_id": chunk.chunk_id,
-                    })
-                    ENTITIES_EXTRACTED.labels(
-                        code_location=code_location, entity_type=ent.label, method="llm"
-                    ).inc()
+                    all_entities.append(
+                        {
+                            **ent.model_dump(),
+                            "source_doc_id": chunk.document_id,
+                            "chunk_id": chunk.chunk_id,
+                        }
+                    )
+                    ENTITIES_EXTRACTED.labels(code_location=code_location, entity_type=ent.label, method="llm").inc()
 
-            ASSET_RECORDS_PROCESSED.labels(
-                code_location=code_location, asset_key=asset_name, layer=layer
-            ).inc(len(all_entities))
-            logger.info("%s NER complete: %d entities from %d chunks", asset_name, len(all_entities), len(chunks))
+            ASSET_RECORDS_PROCESSED.labels(code_location=code_location, asset_key=asset_name, layer=layer).inc(
+                len(all_entities)
+            )
+            logger.info(
+                "%s NER complete: %d entities from %d chunks",
+                asset_name,
+                len(all_entities),
+                len(chunks),
+            )
             context.log.info(f"Extracted {len(all_entities)} entities from {len(chunks)} chunks")
             return Output(all_entities, metadata={"entity_count": len(all_entities)})
 
@@ -284,7 +305,13 @@ def make_proposition_asset(
     ) -> Output[list[dict[str, Any]]]:
         chunks = kwargs[input_key]
         with trace_operation(
-            asset_name, tracer, {"code_location": code_location, "layer": layer, "chunk_count": len(chunks)}
+            asset_name,
+            tracer,
+            {
+                "code_location": code_location,
+                "layer": layer,
+                "chunk_count": len(chunks),
+            },
         ):
             logger.info("Starting %s extraction for %d chunks", asset_name, len(chunks))
             chain = llm.with_structured_output(PropositionResult)
@@ -301,20 +328,24 @@ def make_proposition_asset(
             )
 
             all_propositions: list[dict[str, Any]] = []
-            for chunk, result in zip(chunks, results):
+            for chunk, result in zip(chunks, results, strict=False):
                 for prop in result.propositions:
-                    all_propositions.append({
-                        **prop.model_dump(),
-                        "source_doc_id": chunk.document_id,
-                        "chunk_id": chunk.chunk_id,
-                    })
+                    all_propositions.append(
+                        {
+                            **prop.model_dump(),
+                            "source_doc_id": chunk.document_id,
+                            "chunk_id": chunk.chunk_id,
+                        }
+                    )
 
-            ASSET_RECORDS_PROCESSED.labels(
-                code_location=code_location, asset_key=asset_name, layer=layer
-            ).inc(len(all_propositions))
+            ASSET_RECORDS_PROCESSED.labels(code_location=code_location, asset_key=asset_name, layer=layer).inc(
+                len(all_propositions)
+            )
             logger.info(
                 "%s complete: %d propositions from %d chunks",
-                asset_name, len(all_propositions), len(chunks),
+                asset_name,
+                len(all_propositions),
+                len(chunks),
             )
             context.log.info(f"Extracted {len(all_propositions)} propositions from {len(chunks)} chunks")
             return Output(all_propositions, metadata={"proposition_count": len(all_propositions)})

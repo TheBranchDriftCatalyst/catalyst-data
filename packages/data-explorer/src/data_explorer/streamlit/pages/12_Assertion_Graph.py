@@ -15,7 +15,6 @@ from data_explorer.streamlit.config import get_s3_config
 from data_explorer.streamlit.data_client import DataClient
 from data_explorer.streamlit.navigation import (
     ENTITY_COLORS,
-    navigate_to,
     render_breadcrumbs,
 )
 from data_explorer.streamlit.theme import apply_theme, get_plotly_template
@@ -51,17 +50,33 @@ def _get_client() -> DataClient:
 
 @st.cache_data(ttl=300, show_spinner="Loading assertion graph...")
 def _load_assertion_graph(
-    endpoint_url: str, access_key: str, secret_key: str, bucket: str,
+    endpoint_url: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str,
 ) -> list[dict]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.load_assertion_graph()
 
 
 @st.cache_data(ttl=300, show_spinner="Loading canonical entities...")
 def _load_canonical_entities(
-    endpoint_url: str, access_key: str, secret_key: str, bucket: str,
+    endpoint_url: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str,
 ) -> list[dict]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.load_canonical_entities()
 
 
@@ -73,8 +88,7 @@ canonical_entities = _load_canonical_entities(*conn)
 
 if not assertion_graph:
     st.info(
-        "No assertion graph data found. "
-        "Ensure the knowledge-graph pipeline has materialized the assertion_graph asset."
+        "No assertion graph data found. Ensure the knowledge-graph pipeline has materialized the assertion_graph asset."
     )
     st.stop()
 
@@ -87,7 +101,8 @@ for e in canonical_entities:
 
 logger.info(
     "Loaded %d assertion graph records, %d canonical entities",
-    len(assertion_graph), len(canonical_entities),
+    len(assertion_graph),
+    len(canonical_entities),
 )
 
 
@@ -145,7 +160,8 @@ if linkage_filter == "Fully Linked":
     filtered = [a for a in filtered if a.get("subject_canonical_id") and a.get("object_canonical_id")]
 elif linkage_filter == "Partially Linked":
     filtered = [
-        a for a in filtered
+        a
+        for a in filtered
         if (a.get("subject_canonical_id") or a.get("object_canonical_id"))
         and not (a.get("subject_canonical_id") and a.get("object_canonical_id"))
     ]
@@ -183,7 +199,8 @@ filtered = filtered[:max_assertions]
 total = len(assertion_graph)
 fully_linked = sum(1 for a in assertion_graph if a.get("subject_canonical_id") and a.get("object_canonical_id"))
 partially_linked = sum(
-    1 for a in assertion_graph
+    1
+    for a in assertion_graph
     if (a.get("subject_canonical_id") or a.get("object_canonical_id"))
     and not (a.get("subject_canonical_id") and a.get("object_canonical_id"))
 )
@@ -290,9 +307,13 @@ if not filtered:
     st.warning("No assertions match the current filters.")
     st.stop()
 
-tab_table, tab_provenance, tab_distribution = st.tabs([
-    "Assertion Table", "Provenance", "Distribution",
-])
+tab_table, tab_provenance, tab_distribution = st.tabs(
+    [
+        "Assertion Table",
+        "Provenance",
+        "Distribution",
+    ]
+)
 
 with tab_table:
     # Enrich assertions with canonical entity names for display
@@ -312,8 +333,7 @@ with tab_table:
 with tab_provenance:
     st.markdown("**Source Document Provenance**")
     doc_counts: Counter[str] = Counter(
-        a.get("source_document_id", "unknown") for a in filtered
-        if a.get("source_document_id")
+        a.get("source_document_id", "unknown") for a in filtered if a.get("source_document_id")
     )
     if doc_counts:
         doc_df = pd.DataFrame(
@@ -325,10 +345,7 @@ with tab_provenance:
 
     st.divider()
     st.markdown("**Code Location Provenance**")
-    loc_counts: Counter[str] = Counter(
-        a.get("code_location", "unknown") for a in filtered
-        if a.get("code_location")
-    )
+    loc_counts: Counter[str] = Counter(a.get("code_location", "unknown") for a in filtered if a.get("code_location"))
     if loc_counts:
         loc_df = pd.DataFrame(
             [{"Code Location": loc, "Assertions": c} for loc, c in loc_counts.most_common()],
@@ -341,8 +358,7 @@ with tab_distribution:
     with dist_col1:
         st.markdown("**Top Predicates**")
         pred_counts: Counter[str] = Counter(
-            a.get("predicate_canonical") or a.get("predicate", "unknown")
-            for a in filtered
+            a.get("predicate_canonical") or a.get("predicate", "unknown") for a in filtered
         )
         if pred_counts:
             pred_df = pd.DataFrame(
@@ -355,11 +371,13 @@ with tab_distribution:
         negated = sum(1 for a in filtered if a.get("negated"))
         hedged = sum(1 for a in filtered if a.get("hedged"))
         confident = len(filtered) - negated - hedged
-        flag_df = pd.DataFrame([
-            {"Flag": "Confident", "Count": confident},
-            {"Flag": "Negated", "Count": negated},
-            {"Flag": "Hedged", "Count": hedged},
-        ])
+        flag_df = pd.DataFrame(
+            [
+                {"Flag": "Confident", "Count": confident},
+                {"Flag": "Negated", "Count": negated},
+                {"Flag": "Hedged", "Count": hedged},
+            ]
+        )
         colors = ["#00fcd6", "#ef4444", "#fbbf24"]
         fig = go.Figure(
             go.Bar(
@@ -387,10 +405,7 @@ with tab_distribution:
     qualifier_keys = ["time", "location", "condition", "manner", "source_attribution"]
     qual_counts: dict[str, int] = {}
     for qk in qualifier_keys:
-        qual_counts[qk] = sum(
-            1 for a in filtered
-            if (a.get("qualifiers") or {}).get(qk)
-        )
+        qual_counts[qk] = sum(1 for a in filtered if (a.get("qualifiers") or {}).get(qk))
     qual_df = pd.DataFrame(
         [{"Qualifier": k, "Count": v} for k, v in qual_counts.items()],
     )

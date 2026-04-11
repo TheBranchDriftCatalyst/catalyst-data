@@ -68,8 +68,7 @@ def validate_spatial(
                     ValidationErrorItem(
                         path=f"{path}.h3_index",
                         code=IssueCode.PRECISION_EXCEEDED.value,
-                        message=f"H3 resolution {res} exceeds "
-                        f"max_supported_precision {max_prec}",
+                        message=f"H3 resolution {res} exceeds max_supported_precision {max_prec}",
                     )
                 )
 
@@ -87,9 +86,7 @@ def validate_spatial(
         # Confidence bounds
         confidence = cand.get("confidence")
         if confidence is not None and (
-            not isinstance(confidence, (int, float))
-            or confidence < 0.0
-            or confidence > 1.0
+            not isinstance(confidence, (int, float)) or confidence < 0.0 or confidence > 1.0
         ):
             item_errors.append(
                 ValidationErrorItem(

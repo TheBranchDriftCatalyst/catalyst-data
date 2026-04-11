@@ -54,9 +54,23 @@ def extract_audio_to_wav(audio_path: str) -> str:
     """Extract audio from any media container to a temp WAV file using ffmpeg."""
     wav_path = tempfile.mktemp(suffix=".wav")
     subprocess.run(
-        ["ffmpeg", "-y", "-i", audio_path, "-vn",
-         "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav_path],
-        capture_output=True, check=True, timeout=300,
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            audio_path,
+            "-vn",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-c:a",
+            "pcm_s16le",
+            wav_path,
+        ],
+        capture_output=True,
+        check=True,
+        timeout=300,
     )
     return wav_path
 
@@ -66,6 +80,7 @@ def extract_audio_to_wav(audio_path: str) -> str:
 
 def _load_faster_whisper(config: MediaIngestConfig):
     from faster_whisper import WhisperModel
+
     return WhisperModel(
         config.whisper_model,
         device=config.whisper_device,
@@ -81,7 +96,12 @@ def _transcribe_faster_whisper(model, audio_path: str) -> dict:
         seg = {"start": s.start, "end": s.end, "text": s.text.strip()}
         if s.words:
             seg["words"] = [
-                {"start": w.start, "end": w.end, "word": w.word, "probability": w.probability}
+                {
+                    "start": w.start,
+                    "end": w.end,
+                    "word": w.word,
+                    "probability": w.probability,
+                }
                 for w in s.words
             ]
         segments_list.append(seg)
@@ -98,12 +118,14 @@ def _transcribe_faster_whisper(model, audio_path: str) -> dict:
 
 def _load_openvino(config: MediaIngestConfig):
     from huggingface_hub import snapshot_download
+
     model_dir = os.path.join(WHISPER_MODEL_CACHE, config.openvino_model_id.replace("/", "--"))
     if not os.path.isdir(model_dir):
         logger.info("Downloading OpenVINO model %s to %s", config.openvino_model_id, model_dir)
         snapshot_download(config.openvino_model_id, local_dir=model_dir)
 
     import openvino_genai
+
     device = config.openvino_device
     try:
         return openvino_genai.WhisperPipeline(model_dir, device)
@@ -135,17 +157,21 @@ def _transcribe_openvino(pipe, audio_path: str) -> dict:
     segments_list = []
     if hasattr(result, "chunks") and result.chunks:
         for chunk in result.chunks:
-            segments_list.append({
-                "start": chunk.start_ts,
-                "end": chunk.end_ts,
-                "text": chunk.text.strip(),
-            })
+            segments_list.append(
+                {
+                    "start": chunk.start_ts,
+                    "end": chunk.end_ts,
+                    "text": chunk.text.strip(),
+                }
+            )
     else:
-        segments_list.append({
-            "start": 0.0,
-            "end": duration_s,
-            "text": str(result).strip(),
-        })
+        segments_list.append(
+            {
+                "start": 0.0,
+                "end": duration_s,
+                "text": str(result).strip(),
+            }
+        )
 
     language = "en"
     language_probability = 0.0
@@ -181,14 +207,28 @@ def media_transcriptions(
     media_documents: list[MediaDocument],
 ) -> Output[dict[str, Any]]:
     partition_key = context.partition_key
-    with trace_operation("media_transcriptions", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key}):
+    with trace_operation(
+        "media_transcriptions",
+        tracer,
+        {
+            "code_location": "media_ingest",
+            "layer": "gold",
+            "partition_key": partition_key,
+        },
+    ):
         doc = next((d for d in media_documents if d.id == partition_key), None)
         if doc is None:
             raise ValueError(f"Document '{partition_key}' not found in media_documents")
 
         if not doc.metadata.get("has_audio"):
             return Output(
-                {"document_id": doc.id, "title": doc.title, "text": "", "language": "unknown", "error": "no_audio"},
+                {
+                    "document_id": doc.id,
+                    "title": doc.title,
+                    "text": "",
+                    "language": "unknown",
+                    "error": "no_audio",
+                },
                 metadata={"skipped": True, "reason": "no_audio"},
             )
 
@@ -245,9 +285,17 @@ def media_transcriptions(
         except Exception as e:
             context.log.warning(f"Transcription failed for {doc.title}: {e}")
             logger.error("Transcription failed file=%s error=%s", doc.title, str(e))
-            output = {"document_id": doc.id, "title": doc.title, "text": "", "language": "unknown", "error": str(e)}
+            output = {
+                "document_id": doc.id,
+                "title": doc.title,
+                "text": "",
+                "language": "unknown",
+                "error": str(e),
+            }
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_transcriptions", layer="gold").inc(1)
+        ASSET_RECORDS_PROCESSED.labels(
+            code_location="media_ingest", asset_key="media_transcriptions", layer="gold"
+        ).inc(1)
 
         return Output(
             output,

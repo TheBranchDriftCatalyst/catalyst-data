@@ -6,7 +6,7 @@ import json
 import pickle
 import tempfile
 import typing
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +74,7 @@ def serialize(data: Any, type_hint: type | None) -> tuple[bytes, str, dict]:
     metadata = {
         "format": fmt,
         "type": str(type_hint) if type_hint else "unknown",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
     if fmt == "jsonl":
@@ -120,7 +120,7 @@ def serialize_to_file(data: Any, type_hint: type | None) -> tuple[str, str, dict
     metadata = {
         "format": fmt,
         "type": str(type_hint) if type_hint else "unknown",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
     if fmt != "jsonl":
@@ -129,6 +129,7 @@ def serialize_to_file(data: Any, type_hint: type | None) -> tuple[str, str, dict
     fd, tmp_path = tempfile.mkstemp(suffix=".jsonl")
     try:
         import os
+
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             for item in data:
                 if isinstance(item, BaseModel):

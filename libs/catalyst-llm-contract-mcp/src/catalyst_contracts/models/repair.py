@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class RepairAction(str, Enum):
+class RepairAction(StrEnum):
     REPLACE = "replace"
     DELETE = "delete"
     INSERT = "insert"
@@ -21,11 +21,17 @@ class RepairInstruction(BaseModel):
     current_value: Any = Field(default=None, description="The current value of the field")
     suggested_value: Any = Field(default=None, description="The suggested replacement value")
     reason: str = Field(description="Human-readable explanation of why this repair is needed")
-    auto_applicable: bool = Field(default=False, description="Whether this repair can be applied automatically without LLM re-generation")
+    auto_applicable: bool = Field(
+        default=False,
+        description="Whether this repair can be applied automatically without LLM re-generation",
+    )
 
 
 class RepairPlan(BaseModel):
     """A plan for repairing validation errors in extraction output."""
 
     instructions: list[RepairInstruction] = Field(default=[], description="Ordered list of repair instructions")
-    preserves_valid_fields: bool = Field(default=True, description="Whether applying this plan preserves fields that already passed validation")
+    preserves_valid_fields: bool = Field(
+        default=True,
+        description="Whether applying this plan preserves fields that already passed validation",
+    )

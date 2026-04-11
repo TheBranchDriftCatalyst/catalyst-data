@@ -30,17 +30,11 @@ def _is_transient(exc: Exception) -> bool:
     if isinstance(exc, TRANSIENT_ERRORS):
         return True
     exc_str = str(exc).lower()
-    if "rate limit" in exc_str or "429" in exc_str:
-        return True
-    return False
+    return bool("rate limit" in exc_str or "429" in exc_str)
 
 
-LLM_RETRY = RetryPolicy(
-    max_attempts=3, initial_interval=1.0, backoff_factor=2.0, retry_on=_is_transient
-)
-MCP_RETRY = RetryPolicy(
-    max_attempts=2, initial_interval=0.5, retry_on=_is_transient
-)
+LLM_RETRY = RetryPolicy(max_attempts=3, initial_interval=1.0, backoff_factor=2.0, retry_on=_is_transient)
+MCP_RETRY = RetryPolicy(max_attempts=2, initial_interval=0.5, retry_on=_is_transient)
 
 
 def _route_after_mention_validation(state: ExtractionState) -> str:
@@ -117,7 +111,11 @@ def build_extraction_graph(
     graph.add_node("validate_mentions", ValidateMentions(mcp_client), retry_policy=MCP_RETRY)
     graph.add_node("repair_mentions", RepairMentions(llm_client), retry_policy=LLM_RETRY)
     graph.add_node("extract_propositions", ExtractPropositions(llm_client), retry_policy=LLM_RETRY)
-    graph.add_node("validate_propositions", ValidatePropositions(mcp_client), retry_policy=MCP_RETRY)
+    graph.add_node(
+        "validate_propositions",
+        ValidatePropositions(mcp_client),
+        retry_policy=MCP_RETRY,
+    )
     graph.add_node("repair_propositions", RepairPropositions(llm_client), retry_policy=LLM_RETRY)
     graph.add_node("persist_artifacts", PersistArtifacts(repository))
     graph.add_node("failure_handler", _failure_handler)

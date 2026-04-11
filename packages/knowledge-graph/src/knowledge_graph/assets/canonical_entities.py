@@ -6,6 +6,7 @@ Dual-writes to PostgreSQL + Neo4j.
 """
 
 from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, Output, asset
+
 from dagster_io import (
     CanonicalEntity,
     CrossSourceAligner,
@@ -47,6 +48,7 @@ def _flatten_partition_fanin(value, model_cls=None) -> list:
     if model_cls is not None:
         flat = [model_cls(**item) if isinstance(item, dict) else item for item in flat]
     return flat
+
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
@@ -97,8 +99,23 @@ def canonical_entities(
     media_entity_candidates = _flatten_partition_fanin(media_entity_candidates, EntityCandidate)
     congress_entity_candidates = congress_entity_candidates or []
     leak_entity_candidates = leak_entity_candidates or []
-    with trace_operation("canonical_entities", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "congress_candidate_count": len(congress_entity_candidates), "leak_candidate_count": len(leak_entity_candidates), "media_candidate_count": len(media_entity_candidates)}):
-        logger.info("Starting canonical_entities resolution: %d congress + %d leak + %d media candidates", len(congress_entity_candidates), len(leak_entity_candidates), len(media_entity_candidates))
+    with trace_operation(
+        "canonical_entities",
+        tracer,
+        {
+            "code_location": "knowledge_graph",
+            "layer": "platinum",
+            "congress_candidate_count": len(congress_entity_candidates),
+            "leak_candidate_count": len(leak_entity_candidates),
+            "media_candidate_count": len(media_entity_candidates),
+        },
+    ):
+        logger.info(
+            "Starting canonical_entities resolution: %d congress + %d leak + %d media candidates",
+            len(congress_entity_candidates),
+            len(leak_entity_candidates),
+            len(media_entity_candidates),
+        )
         context.log.info(
             f"Resolving canonical entities from {len(congress_entity_candidates)} congress "
             f"+ {len(leak_entity_candidates)} leak "
@@ -162,8 +179,16 @@ def canonical_entities(
             )
             canonical_list.append(canonical)
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="knowledge_graph", asset_key="canonical_entities", layer="platinum").inc(len(canonical_list))
-        logger.info("canonical_entities complete: %d canonical entities from %d candidates", len(canonical_list), len(all_candidates))
+        ASSET_RECORDS_PROCESSED.labels(
+            code_location="knowledge_graph",
+            asset_key="canonical_entities",
+            layer="platinum",
+        ).inc(len(canonical_list))
+        logger.info(
+            "canonical_entities complete: %d canonical entities from %d candidates",
+            len(canonical_list),
+            len(all_candidates),
+        )
         context.log.info(f"Produced {len(canonical_list)} canonical entities")
 
         # Dual-write to PostgreSQL + Neo4j

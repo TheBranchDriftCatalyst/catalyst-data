@@ -1,6 +1,10 @@
 """Unit tests for open-leaks bronze extraction parsers."""
 
-from open_leaks.assets.extraction import _extract_subject, _extract_tags, _parse_cable_block
+from open_leaks.assets.extraction import (
+    _extract_subject,
+    _extract_tags,
+    _parse_cable_block,
+)
 from open_leaks.config import OpenLeaksConfig
 
 

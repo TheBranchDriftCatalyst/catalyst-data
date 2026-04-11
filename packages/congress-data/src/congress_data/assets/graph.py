@@ -34,7 +34,15 @@ def congress_graph(
     context: AssetExecutionContext,
     congress_entities: list[dict[str, Any]],
 ) -> Output[dict[str, Any]]:
-    with trace_operation("congress_graph", tracer, {"code_location": "congress_data", "layer": "gold", "entity_count": len(congress_entities)}):
+    with trace_operation(
+        "congress_graph",
+        tracer,
+        {
+            "code_location": "congress_data",
+            "layer": "gold",
+            "entity_count": len(congress_entities),
+        },
+    ):
         raise NotImplementedError(
             "Graph loading requires Neo4j — configure via NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD env vars"
         )

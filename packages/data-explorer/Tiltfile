@@ -1,0 +1,68 @@
+# Data Explorer Tiltfile - Local dev mode
+# Runs Streamlit natively on your Mac with port-forwards to cluster services
+#
+# Usage: Uncomment the include() in the root Tiltfile to activate
+#
+# Prerequisites:
+#   - pip install -e packages/data-explorer   (or poetry install)
+#   - pip install -e libs/dagster-io
+#   - Root Tiltfile running (provides port-forwards to cluster DBs)
+#   - talos-homelab Tiltfile running (provides litellm port-forward on :4000)
+#
+# What this gives you:
+#   - Streamlit running natively (instant reload, no container builds)
+#   - Secrets auto-extracted from cluster into .env.cluster
+#   - MinIO port-forwarded to localhost:9000
+#   - LLM at localhost:4000 (from talos-homelab Tiltfile)
+#   - Postgres-knowledge at localhost:5433, Neo4j at localhost:7474/7687 (from root Tiltfile)
+#   - NFS media volumes NOT available locally (metube/tubesync paths set empty)
+
+# Port-forward MinIO S3 API (minio namespace, svc/minio port 80 → localhost:9000)
+local_resource(
+    'minio-s3',
+    serve_cmd='kubectl port-forward -n minio svc/minio 9000:80',
+    labels=['3-data-explorer'],
+)
+
+# Extract secrets from cluster into .env.cluster for local process.
+# Overrides in-cluster URLs to localhost since we're port-forwarding everything.
+_secret_extract = local(
+    '''kubectl get secret dagster-s3-credentials -n catalyst-data -o json 2>/dev/null | \
+       python3 -c "
+import sys, json, base64
+try:
+    s = json.load(sys.stdin)['data']
+    for k, v in s.items():
+        print(f'{k}={base64.b64decode(v).decode()}')
+except: pass
+" > .env.cluster 2>/dev/null;
+    kubectl get secret llm-credentials -n catalyst-data -o json 2>/dev/null | \
+       python3 -c "
+import sys, json, base64
+try:
+    s = json.load(sys.stdin)['data']
+    for k, v in s.items():
+        print(f'{k}={base64.b64decode(v).decode()}')
+except: pass
+" >> .env.cluster 2>/dev/null;
+    echo "DAGSTER_S3_ENDPOINT_URL=http://localhost:9000" >> .env.cluster;
+    echo "LLM_BASE_URL=http://localhost:4000/v1" >> .env.cluster;
+    echo "EMBEDDING_BASE_URL=http://localhost:4000/v1" >> .env.cluster;
+    echo "PROMPT_REGISTRY_DIR=prompts" >> .env.cluster;
+    echo "METUBE_PATH=" >> .env.cluster;
+    echo "TUBESYNC_PATH=" >> .env.cluster;
+    cat .env.cluster''',
+    quiet=True,
+)
+
+# Run Streamlit locally — auto-reloads on file changes
+local_resource(
+    'data-explorer',
+    serve_cmd='cd packages/data-explorer && env $(cat .env.cluster 2>/dev/null | xargs) streamlit run src/data_explorer/streamlit/app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true',
+    deps=[
+        'packages/data-explorer/src/',
+        'packages/data-explorer/.streamlit/',
+    ],
+    resource_deps=['minio-s3'],
+    labels=['3-data-explorer'],
+)

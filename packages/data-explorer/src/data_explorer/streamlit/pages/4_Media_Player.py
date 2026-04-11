@@ -7,21 +7,26 @@ from pathlib import Path
 
 import streamlit as st
 
+from data_explorer.streamlit.components.document_renderer import (
+    render_document,
+    render_entity_legend,
+)
+from data_explorer.streamlit.components.entity_chip import render_entity_chip_list
 from data_explorer.streamlit.config import get_media_config, get_s3_config
 from data_explorer.streamlit.data_client import DataClient
-from data_explorer.streamlit.theme import apply_theme
 from data_explorer.streamlit.navigation import navigate_to, render_breadcrumbs
-from data_explorer.streamlit.components.entity_chip import render_entity_chip_list
-from data_explorer.streamlit.components.document_renderer import render_document, render_entity_legend
+from data_explorer.streamlit.theme import apply_theme
 
 st.set_page_config(page_title="Media Player", page_icon=":material/play_circle:", layout="wide")
 apply_theme()
 
 # --- Breadcrumbs ---
-render_breadcrumbs([
-    ("Home", "app.py"),
-    ("Media Player", None),
-])
+render_breadcrumbs(
+    [
+        ("Home", "app.py"),
+        ("Media Player", None),
+    ]
+)
 
 st.header("Media Player")
 
@@ -124,10 +129,7 @@ def _aggregate_entities(entities: list[dict]) -> list[dict]:
         if text:
             counter[(text, label)] += 1
             label_map[text] = label
-    return [
-        {"text": text, "label": label, "count": count}
-        for (text, label), count in counter.most_common()
-    ]
+    return [{"text": text, "label": label, "count": count} for (text, label), count in counter.most_common()]
 
 
 media_cfg = get_media_config()
@@ -161,7 +163,7 @@ with col_player:
 with col_info:
     # File info
     stat = selected_file.stat()
-    st.metric("Size", f"{stat.st_size / (1024*1024):.1f} MB")
+    st.metric("Size", f"{stat.st_size / (1024 * 1024):.1f} MB")
     st.caption(f"Path: `{selected_file}`")
 
     # S3 metadata (if available)
@@ -186,7 +188,11 @@ transcript_entities: list[dict] = []
 
 if transcriptions:
     fname = selected_file.stem
-    matching_tx = [t for t in transcriptions if fname.lower() in str(t.get("source", "")).lower() or fname.lower() in str(t.get("filename", "")).lower()]
+    matching_tx = [
+        t
+        for t in transcriptions
+        if fname.lower() in str(t.get("source", "")).lower() or fname.lower() in str(t.get("filename", "")).lower()
+    ]
     if matching_tx:
         st.subheader("Transcript")
         tx = matching_tx[0]

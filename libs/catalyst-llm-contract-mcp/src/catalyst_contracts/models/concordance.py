@@ -19,4 +19,7 @@ class ConcordanceCandidateSet(BaseModel):
 
     mention_id: str = Field(description="Composite ID of the mention being resolved (e.g., 'ORG:0:9')")
     candidates: list[ConcordanceCandidateScore] = Field(description="Ranked list of candidate entity matches")
-    ambiguity_flag: bool = Field(default=False, description="Whether multiple candidates have similar scores, indicating ambiguity")
+    ambiguity_flag: bool = Field(
+        default=False,
+        description="Whether multiple candidates have similar scores, indicating ambiguity",
+    )

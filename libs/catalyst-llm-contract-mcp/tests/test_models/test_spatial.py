@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from catalyst_contracts.models.spatial import SpatialGroundingCandidate
+from pydantic import ValidationError
 
 
 class TestSpatialGroundingCandidate:
@@ -21,23 +20,15 @@ class TestSpatialGroundingCandidate:
 
     def test_lat_bounds(self):
         with pytest.raises(ValidationError):
-            SpatialGroundingCandidate(
-                mention_id="m1", lat=91.0, lon=0.0, confidence=0.5
-            )
+            SpatialGroundingCandidate(mention_id="m1", lat=91.0, lon=0.0, confidence=0.5)
         with pytest.raises(ValidationError):
-            SpatialGroundingCandidate(
-                mention_id="m1", lat=-91.0, lon=0.0, confidence=0.5
-            )
+            SpatialGroundingCandidate(mention_id="m1", lat=-91.0, lon=0.0, confidence=0.5)
 
     def test_lon_bounds(self):
         with pytest.raises(ValidationError):
-            SpatialGroundingCandidate(
-                mention_id="m1", lat=0.0, lon=181.0, confidence=0.5
-            )
+            SpatialGroundingCandidate(mention_id="m1", lat=0.0, lon=181.0, confidence=0.5)
         with pytest.raises(ValidationError):
-            SpatialGroundingCandidate(
-                mention_id="m1", lat=0.0, lon=-181.0, confidence=0.5
-            )
+            SpatialGroundingCandidate(mention_id="m1", lat=0.0, lon=-181.0, confidence=0.5)
 
     def test_with_optional_fields(self):
         c = SpatialGroundingCandidate(

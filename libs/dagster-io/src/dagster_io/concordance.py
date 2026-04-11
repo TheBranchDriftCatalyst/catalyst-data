@@ -66,7 +66,7 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     if len(a) != len(b) or not a:
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0 or norm_b == 0:
@@ -123,14 +123,14 @@ class ConcordanceEngine:
             uf.find(m.mention_id)
             by_type[m.mention_type].append(m)
 
-        for mtype, typed_mentions in by_type.items():
+        for _mtype, typed_mentions in by_type.items():
             # Build lookup structures
             normed: dict[str, list[Mention]] = defaultdict(list)
             for m in typed_mentions:
                 normed[m.text.lower().strip()].append(m)
 
             # Pass 1: Exact case-insensitive grouping
-            for key, group in normed.items():
+            for _key, group in normed.items():
                 if len(group) > 1:
                     first = group[0].mention_id
                     for m in group[1:]:
@@ -142,7 +142,7 @@ class ConcordanceEngine:
             # Pass 2: Substring containment
             for i, a in enumerate(surfaces):
                 tokens_a = _tokenize(a)
-                for b in surfaces[i + 1:]:
+                for b in surfaces[i + 1 :]:
                     tokens_b = _tokenize(b)
                     shared = len(tokens_a & tokens_b)
                     if shared < self.min_shared_tokens:
@@ -155,7 +155,7 @@ class ConcordanceEngine:
             # Pass 3: Jaccard overlap
             for i, a in enumerate(surfaces):
                 tokens_a = _tokenize(a)
-                for b in surfaces[i + 1:]:
+                for b in surfaces[i + 1 :]:
                     tokens_b = _tokenize(b)
                     shared = len(tokens_a & tokens_b)
                     if shared < self.min_shared_tokens:
@@ -169,7 +169,7 @@ class ConcordanceEngine:
                     emb_a = embeddings.get(a)
                     if emb_a is None:
                         continue
-                    for b in surfaces[i + 1:]:
+                    for b in surfaces[i + 1 :]:
                         emb_b = embeddings.get(b)
                         if emb_b is None:
                             continue
@@ -221,7 +221,12 @@ class ConcordanceEngine:
             )
             candidates.append(candidate)
 
-        logger.info("Resolved %d mentions into %d candidates for code_location=%s", len(mentions), len(candidates), code_location)
+        logger.info(
+            "Resolved %d mentions into %d candidates for code_location=%s",
+            len(mentions),
+            len(candidates),
+            code_location,
+        )
         return candidates
 
 
@@ -261,10 +266,14 @@ class CrossSourceAligner:
         edges: list[AlignmentEdge] = []
         locations = list(sources.keys())
         total_candidates = sum(len(v) for v in sources.values())
-        logger.info("Cross-source alignment starting: %d locations, %d total candidates", len(locations), total_candidates)
+        logger.info(
+            "Cross-source alignment starting: %d locations, %d total candidates",
+            len(locations),
+            total_candidates,
+        )
 
         for i, loc_a in enumerate(locations):
-            for loc_b in locations[i + 1:]:
+            for loc_b in locations[i + 1 :]:
                 for cand_a in sources[loc_a]:
                     for cand_b in sources[loc_b]:
                         # Only compare same entity type
@@ -278,16 +287,10 @@ class CrossSourceAligner:
         logger.info("Cross-source alignment complete: %d edges produced", len(edges))
         return edges
 
-    def _score_pair(
-        self, a: EntityCandidate, b: EntityCandidate
-    ) -> AlignmentEdge | None:
+    def _score_pair(self, a: EntityCandidate, b: EntityCandidate) -> AlignmentEdge | None:
         signals: list[tuple[float, str]] = []
-        all_names_a = {a.canonical_name.lower().strip()} | {
-            alias.lower().strip() for alias in a.aliases
-        }
-        all_names_b = {b.canonical_name.lower().strip()} | {
-            alias.lower().strip() for alias in b.aliases
-        }
+        all_names_a = {a.canonical_name.lower().strip()} | {alias.lower().strip() for alias in a.aliases}
+        all_names_b = {b.canonical_name.lower().strip()} | {alias.lower().strip() for alias in b.aliases}
 
         # Signal 1: Exact name match (any name from either side)
         if all_names_a & all_names_b:

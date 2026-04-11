@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections import Counter, defaultdict
 
@@ -137,10 +138,8 @@ try:
     mentions_raw = client.load_mentions(source)
 except Exception:
     logger.debug("load_mentions not available, falling back to load_entities")
-    try:
+    with contextlib.suppress(Exception):
         mentions_raw = client.load_entities(source, limit=5000)
-    except Exception:
-        pass
 
 if not assertions_raw:
     st.info("No assertions found for this source. Try selecting a different source.")
@@ -306,7 +305,7 @@ for name in sorted(node_names):
     )
 
 edges: list[Edge] = []
-for idx, p in enumerate(assertions):
+for _idx, p in enumerate(assertions):
     conf = p.get("confidence")
     width = 1.0
     if conf is not None:
@@ -360,13 +359,11 @@ agraph(nodes=nodes, edges=edges, config=config)
 # Detail tabs below the graph
 # ---------------------------------------------------------------------------
 
-tab_assertions, tab_predicates, tab_summary = st.tabs(
-    ["Assertions Table", "Top Predicates", "Entity Summary"]
-)
+tab_assertions, tab_predicates, tab_summary = st.tabs(["Assertions Table", "Top Predicates", "Entity Summary"])
 
 # --- Assertions Table ---
 with tab_assertions:
-    for i, a in enumerate(assertions[:100]):
+    for _i, a in enumerate(assertions[:100]):
         subj = _subj(a)
         pred = _pred(a)
         obj = _obj(a)
@@ -414,10 +411,7 @@ with tab_assertions:
                     st.markdown(qi)
 
             # Raw assertion data
-            detail_cols = {
-                k: v for k, v in a.items()
-                if k not in ("qualifiers",) and v is not None
-            }
+            detail_cols = {k: v for k, v in a.items() if k not in ("qualifiers",) and v is not None}
             st.json(detail_cols)
 
 # --- Top Predicates ---
@@ -450,8 +444,5 @@ with tab_summary:
         st.subheader(f"{label} ({len(entities_for_label)})")
 
         # Build chip list sorted by count descending
-        chip_data = [
-            {"text": text, "label": label, "count": count}
-            for text, count in entities_for_label.most_common()
-        ]
+        chip_data = [{"text": text, "label": label, "count": count} for text, count in entities_for_label.most_common()]
         render_entity_chip_list(chip_data, max_display=20, columns=5)

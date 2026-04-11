@@ -11,6 +11,7 @@ from dagster_io.chunking import ChunkingResource, TextChunk, chunk_document, chu
 from dagster_io.concordance import ConcordanceEngine, CrossSourceAligner
 from dagster_io.document import Document
 from dagster_io.embedding_config import EmbeddingConfig, EmbeddingConfigResource
+from dagster_io.executor import make_k8s_executor
 from dagster_io.extraction_schemas import (
     AssertionExtractionResult,
     AssertionQualifiers,
@@ -19,16 +20,15 @@ from dagster_io.extraction_schemas import (
     normalize_predicate,
     parse_mention_type,
 )
-from dagster_io.executor import make_k8s_executor
 from dagster_io.io_manager import MinioIOManager, OptionalMinioIOManager
 from dagster_io.llm import EmbeddingResource, LLMResource
 from dagster_io.logging import configure_logging, get_logger
 from dagster_io.manifest import AssetManifest, MaterializationRecord
 from dagster_io.metrics import (
     ACTIVE_ASSET_MATERIALIZATIONS,
+    ASSERTIONS_CREATED,
     ASSET_MATERIALIZATION_DURATION,
     ASSET_RECORDS_PROCESSED,
-    ASSERTIONS_CREATED,
     CHUNK_PROCESSING_DURATION,
     CHUNKS_CREATED,
     DIARIZATION_DURATION,

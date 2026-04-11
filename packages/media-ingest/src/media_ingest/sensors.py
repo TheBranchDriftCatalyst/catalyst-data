@@ -20,7 +20,6 @@ from dagster import (
 
 from dagster_io.logging import get_logger
 from dagster_io.s3_client import S3Client
-from media_ingest.partitions import media_partitions
 
 logger = get_logger(__name__)
 
@@ -99,9 +98,7 @@ def media_document_sensor(context: SensorEvaluationContext):
         return
 
     # Get currently registered partitions
-    existing_partitions = set(
-        context.instance.get_dynamic_partitions("media_document")
-    )
+    existing_partitions = set(context.instance.get_dynamic_partitions("media_document"))
     all_doc_ids_set = set(all_doc_ids)
 
     # Garbage-collect partitions whose source document no longer exists in S3.
@@ -111,16 +108,12 @@ def media_document_sensor(context: SensorEvaluationContext):
     for stale_id in stale_ids:
         context.instance.delete_dynamic_partition("media_document", stale_id)
     if stale_ids:
-        logger.info(
-            "media_document_sensor: removed %d stale partitions", len(stale_ids)
-        )
+        logger.info("media_document_sensor: removed %d stale partitions", len(stale_ids))
 
     new_ids = [doc_id for doc_id in all_doc_ids if doc_id not in existing_partitions]
 
     if not new_ids:
-        yield SkipReason(
-            f"All {len(all_doc_ids)} documents already have partitions registered"
-        )
+        yield SkipReason(f"All {len(all_doc_ids)} documents already have partitions registered")
         return
 
     # Cap the batch so a flood of new documents doesn't produce thousands of
@@ -131,9 +124,10 @@ def media_document_sensor(context: SensorEvaluationContext):
     # the rest will be registered on subsequent ticks as they become the new batch.
     context.instance.add_dynamic_partitions("media_document", batch)
     logger.info(
-        "media_document_sensor: registered %d new partitions this tick "
-        "(pending=%d, total_docs=%d)",
-        len(batch), len(new_ids) - len(batch), len(all_doc_ids),
+        "media_document_sensor: registered %d new partitions this tick (pending=%d, total_docs=%d)",
+        len(batch),
+        len(new_ids) - len(batch),
+        len(all_doc_ids),
     )
 
     for doc_id in batch:
@@ -143,6 +137,4 @@ def media_document_sensor(context: SensorEvaluationContext):
             partition_key=doc_id,
         )
 
-    logger.info(
-        "media_document_sensor: yielded %d RunRequests for new documents", len(batch)
-    )
+    logger.info("media_document_sensor: yielded %d RunRequests for new documents", len(batch))

@@ -9,12 +9,12 @@ from collections import defaultdict
 from typing import Any
 
 from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, Output, asset
-from dagster_io import Assertion, CanonicalEntity
-from knowledge_graph.assets.canonical_entities import _flatten_partition_fanin
 
+from dagster_io import Assertion, CanonicalEntity
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
+from knowledge_graph.assets.canonical_entities import _flatten_partition_fanin
 from knowledge_graph.resources import GraphDBResource
 
 logger = get_logger(__name__)
@@ -85,12 +85,24 @@ def assertion_graph(
     media_assertions = _flatten_partition_fanin(media_assertions, Assertion)
     congress_assertions = congress_assertions or []
     leak_assertions = leak_assertions or []
-    with trace_operation("assertion_graph", tracer, {"code_location": "knowledge_graph", "layer": "platinum", "record_count": len(congress_assertions) + len(leak_assertions) + len(media_assertions), "canonical_entity_count": len(canonical_entities)}):
+    with trace_operation(
+        "assertion_graph",
+        tracer,
+        {
+            "code_location": "knowledge_graph",
+            "layer": "platinum",
+            "record_count": len(congress_assertions) + len(leak_assertions) + len(media_assertions),
+            "canonical_entity_count": len(canonical_entities),
+        },
+    ):
         all_assertions = congress_assertions + leak_assertions + media_assertions
-        logger.info("Starting assertion_graph: %d assertions against %d canonical entities", len(all_assertions), len(canonical_entities))
+        logger.info(
+            "Starting assertion_graph: %d assertions against %d canonical entities",
+            len(all_assertions),
+            len(canonical_entities),
+        )
         context.log.info(
-            f"Processing {len(all_assertions)} assertions against "
-            f"{len(canonical_entities)} canonical entities"
+            f"Processing {len(all_assertions)} assertions against {len(canonical_entities)} canonical entities"
         )
 
         # Build name index for entity resolution
@@ -122,10 +134,14 @@ def assertion_graph(
             else:
                 unlinked_count += 1
 
-        logger.info("Assertion linking: fully=%d partial=%d unlinked=%d", stats["fully_linked"], stats["partially_linked"], unlinked_count)
+        logger.info(
+            "Assertion linking: fully=%d partial=%d unlinked=%d",
+            stats["fully_linked"],
+            stats["partially_linked"],
+            unlinked_count,
+        )
         context.log.info(
-            f"Linked: {stats['fully_linked']} full, {stats['partially_linked']} partial, "
-            f"{unlinked_count} unlinked"
+            f"Linked: {stats['fully_linked']} full, {stats['partially_linked']} partial, {unlinked_count} unlinked"
         )
 
         # Write to PostgreSQL
@@ -137,8 +153,17 @@ def assertion_graph(
         neo4j_count = graph_db.sync_assertions_to_neo4j(fully_linked)
         context.log.info(f"Wrote {neo4j_count} assertion edges to Neo4j")
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="knowledge_graph", asset_key="assertion_graph", layer="platinum").inc(len(all_assertions))
-        logger.info("assertion_graph complete: %d assertions, pg=%d, neo4j=%d", len(all_assertions), pg_count, neo4j_count)
+        ASSET_RECORDS_PROCESSED.labels(
+            code_location="knowledge_graph",
+            asset_key="assertion_graph",
+            layer="platinum",
+        ).inc(len(all_assertions))
+        logger.info(
+            "assertion_graph complete: %d assertions, pg=%d, neo4j=%d",
+            len(all_assertions),
+            pg_count,
+            neo4j_count,
+        )
         result = {
             "total_assertions": len(all_assertions),
             "fully_linked": stats["fully_linked"],

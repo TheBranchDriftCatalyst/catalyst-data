@@ -1,9 +1,9 @@
 import logging
 import os
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from typing import Callable
 
 from prometheus_client import (
     CollectorRegistry,
@@ -225,6 +225,7 @@ def track_asset_materialization(code_location: str, layer: str):
         def my_asset(context):
             ...
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -243,7 +244,9 @@ def track_asset_materialization(code_location: str, layer: str):
                     asset_key=asset_key,
                     layer=layer,
                 ).observe(duration)
+
         return wrapper
+
     return decorator
 
 
@@ -258,13 +261,14 @@ def push_metrics(job_name: str = "dagster_step") -> None:
     or SIGTERM handling.
     """
     try:
-        from prometheus_client.openmetrics.exposition import generate_latest
-        from prometheus_client.parser import text_string_to_metric_families
-
-        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+            OTLPMetricExporter,
+        )
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.metrics.export import InMemoryMetricReader
         from opentelemetry.sdk.resources import Resource
+        from prometheus_client.openmetrics.exposition import generate_latest
+        from prometheus_client.parser import text_string_to_metric_families
 
         endpoint = os.getenv(
             "OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -273,11 +277,13 @@ def push_metrics(job_name: str = "dagster_step") -> None:
 
         metrics_text = generate_latest(REGISTRY).decode("utf-8")
 
-        resource = Resource.create({
-            "service.name": os.getenv("OTEL_SERVICE_NAME", "catalyst-data"),
-            "service.namespace": "catalyst-data",
-            "job": job_name,
-        })
+        resource = Resource.create(
+            {
+                "service.name": os.getenv("OTEL_SERVICE_NAME", "catalyst-data"),
+                "service.namespace": "catalyst-data",
+                "job": job_name,
+            }
+        )
 
         reader = InMemoryMetricReader()
         provider = MeterProvider(resource=resource, metric_readers=[reader])
@@ -329,7 +335,10 @@ def start_metrics_server(port: int | None = None) -> None:
     def _sigterm_handler(signum, frame):
         push_metrics(job_name=_job_name)
         # Chain to previous handler if it was callable
-        if callable(_prev_handler) and _prev_handler not in (signal.SIG_DFL, signal.SIG_IGN):
+        if callable(_prev_handler) and _prev_handler not in (
+            signal.SIG_DFL,
+            signal.SIG_IGN,
+        ):
             _prev_handler(signum, frame)
         raise SystemExit(0)
 

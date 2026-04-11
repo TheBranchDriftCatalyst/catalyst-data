@@ -2,8 +2,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 
 class JsonFormatter(logging.Formatter):
@@ -16,7 +15,7 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record):
         log_entry = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -31,12 +30,34 @@ class JsonFormatter(logging.Formatter):
                 log_entry[key] = val
         # Add any extra fields passed via logger.info("msg", extra={...})
         for key, val in record.__dict__.items():
-            if key.startswith("_") or key in log_entry or key in (
-                "name", "msg", "args", "created", "relativeCreated",
-                "exc_info", "exc_text", "stack_info", "levelname", "levelno",
-                "pathname", "filename", "module", "funcName", "lineno",
-                "msecs", "thread", "threadName", "process", "processName",
-                "taskName", "message",
+            if (
+                key.startswith("_")
+                or key in log_entry
+                or key
+                in (
+                    "name",
+                    "msg",
+                    "args",
+                    "created",
+                    "relativeCreated",
+                    "exc_info",
+                    "exc_text",
+                    "stack_info",
+                    "levelname",
+                    "levelno",
+                    "pathname",
+                    "filename",
+                    "module",
+                    "funcName",
+                    "lineno",
+                    "msecs",
+                    "thread",
+                    "threadName",
+                    "process",
+                    "processName",
+                    "taskName",
+                    "message",
+                )
             ):
                 continue
             log_entry[key] = val
@@ -53,8 +74,11 @@ class ModuleFilter(logging.Filter):
     - Per-module level overrides (e.g., 'dagster_io.llm' -> WARNING)
     """
 
-    def __init__(self, disabled_modules: list[str] | None = None,
-                 module_levels: dict[str, int] | None = None):
+    def __init__(
+        self,
+        disabled_modules: list[str] | None = None,
+        module_levels: dict[str, int] | None = None,
+    ):
         super().__init__()
         self.disabled_modules = disabled_modules or []
         self.module_levels = module_levels or {}
@@ -145,10 +169,12 @@ def configure_logging(
     if log_format == "json":
         handler.setFormatter(JsonFormatter())
     else:
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)-8s] %(name)-40s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
+        handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s [%(levelname)-8s] %(name)-40s | %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
 
     # Add module filter
     if disabled or mod_levels:
@@ -157,8 +183,18 @@ def configure_logging(
     root_logger.addHandler(handler)
 
     # Quiet noisy third-party loggers
-    for noisy in ("botocore", "boto3", "s3transfer", "httpx", "httpcore",
-                   "openai", "langchain", "chromadb", "fsspec", "aiobotocore"):
+    for noisy in (
+        "botocore",
+        "boto3",
+        "s3transfer",
+        "httpx",
+        "httpcore",
+        "openai",
+        "langchain",
+        "chromadb",
+        "fsspec",
+        "aiobotocore",
+    ):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     # urllib3.connection spams HeaderParsingError warnings on MinIO responses
     logging.getLogger("urllib3").setLevel(logging.ERROR)

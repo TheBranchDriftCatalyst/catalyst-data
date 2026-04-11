@@ -1,7 +1,6 @@
 """Test the extraction graph — repair path (first validation fails, repair succeeds)."""
 
 import pytest
-
 from catalyst_langgraph.graph import build_extraction_graph
 from catalyst_langgraph.repository.jsonl import JsonlRepository
 
@@ -23,14 +22,18 @@ async def test_mention_repair_then_success(
         return {"verdict": "valid", "errors": []}
 
     mock_mcp.set_response("validate_mentions", mention_validator)
-    mock_mcp.set_response(
-        "validate_propositions", {"verdict": "valid", "errors": []}
-    )
+    mock_mcp.set_response("validate_propositions", {"verdict": "valid", "errors": []})
 
     repo = JsonlRepository(tmp_path)
     graph = build_extraction_graph(mock_llm, mock_mcp, repo)
 
-    state = {**sample_state, "source_metadata": {**sample_state["source_metadata"], "document_id": "doc-repair"}}
+    state = {
+        **sample_state,
+        "source_metadata": {
+            **sample_state["source_metadata"],
+            "document_id": "doc-repair",
+        },
+    }
     result = await graph.ainvoke(state)
 
     assert result["status"] == "completed"
@@ -46,9 +49,7 @@ async def test_proposition_repair_then_success(
     mock_llm.set_default_mentions(sample_mentions)
     mock_llm.set_default_propositions(sample_propositions)
 
-    mock_mcp.set_response(
-        "validate_mentions", {"verdict": "valid", "errors": []}
-    )
+    mock_mcp.set_response("validate_mentions", {"verdict": "valid", "errors": []})
 
     prop_call_count = {"n": 0}
 
@@ -63,7 +64,13 @@ async def test_proposition_repair_then_success(
     repo = JsonlRepository(tmp_path)
     graph = build_extraction_graph(mock_llm, mock_mcp, repo)
 
-    state = {**sample_state, "source_metadata": {**sample_state["source_metadata"], "document_id": "doc-prop-repair"}}
+    state = {
+        **sample_state,
+        "source_metadata": {
+            **sample_state["source_metadata"],
+            "document_id": "doc-prop-repair",
+        },
+    }
     result = await graph.ainvoke(state)
 
     assert result["status"] == "completed"

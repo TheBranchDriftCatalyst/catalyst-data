@@ -8,10 +8,9 @@ if PostgreSQL is unavailable.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
-from datetime import datetime, timezone
-from typing import Any
 
 from dagster_io.logging import get_logger
 
@@ -66,11 +65,17 @@ class AnnotationStore:
             return self._conn
         try:
             import psycopg
+
             self._conn = psycopg.connect(**_PG_CONFIG, autocommit=True)
             if not self._initialized:
                 self._conn.execute(_INIT_SQL)
                 self._initialized = True
-                logger.info("Annotation store connected to %s:%s/%s", _PG_CONFIG["host"], _PG_CONFIG["port"], _PG_CONFIG["dbname"])
+                logger.info(
+                    "Annotation store connected to %s:%s/%s",
+                    _PG_CONFIG["host"],
+                    _PG_CONFIG["port"],
+                    _PG_CONFIG["dbname"],
+                )
             return self._conn
         except Exception as e:
             logger.warning("Annotation store connection failed: %s", e)
@@ -86,10 +91,8 @@ class AnnotationStore:
             return fn(conn)
         except Exception as e:
             logger.warning("Annotation store error: %s", e)
-            try:
+            with contextlib.suppress(Exception):
                 self._conn.close()
-            except Exception:
-                pass
             self._conn = None
             return default
 
@@ -109,32 +112,48 @@ class AnnotationStore:
             ).fetchall()
             return [
                 {
-                    "annotation_id": r[0], "document_id": r[1], "target_type": r[2],
-                    "target_id": r[3], "action": r[4], "edits": r[5] or {},
-                    "reviewer": r[6], "notes": r[7],
+                    "annotation_id": r[0],
+                    "document_id": r[1],
+                    "target_type": r[2],
+                    "target_id": r[3],
+                    "action": r[4],
+                    "edits": r[5] or {},
+                    "reviewer": r[6],
+                    "notes": r[7],
                     "created_at": r[8].isoformat() if r[8] else None,
                 }
                 for r in rows
             ]
+
         return self._safe(_query, [])
 
     def create_annotation(self, data: dict) -> dict | None:
         def _insert(conn):
             aid = data.get("annotation_id", str(uuid.uuid4()))
             import json
+
             conn.execute(
                 "INSERT INTO viewer_annotations (annotation_id, document_id, target_type, target_id, action, edits, reviewer, notes) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (aid, data["document_id"], data["target_type"], data["target_id"],
-                 data["action"], json.dumps(data.get("edits", {})),
-                 data.get("reviewer", ""), data.get("notes", "")),
+                (
+                    aid,
+                    data["document_id"],
+                    data["target_type"],
+                    data["target_id"],
+                    data["action"],
+                    json.dumps(data.get("edits", {})),
+                    data.get("reviewer", ""),
+                    data.get("notes", ""),
+                ),
             )
             return {"annotation_id": aid, **data}
+
         return self._safe(_insert)
 
     def update_annotation(self, annotation_id: str, data: dict) -> dict | None:
         def _update(conn):
             import json
+
             sets = []
             vals = []
             for key in ("action", "reviewer", "notes"):
@@ -147,31 +166,48 @@ class AnnotationStore:
             if not sets:
                 return None
             vals.append(annotation_id)
-            conn.execute(f"UPDATE viewer_annotations SET {', '.join(sets)} WHERE annotation_id = %s", vals)
+            conn.execute(
+                f"UPDATE viewer_annotations SET {', '.join(sets)} WHERE annotation_id = %s",
+                vals,
+            )
             return {"annotation_id": annotation_id, **data}
+
         return self._safe(_update)
 
     def delete_annotation(self, annotation_id: str) -> bool:
         def _delete(conn):
-            conn.execute("DELETE FROM viewer_annotations WHERE annotation_id = %s", (annotation_id,))
+            conn.execute(
+                "DELETE FROM viewer_annotations WHERE annotation_id = %s",
+                (annotation_id,),
+            )
             return True
+
         return self._safe(_delete, False)
 
     def bulk_create_annotations(self, annotations: list[dict]) -> int:
         def _bulk(conn):
             import json
+
             count = 0
             for data in annotations:
                 aid = data.get("annotation_id", str(uuid.uuid4()))
                 conn.execute(
                     "INSERT INTO viewer_annotations (annotation_id, document_id, target_type, target_id, action, edits, reviewer, notes) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (annotation_id) DO NOTHING",
-                    (aid, data["document_id"], data["target_type"], data["target_id"],
-                     data["action"], json.dumps(data.get("edits", {})),
-                     data.get("reviewer", ""), data.get("notes", "")),
+                    (
+                        aid,
+                        data["document_id"],
+                        data["target_type"],
+                        data["target_id"],
+                        data["action"],
+                        json.dumps(data.get("edits", {})),
+                        data.get("reviewer", ""),
+                        data.get("notes", ""),
+                    ),
                 )
                 count += 1
             return count
+
         return self._safe(_bulk, 0)
 
     # ── Speaker Mappings ─────────────────────────────────────────────────
@@ -183,6 +219,7 @@ class AnnotationStore:
                 (document_id,),
             ).fetchall()
             return {r[0]: {"display_name": r[1], "color_index": r[2]} for r in rows}
+
         return self._safe(_query, {})
 
     def save_speaker_mappings(self, document_id: str, mappings: dict[str, str]) -> bool:
@@ -195,4 +232,5 @@ class AnnotationStore:
                     (document_id, label, name),
                 )
             return True
+
         return self._safe(_upsert, False)

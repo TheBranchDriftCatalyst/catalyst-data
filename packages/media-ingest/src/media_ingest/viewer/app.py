@@ -19,9 +19,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
 from dagster_io.logging import get_logger
-
+from media_ingest.viewer.routes.annotations import router as annotations_router
+from media_ingest.viewer.routes.annotations import set_store
 from media_ingest.viewer.routes.api import router as api_router
-from media_ingest.viewer.routes.annotations import router as annotations_router, set_store
 from media_ingest.viewer.routes.media import router as media_router
 from media_ingest.viewer.services.annotation_store import AnnotationStore
 
@@ -70,7 +70,7 @@ def create_viewer_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
-            "http://localhost:5173",   # Vite dev server
+            "http://localhost:5173",  # Vite dev server
             "http://localhost:3000",
             "http://media.talos00",
         ],

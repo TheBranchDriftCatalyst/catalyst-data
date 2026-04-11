@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field, model_validator
 
 
-class IssueCode(str, Enum):
+class IssueCode(StrEnum):
     SPAN_MISMATCH = "SPAN_MISMATCH"
     INVALID_TYPE = "INVALID_TYPE"
     CONFIDENCE_OUT_OF_RANGE = "CONFIDENCE_OUT_OF_RANGE"
@@ -22,7 +22,7 @@ class IssueCode(str, Enum):
     MISSING_REQUIRED_FIELD = "MISSING_REQUIRED_FIELD"
 
 
-class IssueSeverity(str, Enum):
+class IssueSeverity(StrEnum):
     ERROR = "error"
     WARNING = "warning"
     INFO = "info"
@@ -44,8 +44,7 @@ class EvidenceSpan(BaseModel):
             raise ValueError("span_end must be greater than span_start")
         if len(self.text) != self.span_end - self.span_start:
             raise ValueError(
-                f"text length ({len(self.text)}) must equal span_end - span_start "
-                f"({self.span_end - self.span_start})"
+                f"text length ({len(self.text)}) must equal span_end - span_start ({self.span_end - self.span_start})"
             )
         return self
 
@@ -56,4 +55,7 @@ class ExtractionIssue(BaseModel):
     code: IssueCode = Field(description="Machine-readable issue code")
     severity: IssueSeverity = Field(description="Severity level: error, warning, or info")
     message: str = Field(description="Human-readable description of the issue")
-    path: str | None = Field(default=None, description="JSON path to the problematic field (e.g., 'mentions[0].span_start')")
+    path: str | None = Field(
+        default=None,
+        description="JSON path to the problematic field (e.g., 'mentions[0].span_start')",
+    )

@@ -13,7 +13,7 @@ from __future__ import annotations
 import mimetypes
 import os
 import stat
-from typing import Generator
+from collections.abc import Generator
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
@@ -31,10 +31,17 @@ _MEDIA_ROOTS: dict[str, str] = {
 }
 
 # Supported media extensions
-_ALLOWED_EXTENSIONS = frozenset({
-    ".mp4", ".mkv", ".webm",  # video
-    ".mp3", ".m4a", ".wav", ".flac",  # audio
-})
+_ALLOWED_EXTENSIONS = frozenset(
+    {
+        ".mp4",
+        ".mkv",
+        ".webm",  # video
+        ".mp3",
+        ".m4a",
+        ".wav",
+        ".flac",  # audio
+    }
+)
 
 # Chunk size for streaming (256KB)
 _CHUNK_SIZE = 256 * 1024
@@ -85,15 +92,13 @@ def _resolve_path(source: str, path: str) -> str:
         st = os.stat(full_path)
         if not stat.S_ISREG(st.st_mode):
             raise HTTPException(status_code=404, detail="Not a regular file")
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="File not found")
+    except FileNotFoundError as err:
+        raise HTTPException(status_code=404, detail="File not found") from err
 
     return full_path
 
 
-def _range_stream(
-    file_path: str, start: int, end: int
-) -> Generator[bytes, None, None]:
+def _range_stream(file_path: str, start: int, end: int) -> Generator[bytes, None, None]:
     """Yield chunks of a file from start to end (inclusive)."""
     remaining = end - start + 1
     with open(file_path, "rb") as f:
@@ -123,8 +128,8 @@ def stream_media(source: str, path: str, request: Request) -> Response:
             parts = range_spec.split("-", 1)
             start = int(parts[0]) if parts[0] else 0
             end = int(parts[1]) if parts[1] else file_size - 1
-        except (ValueError, IndexError):
-            raise HTTPException(status_code=416, detail="Invalid Range header")
+        except (ValueError, IndexError) as err:
+            raise HTTPException(status_code=416, detail="Invalid Range header") from err
 
         # Clamp values
         start = max(0, start)

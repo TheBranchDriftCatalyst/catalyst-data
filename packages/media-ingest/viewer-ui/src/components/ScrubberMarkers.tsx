@@ -28,10 +28,7 @@ interface MarkerCluster {
 /**
  * Group markers that are within CLUSTER_THRESHOLD % of each other.
  */
-function clusterMarkers(
-  markers: TimelineMarker[],
-  duration: number,
-): MarkerCluster[] {
+function clusterMarkers(markers: TimelineMarker[], duration: number): MarkerCluster[] {
   if (duration <= 0 || markers.length === 0) return [];
 
   // Sort by timestamp
@@ -49,8 +46,7 @@ function clusterMarkers(
     } else {
       // Finalize previous cluster
       const avgPct =
-        current.reduce((sum, c) => sum + (c.timestamp / duration) * 100, 0) /
-        current.length;
+        current.reduce((sum, c) => sum + (c.timestamp / duration) * 100, 0) / current.length;
       clusters.push({ markers: current, position: avgPct });
 
       current = [m];
@@ -61,8 +57,7 @@ function clusterMarkers(
   // Finalize last cluster
   if (current.length > 0) {
     const avgPct =
-      current.reduce((sum, c) => sum + (c.timestamp / duration) * 100, 0) /
-      current.length;
+      current.reduce((sum, c) => sum + (c.timestamp / duration) * 100, 0) / current.length;
     clusters.push({ markers: current, position: avgPct });
   }
 
@@ -84,10 +79,7 @@ export default function ScrubberMarkers({
   onMarkerClick,
   className,
 }: ScrubberMarkersProps) {
-  const clusters = useMemo(
-    () => clusterMarkers(markers, duration),
-    [markers, duration],
-  );
+  const clusters = useMemo(() => clusterMarkers(markers, duration), [markers, duration]);
 
   const handleClusterClick = useCallback(
     (cluster: MarkerCluster) => {
@@ -107,17 +99,11 @@ export default function ScrubberMarkers({
   );
 
   return (
-    <div
-      className={cn(
-        "absolute inset-0 pointer-events-none",
-        className,
-      )}
-    >
+    <div className={cn("absolute inset-0 pointer-events-none", className)}>
       {/* Range bands */}
       {rangeMarkers.map((m) => {
         const leftPct = (m.timestamp / duration) * 100;
-        const widthPct =
-          ((m.endTimestamp! - m.timestamp) / duration) * 100;
+        const widthPct = ((m.endTimestamp! - m.timestamp) / duration) * 100;
         return (
           <Tooltip key={`range-${m.id}`}>
             <TooltipTrigger asChild>
@@ -183,9 +169,7 @@ export default function ScrubberMarkers({
                 <p className="text-xs">{primary.label}</p>
               ) : (
                 <div className="space-y-0.5">
-                  <p className="text-xs font-medium">
-                    {cluster.markers.length} markers
-                  </p>
+                  <p className="text-xs font-medium">{cluster.markers.length} markers</p>
                   {cluster.markers.slice(0, 5).map((m) => (
                     <p key={m.id} className="text-[10px] text-zinc-400 truncate max-w-[200px]">
                       <span
@@ -196,9 +180,7 @@ export default function ScrubberMarkers({
                     </p>
                   ))}
                   {cluster.markers.length > 5 && (
-                    <p className="text-[10px] text-zinc-500">
-                      +{cluster.markers.length - 5} more
-                    </p>
+                    <p className="text-[10px] text-zinc-500">+{cluster.markers.length - 5} more</p>
                   )}
                 </div>
               )}

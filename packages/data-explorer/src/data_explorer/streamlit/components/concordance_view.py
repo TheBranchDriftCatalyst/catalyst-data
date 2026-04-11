@@ -223,9 +223,7 @@ def render_concordance_stats(matches: list[dict]) -> None:
     cols[2].metric("Unique Entities", unique_entities)
 
     # Label distribution
-    label_counts: Counter[str] = Counter(
-        m.get("label", "") or m.get("mention_type", "UNKNOWN") for m in matches
-    )
+    label_counts: Counter[str] = Counter(m.get("label", "") or m.get("mention_type", "UNKNOWN") for m in matches)
     labels_sorted = sorted(label_counts.keys(), key=lambda k: label_counts[k])
 
     colors = [_mention_color(lbl) for lbl in labels_sorted]
@@ -369,10 +367,7 @@ def render_assertion_table(assertions: list[dict], page_size: int = 100, key_suf
             val = qualifiers.get(qkey)
             if val:
                 safe_val = html.escape(str(val))[:50]
-                qual_chips.append(
-                    f'<span class="qual-chip qual-{qkey}" title="{qkey}: {safe_val}">'
-                    f"{qkey[:3]}</span>"
-                )
+                qual_chips.append(f'<span class="qual-chip qual-{qkey}" title="{qkey}: {safe_val}">{qkey[:3]}</span>')
         qual_html = " ".join(qual_chips) if qual_chips else '<span style="color:#52525b;">--</span>'
 
         # Indicators

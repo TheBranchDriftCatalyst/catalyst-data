@@ -28,7 +28,9 @@ def configure_tracing(service_name: str = "catalyst-data") -> None:
 
     try:
         from opentelemetry import trace
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter,
+        )
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -39,18 +41,24 @@ def configure_tracing(service_name: str = "catalyst-data") -> None:
         )
         svc_name = os.getenv("OTEL_SERVICE_NAME", service_name)
 
-        resource = Resource.create({
-            "service.name": svc_name,
-            "service.namespace": "catalyst-data",
-            "deployment.environment": os.getenv("DEPLOYMENT_ENV", "production"),
-        })
+        resource = Resource.create(
+            {
+                "service.name": svc_name,
+                "service.namespace": "catalyst-data",
+                "deployment.environment": os.getenv("DEPLOYMENT_ENV", "production"),
+            }
+        )
 
         provider = TracerProvider(resource=resource)
         exporter = OTLPSpanExporter(endpoint=endpoint, insecure=True)
         provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
 
-        logger.info("OpenTelemetry tracing configured: endpoint=%s, service=%s", endpoint, svc_name)
+        logger.info(
+            "OpenTelemetry tracing configured: endpoint=%s, service=%s",
+            endpoint,
+            svc_name,
+        )
     except ImportError:
         logger.warning("OpenTelemetry packages not installed, tracing disabled")
     except Exception as e:
@@ -64,6 +72,7 @@ def get_tracer(name: str):
     """
     try:
         from opentelemetry import trace
+
         return trace.get_tracer(name)
     except ImportError:
         return _NoOpTracer()
@@ -83,6 +92,7 @@ def trace_operation(name: str, tracer=None, attributes: dict[str, Any] | None = 
 
     try:
         from opentelemetry import trace as otel_trace
+
         with tracer.start_as_current_span(name, attributes=attributes or {}) as span:
             try:
                 yield span
@@ -96,6 +106,7 @@ def trace_operation(name: str, tracer=None, attributes: dict[str, Any] | None = 
 
 class _NoOpTracer:
     """Fallback tracer when OpenTelemetry is not installed."""
+
     def start_as_current_span(self, name, **kwargs):
         return _NoOpContextManager()
 
@@ -103,5 +114,6 @@ class _NoOpTracer:
 class _NoOpContextManager:
     def __enter__(self):
         return self
+
     def __exit__(self, *args):
         pass

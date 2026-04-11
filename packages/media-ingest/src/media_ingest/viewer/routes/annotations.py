@@ -65,10 +65,12 @@ async def list_annotations(document_id: str) -> list[dict]:
 
 @router.post("/documents/{document_id}/annotations")
 async def create_annotation(document_id: str, body: AnnotationCreate) -> dict:
-    result = _get_store().create_annotation({
-        "document_id": document_id,
-        **body.model_dump(),
-    })
+    result = _get_store().create_annotation(
+        {
+            "document_id": document_id,
+            **body.model_dump(),
+        }
+    )
     if result is None:
         raise HTTPException(500, "Failed to create annotation")
     return result

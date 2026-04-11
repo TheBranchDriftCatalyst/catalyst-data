@@ -35,9 +35,3 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dagster_io"]
-
-[tool.ruff]
-target-version = "py312"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP"]

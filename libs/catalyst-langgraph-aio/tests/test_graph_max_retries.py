@@ -1,7 +1,6 @@
 """Test the extraction graph — max retries path (repair exhausts retries)."""
 
 import pytest
-
 from catalyst_langgraph.graph import build_extraction_graph
 from catalyst_langgraph.repository.jsonl import JsonlRepository
 
@@ -22,7 +21,10 @@ async def test_mention_max_retries(tmp_path, mock_llm, mock_mcp, sample_mentions
     state = {
         **sample_state,
         "max_retries": 2,
-        "source_metadata": {**sample_state["source_metadata"], "document_id": "doc-fail"},
+        "source_metadata": {
+            **sample_state["source_metadata"],
+            "document_id": "doc-fail",
+        },
     }
     result = await graph.ainvoke(state)
 
@@ -57,7 +59,10 @@ async def test_mention_max_retries_zero(tmp_path, mock_llm, mock_mcp, sample_men
     state = {
         **sample_state,
         "max_retries": 0,
-        "source_metadata": {**sample_state["source_metadata"], "document_id": "doc-zero"},
+        "source_metadata": {
+            **sample_state["source_metadata"],
+            "document_id": "doc-zero",
+        },
     }
     result = await graph.ainvoke(state)
 
@@ -66,6 +71,7 @@ async def test_mention_max_retries_zero(tmp_path, mock_llm, mock_mcp, sample_men
     assert result["status"] == "failed"
     # Verify the exact enum value is used (not a bare string)
     from catalyst_langgraph.state import WorkflowStatus
+
     assert result["status"] == WorkflowStatus.FAILED.value
     assert not (tmp_path / "doc-zero" / "mentions.jsonl").exists()
 
@@ -85,7 +91,10 @@ async def test_mention_max_retries_one(tmp_path, mock_llm, mock_mcp, sample_ment
     state = {
         **sample_state,
         "max_retries": 1,
-        "source_metadata": {**sample_state["source_metadata"], "document_id": "doc-one"},
+        "source_metadata": {
+            **sample_state["source_metadata"],
+            "document_id": "doc-one",
+        },
     }
     result = await graph.ainvoke(state)
 
@@ -116,7 +125,10 @@ async def test_failure_status_uses_enum_value(tmp_path, mock_llm, mock_mcp, samp
     state = {
         **sample_state,
         "max_retries": 1,
-        "source_metadata": {**sample_state["source_metadata"], "document_id": "doc-enum"},
+        "source_metadata": {
+            **sample_state["source_metadata"],
+            "document_id": "doc-enum",
+        },
     }
     result = await graph.ainvoke(state)
 
@@ -132,9 +144,7 @@ async def test_proposition_max_retries(
     mock_llm.set_default_mentions(sample_mentions)
     mock_llm.set_default_propositions(sample_propositions)
 
-    mock_mcp.set_response(
-        "validate_mentions", {"verdict": "valid", "errors": []}
-    )
+    mock_mcp.set_response("validate_mentions", {"verdict": "valid", "errors": []})
     mock_mcp.set_response(
         "validate_propositions",
         {"verdict": "invalid", "errors": ["Always fails"]},
@@ -146,7 +156,10 @@ async def test_proposition_max_retries(
     state = {
         **sample_state,
         "max_retries": 2,
-        "source_metadata": {**sample_state["source_metadata"], "document_id": "doc-prop-fail"},
+        "source_metadata": {
+            **sample_state["source_metadata"],
+            "document_id": "doc-prop-fail",
+        },
     }
     result = await graph.ainvoke(state)
 

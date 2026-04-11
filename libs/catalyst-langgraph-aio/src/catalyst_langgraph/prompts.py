@@ -90,9 +90,7 @@ def load_prompt(prompt_id: str, fallback: str) -> str:
 
     prompt_path = Path(registry_dir) / f"{prompt_id}.prompt"
     if not prompt_path.is_file():
-        logger.warning(
-            "Prompt file not found at %s, using fallback for %r", prompt_path, prompt_id
-        )
+        logger.warning("Prompt file not found at %s, using fallback for %r", prompt_path, prompt_id)
         return fallback
 
     parsed = parse_prompt_file(prompt_path, prompt_id=prompt_id)

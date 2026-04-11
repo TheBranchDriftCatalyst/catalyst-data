@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -74,7 +73,7 @@ def make_record(
 ) -> MaterializationRecord:
     return MaterializationRecord(
         run_id=run_id,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         partition=partition,
         format=fmt,
         count=count,

@@ -33,7 +33,16 @@ def leak_graph(
     leak_entities: list[dict[str, Any]],
     icij_offshore_relationships: list[OffshoreRelationship],
 ) -> Output[dict[str, Any]]:
-    with trace_operation("leak_graph", tracer, {"code_location": "open_leaks", "layer": "gold", "entity_count": len(leak_entities), "relationship_count": len(icij_offshore_relationships)}):
+    with trace_operation(
+        "leak_graph",
+        tracer,
+        {
+            "code_location": "open_leaks",
+            "layer": "gold",
+            "entity_count": len(leak_entities),
+            "relationship_count": len(icij_offshore_relationships),
+        },
+    ):
         raise NotImplementedError(
             "Graph loading requires Neo4j or similar graph DB — "
             "configure via NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD env vars. "

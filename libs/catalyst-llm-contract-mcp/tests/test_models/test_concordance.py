@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from catalyst_contracts.models.concordance import (
     ConcordanceCandidateScore,
     ConcordanceCandidateSet,
 )
+from pydantic import ValidationError
 
 
 class TestConcordanceCandidateScore:

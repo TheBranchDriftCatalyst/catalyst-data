@@ -4,16 +4,16 @@ Partitioned by document_id — each run extracts assertions from one document's 
 """
 
 from dagster import AssetExecutionContext, Output, asset
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from dagster_io import (
+    LLM_ASSET_K8S_CONFIG,
     Assertion,
     AssertionExtractionResult,
-    LLM_ASSET_K8S_CONFIG,
     LLMResource,
     TextChunk,
     build_assertions,
 )
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -135,8 +135,21 @@ def media_assertions(
     media_chunks: list[TextChunk],
 ) -> Output[list[Assertion]]:
     partition_key = context.partition_key
-    with trace_operation("media_assertions", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key, "chunk_count": len(media_chunks)}):
-        logger.info("Starting media_assertions extraction for partition=%s (%d chunks)", partition_key, len(media_chunks))
+    with trace_operation(
+        "media_assertions",
+        tracer,
+        {
+            "code_location": "media_ingest",
+            "layer": "gold",
+            "partition_key": partition_key,
+            "chunk_count": len(media_chunks),
+        },
+    ):
+        logger.info(
+            "Starting media_assertions extraction for partition=%s (%d chunks)",
+            partition_key,
+            len(media_chunks),
+        )
 
         if not media_chunks:
             context.log.info(f"No chunks for partition={partition_key} — returning empty assertions")
@@ -162,7 +175,8 @@ def media_assertions(
         )
 
         all_assertions = build_assertions(
-            media_chunks, results,
+            media_chunks,
+            results,
             llm_model=llm.model,
             code_location="media_ingest",
             predicate_mappings=MEDIA_PREDICATE_MAPPINGS,
@@ -170,10 +184,16 @@ def media_assertions(
 
         negated_count = sum(1 for a in all_assertions if a.negated)
         hedged_count = sum(1 for a in all_assertions if a.hedged)
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_assertions", layer="gold").inc(len(all_assertions))
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_assertions", layer="gold").inc(
+            len(all_assertions)
+        )
         logger.info(
             "media_assertions complete for partition=%s: %d assertions from %d chunks (negated=%d, hedged=%d)",
-            partition_key, len(all_assertions), len(media_chunks), negated_count, hedged_count,
+            partition_key,
+            len(all_assertions),
+            len(media_chunks),
+            negated_count,
+            hedged_count,
         )
         context.log.info(
             f"Extracted {len(all_assertions)} assertions from {len(media_chunks)} chunks "

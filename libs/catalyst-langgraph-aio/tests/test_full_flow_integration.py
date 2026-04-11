@@ -14,18 +14,15 @@ import json
 from typing import Any
 
 import pytest
-
-from catalyst_langgraph.clients.mcp import MockMCPClient
-from catalyst_langgraph.graph import build_extraction_graph
-from catalyst_langgraph.repository.jsonl import JsonlRepository
-
 from catalyst_contracts.models.extraction_output import (
     MentionCandidate,
     MentionExtractionResult,
     PropositionCandidate,
     PropositionExtractionResult,
 )
-
+from catalyst_langgraph.clients.mcp import MockMCPClient
+from catalyst_langgraph.graph import build_extraction_graph
+from catalyst_langgraph.repository.jsonl import JsonlRepository
 
 SOURCE_TEXT = (
     "The United Nations was founded in 1945 by 51 countries committed to "
@@ -38,21 +35,21 @@ def _to_mention_result(mentions: list[dict]) -> MentionExtractionResult:
     """Build a MentionExtractionResult from dicts, handling old/new field names."""
     candidates = []
     for m in mentions:
-        candidates.append(MentionCandidate(
-            text=m.get("text", m.get("surface_form", "")),
-            mention_type=m.get("mention_type", m.get("entity_type", "OTHER")),
-            span_start=m.get("span_start", m.get("start_offset", 0)),
-            span_end=m.get("span_end", m.get("end_offset", 0)),
-            confidence=m.get("confidence", 1.0),
-        ))
+        candidates.append(
+            MentionCandidate(
+                text=m.get("text", m.get("surface_form", "")),
+                mention_type=m.get("mention_type", m.get("entity_type", "OTHER")),
+                span_start=m.get("span_start", m.get("start_offset", 0)),
+                span_end=m.get("span_end", m.get("end_offset", 0)),
+                confidence=m.get("confidence", 1.0),
+            )
+        )
     return MentionExtractionResult(mentions=candidates)
 
 
 def _to_proposition_result(propositions: list[dict]) -> PropositionExtractionResult:
     """Build a PropositionExtractionResult from dicts."""
-    return PropositionExtractionResult(
-        propositions=[PropositionCandidate(**p) for p in propositions]
-    )
+    return PropositionExtractionResult(propositions=[PropositionCandidate(**p) for p in propositions])
 
 
 class MockLLMForIntegration:
@@ -107,7 +104,7 @@ def invalid_mentions_then_fixed() -> tuple[list[dict], list[dict]]:
             "text": "United Nations",
             "mention_type": "ORG",
             "span_start": 0,  # Wrong! Should be 4
-            "span_end": 14,   # Wrong! Should be 18
+            "span_end": 14,  # Wrong! Should be 18
             "confidence": 0.95,
         },
     ]
@@ -167,9 +164,7 @@ class TestFullFlowEndToEnd:
     """Full graph flow using MockMCPClient — exercises all paths."""
 
     @pytest.mark.asyncio
-    async def test_happy_path_end_to_end(
-        self, tmp_path, valid_mentions, valid_propositions
-    ):
+    async def test_happy_path_end_to_end(self, tmp_path, valid_mentions, valid_propositions):
         """LLM extracts → MCP validates (mock accepts) → persisted."""
         llm = MockLLMForIntegration(valid_mentions, valid_propositions)
         mcp = MockMCPClient(
@@ -206,9 +201,7 @@ class TestFullFlowEndToEnd:
         assert "persist_artifacts" in state_node_names
 
     @pytest.mark.asyncio
-    async def test_repair_loop_end_to_end(
-        self, tmp_path, invalid_mentions_then_fixed, valid_propositions
-    ):
+    async def test_repair_loop_end_to_end(self, tmp_path, invalid_mentions_then_fixed, valid_propositions):
         """LLM extracts bad spans → MCP rejects → LLM repairs → MCP accepts → persisted."""
         bad, good = invalid_mentions_then_fixed
         call_count = {"n": 0}
@@ -256,11 +249,17 @@ class TestFullFlowEndToEnd:
     @pytest.mark.asyncio
     async def test_max_retries_graceful_failure(self, tmp_path, valid_propositions):
         """LLM always produces bad data → MCP always rejects → graph fails gracefully."""
-        bad_mentions = [{"text": "WRONG", "mention_type": "BOGUS", "span_start": 0, "span_end": 5, "confidence": 0.9}]
+        bad_mentions = [
+            {
+                "text": "WRONG",
+                "mention_type": "BOGUS",
+                "span_start": 0,
+                "span_end": 5,
+                "confidence": 0.9,
+            }
+        ]
         llm = MockLLMForIntegration(bad_mentions, valid_propositions)
-        mcp = MockMCPClient(
-            {"validate_mentions": {"verdict": "invalid", "errors": ["Invalid type"]}}
-        )
+        mcp = MockMCPClient({"validate_mentions": {"verdict": "invalid", "errors": ["Invalid type"]}})
         repo = JsonlRepository(tmp_path)
         graph = build_extraction_graph(llm, mcp, repo)
 

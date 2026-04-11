@@ -31,8 +31,7 @@ def validate_math(
                 ValidationErrorItem(
                     path=f"{path}.kind",
                     code=IssueCode.INVALID_TYPE.value,
-                    message=f"Invalid math proposition kind '{kind}'. "
-                    f"Must be one of: {sorted(valid_kinds)}",
+                    message=f"Invalid math proposition kind '{kind}'. Must be one of: {sorted(valid_kinds)}",
                 )
             )
 
@@ -55,8 +54,7 @@ def validate_math(
                     ValidationErrorItem(
                         path=f"{path}.objects[{j}].kind",
                         code=IssueCode.INVALID_TYPE.value,
-                        message=f"Invalid math object kind '{obj_kind}'. "
-                        f"Must be one of: {sorted(valid_obj_kinds)}",
+                        message=f"Invalid math object kind '{obj_kind}'. Must be one of: {sorted(valid_obj_kinds)}",
                     )
                 )
 

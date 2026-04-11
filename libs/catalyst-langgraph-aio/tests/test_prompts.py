@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from catalyst_langgraph.prompts import ParsedPrompt, load_prompt, parse_prompt_file
 
 
@@ -19,7 +17,9 @@ class TestParsedPrompt:
 class TestParsePromptFile:
     def test_with_frontmatter(self, tmp_path):
         f = tmp_path / "test.prompt"
-        f.write_text("---\nmodel: gpt-4o\ntemperature: 0.5\nmax_tokens: 2048\nmetadata:\n  task: ner\n---\nExtract entities.")
+        f.write_text(
+            "---\nmodel: gpt-4o\ntemperature: 0.5\nmax_tokens: 2048\nmetadata:\n  task: ner\n---\nExtract entities."
+        )
         result = parse_prompt_file(f)
         assert result.prompt_id == "test"
         assert result.system_content == "Extract entities."

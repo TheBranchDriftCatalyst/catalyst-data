@@ -20,10 +20,12 @@ logger = get_logger(__name__)
 
 st.set_page_config(page_title="Cross-Source Linker", page_icon=":material/link:", layout="wide")
 apply_theme()
-render_breadcrumbs([
-    ("Home", "app.py"),
-    ("Cross-Source Linker", None),
-])
+render_breadcrumbs(
+    [
+        ("Home", "app.py"),
+        ("Cross-Source Linker", None),
+    ]
+)
 st.title("Cross-Source Entity Linker")
 st.caption("Explore canonical entities resolved across all data sources")
 
@@ -31,6 +33,7 @@ st.caption("Explore canonical entities resolved across all data sources")
 # ---------------------------------------------------------------------------
 # Data access
 # ---------------------------------------------------------------------------
+
 
 @st.cache_resource
 def _get_client() -> DataClient:
@@ -45,13 +48,23 @@ def _get_client() -> DataClient:
 
 @st.cache_data(ttl=300, show_spinner="Loading canonical entities...")
 def _load_canonical_entities(endpoint_url: str, access_key: str, secret_key: str, bucket: str) -> list[dict]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.load_canonical_entities()
 
 
 @st.cache_data(ttl=300, show_spinner="Loading entity alignments...")
 def _load_entity_alignments(endpoint_url: str, access_key: str, secret_key: str, bucket: str) -> list[dict]:
-    client = DataClient(endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, bucket=bucket)
+    client = DataClient(
+        endpoint_url=endpoint_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=bucket,
+    )
     return client.load_entity_alignments()
 
 
@@ -63,17 +76,27 @@ client = _get_client()
 
 with st.spinner("Loading platinum-layer entities..."):
     canonical_entities = _load_canonical_entities(
-        client._endpoint_url, client._access_key, client._secret_key, client._bucket,
+        client._endpoint_url,
+        client._access_key,
+        client._secret_key,
+        client._bucket,
     )
     alignments = _load_entity_alignments(
-        client._endpoint_url, client._access_key, client._secret_key, client._bucket,
+        client._endpoint_url,
+        client._access_key,
+        client._secret_key,
+        client._bucket,
     )
 
 if not canonical_entities:
     st.warning("No canonical entities found. Run the knowledge-graph pipeline first.")
     st.stop()
 
-logger.info("Loaded %d canonical entities and %d alignments", len(canonical_entities), len(alignments))
+logger.info(
+    "Loaded %d canonical entities and %d alignments",
+    len(canonical_entities),
+    len(alignments),
+)
 
 # ---------------------------------------------------------------------------
 # Summary stats
@@ -114,9 +137,9 @@ if selected_source != "All":
 if search_query:
     q = search_query.lower()
     filtered = [
-        e for e in filtered
-        if q in e.get("canonical_name", "").lower()
-        or any(q in a.lower() for a in e.get("aliases", []))
+        e
+        for e in filtered
+        if q in e.get("canonical_name", "").lower() or any(q in a.lower() for a in e.get("aliases", []))
     ]
 
 # ---------------------------------------------------------------------------
@@ -126,17 +149,25 @@ if search_query:
 st.subheader(f"Canonical Entities ({len(filtered)})")
 
 if filtered:
-    df = pd.DataFrame([{
-        "Name": e.get("canonical_name", ""),
-        "Type": e.get("entity_type", ""),
-        "Sources": ", ".join(e.get("source_code_locations", [])),
-        "Mentions": e.get("mention_count", 0),
-        "Aliases": ", ".join(e.get("aliases", [])[:3]),
-    } for e in filtered])
+    df = pd.DataFrame(
+        [
+            {
+                "Name": e.get("canonical_name", ""),
+                "Type": e.get("entity_type", ""),
+                "Sources": ", ".join(e.get("source_code_locations", [])),
+                "Mentions": e.get("mention_count", 0),
+                "Aliases": ", ".join(e.get("aliases", [])[:3]),
+            }
+            for e in filtered
+        ]
+    )
 
     selected_idx = st.dataframe(
-        df, use_container_width=True, hide_index=True,
-        on_select="rerun", selection_mode="single-row",
+        df,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
     )
 
     # Detail view for selected entity
@@ -174,9 +205,9 @@ if filtered:
         with tab2:
             entity_id = entity.get("canonical_id", "")
             related_alignments = [
-                a for a in alignments
-                if a.get("source_entity_id") == entity_id
-                or a.get("target_entity_id") == entity_id
+                a
+                for a in alignments
+                if a.get("source_entity_id") == entity_id or a.get("target_entity_id") == entity_id
             ]
             if related_alignments:
                 # Resolve names for the "other" entity
@@ -184,16 +215,25 @@ if filtered:
                     e.get("canonical_id", ""): e.get("canonical_name", e.get("canonical_id", ""))
                     for e in canonical_entities
                 }
-                align_df = pd.DataFrame([{
-                    "Other Entity": entity_name_map.get(
-                        a.get("target_entity_id") if a.get("source_entity_id") == entity_id else a.get("source_entity_id"),
-                        a.get("target_entity_id") if a.get("source_entity_id") == entity_id else a.get("source_entity_id"),
-                    ),
-                    "Alignment": a.get("alignment_type", ""),
-                    "Score": f"{a.get('score', 0):.3f}",
-                    "Method": a.get("method", ""),
-                    "Evidence": str(a.get("evidence", ""))[:100],
-                } for a in related_alignments])
+                align_df = pd.DataFrame(
+                    [
+                        {
+                            "Other Entity": entity_name_map.get(
+                                a.get("target_entity_id")
+                                if a.get("source_entity_id") == entity_id
+                                else a.get("source_entity_id"),
+                                a.get("target_entity_id")
+                                if a.get("source_entity_id") == entity_id
+                                else a.get("source_entity_id"),
+                            ),
+                            "Alignment": a.get("alignment_type", ""),
+                            "Score": f"{a.get('score', 0):.3f}",
+                            "Method": a.get("method", ""),
+                            "Evidence": str(a.get("evidence", ""))[:100],
+                        }
+                        for a in related_alignments
+                    ]
+                )
                 st.dataframe(align_df, use_container_width=True, hide_index=True)
             else:
                 st.info("No alignment edges for this entity")
@@ -253,6 +293,7 @@ if alignments:
         scores = [a.get("score", 0) for a in alignments if a.get("score") is not None]
         if scores:
             import numpy as np
+
             bins = np.histogram(scores, bins=20)
             bin_edges = [(bins[1][i] + bins[1][i + 1]) / 2 for i in range(len(bins[1]) - 1)]
             fig = go.Figure(

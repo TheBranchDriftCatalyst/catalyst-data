@@ -5,6 +5,8 @@ entity guidance for leaked documents, and expanded type set.
 """
 
 from dagster import AssetExecutionContext, Output, asset
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from dagster_io import (
     LLM_ASSET_K8S_CONFIG,
     LLMResource,
@@ -13,12 +15,10 @@ from dagster_io import (
     TextChunk,
     build_mentions,
 )
-from dagster_io.prompts import load_prompt
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
+from dagster_io.prompts import load_prompt
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -65,7 +65,15 @@ def leak_mentions(
     llm: LLMResource,
     leak_chunks: list[TextChunk],
 ) -> Output[list[Mention]]:
-    with trace_operation("leak_mentions", tracer, {"code_location": "open_leaks", "layer": "gold", "chunk_count": len(leak_chunks)}):
+    with trace_operation(
+        "leak_mentions",
+        tracer,
+        {
+            "code_location": "open_leaks",
+            "layer": "gold",
+            "chunk_count": len(leak_chunks),
+        },
+    ):
         logger.info("Starting leak_mentions extraction for %d chunks", len(leak_chunks))
         chain = llm.with_structured_output(MentionExtractionResult)
         results = llm.invoke_batch(
@@ -79,10 +87,19 @@ def leak_mentions(
         )
 
         all_mentions = build_mentions(
-            leak_chunks, results, llm_model=llm.model, code_location="open_leaks",
+            leak_chunks,
+            results,
+            llm_model=llm.model,
+            code_location="open_leaks",
         )
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_mentions", layer="gold").inc(len(all_mentions))
-        logger.info("leak_mentions complete: %d mentions from %d chunks", len(all_mentions), len(leak_chunks))
+        ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_mentions", layer="gold").inc(
+            len(all_mentions)
+        )
+        logger.info(
+            "leak_mentions complete: %d mentions from %d chunks",
+            len(all_mentions),
+            len(leak_chunks),
+        )
         context.log.info(f"Extracted {len(all_mentions)} mentions from {len(leak_chunks)} chunks")
         return Output(all_mentions, metadata={"mention_count": len(all_mentions)})

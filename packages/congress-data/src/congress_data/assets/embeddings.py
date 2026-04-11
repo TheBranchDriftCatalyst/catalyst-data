@@ -3,8 +3,8 @@
 from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
-from dagster_io import EmbeddingResource, TextChunk
 
+from dagster_io import EmbeddingResource, TextChunk
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -34,14 +34,28 @@ def congress_embeddings(
     embeddings: EmbeddingResource,
     congress_chunks: list[TextChunk],
 ) -> Output[list[dict[str, Any]]]:
-    with trace_operation("congress_embeddings", tracer, {"code_location": "congress_data", "layer": "gold", "chunk_count": len(congress_chunks)}):
+    with trace_operation(
+        "congress_embeddings",
+        tracer,
+        {
+            "code_location": "congress_data",
+            "layer": "gold",
+            "chunk_count": len(congress_chunks),
+        },
+    ):
         logger.info("Starting congress_embeddings for %d chunks", len(congress_chunks))
         texts = [chunk.text for chunk in congress_chunks]
 
         context.log.info(f"Embedding {len(texts)} chunks with model={embeddings.model}")
         vectors = embeddings.embed(texts)
-        ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_embeddings", layer="gold").inc(len(vectors))
-        logger.info("congress_embeddings complete: %d vectors (%dd)", len(vectors), len(vectors[0]) if vectors else 0)
+        ASSET_RECORDS_PROCESSED.labels(
+            code_location="congress_data", asset_key="congress_embeddings", layer="gold"
+        ).inc(len(vectors))
+        logger.info(
+            "congress_embeddings complete: %d vectors (%dd)",
+            len(vectors),
+            len(vectors[0]) if vectors else 0,
+        )
 
         results = [
             {
@@ -51,7 +65,7 @@ def congress_embeddings(
                 "model": embeddings.model,
                 "dimensions": len(vec),
             }
-            for chunk, vec in zip(congress_chunks, vectors)
+            for chunk, vec in zip(congress_chunks, vectors, strict=False)
         ]
 
         context.log.info(f"Generated {len(results)} embeddings ({len(vectors[0])}d)")

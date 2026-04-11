@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from catalyst_contracts.models.evidence import IssueCode
 from catalyst_contracts.validators.mention_validator import (
     ENTITY_TYPE_ALIASES,
@@ -28,9 +27,7 @@ class TestMissingRequiredFieldEnum:
         ]
         result = validate_mentions(mentions, SOURCE_TEXT, "doc1")
         assert result.verdict.value == "invalid"
-        assert any(
-            e.code == IssueCode.MISSING_REQUIRED_FIELD.value for e in result.errors
-        )
+        assert any(e.code == IssueCode.MISSING_REQUIRED_FIELD.value for e in result.errors)
 
     def test_missing_mention_type_field(self):
         mentions = [
@@ -42,9 +39,7 @@ class TestMissingRequiredFieldEnum:
         ]
         result = validate_mentions(mentions, SOURCE_TEXT, "doc1")
         assert result.verdict.value == "invalid"
-        assert any(
-            e.code == IssueCode.MISSING_REQUIRED_FIELD.value for e in result.errors
-        )
+        assert any(e.code == IssueCode.MISSING_REQUIRED_FIELD.value for e in result.errors)
 
 
 class TestEntityTypeAliases:
@@ -168,9 +163,7 @@ class TestEntityTypeAliases:
         result = validate_mentions(mentions, SOURCE_TEXT, "doc1")
         assert result.verdict.value == "invalid"
         # Empty mention_type triggers MISSING_REQUIRED_FIELD (falsy check)
-        assert any(
-            e.code == IssueCode.MISSING_REQUIRED_FIELD.value for e in result.errors
-        )
+        assert any(e.code == IssueCode.MISSING_REQUIRED_FIELD.value for e in result.errors)
 
     def test_case_insensitive_alias_lookup(self):
         """Alias lookup should be case-insensitive (lowercase 'organization' works)."""

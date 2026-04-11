@@ -52,7 +52,8 @@ class TestProvenance:
 
     def test_extraction_method_override(self):
         p = Provenance(
-            source_document_id="d", chunk_id="c",
+            source_document_id="d",
+            chunk_id="c",
             extraction_method=ExtractionMethod.SPACY,
         )
         assert p.extraction_method == ExtractionMethod.SPACY

@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-
 from catalyst_langgraph.clients.mcp import DirectMCPClient
 
 
@@ -47,7 +44,5 @@ class TestDirectMCPClient:
     @pytest.mark.asyncio
     async def test_passes_kwargs_correctly(self):
         client = DirectMCPClient(SyncHandler())
-        result = await client.call_tool(
-            "validate_mentions", {"a": 1, "b": "two", "c": [3]}
-        )
+        result = await client.call_tool("validate_mentions", {"a": 1, "b": "two", "c": [3]})
         assert result["args"] == {"a": 1, "b": "two", "c": [3]}

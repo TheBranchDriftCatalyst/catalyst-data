@@ -5,12 +5,8 @@ from catalyst_contracts.validators.proposition_validator import validate_proposi
 
 
 class TestValidatePropositions:
-    def test_valid_propositions(
-        self, valid_propositions_data, known_mention_ids, source_text
-    ):
-        result = validate_propositions(
-            valid_propositions_data, known_mention_ids, source_text
-        )
+    def test_valid_propositions(self, valid_propositions_data, known_mention_ids, source_text):
+        result = validate_propositions(valid_propositions_data, known_mention_ids, source_text)
         assert result.verdict == ValidationVerdict.VALID
         assert result.valid_count == 2
 
@@ -85,10 +81,7 @@ class TestValidatePropositions:
         ]
         result = validate_propositions(props, known_mention_ids, source_text)
         assert result.verdict == ValidationVerdict.INVALID
-        assert any(
-            e.code == "INVALID_REFERENCE" and "object_id" in e.path
-            for e in result.errors
-        )
+        assert any(e.code == "INVALID_REFERENCE" and "object_id" in e.path for e in result.errors)
 
     def test_ambiguous_verdict_mixed(self, known_mention_ids, source_text):
         """Cover line 105: mix of valid and invalid propositions yields AMBIGUOUS."""
@@ -135,10 +128,7 @@ class TestMentionIdEdgeCases:
         result = validate_propositions(props, self.KNOWN_IDS, self.SOURCE)
         assert result.verdict == ValidationVerdict.INVALID
         assert result.invalid_count == 1
-        assert any(
-            e.code == "INVALID_REFERENCE" and "subject_id" in e.path
-            for e in result.errors
-        )
+        assert any(e.code == "INVALID_REFERENCE" and "subject_id" in e.path for e in result.errors)
 
     def test_object_id_not_in_known_ids_rejected(self):
         """object_id present but not in known_ids -> rejected."""
@@ -146,10 +136,7 @@ class TestMentionIdEdgeCases:
         result = validate_propositions(props, self.KNOWN_IDS, self.SOURCE)
         assert result.verdict == ValidationVerdict.INVALID
         assert result.invalid_count == 1
-        assert any(
-            e.code == "INVALID_REFERENCE" and "object_id" in e.path
-            for e in result.errors
-        )
+        assert any(e.code == "INVALID_REFERENCE" and "object_id" in e.path for e in result.errors)
 
     def test_no_mention_ids_passes(self):
         """Both subject_id and object_id missing/None -> accepted."""
@@ -171,10 +158,7 @@ class TestMentionIdEdgeCases:
         props = [self._prop(subject_id="", object_id="m-mat")]
         result = validate_propositions(props, self.KNOWN_IDS, self.SOURCE)
         assert result.verdict == ValidationVerdict.INVALID
-        assert any(
-            e.code == "INVALID_REFERENCE" and "subject_id" in e.path
-            for e in result.errors
-        )
+        assert any(e.code == "INVALID_REFERENCE" and "subject_id" in e.path for e in result.errors)
 
     def test_subject_valid_object_invalid_rejects_with_object_error(self):
         """subject_id valid, object_id invalid -> rejected with error on object only."""
@@ -223,20 +207,14 @@ class TestMentionIdEdgeCases:
         props = [self._prop(subject_mention_id="m-nonexistent", object_id="m-mat")]
         result = validate_propositions(props, self.KNOWN_IDS, self.SOURCE)
         assert result.verdict == ValidationVerdict.INVALID
-        assert any(
-            e.code == "INVALID_REFERENCE" and "subject_mention_id" in e.path
-            for e in result.errors
-        )
+        assert any(e.code == "INVALID_REFERENCE" and "subject_mention_id" in e.path for e in result.errors)
 
     def test_unknown_object_mention_id_rejected(self):
         """object_mention_id referencing unknown ID should be rejected."""
         props = [self._prop(subject_id="m-cat", object_mention_id="m-nonexistent")]
         result = validate_propositions(props, self.KNOWN_IDS, self.SOURCE)
         assert result.verdict == ValidationVerdict.INVALID
-        assert any(
-            e.code == "INVALID_REFERENCE" and "object_mention_id" in e.path
-            for e in result.errors
-        )
+        assert any(e.code == "INVALID_REFERENCE" and "object_mention_id" in e.path for e in result.errors)
 
     def test_valid_subject_mention_id_accepted(self):
         """subject_mention_id referencing a known ID should pass."""

@@ -64,11 +64,14 @@ class GraphDBResource(ConfigurableResource):
         logger.info("Upserting %d canonical entities to PostgreSQL", len(entities))
         conn = self._pg_conn()
         try:
-          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "postgresql", "operation": "upsert_entities"}):
-            with conn.cursor() as cur:
-                for ent in entities:
-                    cur.execute(
-                        """
+            with track_duration(
+                GRAPH_DB_OPERATION_DURATION,
+                {"backend": "postgresql", "operation": "upsert_entities"},
+            ):
+                with conn.cursor() as cur:
+                    for ent in entities:
+                        cur.execute(
+                            """
                         INSERT INTO canonical_entities (
                             canonical_id, canonical_name, entity_type, aliases,
                             external_ids, embedding, mention_count,
@@ -82,22 +85,25 @@ class GraphDBResource(ConfigurableResource):
                             mention_count = EXCLUDED.mention_count,
                             last_seen = EXCLUDED.last_seen
                         """,
-                        (
-                            ent["canonical_id"],
-                            ent["canonical_name"],
-                            ent["entity_type"],
-                            ent.get("aliases", []),
-                            json.dumps(ent.get("external_ids", {})),
-                            ent.get("embedding"),
-                            ent.get("mention_count", 0),
-                            ent.get("first_seen"),
-                            ent.get("last_seen"),
-                        ),
-                    )
-            conn.commit()
-            GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="upsert_entities").inc(len(entities))
-            logger.info("PostgreSQL upsert_canonical_entities complete count=%d", len(entities))
-            return len(entities)
+                            (
+                                ent["canonical_id"],
+                                ent["canonical_name"],
+                                ent["entity_type"],
+                                ent.get("aliases", []),
+                                json.dumps(ent.get("external_ids", {})),
+                                ent.get("embedding"),
+                                ent.get("mention_count", 0),
+                                ent.get("first_seen"),
+                                ent.get("last_seen"),
+                            ),
+                        )
+                conn.commit()
+                GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="upsert_entities").inc(len(entities))
+                logger.info(
+                    "PostgreSQL upsert_canonical_entities complete count=%d",
+                    len(entities),
+                )
+                return len(entities)
         finally:
             conn.close()
 
@@ -108,11 +114,14 @@ class GraphDBResource(ConfigurableResource):
         logger.info("Upserting %d alignment edges to PostgreSQL", len(edges))
         conn = self._pg_conn()
         try:
-          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "postgresql", "operation": "upsert_edges"}):
-            with conn.cursor() as cur:
-                for edge in edges:
-                    cur.execute(
-                        """
+            with track_duration(
+                GRAPH_DB_OPERATION_DURATION,
+                {"backend": "postgresql", "operation": "upsert_edges"},
+            ):
+                with conn.cursor() as cur:
+                    for edge in edges:
+                        cur.execute(
+                            """
                         INSERT INTO alignment_edges (
                             edge_id, source_entity_id, target_entity_id,
                             alignment_type, score, evidence, method
@@ -121,20 +130,20 @@ class GraphDBResource(ConfigurableResource):
                             score = EXCLUDED.score,
                             evidence = EXCLUDED.evidence
                         """,
-                        (
-                            edge["edge_id"],
-                            edge["source_entity_id"],
-                            edge["target_entity_id"],
-                            edge["alignment_type"],
-                            edge["score"],
-                            json.dumps(edge.get("evidence", [])),
-                            edge.get("method", ""),
-                        ),
-                    )
-            conn.commit()
-            GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="upsert_edges").inc(len(edges))
-            logger.info("PostgreSQL upsert_alignment_edges complete count=%d", len(edges))
-            return len(edges)
+                            (
+                                edge["edge_id"],
+                                edge["source_entity_id"],
+                                edge["target_entity_id"],
+                                edge["alignment_type"],
+                                edge["score"],
+                                json.dumps(edge.get("evidence", [])),
+                                edge.get("method", ""),
+                            ),
+                        )
+                conn.commit()
+                GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="upsert_edges").inc(len(edges))
+                logger.info("PostgreSQL upsert_alignment_edges complete count=%d", len(edges))
+                return len(edges)
         finally:
             conn.close()
 
@@ -145,11 +154,14 @@ class GraphDBResource(ConfigurableResource):
         logger.info("Upserting %d assertions to PostgreSQL", len(assertions))
         conn = self._pg_conn()
         try:
-          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "postgresql", "operation": "upsert_assertions"}):
-            with conn.cursor() as cur:
-                for a in assertions:
-                    cur.execute(
-                        """
+            with track_duration(
+                GRAPH_DB_OPERATION_DURATION,
+                {"backend": "postgresql", "operation": "upsert_assertions"},
+            ):
+                with conn.cursor() as cur:
+                    for a in assertions:
+                        cur.execute(
+                            """
                         INSERT INTO assertions (
                             assertion_id, subject_canonical_id, predicate,
                             predicate_canonical, object_canonical_id,
@@ -160,25 +172,25 @@ class GraphDBResource(ConfigurableResource):
                             confidence = EXCLUDED.confidence,
                             qualifiers = EXCLUDED.qualifiers
                         """,
-                        (
-                            a["assertion_id"],
-                            a.get("subject_canonical_id"),
-                            a["predicate"],
-                            a.get("predicate_canonical", ""),
-                            a.get("object_canonical_id"),
-                            json.dumps(a.get("qualifiers", {})),
-                            a.get("confidence", 1.0),
-                            a.get("negated", False),
-                            a.get("hedged", False),
-                            a.get("source_document_id"),
-                            a.get("chunk_id"),
-                            a.get("code_location", ""),
-                        ),
-                    )
-            conn.commit()
-            GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="upsert_assertions").inc(len(assertions))
-            logger.info("PostgreSQL upsert_assertions complete count=%d", len(assertions))
-            return len(assertions)
+                            (
+                                a["assertion_id"],
+                                a.get("subject_canonical_id"),
+                                a["predicate"],
+                                a.get("predicate_canonical", ""),
+                                a.get("object_canonical_id"),
+                                json.dumps(a.get("qualifiers", {})),
+                                a.get("confidence", 1.0),
+                                a.get("negated", False),
+                                a.get("hedged", False),
+                                a.get("source_document_id"),
+                                a.get("chunk_id"),
+                                a.get("code_location", ""),
+                            ),
+                        )
+                conn.commit()
+                GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="upsert_assertions").inc(len(assertions))
+                logger.info("PostgreSQL upsert_assertions complete count=%d", len(assertions))
+                return len(assertions)
         finally:
             conn.close()
 
@@ -191,26 +203,29 @@ class GraphDBResource(ConfigurableResource):
         logger.info("Syncing %d entities to Neo4j", len(entities))
         driver = self._neo4j_driver()
         try:
-          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "neo4j", "operation": "sync_entities"}):
-            with driver.session() as session:
-                for ent in entities:
-                    session.run(
-                        """
+            with track_duration(
+                GRAPH_DB_OPERATION_DURATION,
+                {"backend": "neo4j", "operation": "sync_entities"},
+            ):
+                with driver.session() as session:
+                    for ent in entities:
+                        session.run(
+                            """
                         MERGE (e:Entity {canonical_id: $canonical_id})
                         SET e.name = $name,
                             e.entity_type = $entity_type,
                             e.aliases = $aliases,
                             e.mention_count = $mention_count
                         """,
-                        canonical_id=ent["canonical_id"],
-                        name=ent["canonical_name"],
-                        entity_type=ent["entity_type"],
-                        aliases=ent.get("aliases", []),
-                        mention_count=ent.get("mention_count", 0),
-                    )
-            GRAPH_DB_OPERATIONS.labels(backend="neo4j", operation="sync_entities").inc(len(entities))
-            logger.info("Neo4j sync_entities complete count=%d", len(entities))
-            return len(entities)
+                            canonical_id=ent["canonical_id"],
+                            name=ent["canonical_name"],
+                            entity_type=ent["entity_type"],
+                            aliases=ent.get("aliases", []),
+                            mention_count=ent.get("mention_count", 0),
+                        )
+                GRAPH_DB_OPERATIONS.labels(backend="neo4j", operation="sync_entities").inc(len(entities))
+                logger.info("Neo4j sync_entities complete count=%d", len(entities))
+                return len(entities)
         finally:
             driver.close()
 
@@ -221,25 +236,28 @@ class GraphDBResource(ConfigurableResource):
         logger.info("Syncing %d alignment edges to Neo4j", len(edges))
         driver = self._neo4j_driver()
         try:
-          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "neo4j", "operation": "sync_edges"}):
-            with driver.session() as session:
-                for edge in edges:
-                    rel_type = edge["alignment_type"].upper().replace(" ", "_")
-                    session.run(
-                        f"""
+            with track_duration(
+                GRAPH_DB_OPERATION_DURATION,
+                {"backend": "neo4j", "operation": "sync_edges"},
+            ):
+                with driver.session() as session:
+                    for edge in edges:
+                        rel_type = edge["alignment_type"].upper().replace(" ", "_")
+                        session.run(
+                            f"""
                         MATCH (a:Entity {{canonical_id: $source_id}})
                         MATCH (b:Entity {{canonical_id: $target_id}})
                         MERGE (a)-[r:{rel_type}]->(b)
                         SET r.score = $score, r.method = $method
                         """,
-                        source_id=edge["source_entity_id"],
-                        target_id=edge["target_entity_id"],
-                        score=edge["score"],
-                        method=edge.get("method", ""),
-                    )
-            GRAPH_DB_OPERATIONS.labels(backend="neo4j", operation="sync_edges").inc(len(edges))
-            logger.info("Neo4j sync_alignment_edges complete count=%d", len(edges))
-            return len(edges)
+                            source_id=edge["source_entity_id"],
+                            target_id=edge["target_entity_id"],
+                            score=edge["score"],
+                            method=edge.get("method", ""),
+                        )
+                GRAPH_DB_OPERATIONS.labels(backend="neo4j", operation="sync_edges").inc(len(edges))
+                logger.info("Neo4j sync_alignment_edges complete count=%d", len(edges))
+                return len(edges)
         finally:
             driver.close()
 
@@ -251,15 +269,18 @@ class GraphDBResource(ConfigurableResource):
         driver = self._neo4j_driver()
         count = 0
         try:
-          with track_duration(GRAPH_DB_OPERATION_DURATION, {"backend": "neo4j", "operation": "sync_assertions"}):
-            with driver.session() as session:
-                for a in assertions:
-                    subj_id = a.get("subject_canonical_id")
-                    obj_id = a.get("object_canonical_id")
-                    if not subj_id or not obj_id:
-                        continue
-                    session.run(
-                        """
+            with track_duration(
+                GRAPH_DB_OPERATION_DURATION,
+                {"backend": "neo4j", "operation": "sync_assertions"},
+            ):
+                with driver.session() as session:
+                    for a in assertions:
+                        subj_id = a.get("subject_canonical_id")
+                        obj_id = a.get("object_canonical_id")
+                        if not subj_id or not obj_id:
+                            continue
+                        session.run(
+                            """
                         MATCH (s:Entity {canonical_id: $subj_id})
                         MATCH (o:Entity {canonical_id: $obj_id})
                         MERGE (s)-[r:ASSERTS {assertion_id: $assertion_id}]->(o)
@@ -268,17 +289,17 @@ class GraphDBResource(ConfigurableResource):
                             r.negated = $negated,
                             r.hedged = $hedged
                         """,
-                        subj_id=subj_id,
-                        obj_id=obj_id,
-                        assertion_id=a["assertion_id"],
-                        predicate=a.get("predicate_canonical", a["predicate"]),
-                        confidence=a.get("confidence", 1.0),
-                        negated=a.get("negated", False),
-                        hedged=a.get("hedged", False),
-                    )
-                    count += 1
-            GRAPH_DB_OPERATIONS.labels(backend="neo4j", operation="sync_assertions").inc(count)
-            logger.info("Neo4j sync_assertions complete count=%d", count)
-            return count
+                            subj_id=subj_id,
+                            obj_id=obj_id,
+                            assertion_id=a["assertion_id"],
+                            predicate=a.get("predicate_canonical", a["predicate"]),
+                            confidence=a.get("confidence", 1.0),
+                            negated=a.get("negated", False),
+                            hedged=a.get("hedged", False),
+                        )
+                        count += 1
+                GRAPH_DB_OPERATIONS.labels(backend="neo4j", operation="sync_assertions").inc(count)
+                logger.info("Neo4j sync_assertions complete count=%d", count)
+                return count
         finally:
             driver.close()

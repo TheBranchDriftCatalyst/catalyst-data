@@ -161,10 +161,7 @@ class TestValidateMentions:
         ]
         result = validate_mentions(mentions, source_text, "doc1")
         assert result.verdict == ValidationVerdict.INVALID
-        assert any(
-            e.code == "SPAN_MISMATCH" and "Invalid span range" in e.message
-            for e in result.errors
-        )
+        assert any(e.code == "SPAN_MISMATCH" and "Invalid span range" in e.message for e in result.errors)
 
     def test_span_exceeds_source_length(self, source_text):
         """span_end beyond source text length hits the elif branch."""
@@ -179,7 +176,4 @@ class TestValidateMentions:
         ]
         result = validate_mentions(mentions, source_text, "doc1")
         assert result.verdict == ValidationVerdict.INVALID
-        assert any(
-            e.code == "SPAN_MISMATCH" and "Invalid span range" in e.message
-            for e in result.errors
-        )
+        assert any(e.code == "SPAN_MISMATCH" and "Invalid span range" in e.message for e in result.errors)

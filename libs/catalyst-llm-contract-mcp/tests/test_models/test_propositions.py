@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from catalyst_contracts.models.propositions import (
     BinaryProposition,
     NaryProposition,
     PropositionArgument,
     PropositionExtraction,
 )
+from pydantic import ValidationError
 
 
 class TestBinaryProposition:
@@ -59,11 +58,7 @@ class TestNaryProposition:
 
 class TestPropositionExtraction:
     def test_binary_extraction(self):
-        pe = PropositionExtraction(
-            proposition=BinaryProposition(
-                predicate="leads", confidence=0.9
-            )
-        )
+        pe = PropositionExtraction(proposition=BinaryProposition(predicate="leads", confidence=0.9))
         assert pe.proposition.kind == "binary"
 
     def test_nary_extraction(self):
@@ -77,21 +72,25 @@ class TestPropositionExtraction:
         assert pe.proposition.kind == "nary"
 
     def test_discriminator_from_dict(self):
-        pe = PropositionExtraction.model_validate({
-            "proposition": {
-                "kind": "binary",
-                "predicate": "knows",
-                "confidence": 0.9,
+        pe = PropositionExtraction.model_validate(
+            {
+                "proposition": {
+                    "kind": "binary",
+                    "predicate": "knows",
+                    "confidence": 0.9,
+                }
             }
-        })
+        )
         assert pe.proposition.kind == "binary"
 
-        pe2 = PropositionExtraction.model_validate({
-            "proposition": {
-                "kind": "nary",
-                "predicate": "transfer",
-                "arguments": [{"role": "agent", "text": "A"}],
-                "confidence": 0.8,
+        pe2 = PropositionExtraction.model_validate(
+            {
+                "proposition": {
+                    "kind": "nary",
+                    "predicate": "transfer",
+                    "arguments": [{"role": "agent", "text": "A"}],
+                    "confidence": 0.8,
+                }
             }
-        })
+        )
         assert pe2.proposition.kind == "nary"

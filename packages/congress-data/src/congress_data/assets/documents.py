@@ -2,11 +2,11 @@
 
 from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
+from congress_data.core.document import Document
+from congress_data.entities import Bill, Committee, Member
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
-from congress_data.core.document import Document
-from congress_data.entities import Bill, Committee, Member
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -104,7 +104,17 @@ def congress_documents(
     congress_members: list[Member],
     congress_committees: list[Committee],
 ) -> Output[list[Document]]:
-    with trace_operation("congress_documents", tracer, {"code_location": "congress_data", "layer": "silver", "bill_count": len(congress_bills), "member_count": len(congress_members), "committee_count": len(congress_committees)}):
+    with trace_operation(
+        "congress_documents",
+        tracer,
+        {
+            "code_location": "congress_data",
+            "layer": "silver",
+            "bill_count": len(congress_bills),
+            "member_count": len(congress_members),
+            "committee_count": len(congress_committees),
+        },
+    ):
         logger.info("Starting congress_documents transformation")
         documents: list[Document] = []
 
@@ -117,7 +127,11 @@ def congress_documents(
         for committee in congress_committees:
             documents.append(_committee_to_document(committee))
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_documents", layer="silver").inc(len(documents))
+        ASSET_RECORDS_PROCESSED.labels(
+            code_location="congress_data",
+            asset_key="congress_documents",
+            layer="silver",
+        ).inc(len(documents))
         logger.info("congress_documents transformation complete count=%d", len(documents))
         context.log.info(
             f"Produced {len(documents)} documents "
@@ -129,10 +143,12 @@ def congress_documents(
             documents,
             metadata={
                 "total_documents": len(documents),
-                "by_type": MetadataValue.json({
-                    "bills": len(congress_bills),
-                    "members": len(congress_members),
-                    "committees": len(congress_committees),
-                }),
+                "by_type": MetadataValue.json(
+                    {
+                        "bills": len(congress_bills),
+                        "members": len(congress_members),
+                        "committees": len(congress_committees),
+                    }
+                ),
             },
         )

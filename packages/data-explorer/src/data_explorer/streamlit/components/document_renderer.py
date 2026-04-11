@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 # Entity color palette — semi-transparent backgrounds for dark theme
 ENTITY_COLORS: dict[str, dict[str, str]] = {
     "PERSON": {"bg": "rgba(0,252,214,0.2)", "border": "#00fcd6"},
-    "ORG":    {"bg": "rgba(192,38,211,0.2)", "border": "#c026d3"},
-    "GPE":    {"bg": "rgba(245,158,11,0.2)", "border": "#f59e0b"},
-    "DATE":   {"bg": "rgba(99,102,241,0.2)", "border": "#6366f1"},
-    "LAW":    {"bg": "rgba(239,68,68,0.2)", "border": "#ef4444"},
-    "EVENT":  {"bg": "rgba(34,197,94,0.2)", "border": "#22c55e"},
+    "ORG": {"bg": "rgba(192,38,211,0.2)", "border": "#c026d3"},
+    "GPE": {"bg": "rgba(245,158,11,0.2)", "border": "#f59e0b"},
+    "DATE": {"bg": "rgba(99,102,241,0.2)", "border": "#6366f1"},
+    "LAW": {"bg": "rgba(239,68,68,0.2)", "border": "#ef4444"},
+    "EVENT": {"bg": "rgba(34,197,94,0.2)", "border": "#22c55e"},
 }
 
 _DEFAULT_COLORS = {"bg": "rgba(161,161,170,0.2)", "border": "#a1a1aa"}
@@ -160,10 +160,7 @@ def render_document(
             chunk_entities = []
             if entities:
                 chunk_id = chunk.get("chunk_id", "")
-                chunk_entities = [
-                    e for e in entities
-                    if e.get("chunk_id") == chunk_id
-                ] if chunk_id else entities
+                chunk_entities = [e for e in entities if e.get("chunk_id") == chunk_id] if chunk_id else entities
 
             annotated = _annotate_text(chunk_text, chunk_entities)
             idx = chunk.get("index", 0)
@@ -198,9 +195,7 @@ def render_entity_legend() -> None:
             f"{label}</span>"
         )
     st.markdown(
-        '<div style="display:flex;flex-wrap:wrap;padding:0.5rem 0;">'
-        + "".join(items)
-        + "</div>",
+        '<div style="display:flex;flex-wrap:wrap;padding:0.5rem 0;">' + "".join(items) + "</div>",
         unsafe_allow_html=True,
     )
 
@@ -229,7 +224,8 @@ def render_document_with_mentions(content: str, mentions: list[dict]) -> str:
     # Filter mentions with valid spans and sort by span_start descending
     # (insert from end to preserve earlier offsets)
     valid_mentions = [
-        m for m in mentions
+        m
+        for m in mentions
         if m.get("span_start") is not None
         and m.get("span_end") is not None
         and m["span_start"] < m["span_end"] <= len(content)
@@ -280,7 +276,8 @@ def _render_mentions_safe(content: str, mentions: list[dict]) -> str:
         return html.escape(content) if content else ""
 
     valid_mentions = [
-        m for m in mentions
+        m
+        for m in mentions
         if m.get("span_start") is not None
         and m.get("span_end") is not None
         and 0 <= m["span_start"] < m["span_end"] <= len(content)

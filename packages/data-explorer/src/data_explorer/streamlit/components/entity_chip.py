@@ -127,7 +127,7 @@ def render_entity_chip_list(
         for idx in range(0, len(batch), columns):
             row = batch[idx : idx + columns]
             cols = st.columns(len(row))
-            for col, entity in zip(cols, row):
+            for col, entity in zip(cols, row, strict=False):
                 with col:
                     was_clicked = render_entity_chip(
                         text=entity["text"],
@@ -165,10 +165,7 @@ def render_entity_chip_html(
 
     count_badge = ""
     if count is not None:
-        count_badge = (
-            f'<sup style="margin-left:3px;font-size:0.7em;'
-            f'opacity:0.8;">{count}</sup>'
-        )
+        count_badge = f'<sup style="margin-left:3px;font-size:0.7em;opacity:0.8;">{count}</sup>'
 
     return (
         f'<span style="'

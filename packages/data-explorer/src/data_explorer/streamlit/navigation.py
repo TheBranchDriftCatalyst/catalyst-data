@@ -77,13 +77,9 @@ def render_breadcrumbs(crumbs: list[tuple[str, str | None]]) -> None:
     for idx, (label, page) in enumerate(crumbs):
         is_last = idx == len(crumbs) - 1
         if is_last or page is None:
-            parts.append(
-                f'<span style="color:#00fcd6;font-weight:600;">{label}</span>'
-            )
+            parts.append(f'<span style="color:#00fcd6;font-weight:600;">{label}</span>')
         else:
-            parts.append(
-                f'<span style="color:#a1a1aa;">{label}</span>'
-            )
+            parts.append(f'<span style="color:#a1a1aa;">{label}</span>')
 
     separator = '<span style="color:#a1a1aa;margin:0 0.4em;">&#47;</span>'
     html = (
