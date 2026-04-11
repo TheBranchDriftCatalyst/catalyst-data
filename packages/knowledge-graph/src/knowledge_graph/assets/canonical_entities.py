@@ -26,6 +26,13 @@ tracer = get_tracer(__name__)
     description="Cross-source canonical entity resolution (platinum layer)",
     compute_kind="python",
     metadata={"layer": "platinum"},
+    ins={
+        # Optional cross-source inputs — if the source code location has
+        # never materialized these, the OptionalMinioIOManager returns None
+        # and the asset body falls back to an empty list.
+        "congress_entity_candidates": AssetIn(input_manager_key="optional_io_manager"),
+        "leak_entity_candidates": AssetIn(input_manager_key="optional_io_manager"),
+    },
     op_tags={
         "dagster-k8s/config": {
             "container_config": {

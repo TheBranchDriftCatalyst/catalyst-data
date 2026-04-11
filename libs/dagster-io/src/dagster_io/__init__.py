@@ -19,7 +19,7 @@ from dagster_io.extraction_schemas import (
     normalize_predicate,
     parse_mention_type,
 )
-from dagster_io.io_manager import MinioIOManager
+from dagster_io.io_manager import MinioIOManager, OptionalMinioIOManager
 from dagster_io.llm import EmbeddingResource, LLMResource
 from dagster_io.logging import configure_logging, get_logger
 from dagster_io.manifest import AssetManifest, MaterializationRecord
@@ -70,6 +70,7 @@ from dagster_io.prompts import load_prompt, parse_prompt_file
 __all__ = [
     # IO
     "MinioIOManager",
+    "OptionalMinioIOManager",
     # Resources
     "LLMResource",
     "EmbeddingResource",

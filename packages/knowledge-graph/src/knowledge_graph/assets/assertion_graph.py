@@ -8,7 +8,7 @@ PostgreSQL + Neo4j.
 from collections import defaultdict
 from typing import Any
 
-from dagster import AssetExecutionContext, Output, asset
+from dagster import AssetExecutionContext, AssetIn, Output, asset
 from dagster_io import Assertion, CanonicalEntity
 
 from dagster_io.logging import get_logger
@@ -54,6 +54,10 @@ def _resolve_entity_id(text: str, name_index: dict[str, str]) -> str | None:
     description="Link assertions to canonical entities and write to graph stores (platinum layer)",
     compute_kind="python",
     metadata={"layer": "platinum"},
+    ins={
+        "congress_assertions": AssetIn(input_manager_key="optional_io_manager"),
+        "leak_assertions": AssetIn(input_manager_key="optional_io_manager"),
+    },
     op_tags={
         "dagster-k8s/config": {
             "container_config": {

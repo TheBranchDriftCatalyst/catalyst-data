@@ -14,7 +14,7 @@ configure_tracing(service_name="catalyst-data.knowledge_graph")
 start_metrics_server()
 
 from dagster import Definitions, SourceAsset
-from dagster_io import MinioIOManager
+from dagster_io import MinioIOManager, OptionalMinioIOManager
 
 from knowledge_graph.resources import GraphDBResource
 
@@ -75,6 +75,11 @@ defs = Definitions(
     ],
     resources={
         "io_manager": MinioIOManager(),
+        # Used via AssetIn(input_manager_key="optional_io_manager") for
+        # cross-source inputs that may not yet be materialized (e.g. the
+        # congress/leak entity_candidates and assertions inputs to the
+        # platinum assets). Returns None on NoSuchKey instead of raising.
+        "optional_io_manager": OptionalMinioIOManager(),
         "graph_db": GraphDBResource(),
     },
 )

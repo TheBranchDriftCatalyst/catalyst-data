@@ -25,6 +25,10 @@ tracer = get_tracer(__name__)
     description="Cross-source entity alignment edges (platinum layer)",
     compute_kind="python",
     metadata={"layer": "platinum"},
+    ins={
+        "congress_entity_candidates": AssetIn(input_manager_key="optional_io_manager"),
+        "leak_entity_candidates": AssetIn(input_manager_key="optional_io_manager"),
+    },
     op_tags={
         "dagster-k8s/config": {
             "container_config": {

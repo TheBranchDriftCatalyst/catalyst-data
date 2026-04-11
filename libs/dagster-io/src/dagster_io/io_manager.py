@@ -329,3 +329,40 @@ class MinioIOManager(ConfigurableIOManager):
                 return {k: self._load_single(context, k) for k in keys}
             return self._load_single(context, keys[0])
         return self._load_single(context)
+
+
+class OptionalMinioIOManager(MinioIOManager):
+    """Same as MinioIOManager, but load_input returns None when the upstream
+    asset has never been materialized (S3 key missing) instead of raising.
+
+    Use as the ``input_manager_key`` on an ``AssetIn`` whose upstream may
+    legitimately be absent — e.g. cross-source platinum-layer assets that
+    should still run when one of several source code locations hasn't
+    produced data yet.
+
+    Asset bodies receiving ``None`` from this manager should defend with
+    ``value = value or []`` (or equivalent) — matching how these optional
+    kwargs are annotated in the consuming assets.
+
+    This is the officially-sanctioned Dagster pattern for handling optional
+    upstream assets when the downstream needs the actual data (not just a
+    lineage pointer via ``deps=``). See:
+    https://docs.dagster.io/guides/build/jobs/unconnected-inputs
+    """
+
+    def load_input(self, context: InputContext) -> typing.Any:
+        from botocore.exceptions import ClientError
+
+        try:
+            return super().load_input(context)
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code in ("NoSuchKey", "404", "NoSuchBucket"):
+                logger.info(
+                    "OptionalMinioIOManager: upstream asset %s not materialized "
+                    "(%s) — returning None for optional input",
+                    context.asset_key.to_user_string(),
+                    code,
+                )
+                return None
+            raise
