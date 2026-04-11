@@ -16,6 +16,19 @@ from dagster_io.metrics import (
 logger = get_logger(__name__)
 
 
+# Runtime schema migrations for canonical_entities. Each entry is a
+# standalone ``ALTER TABLE ... IF NOT EXISTS`` statement so it's safe to
+# re-run on every resource use. The authoritative schema lives in the
+# ``postgres-knowledge-init`` ConfigMap
+# (``k8s/platform/postgres-knowledge.yaml``); those definitions only apply
+# to fresh Postgres PVCs. Existing deployments whose init.sql ran before a
+# column was added pick it up here on next upsert without requiring a
+# manual migration.
+_CANONICAL_ENTITIES_MIGRATIONS: tuple[str, ...] = (
+    "ALTER TABLE canonical_entities ADD COLUMN IF NOT EXISTS source_code_locations TEXT[] NOT NULL DEFAULT '{}'",
+)
+
+
 class GraphDBResource(ConfigurableResource):
     """Wraps both Neo4j and PostgreSQL for dual-write graph storage.
 
@@ -57,6 +70,30 @@ class GraphDBResource(ConfigurableResource):
 
     # -- PostgreSQL writes --
 
+    @staticmethod
+    def _ensure_canonical_entities_schema(cur) -> None:
+        """Idempotently apply runtime migrations to ``canonical_entities``.
+
+        Each statement in ``_CANONICAL_ENTITIES_MIGRATIONS`` uses
+        ``ADD COLUMN IF NOT EXISTS`` so re-runs are cheap and safe. If a
+        statement fails because the column already exists on an older
+        Postgres that lacks ``IF NOT EXISTS`` support, we log and keep
+        going — the upsert will surface any genuine schema mismatch on the
+        subsequent INSERT.
+        """
+        for stmt in _CANONICAL_ENTITIES_MIGRATIONS:
+            try:
+                cur.execute(stmt)
+            except Exception as exc:  # noqa: BLE001 — we intentionally keep going
+                msg = str(exc).lower()
+                if "already exists" in msg or "duplicate column" in msg:
+                    logger.info(
+                        "canonical_entities migration already applied: %s",
+                        stmt.splitlines()[0],
+                    )
+                else:
+                    raise
+
     def upsert_canonical_entities(self, entities: list[dict[str, Any]]) -> int:
         """Upsert canonical entities into PostgreSQL."""
         if not entities:
@@ -69,20 +106,23 @@ class GraphDBResource(ConfigurableResource):
                 {"backend": "postgresql", "operation": "upsert_entities"},
             ):
                 with conn.cursor() as cur:
+                    self._ensure_canonical_entities_schema(cur)
                     for ent in entities:
                         cur.execute(
                             """
                         INSERT INTO canonical_entities (
                             canonical_id, canonical_name, entity_type, aliases,
                             external_ids, embedding, mention_count,
+                            source_code_locations,
                             first_seen, last_seen
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (canonical_id) DO UPDATE SET
                             canonical_name = EXCLUDED.canonical_name,
                             aliases = EXCLUDED.aliases,
                             external_ids = EXCLUDED.external_ids,
                             embedding = EXCLUDED.embedding,
                             mention_count = EXCLUDED.mention_count,
+                            source_code_locations = EXCLUDED.source_code_locations,
                             last_seen = EXCLUDED.last_seen
                         """,
                             (
@@ -93,6 +133,11 @@ class GraphDBResource(ConfigurableResource):
                                 json.dumps(ent.get("external_ids", {})),
                                 ent.get("embedding"),
                                 ent.get("mention_count", 0),
+                                # Legacy CanonicalEntity dicts pre-dating
+                                # CD-7np may not carry this field; default
+                                # to an empty array so the NOT NULL
+                                # DEFAULT '{}' column contract holds.
+                                ent.get("source_code_locations") or [],
                                 ent.get("first_seen"),
                                 ent.get("last_seen"),
                             ),

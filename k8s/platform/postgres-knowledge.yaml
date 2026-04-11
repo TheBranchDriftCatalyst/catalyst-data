@@ -18,11 +18,19 @@ data:
         external_ids JSONB DEFAULT '{}',
         embedding vector(1536),
         mention_count INTEGER DEFAULT 0,
+        source_code_locations TEXT[] NOT NULL DEFAULT '{}',
         first_seen TIMESTAMPTZ DEFAULT NOW(),
         last_seen TIMESTAMPTZ DEFAULT NOW(),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    -- Idempotent migration for existing deployments whose init.sql ran
+    -- before source_code_locations existed. Runtime ALTER in
+    -- GraphDBResource._ensure_canonical_entities_schema also covers this
+    -- path but re-running it here keeps the ConfigMap self-describing.
+    ALTER TABLE canonical_entities
+        ADD COLUMN IF NOT EXISTS source_code_locations TEXT[] NOT NULL DEFAULT '{}';
 
     CREATE TABLE IF NOT EXISTS alignment_edges (
         edge_id TEXT PRIMARY KEY,
@@ -55,6 +63,7 @@ data:
     CREATE INDEX IF NOT EXISTS idx_entities_name ON canonical_entities USING gin (canonical_name gin_trgm_ops);
     CREATE INDEX IF NOT EXISTS idx_entities_type ON canonical_entities (entity_type);
     CREATE INDEX IF NOT EXISTS idx_entities_embedding ON canonical_entities USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+    CREATE INDEX IF NOT EXISTS idx_entities_source_code_locations ON canonical_entities USING gin (source_code_locations);
 
     CREATE INDEX IF NOT EXISTS idx_align_source ON alignment_edges (source_entity_id);
     CREATE INDEX IF NOT EXISTS idx_align_target ON alignment_edges (target_entity_id);
