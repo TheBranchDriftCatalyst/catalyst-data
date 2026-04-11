@@ -1,0 +1,70 @@
+# Lefthook — git hooks manager (https://lefthook.dev)
+#
+# Runs the same checks CI runs (.github/workflows/ci.yaml) against staged
+# files before commit, with auto-fix + re-stage where possible. Install
+# once per clone:
+#
+#     lefthook install
+#
+# To run all hooks manually against staged files:
+#     lefthook run pre-commit
+#
+# To run against the whole tree (slow, use sparingly):
+#     lefthook run pre-commit --all-files
+#
+# To bypass for a single commit (e.g. WIP, lint-red intentionally):
+#     LEFTHOOK=0 git commit ...
+
+pre-commit:
+  parallel: true
+  commands:
+
+    # ── Python: ruff ────────────────────────────────────────────────────
+    # Autofix fixable lint + re-stage. Config lives in the root
+    # pyproject.toml under [tool.ruff] — per-package pyproject.tomls do
+    # not define their own ruff config (see 478e011 commit).
+    ruff-lint:
+      tags: python lint
+      glob: "**/*.py"
+      # --force-exclude ensures ruff respects the root config's
+      # extend-exclude list even when we pass explicit file paths.
+      run: ruff check --fix --force-exclude {staged_files}
+      stage_fixed: true
+
+    ruff-format:
+      tags: python format
+      glob: "**/*.py"
+      run: ruff format --force-exclude {staged_files}
+      stage_fixed: true
+
+    # ── Frontend: eslint + prettier (viewer-ui only) ────────────────────
+    # Only fire when viewer-ui files are staged. Runs from the viewer-ui
+    # directory so npm scripts resolve the local package's tooling.
+    eslint-viewer:
+      tags: frontend lint
+      glob: "packages/media-ingest/viewer-ui/src/**/*.{ts,tsx}"
+      root: "packages/media-ingest/viewer-ui/"
+      # Pass staged filenames (relative to viewer-ui root) so eslint only
+      # touches what we changed. --fix auto-repairs; stage_fixed re-adds.
+      run: npx eslint --fix {staged_files}
+      stage_fixed: true
+
+    prettier-viewer:
+      tags: frontend format
+      glob: "packages/media-ingest/viewer-ui/src/**/*.{ts,tsx,css,json,html}"
+      root: "packages/media-ingest/viewer-ui/"
+      run: npx prettier --write {staged_files}
+      stage_fixed: true
+
+    # ── Beads pre-commit flush ──────────────────────────────────────────
+    # Preserve beads integration. This runs the same command the
+    # beads-managed .git/hooks/pre-commit used to run before lefthook
+    # took ownership of the file. Without this, pending issue edits
+    # won't flush to the Dolt backend before the commit.
+    beads-flush:
+      tags: beads
+      # Run unconditionally, not scoped to any file glob.
+      run: bd hooks run pre-commit
+      # bd exits 3 when the database isn't initialized yet — treat that
+      # as a skip rather than a failure (matches the old shim's logic).
+      fail_text: "beads pre-commit hook failed — run 'bd doctor' to diagnose"
