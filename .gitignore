@@ -8,6 +8,11 @@ build/
 .scratch/
 *.egg
 .pytest_cache/
+
+# Test output scratch — media-ingest QA tests write WAVs, transcripts,
+# diarization JSONs here. Should not be committed.
+packages/media-ingest/tests/.output/
+
 .env
 .env.*
 .envrc
