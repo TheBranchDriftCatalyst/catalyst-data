@@ -33,9 +33,11 @@ from dagster_io import (
     LLMResource,
     MinioIOManager,
     make_k8s_executor,
+    make_run_status_sensor,
 )
 
 _k8s_executor = make_k8s_executor("media_ingest")
+_run_status_sensors = make_run_status_sensor("media_ingest")
 
 from media_ingest.assets import (
     media_assertions,
@@ -70,6 +72,7 @@ defs = Definitions(
     ],
     sensors=[
         media_document_sensor,
+        *_run_status_sensors,
     ],
     executor=_k8s_executor,
     resources={

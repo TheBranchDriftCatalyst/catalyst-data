@@ -205,6 +205,52 @@ TRANSCRIPTION_REALTIME_FACTOR = Histogram(
     registry=REGISTRY,
 )
 
+# ── DAG health metrics (CD-59v) ──
+# Run-level + freshness metrics emitted by the shared RunStatusSensor factory
+# in dagster_io.run_status_sensor.make_run_status_sensor. Before these
+# existed, the Grafana dashboard could not answer "did anything run today?"
+# — there were no run-level metrics at all, only per-asset duration.
+DAGSTER_RUN_STATUS_TOTAL = Counter(
+    "catalyst_dagster_run_status_total",
+    "Dagster run terminal outcomes by code location and job",
+    # status ∈ {success, failure, canceled}
+    ["code_location", "job_name", "status"],
+    registry=REGISTRY,
+)
+
+DAGSTER_RUN_DURATION_SECONDS = Histogram(
+    "catalyst_dagster_run_duration_seconds",
+    "End-to-end Dagster run wall-clock duration",
+    ["code_location", "job_name"],
+    # Bucket layout tuned for our pipelines: fastest partitioned runs
+    # (discovery, metadata) finish in <60s, media transcode/transcription
+    # runs land in the 5-60 min range, and multi-hour batch runs (knowledge
+    # graph platinum fan-in, congress bulk load) land in the 1-8 hour range.
+    buckets=(10, 30, 60, 300, 900, 1800, 3600, 7200, 14400, 28800),
+    registry=REGISTRY,
+)
+
+DAGSTER_SENSOR_TICK_TOTAL = Counter(
+    "catalyst_dagster_sensor_tick_total",
+    "Dagster sensor tick outcomes",
+    # outcome ∈ {success, skipped, failure}
+    #
+    # NOTE: this counter is defined here but NOT emitted by
+    # make_run_status_sensor — a run-status sensor cannot observe its own
+    # ticks without circular logic. Emission is a follow-up: wire it from
+    # an instance-level sensor or a Dagster instance hook (see CD-59v
+    # follow-up).
+    ["code_location", "sensor_name", "outcome"],
+    registry=REGISTRY,
+)
+
+ASSET_LAST_MATERIALIZED_TIMESTAMP_SECONDS = Gauge(
+    "catalyst_asset_last_materialized_timestamp_seconds",
+    "Unix timestamp of last successful materialization — subtract from time() for freshness SLO",
+    ["code_location", "asset_key"],
+    registry=REGISTRY,
+)
+
 
 @contextmanager
 def track_duration(histogram, labels: dict):

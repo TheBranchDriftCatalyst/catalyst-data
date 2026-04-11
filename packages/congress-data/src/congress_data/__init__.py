@@ -16,9 +16,11 @@ from dagster_io import (
     LLMResource,
     MinioIOManager,
     make_k8s_executor,
+    make_run_status_sensor,
 )
 
 _k8s_executor = make_k8s_executor("congress_data")
+_run_status_sensors = make_run_status_sensor("congress_data")
 
 from congress_data.assets import (
     congress_assertions,
@@ -54,6 +56,9 @@ defs = Definitions(
         # Gold (unchanged)
         congress_embeddings,
         congress_graph,
+    ],
+    sensors=[
+        *_run_status_sensors,
     ],
     executor=_k8s_executor,
     resources={

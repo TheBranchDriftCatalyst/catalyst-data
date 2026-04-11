@@ -16,9 +16,11 @@ from dagster_io import (
     LLMResource,
     MinioIOManager,
     make_k8s_executor,
+    make_run_status_sensor,
 )
 
 _k8s_executor = make_k8s_executor("open_leaks")
+_run_status_sensors = make_run_status_sensor("open_leaks")
 
 from open_leaks.assets import (
     epstein_court_docs,
@@ -56,6 +58,9 @@ defs = Definitions(
         # Gold (unchanged)
         leak_embeddings,
         leak_graph,
+    ],
+    sensors=[
+        *_run_status_sensors,
     ],
     executor=_k8s_executor,
     resources={

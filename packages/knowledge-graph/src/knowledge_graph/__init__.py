@@ -15,10 +15,16 @@ start_metrics_server()
 
 from dagster import Definitions, DynamicPartitionsDefinition, SourceAsset
 
-from dagster_io import MinioIOManager, OptionalMinioIOManager, make_k8s_executor
+from dagster_io import (
+    MinioIOManager,
+    OptionalMinioIOManager,
+    make_k8s_executor,
+    make_run_status_sensor,
+)
 from knowledge_graph.resources import GraphDBResource
 
 _k8s_executor = make_k8s_executor("knowledge_graph")
+_run_status_sensors = make_run_status_sensor("knowledge_graph")
 
 # Import assets AFTER SourceAsset definitions to avoid circular issues
 # The assets module does not import from __init__
@@ -87,6 +93,9 @@ defs = Definitions(
         canonical_entities,
         entity_alignments,
         assertion_graph,
+    ],
+    sensors=[
+        *_run_status_sensors,
     ],
     executor=_k8s_executor,
     resources={

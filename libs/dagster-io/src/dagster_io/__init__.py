@@ -27,10 +27,14 @@ from dagster_io.manifest import AssetManifest, MaterializationRecord
 from dagster_io.metrics import (
     ACTIVE_ASSET_MATERIALIZATIONS,
     ASSERTIONS_CREATED,
+    ASSET_LAST_MATERIALIZED_TIMESTAMP_SECONDS,
     ASSET_MATERIALIZATION_DURATION,
     ASSET_RECORDS_PROCESSED,
     CHUNK_PROCESSING_DURATION,
     CHUNKS_CREATED,
+    DAGSTER_RUN_DURATION_SECONDS,
+    DAGSTER_RUN_STATUS_TOTAL,
+    DAGSTER_SENSOR_TICK_TOTAL,
     DIARIZATION_DURATION,
     EMBEDDING_BATCH_DURATION,
     EMBEDDING_VECTORS_CREATED,
@@ -67,6 +71,7 @@ from dagster_io.models import (
 from dagster_io.observability import configure_tracing, get_tracer, trace_operation
 from dagster_io.processing_tracker import ProcessingTracker
 from dagster_io.prompts import load_prompt, parse_prompt_file
+from dagster_io.run_status_sensor import make_run_status_sensor
 
 __all__ = [
     # IO
@@ -74,6 +79,8 @@ __all__ = [
     "OptionalMinioIOManager",
     # Executor
     "make_k8s_executor",
+    # Run-status sensor factory
+    "make_run_status_sensor",
     # Resources
     "LLMResource",
     "EmbeddingResource",
@@ -146,6 +153,11 @@ __all__ = [
     "TRANSCODE_COMPRESSION_RATIO",
     "TRANSCODE_SAVED_BYTES",
     "MODEL_LOAD_DURATION",
+    # DAG health (CD-59v)
+    "DAGSTER_RUN_STATUS_TOTAL",
+    "DAGSTER_RUN_DURATION_SECONDS",
+    "DAGSTER_SENSOR_TICK_TOTAL",
+    "ASSET_LAST_MATERIALIZED_TIMESTAMP_SECONDS",
     "start_metrics_server",
     "track_duration",
     "track_asset_materialization",
