@@ -1,7 +1,5 @@
 """Shared Dagster test fixtures for catalyst-data pipelines."""
 
-import os
-
 import pytest
 from dagster import build_asset_context
 
