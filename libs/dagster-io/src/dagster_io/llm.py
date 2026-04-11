@@ -86,7 +86,13 @@ class LLMResource(ConfigurableResource):
         if system:
             messages.append(SystemMessage(content=system))
         messages.append(HumanMessage(content=prompt))
-        LLM_REQUESTS.labels(model=self.model, operation="complete", status="pending").inc()
+        # Note: LLM_REQUESTS is only incremented on terminal states (success or
+        # error). A previous in-flight status increment at request start was
+        # never paired with a decrement, so it grew monotonically and the
+        # Grafana piechart was dominated by historical starts rather than
+        # current in-flight requests. If we ever need in-flight visibility,
+        # add a proper Gauge (inc at start, dec in finally) — don't abuse the
+        # terminal-state counter.
         start = time.monotonic()
         try:
             with track_duration(LLM_REQUEST_DURATION, {"model": self.model, "operation": "complete"}):
@@ -124,7 +130,8 @@ class LLMResource(ConfigurableResource):
         if system:
             messages.append(SystemMessage(content=system))
         messages.append(HumanMessage(content=prompt))
-        LLM_REQUESTS.labels(model=self.model, operation="complete_json", status="pending").inc()
+        # See `complete()` above for rationale — no `pending` emission; this
+        # counter tracks terminal states only.
         start = time.monotonic()
         try:
             with track_duration(

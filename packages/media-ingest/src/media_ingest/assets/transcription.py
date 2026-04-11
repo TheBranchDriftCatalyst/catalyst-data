@@ -116,7 +116,16 @@ def _transcribe_faster_whisper(model, audio_path: str) -> dict:
 # ── Backend: OpenVINO GenAI ──────────────────────────────────────────────────
 
 
-def _load_openvino(config: MediaIngestConfig):
+def _load_openvino(config: MediaIngestConfig) -> tuple[Any, str]:
+    """Load the OpenVINO Whisper pipeline.
+
+    Returns ``(pipeline, resolved_device)`` where ``resolved_device`` is the
+    device the pipeline is actually running on, NOT the requested one. If the
+    GPU init fails we fall back to CPU transparently and the returned
+    ``resolved_device`` reflects that — this is used downstream to label the
+    ``TRANSCRIPTION_REALTIME_FACTOR`` histogram so Grafana can distinguish
+    GPU throughput from silent-CPU-fallback throughput.
+    """
     from huggingface_hub import snapshot_download
 
     model_dir = os.path.join(WHISPER_MODEL_CACHE, config.openvino_model_id.replace("/", "--"))
@@ -126,13 +135,14 @@ def _load_openvino(config: MediaIngestConfig):
 
     import openvino_genai
 
-    device = config.openvino_device
+    requested_device = config.openvino_device
     try:
-        return openvino_genai.WhisperPipeline(model_dir, device)
+        pipeline = openvino_genai.WhisperPipeline(model_dir, requested_device)
+        return pipeline, requested_device
     except RuntimeError as e:
-        if "GPU" in device and "Context was not initialized" in str(e):
+        if "GPU" in requested_device and "Context was not initialized" in str(e):
             logger.warning("GPU not available, falling back to CPU: %s", e)
-            return openvino_genai.WhisperPipeline(model_dir, "CPU")
+            return openvino_genai.WhisperPipeline(model_dir, "CPU"), "CPU"
         raise
 
 
@@ -235,18 +245,29 @@ def media_transcriptions(
         backend = config.whisper_backend
         start = time.monotonic()
 
+        # `resolved_device` and `model_name` are passed as labels to the RTF
+        # histogram so Grafana can distinguish GPU throughput from silent-CPU
+        # fallback throughput (see _load_openvino docstring for context).
         if backend == "openvino":
             context.log.info(f"Loading OpenVINO model '{config.openvino_model_id}' (device={config.openvino_device})")
             model_load_start = time.monotonic()
-            model = _load_openvino(config)
+            model, resolved_device = _load_openvino(config)
             MODEL_LOAD_DURATION.labels(model_type="openvino").observe(time.monotonic() - model_load_start)
-            model_label = f"openvino:{config.openvino_model_id}:{config.openvino_device}"
+            model_name = config.openvino_model_id
+            model_label = f"openvino:{model_name}:{resolved_device}"
+            if resolved_device != config.openvino_device:
+                context.log.warning(
+                    f"OpenVINO device fallback: requested={config.openvino_device} resolved={resolved_device}"
+                )
         else:
             context.log.info(f"Loading faster-whisper '{config.whisper_model}' (compute={config.whisper_compute_type})")
             model_load_start = time.monotonic()
             model = _load_faster_whisper(config)
             MODEL_LOAD_DURATION.labels(model_type="faster-whisper").observe(time.monotonic() - model_load_start)
-            model_label = f"faster-whisper:{config.whisper_model}:{config.whisper_compute_type}"
+            model_name = config.whisper_model
+            # faster-whisper doesn't silently fall back — whatever config says is what runs
+            resolved_device = config.whisper_device
+            model_label = f"faster-whisper:{model_name}:{config.whisper_compute_type}"
 
         context.log.info(f"Transcribing: {doc.title}")
 
@@ -264,11 +285,17 @@ def media_transcriptions(
             # Record transcription duration metric
             TRANSCRIPTION_DURATION.labels(backend=backend, model=config.whisper_model).observe(transcribe_time)
 
-            # Record real-time factor (audio_duration / transcription_time)
+            # Record real-time factor (audio_duration / transcription_time).
+            # Labels include `resolved_device` (not requested) so GPU vs
+            # silent-CPU-fallback runs show up as distinct series in Grafana.
             audio_duration = result.get("duration_s", 0)
             if transcribe_time > 0 and audio_duration > 0:
                 rtf = audio_duration / transcribe_time
-                TRANSCRIPTION_REALTIME_FACTOR.labels(backend=backend).observe(rtf)
+                TRANSCRIPTION_REALTIME_FACTOR.labels(
+                    backend=backend,
+                    device=resolved_device,
+                    model=model_name,
+                ).observe(rtf)
 
             output = {
                 "document_id": doc.id,

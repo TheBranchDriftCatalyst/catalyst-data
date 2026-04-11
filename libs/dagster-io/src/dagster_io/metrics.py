@@ -195,7 +195,12 @@ MODEL_LOAD_DURATION = Histogram(
 TRANSCRIPTION_REALTIME_FACTOR = Histogram(
     "catalyst_transcription_realtime_factor",
     "Ratio of audio duration to transcription time (>1 means faster than realtime)",
-    ["backend"],
+    # `device` records the *resolved* device the model actually ran on, not the
+    # requested one. OpenVINO silently falls back from GPU to CPU on init
+    # failure (transcription.py:110-114) and without this label that fallback
+    # is invisible in Grafana — both paths look like the same `backend`.
+    # `model` distinguishes faster-whisper vs openvino-whisper-large vs etc.
+    ["backend", "device", "model"],
     buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0),
     registry=REGISTRY,
 )
