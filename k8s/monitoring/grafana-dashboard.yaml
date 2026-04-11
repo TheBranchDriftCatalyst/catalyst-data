@@ -148,66 +148,12 @@ spec:
                 "stacking": { "group": "A", "mode": "none" },
                 "thresholdsStyle": { "mode": "off" }
               },
-              "unit": "s",
-              "mappings": []
-            },
-            "overrides": []
-          },
-          "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
-          "id": 3,
-          "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "title": "Asset Materialization Duration",
-          "type": "timeseries",
-          "targets": [
-            {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "catalyst_asset_materialization_duration_seconds{quantile=\"0.5\"}",
-              "legendFormat": "{{ code_location }} / {{ asset_key }} p50",
-              "refId": "A"
-            },
-            {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "catalyst_asset_materialization_duration_seconds{quantile=\"0.99\"}",
-              "legendFormat": "{{ code_location }} / {{ asset_key }} p99",
-              "refId": "B"
-            }
-          ]
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "palette-classic" },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "drawStyle": "line",
-                "fillOpacity": 10,
-                "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-                "insertNulls": false,
-                "lineInterpolation": "smooth",
-                "lineWidth": 2,
-                "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
-                "showPoints": "never",
-                "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
-              },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 1 },
           "id": 4,
           "options": {
             "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
@@ -218,7 +164,7 @@ spec:
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "rate(catalyst_asset_records_processed_total[1m])",
+              "expr": "sum by (code_location, asset_key) (rate(catalyst_asset_records_processed_total{code_location=~\"$code_location\"}[5m]))",
               "legendFormat": "{{ code_location }} / {{ asset_key }}",
               "refId": "A"
             }
@@ -273,14 +219,14 @@ spec:
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "catalyst_llm_request_duration_seconds{quantile=\"0.5\"}",
-              "legendFormat": "{{ model }} p50",
+              "expr": "histogram_quantile(0.5, sum by (le, model, operation) (rate(catalyst_llm_request_duration_seconds_bucket[5m])))",
+              "legendFormat": "{{ model }} / {{ operation }} p50",
               "refId": "A"
             },
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "catalyst_llm_request_duration_seconds{quantile=\"0.99\"}",
-              "legendFormat": "{{ model }} p99",
+              "expr": "histogram_quantile(0.99, sum by (le, model, operation) (rate(catalyst_llm_request_duration_seconds_bucket[5m])))",
+              "legendFormat": "{{ model }} / {{ operation }} p99",
               "refId": "B"
             }
           ]
@@ -289,14 +235,27 @@ spec:
           "datasource": { "type": "prometheus", "uid": "mimir" },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 100000 },
-                  { "color": "red", "value": 1000000 }
-                ]
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "insertNulls": false,
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
               },
               "unit": "short",
               "mappings": []
@@ -306,23 +265,16 @@ spec:
           "gridPos": { "h": 8, "w": 6, "x": 6, "y": 8 },
           "id": 6,
           "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": ["lastNotNull"],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "auto"
+            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+            "tooltip": { "mode": "multi", "sort": "desc" }
           },
-          "title": "LLM Tokens Used",
-          "type": "stat",
+          "title": "LLM Token Burn Rate",
+          "description": "Tokens consumed per second, grouped by model and token_type.",
+          "type": "timeseries",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum(catalyst_llm_tokens_total) by (model, token_type)",
+              "expr": "sum by (model, token_type) (rate(catalyst_llm_tokens_total[5m]))",
               "legendFormat": "{{ model }} ({{ token_type }})",
               "refId": "A"
             }
@@ -398,19 +350,69 @@ spec:
             "tooltip": { "mode": "single", "sort": "none" }
           },
           "title": "LLM Requests by Status",
+          "description": "Excludes status=pending (counter leak, fixed in CD-5j5).",
           "type": "piechart",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (status) (catalyst_llm_requests_total)",
+              "expr": "sum by (status) (increase(catalyst_llm_requests_total{status!=\"pending\"}[$__range]))",
               "legendFormat": "{{ status }}",
               "refId": "A"
             }
           ]
         },
         {
+          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "insertNulls": false,
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
+              },
+              "unit": "percentunit",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+          "id": 43,
+          "options": {
+            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "title": "LLM Error Rate by Model",
+          "description": "LLM error rate per model (errors / total). Alert fires at >10%.",
+          "type": "timeseries",
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "expr": "sum by (model) (rate(catalyst_llm_requests_total{status=\"error\"}[5m])) / sum by (model) (rate(catalyst_llm_requests_total[5m]))",
+              "legendFormat": "{{ model }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
           "id": 102,
           "title": "Storage & Embeddings",
           "type": "row"
@@ -467,15 +469,29 @@ spec:
           "datasource": { "type": "prometheus", "uid": "mimir" },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "blue", "value": 1073741824 }
-                ]
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "insertNulls": false,
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
               },
-              "unit": "bytes",
+              "unit": "Bps",
               "mappings": []
             },
             "overrides": []
@@ -483,24 +499,17 @@ spec:
           "gridPos": { "h": 8, "w": 6, "x": 6, "y": 17 },
           "id": 10,
           "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": ["lastNotNull"],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "auto"
+            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+            "tooltip": { "mode": "multi", "sort": "desc" }
           },
           "title": "S3 Bytes Transferred",
-          "type": "stat",
+          "description": "S3/MinIO bytes/sec by direction (upload|download).",
+          "type": "timeseries",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (operation) (catalyst_s3_bytes_total)",
-              "legendFormat": "{{ operation }}",
+              "expr": "sum by (direction) (rate(catalyst_s3_bytes_total[5m]))",
+              "legendFormat": "{{ direction }}",
               "refId": "A"
             }
           ]
@@ -547,14 +556,14 @@ spec:
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "catalyst_embedding_batch_duration_seconds{quantile=\"0.5\"}",
-              "legendFormat": "p50",
+              "expr": "histogram_quantile(0.5, sum by (le, provider, model) (rate(catalyst_embedding_batch_duration_seconds_bucket[5m])))",
+              "legendFormat": "{{ provider }} / {{ model }} p50",
               "refId": "A"
             },
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "catalyst_embedding_batch_duration_seconds{quantile=\"0.99\"}",
-              "legendFormat": "p99",
+              "expr": "histogram_quantile(0.99, sum by (le, provider, model) (rate(catalyst_embedding_batch_duration_seconds_bucket[5m])))",
+              "legendFormat": "{{ provider }} / {{ model }} p99",
               "refId": "B"
             }
           ]
@@ -563,15 +572,29 @@ spec:
           "datasource": { "type": "prometheus", "uid": "mimir" },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "blue", "value": 10000 }
-                ]
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "insertNulls": false,
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
               },
-              "unit": "short",
+              "unit": "ops",
               "mappings": []
             },
             "overrides": []
@@ -579,24 +602,17 @@ spec:
           "gridPos": { "h": 8, "w": 6, "x": 18, "y": 17 },
           "id": 12,
           "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": ["lastNotNull"],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "auto"
+            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+            "tooltip": { "mode": "multi", "sort": "desc" }
           },
-          "title": "Total Embedding Vectors",
-          "type": "stat",
+          "title": "Embedding Vectors/sec",
+          "description": "Rate of embedding vectors created per second, grouped by provider.",
+          "type": "timeseries",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum(catalyst_embedding_vectors_total)",
-              "legendFormat": "Vectors",
+              "expr": "sum by (provider) (rate(catalyst_embedding_vectors_total[5m]))",
+              "legendFormat": "{{ provider }}",
               "refId": "A"
             }
           ]
@@ -660,15 +676,29 @@ spec:
           "datasource": { "type": "prometheus", "uid": "mimir" },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "blue", "value": 1000 }
-                ]
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "insertNulls": false,
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
               },
-              "unit": "short",
+              "unit": "ops",
               "mappings": []
             },
             "overrides": []
@@ -676,24 +706,17 @@ spec:
           "gridPos": { "h": 8, "w": 8, "x": 8, "y": 26 },
           "id": 14,
           "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": ["lastNotNull"],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "auto"
+            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+            "tooltip": { "mode": "multi", "sort": "desc" }
           },
-          "title": "Total Assertions Created",
-          "type": "stat",
+          "title": "Assertions/sec by Domain",
+          "description": "S-P-O triples created per second, grouped by code_location.",
+          "type": "timeseries",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum(catalyst_assertions_created_total)",
-              "legendFormat": "Assertions",
+              "expr": "sum by (code_location) (rate(catalyst_assertions_created_total{code_location=~\"$code_location\"}[5m]))",
+              "legendFormat": "{{ code_location }}",
               "refId": "A"
             }
           ]
@@ -747,35 +770,11 @@ spec:
           ]
         },
         {
-          "collapsed": false,
+          "collapsed": true,
           "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 },
           "id": 104,
           "title": "Logs",
           "type": "row"
-        },
-        {
-          "datasource": { "type": "loki", "uid": "loki-v2" },
-          "gridPos": { "h": 10, "w": 12, "x": 0, "y": 35 },
-          "id": 16,
-          "options": {
-            "dedupStrategy": "none",
-            "enableLogDetails": true,
-            "prettifyLogMessage": false,
-            "showCommonLabels": false,
-            "showLabels": false,
-            "showTime": true,
-            "sortOrder": "Descending",
-            "wrapLogMessage": true
-          },
-          "title": "All Logs (catalyst-data)",
-          "type": "logs",
-          "targets": [
-            {
-              "datasource": { "type": "loki", "uid": "loki-v2" },
-              "expr": "{namespace=\"catalyst-data\"}",
-              "refId": "A"
-            }
-          ]
         },
         {
           "datasource": { "type": "loki", "uid": "loki-v2" },
@@ -828,7 +827,7 @@ spec:
               }
             ]
           },
-          "gridPos": { "h": 10, "w": 12, "x": 12, "y": 35 },
+          "gridPos": { "h": 10, "w": 12, "x": 0, "y": 35 },
           "id": 17,
           "options": {
             "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom" },
@@ -1004,12 +1003,13 @@ spec:
             },
             "textMode": "auto"
           },
-          "title": "Pod Restart Count",
+          "title": "Pod Restart Count (1h)",
+          "description": "Container restarts in the last 1h, per pod.",
           "type": "stat",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (pod) (kube_pod_container_status_restarts_total{namespace=\"catalyst-data\"})",
+              "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"catalyst-data\"}[1h]))",
               "legendFormat": "{{ pod }}",
               "refId": "A"
             }
@@ -1310,15 +1310,29 @@ spec:
           "datasource": { "type": "prometheus", "uid": "mimir" },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "blue", "value": 1073741824 }
-                ]
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "insertNulls": false,
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
               },
-              "unit": "bytes",
+              "unit": "Bps",
               "mappings": []
             },
             "overrides": []
@@ -1326,23 +1340,16 @@ spec:
           "gridPos": { "h": 8, "w": 6, "x": 12, "y": 73 },
           "id": 35,
           "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": ["lastNotNull"],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "auto"
+            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+            "tooltip": { "mode": "multi", "sort": "desc" }
           },
-          "title": "Total Bytes Saved (Transcode)",
-          "type": "stat",
+          "title": "Transcode Bytes Saved Rate",
+          "description": "Bytes saved per second by transcoding (1h window).",
+          "type": "timeseries",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "catalyst_transcode_saved_bytes_total",
+              "expr": "sum(rate(catalyst_transcode_saved_bytes_total[1h]))",
               "legendFormat": "Saved",
               "refId": "A"
             }
@@ -1452,7 +1459,7 @@ spec:
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (code_location) (rate(catalyst_asset_records_processed_total[5m]))",
+              "expr": "sum by (code_location) (rate(catalyst_asset_records_processed_total{code_location=~\"$code_location\"}[5m]))",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
             }
@@ -1496,12 +1503,12 @@ spec:
             "tooltip": { "mode": "multi", "sort": "desc" }
           },
           "title": "Active Materializations by Domain",
-          "description": "Concurrent running materializations, grouped by code_location.",
+          "description": "Concurrent running materializations, summed across all pods, grouped by code_location.",
           "type": "timeseries",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "catalyst_active_asset_materializations",
+              "expr": "sum by (code_location) (catalyst_active_asset_materializations{code_location=~\"$code_location\"})",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
             }
@@ -1550,57 +1557,8 @@ spec:
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "histogram_quantile(0.95, sum by (code_location, asset_key, le) (rate(catalyst_asset_materialization_duration_seconds_bucket[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (code_location, asset_key, le) (rate(catalyst_asset_materialization_duration_seconds_bucket{code_location=~\"$code_location\", asset_key=~\"$asset_key\"}[5m])))",
               "legendFormat": "{{ code_location }}/{{ asset_key }}",
-              "refId": "A"
-            }
-          ]
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "palette-classic" },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "drawStyle": "line",
-                "fillOpacity": 10,
-                "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-                "insertNulls": false,
-                "lineInterpolation": "smooth",
-                "lineWidth": 2,
-                "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
-                "showPoints": "never",
-                "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
-              },
-              "unit": "reqps",
-              "mappings": []
-            },
-            "overrides": []
-          },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 90 },
-          "id": 43,
-          "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "title": "LLM Error Rate by Model",
-          "description": "LLM error rate per model. Alert fires at >10%.",
-          "type": "timeseries",
-          "targets": [
-            {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "rate(catalyst_llm_requests_total{status=\"error\"}[5m]) / rate(catalyst_llm_requests_total[5m])",
-              "legendFormat": "{{ model }} error rate",
               "refId": "A"
             }
           ]
@@ -1609,7 +1567,46 @@ spec:
       "refresh": "30s",
       "schemaVersion": 39,
       "tags": ["dagster", "catalyst-data", "pipelines", "media-ingest"],
-      "templating": { "list": [] },
+      "templating": {
+        "list": [
+          {
+            "name": "code_location",
+            "label": "Code Location",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "mimir" },
+            "query": "label_values(catalyst_active_asset_materializations, code_location)",
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*",
+            "current": { "selected": true, "text": "All", "value": "$__all" },
+            "refresh": 1,
+            "sort": 1
+          },
+          {
+            "name": "asset_key",
+            "label": "Asset Key",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "mimir" },
+            "query": "label_values(catalyst_asset_materialization_duration_seconds_bucket{code_location=~\"$code_location\"}, asset_key)",
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*",
+            "current": { "selected": true, "text": "All", "value": "$__all" },
+            "refresh": 2,
+            "sort": 1
+          },
+          {
+            "name": "interval",
+            "label": "Interval",
+            "type": "interval",
+            "query": "1m,5m,15m,1h",
+            "current": { "selected": true, "text": "5m", "value": "5m" },
+            "auto": false,
+            "auto_count": 30,
+            "auto_min": "10s"
+          }
+        ]
+      },
       "time": { "from": "now-6h", "to": "now" },
       "timepicker": {},
       "timezone": "browser",
