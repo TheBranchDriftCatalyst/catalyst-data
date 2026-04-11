@@ -76,6 +76,8 @@ spec:
               value: "json"
             - name: METRICS_PORT
               value: "9090"
+            - name: DAGSTER_CODE_LOCATION
+              value: media_ingest
             - name: DAGSTER_CURRENT_IMAGE
               value: ghcr.io/thebranchdriftcatalyst/media-ingest:gpu
             - name: DAGSTER_S3_ENDPOINT_URL

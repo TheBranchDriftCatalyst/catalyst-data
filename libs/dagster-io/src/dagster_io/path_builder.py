@@ -50,10 +50,32 @@ def _get_upstream_metadata(context: InputContext) -> dict:
 
 
 def _code_location_from_context(context: OutputContext | InputContext) -> str:
-    """Extract code location name from run context, falling back to env var.
+    """Extract the code location name for S3 path building.
 
-    For InputContext, checks upstream metadata for ``source_code_location``
-    override — enables cross-code-location reads via SourceAssets.
+    Resolution precedence:
+      1. ``InputContext`` upstream metadata override (``source_code_location``)
+         — enables cross-code-location reads via SourceAssets. This is how
+         ``knowledge_graph`` reads ``media_entity_candidates`` written by the
+         ``media_ingest`` code location.
+      2. ``DAGSTER_CODE_LOCATION`` environment variable — required on every
+         Dagster code-server pod and every process that uses dagster_io for
+         S3 path building. Set in each ``k8s/<name>/deployment.yaml``.
+
+    Raises:
+        RuntimeError: if neither a ``source_code_location`` metadata override
+            is present nor ``DAGSTER_CODE_LOCATION`` is set. We fail loud
+            rather than silently falling back to ``"default"`` — a silent
+            default caused a P0 data-routing bug where ``media_ingest`` wrote
+            to ``gold/default/media/…`` but ``knowledge_graph`` read from
+            ``gold/media_ingest/media/…``, and every ``canonical_entities``
+            run produced zero entities for days.
+
+    The previous implementation also attempted to resolve the code location
+    via ``context.step_context.dagster_run.external_pipeline_origin`` — that
+    attribute path no longer exists on modern Dagster runs, so the branch
+    always raised and silently fell through to the env var with a
+    ``"default"`` fallback. Both the deprecated API traversal and the silent
+    fallback are removed here.
     """
     if isinstance(context, InputContext):
         meta = _get_upstream_metadata(context)
@@ -61,11 +83,18 @@ def _code_location_from_context(context: OutputContext | InputContext) -> str:
         if override:
             logger.debug("path_builder: using source_code_location override=%s", override)
             return override
-    try:
-        origin = context.step_context.dagster_run.external_pipeline_origin
-        return origin.external_repository_origin.code_location_origin.location_name
-    except Exception:
-        return os.environ.get("DAGSTER_CODE_LOCATION", "default")
+
+    loc = os.environ.get("DAGSTER_CODE_LOCATION")
+    if not loc:
+        raise RuntimeError(
+            "DAGSTER_CODE_LOCATION environment variable is not set, and no "
+            "SourceAsset 'source_code_location' metadata override was provided "
+            "for the input. Every process that uses dagster_io for S3 path "
+            "building must set DAGSTER_CODE_LOCATION in its k8s deployment "
+            "manifest (see k8s/<name>/deployment.yaml). This used to silently "
+            "default to 'default' and caused a P0 data-routing bug."
+        )
+    return loc
 
 
 def _group_from_asset_key(asset_key) -> str:

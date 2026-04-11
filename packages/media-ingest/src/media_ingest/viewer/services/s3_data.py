@@ -25,7 +25,11 @@ _CACHE_TTL = 60
 # Unpartitioned:  {layer}/{code_location}/{group}/{asset}/data.{ext}
 # Partitioned:    {layer}/{code_location}/{group}/{asset}/{partition_key}/data.{ext}
 
-_CODE_LOCATION = "default"
+# Read from env rather than hardcoding — must match dagster_io.path_builder
+# which requires DAGSTER_CODE_LOCATION to be set on every pod that uses the
+# S3 path helpers. The viewer runs inside the media-ingest code-server pod,
+# so this resolves to "media_ingest" in prod.
+_CODE_LOCATION = os.environ.get("DAGSTER_CODE_LOCATION", "media_ingest")
 _GROUP = "media"
 
 # silver layer — unpartitioned list

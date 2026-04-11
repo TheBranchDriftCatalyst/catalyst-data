@@ -28,6 +28,13 @@ spec:
               containerPort: 8501
               protocol: TCP
           env:
+            # Required by dagster_io.path_builder — every pod that imports
+            # dagster_io must set this so S3 path building doesn't silently
+            # fall back to "default". data_explorer is a streamlit consumer,
+            # not a registered Dagster code location, but it uses the same
+            # S3 path helpers for reads so it needs a value here.
+            - name: DAGSTER_CODE_LOCATION
+              value: data_explorer
             - name: DAGSTER_S3_ENDPOINT_URL
               valueFrom:
                 secretKeyRef:
