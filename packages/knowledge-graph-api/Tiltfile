@@ -1,0 +1,57 @@
+# knowledge-graph-api Tiltfile — local dev mode
+# Runs the GraphQL server natively on your Mac, pointed at cluster Neo4j
+# via port-forwards from the root Tiltfile.
+#
+# Usage:
+#   Uncomment the include() in the root Tiltfile to activate, OR run:
+#     tilt up -f packages/knowledge-graph-api/Tiltfile
+#
+# Prerequisites:
+#   - Root Tiltfile running (provides Neo4j port-forwards on 7474/7687).
+#     If you run this file standalone, set RUN_STANDALONE=1 below to also
+#     attach Neo4j from this Tiltfile (see bottom of file).
+#   - npm install has been run once in packages/knowledge-graph-api/
+#
+# What you get:
+#   - Apollo Sandbox at http://localhost:4000
+#   - Neo4j Browser at http://localhost:7474 (from root Tiltfile)
+#   - tsx watch auto-reloads on source changes
+
+load('ext://k8s_attach', 'k8s_attach')
+
+LABEL_KG_API = '3-knowledge-graph-api'
+
+# Set to True to port-forward Neo4j from this Tiltfile when running standalone.
+# Leave False if the root Tiltfile is already running (it owns the port-forward).
+RUN_STANDALONE = False
+
+if RUN_STANDALONE:
+    # Attach to the existing cluster Neo4j (ArgoCD-managed) and port-forward bolt + http.
+    # Conflicts with the root Tiltfile's neo4j attach — pick one.
+    k8s_attach(
+        'neo4j-kg-api',
+        'deployment/neo4j',
+        namespace='catalyst-data',
+        port_forwards=['7474:7474', '7687:7687'],
+        labels=[LABEL_KG_API],
+    )
+
+# Run the GraphQL server natively — tsx watch auto-reloads on file changes.
+local_resource(
+    'knowledge-graph-api',
+    serve_cmd='cd packages/knowledge-graph-api && npm run dev',
+    deps=[
+        'packages/knowledge-graph-api/src/',
+        'packages/knowledge-graph-api/package.json',
+        'packages/knowledge-graph-api/tsconfig.json',
+    ],
+    readiness_probe=probe(
+        period_secs=5,
+        http_get=http_get_action(port=4000, path='/'),
+    ),
+    links=[
+        link('http://localhost:4000', 'Apollo Sandbox'),
+        link('http://localhost:7474', 'Neo4j Browser'),
+    ],
+    labels=[LABEL_KG_API],
+)

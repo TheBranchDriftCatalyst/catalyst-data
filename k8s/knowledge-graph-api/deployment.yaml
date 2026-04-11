@@ -1,0 +1,57 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knowledge-graph-api
+  labels:
+    app: knowledge-graph-api
+    app.kubernetes.io/name: knowledge-graph-api
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: knowledge-graph-api
+  template:
+    metadata:
+      labels:
+        app: knowledge-graph-api
+        app.kubernetes.io/name: knowledge-graph-api
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: server
+          image: ghcr.io/thebranchdriftcatalyst/knowledge-graph-api:latest
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "4000"
+            - name: NEO4J_URI
+              value: bolt://neo4j.catalyst-data.svc.cluster.local:7687
+            - name: NEO4J_USER
+              value: neo4j
+            - name: NEO4J_PASSWORD
+              value: neo4j-homelab
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30

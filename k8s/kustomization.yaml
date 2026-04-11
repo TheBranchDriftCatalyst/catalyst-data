@@ -37,6 +37,10 @@ resources:
   - open-leaks/service.yaml
   - knowledge-graph/deployment.yaml
   - knowledge-graph/service.yaml
+  # Knowledge Graph GraphQL API (Node/Apollo + @neo4j/graphql over Neo4j)
+  - knowledge-graph-api/deployment.yaml
+  - knowledge-graph-api/service.yaml
+  - knowledge-graph-api/ingressroute.yaml
   # Data Explorer (Streamlit UI)
   - data-explorer/deployment.yaml
   - data-explorer/service.yaml

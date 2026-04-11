@@ -56,7 +56,7 @@ jobs:
     needs: [test]
     strategy:
       matrix:
-        app: [congress-data, media-ingest, open-leaks, knowledge-graph, data-explorer]
+        app: [congress-data, media-ingest, open-leaks, knowledge-graph, data-explorer, knowledge-graph-api]
     uses: ./.github/workflows/build-image.yaml
     with:
       app: ${{ matrix.app }}

@@ -1,0 +1,17 @@
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: knowledge-graph-api
+  labels:
+    app: knowledge-graph-api
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`kg-graphql.talos00`)
+      kind: Rule
+      services:
+        - name: knowledge-graph-api
+          port: 4000

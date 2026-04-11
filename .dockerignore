@@ -29,6 +29,9 @@ tests/
 **/*.egg-info/
 **/.ruff_cache/
 
+# Node caches
+**/node_modules/
+
 # Build artifacts
 dist/
 build/

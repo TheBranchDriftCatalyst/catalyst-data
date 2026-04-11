@@ -2,9 +2,12 @@
 
 GraphQL read API over the catalyst-data Neo4j knowledge graph.
 
-MVP: local dev only, read-only, schema auto-derived from the live Neo4j database at startup via [`@neo4j/introspector`](https://neo4j.com/docs/graphql/current/introspector/). Served by [Apollo Server 5](https://www.apollographql.com/docs/apollo-server/) with its embedded **Apollo Sandbox** query explorer.
+Read-only, schema auto-derived from the live Neo4j database at startup via [`@neo4j/introspector`](https://neo4j.com/docs/graphql/current/introspector/). Served by [Apollo Server 5](https://www.apollographql.com/docs/apollo-server/) with its embedded **Apollo Sandbox** query explorer.
 
-Tracked in beads: `CD-4bj`.
+- **Local dev:** run natively via `npm run dev` or `tilt up -f packages/knowledge-graph-api/Tiltfile`
+- **Production:** deployed to k8s as `knowledge-graph-api` in the `catalyst-data` namespace, exposed at **`http://kg-graphql.talos00`** via Traefik
+
+Tracked in beads: `CD-4bj` (MVP), `CD-0mz` (deployment).
 
 ## Prerequisites
 
@@ -12,10 +15,22 @@ Tracked in beads: `CD-4bj`.
 - Access to the catalyst-data cluster (so Neo4j is reachable on `localhost:7687`).
 - Knowledge graph has been materialized at least once (empty DB → empty schema).
 
-## Run it
+## Run it locally
+
+### Option A: Tilt (recommended)
+
+```bash
+tilt up -f packages/knowledge-graph-api/Tiltfile
+```
+
+The Tiltfile expects the root `Tiltfile` to already be running (it provides the Neo4j port-forwards on 7474/7687). If you want to run this one standalone, flip `RUN_STANDALONE = True` at the top of `packages/knowledge-graph-api/Tiltfile` so it attaches Neo4j itself.
+
+Tilt gives you auto-reload on source edits, a UI at http://localhost:10350 with live logs, and direct links to Apollo Sandbox and Neo4j Browser.
+
+### Option B: plain npm
 
 1. **Port-forward Neo4j to localhost.** Either:
-   - `tilt up` at the repo root (preferred) — the root `Tiltfile` attaches `neo4j` on ports 7474/7687. Or:
+   - `tilt up` at the repo root — the root `Tiltfile` attaches `neo4j` on 7474/7687. Or:
    - `kubectl port-forward -n catalyst-data svc/neo4j 7687:7687 7474:7474`
 2. `cd packages/knowledge-graph-api`
 3. `cp .env.example .env` (edit if your connection differs from the defaults)
@@ -91,16 +106,34 @@ Because this happens once at boot:
 
 With `"type": "module"` + `NodeNext` module resolution, TypeScript source files import each other with a `.js` suffix (e.g., `import { loadConfig } from "./env.js"`). The actual file is `env.ts`; TS rewrites the extension at compile time. Normal and expected.
 
-## Not in MVP
+## Production deployment
 
-Explicit out-of-scope list:
+Deployed to the `catalyst-data` namespace as the `knowledge-graph-api` Deployment + Service + Traefik IngressRoute. Accessible cluster-internally at `knowledge-graph-api.catalyst-data.svc.cluster.local:4000` and externally (on the homelab LAN) at **`http://kg-graphql.talos00`**.
 
-- Authentication / authorization (localhost only — do **not** expose this port on a LAN)
+### How it ships
+
+1. **Build**: `.github/workflows/ci.yaml` has a matrix that includes `knowledge-graph-api`. Merges to `main` → `build-image.yaml` workflow builds `packages/knowledge-graph-api/Dockerfile` (multi-stage Node 24, `tsc`-compiled, runs `node dist/index.js`) and pushes to `ghcr.io/thebranchdriftcatalyst/knowledge-graph-api:latest` + a per-SHA tag.
+2. **Deploy**: ArgoCD watches this repo's `k8s/` directory. `k8s/kustomization.yaml` references `k8s/knowledge-graph-api/{deployment,service,ingressroute}.yaml`. On sync, ArgoCD creates/updates the resources.
+
+### Known: image-updater not wired up
+
+Like `knowledge-graph` and `data-explorer`, this service is **not** covered by `argocd-image-updater`. A new `:latest` push after CI will not automatically roll the pod. To pick up a new image manually:
+
+```bash
+kubectl rollout restart deployment/knowledge-graph-api -n catalyst-data
+# or
+kubectl delete pod -n catalyst-data -l app=knowledge-graph-api
+```
+
+Fixing this requires adding `knowledge-graph-api` to the `argocd-image-updater` annotation on the argocd Application (lives in the GitOps repo, not here).
+
+### No auth
+
+The IngressRoute has no auth middleware, matching the rest of `*.talos00` (LAN-only trust model). If the homelab is ever exposed to a wider network, add a Traefik `basicauth` or `forward-auth` middleware before publishing this hostname.
+
+## Not in scope
+
 - Mutations (the introspector is called with `readonly=true`)
-- K8s deployment manifests
-- Dockerfile
-- Tilt resource for this service (runs natively on your Mac)
 - Unit or integration tests
-- CI wiring
-- Schema hot-reload on Neo4j data changes
-- Graph visualization UI (use Neo4j Browser)
+- Schema hot-reload on Neo4j data changes (restart to pick up new node labels / rel types)
+- Built-in graph visualization (use Neo4j Browser)
