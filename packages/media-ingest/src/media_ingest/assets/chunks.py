@@ -1,4 +1,4 @@
-"""Silver: Text chunking for downstream embedding stage.
+"""Gold: Text chunking for downstream embedding stage.
 
 Uses 800/150 chunk sizes optimized for speech transcriptions — shorter chunks
 improve retrieval quality for conversational audio content.
@@ -24,13 +24,27 @@ tracer = get_tracer(__name__)
 TRANSCRIPTION_CHUNK_SIZE = 800
 TRANSCRIPTION_CHUNK_OVERLAP = 150
 
+# CPU-only text chunking. Small footprint but we set explicit requests/limits
+# so the scheduler doesn't co-locate too many of these on a single node.
+CHUNKS_K8S_CONFIG = {
+    "dagster-k8s/config": {
+        "container_config": {
+            "resources": {
+                "requests": {"cpu": "250m", "memory": "512Mi"},
+                "limits": {"cpu": "1", "memory": "2Gi"},
+            },
+        },
+    },
+}
+
 
 @asset(
     group_name="media_ingest",
     description="Chunk a single media transcription for embedding. One partition = one document.",
     compute_kind="python",
-    metadata={"layer": "silver"},
+    metadata={"layer": "gold"},
     partitions_def=media_partitions,
+    op_tags=CHUNKS_K8S_CONFIG,
 )
 def media_chunks(
     context: AssetExecutionContext,
@@ -38,7 +52,7 @@ def media_chunks(
     media_diarization: dict[str, Any],
 ) -> Output[list[TextChunk]]:
     partition_key = context.partition_key
-    with trace_operation("media_chunks", tracer, {"code_location": "media_ingest", "layer": "silver", "partition_key": partition_key}):
+    with trace_operation("media_chunks", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key}):
         t = media_diarization
         logger.info("Starting media_chunks chunking for partition=%s", partition_key)
 
@@ -70,7 +84,7 @@ def media_chunks(
             chunk_overlap=TRANSCRIPTION_CHUNK_OVERLAP,
         )
 
-        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_chunks", layer="silver").inc(len(chunks))
+        ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_chunks", layer="gold").inc(len(chunks))
         logger.info("media_chunks complete for partition=%s: %d chunks", partition_key, len(chunks))
         context.log.info(
             f"Chunked transcription for '{t.get('title', partition_key)}' into {len(chunks)} chunks "

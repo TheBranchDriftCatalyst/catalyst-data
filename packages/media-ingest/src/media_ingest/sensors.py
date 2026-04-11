@@ -3,7 +3,8 @@
 For each new document_id found in media_documents that is not yet a registered
 partition, the sensor registers the partition key and yields a RunRequest to
 materialize the full partitioned downstream chain:
-  media_transcriptions -> media_chunks -> {media_mentions, media_assertions, media_embeddings}
+  media_transcriptions -> media_diarization -> media_chunks
+    -> {media_mentions, media_assertions, media_embeddings} -> media_entity_candidates
 """
 
 import json
@@ -11,7 +12,6 @@ import os
 
 from dagster import (
     AssetKey,
-    RunConfig,
     RunRequest,
     SensorEvaluationContext,
     SkipReason,
@@ -27,6 +27,11 @@ logger = get_logger(__name__)
 # The S3 path where media_documents data lives — the sensor reads this to
 # discover new document IDs without needing to run the discovery pipeline.
 _DOCUMENTS_S3_PREFIX = "silver/default/media/media_documents"
+
+# Cap the number of RunRequests yielded per sensor tick. If a large batch of
+# new documents lands at once, we process them across multiple ticks rather
+# than flooding the run queue.
+_MAX_RUNS_PER_TICK = 25
 
 
 def _get_s3_client() -> S3Client:
@@ -66,11 +71,12 @@ def _load_document_ids(client: S3Client) -> list[str]:
     name="media_document_sensor",
     description=(
         "Watches media_documents in S3 for new document IDs. "
-        "Registers dynamic partitions and triggers transcription+downstream for each new file."
+        "Registers dynamic partitions and triggers the full partitioned pipeline for each new file."
     ),
     minimum_interval_seconds=300,  # Check every 5 minutes
     asset_selection=[
         AssetKey("media_transcriptions"),
+        AssetKey("media_diarization"),
         AssetKey("media_chunks"),
         AssetKey("media_mentions"),
         AssetKey("media_assertions"),
@@ -96,9 +102,19 @@ def media_document_sensor(context: SensorEvaluationContext):
     existing_partitions = set(
         context.instance.get_dynamic_partitions("media_document")
     )
+    all_doc_ids_set = set(all_doc_ids)
 
-    # Filter to only audio documents by checking which have already been transcribed
-    # We register ALL document IDs as partitions but only create RunRequests for new ones
+    # Garbage-collect partitions whose source document no longer exists in S3.
+    # Without this the dynamic partition set grows unboundedly as files are
+    # renamed/removed, leaving orphaned keys behind.
+    stale_ids = existing_partitions - all_doc_ids_set
+    for stale_id in stale_ids:
+        context.instance.delete_dynamic_partition("media_document", stale_id)
+    if stale_ids:
+        logger.info(
+            "media_document_sensor: removed %d stale partitions", len(stale_ids)
+        )
+
     new_ids = [doc_id for doc_id in all_doc_ids if doc_id not in existing_partitions]
 
     if not new_ids:
@@ -107,15 +123,20 @@ def media_document_sensor(context: SensorEvaluationContext):
         )
         return
 
-    # Register new partition keys
-    context.instance.add_dynamic_partitions("media_document", new_ids)
+    # Cap the batch so a flood of new documents doesn't produce thousands of
+    # concurrent RunRequests. Remaining IDs get picked up on the next tick.
+    batch = new_ids[:_MAX_RUNS_PER_TICK]
+
+    # Register only the partition keys we're about to materialize this tick —
+    # the rest will be registered on subsequent ticks as they become the new batch.
+    context.instance.add_dynamic_partitions("media_document", batch)
     logger.info(
-        "media_document_sensor: registered %d new partitions (total=%d)",
-        len(new_ids), len(all_doc_ids),
+        "media_document_sensor: registered %d new partitions this tick "
+        "(pending=%d, total_docs=%d)",
+        len(batch), len(new_ids) - len(batch), len(all_doc_ids),
     )
 
-    # Yield a RunRequest for each new document
-    for doc_id in new_ids:
+    for doc_id in batch:
         context.log.info(f"New document detected: {doc_id}")
         yield RunRequest(
             run_key=f"media_document_{doc_id}",
@@ -123,5 +144,5 @@ def media_document_sensor(context: SensorEvaluationContext):
         )
 
     logger.info(
-        "media_document_sensor: yielded %d RunRequests for new documents", len(new_ids)
+        "media_document_sensor: yielded %d RunRequests for new documents", len(batch)
     )

@@ -28,6 +28,7 @@ tracer = get_tracer(__name__)
             "container_config": {
                 "resources": {
                     "requests": {"cpu": "1", "memory": "4Gi"},
+                    "limits": {"cpu": "2", "memory": "8Gi"},
                 }
             }
         }

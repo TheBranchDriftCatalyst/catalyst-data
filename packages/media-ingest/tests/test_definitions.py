@@ -69,3 +69,37 @@ def test_unpartitioned_assets():
             assert spec.partitions_def is None, (
                 f"{spec.key} should not be partitioned"
             )
+
+
+def test_sensor_asset_selections_are_closed():
+    """Every sensor with an asset_selection must form a closed subgraph.
+
+    For each selected asset, every partitioned parent MUST also be in the
+    selection. Otherwise a sensor-triggered run will fail at IO manager load
+    time with NoSuchKey, because the parent partition will never have been
+    materialized inside the run.
+
+    This is the guardrail for the April 5 regression where media_diarization
+    was split out of media_transcriptions but not added to
+    media_document_sensor's asset_selection — every run failed trying to
+    load media_diarization as an input to media_chunks.
+    """
+    graph = defs.resolve_asset_graph()
+    for sensor in defs.sensors:
+        if sensor.asset_selection is None:
+            continue
+        selection = sensor.asset_selection.resolve(graph)
+        for key in selection:
+            node = graph.get(key)
+            for parent in node.parent_keys:
+                parent_node = graph.get(parent)
+                if parent_node.partitions_def is None:
+                    # Unpartitioned parents are expected to be materialized
+                    # separately (e.g. by discovery jobs) — fine to exclude.
+                    continue
+                assert parent in selection, (
+                    f"Sensor '{sensor.name}' selects {key} but its partitioned "
+                    f"parent {parent} is NOT in the selection. Runs will fail "
+                    f"loading {parent} from the IO manager. Add "
+                    f"AssetKey({list(parent.path)!r}) to asset_selection."
+                )
