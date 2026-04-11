@@ -26,17 +26,15 @@ if os.environ.get("DAGSTER_IS_CODE_SERVER", "").lower() in ("1", "true"):
     threading.Thread(target=_start_viewer, daemon=True, name="media-viewer").start()
 
 from dagster import Definitions
-from dagster_k8s import k8s_job_executor
-
-# Forward DAGSTER_CODE_LOCATION from the code-server's env to every step
-# pod spawned by this executor. dagster_io.path_builder requires this env
-# var to build S3 paths (it used to silently default to "default" and
-# caused a P0 data-routing bug).
-_k8s_executor = k8s_job_executor.configured(
-    {"env_vars": ["DAGSTER_CODE_LOCATION"]},
-    name="k8s_job_executor_with_code_location",
+from dagster_io import (
+    ChunkingResource,
+    EmbeddingResource,
+    LLMResource,
+    MinioIOManager,
+    make_k8s_executor,
 )
-from dagster_io import ChunkingResource, EmbeddingResource, LLMResource, MinioIOManager
+
+_k8s_executor = make_k8s_executor("media_ingest")
 
 from media_ingest.assets import (
     media_assertions,

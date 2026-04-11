@@ -19,6 +19,7 @@ from dagster_io.extraction_schemas import (
     normalize_predicate,
     parse_mention_type,
 )
+from dagster_io.executor import make_k8s_executor
 from dagster_io.io_manager import MinioIOManager, OptionalMinioIOManager
 from dagster_io.llm import EmbeddingResource, LLMResource
 from dagster_io.logging import configure_logging, get_logger
@@ -71,6 +72,8 @@ __all__ = [
     # IO
     "MinioIOManager",
     "OptionalMinioIOManager",
+    # Executor
+    "make_k8s_executor",
     # Resources
     "LLMResource",
     "EmbeddingResource",
