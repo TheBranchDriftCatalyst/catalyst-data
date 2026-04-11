@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import Scope
 
 from dagster_io.logging import get_logger
 
@@ -27,6 +29,32 @@ logger = get_logger(__name__)
 
 # Path where the production React build is mounted in the container
 _STATIC_DIR = "/app/viewer-static"
+
+
+class SPAStaticFiles(StaticFiles):
+    """StaticFiles with SPA fallback to index.html for any 404.
+
+    React Router client-side routes like ``/viewer/player/<doc_id>`` don't
+    correspond to real files on disk. A vanilla StaticFiles mount returns
+    404 for them, which produces the FastAPI ``{"detail":"Not Found"}``
+    response. This subclass catches the 404 and serves index.html instead,
+    letting React Router handle routing in the browser.
+
+    API routes (``/viewer/api/...``, ``/viewer/media/...``,
+    ``/viewer/health``, ``/viewer/openapi.json``, ``/viewer/docs``) are
+    registered on the FastAPI app itself and match BEFORE this mount, so
+    they never reach this fallback.
+    """
+
+    async def get_response(self, path: str, scope: Scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as e:
+            if e.status_code == 404:
+                index = os.path.join(self.directory, "index.html")
+                if os.path.isfile(index):
+                    return FileResponse(index)
+            raise
 
 
 def create_viewer_app() -> FastAPI:
@@ -69,40 +97,14 @@ def create_viewer_app() -> FastAPI:
     def health() -> dict:
         return {"status": "ok"}
 
-    # Serve React static build if the directory exists (production)
+    # Serve React static build with SPA fallback if the directory exists
     if os.path.isdir(_STATIC_DIR):
-        logger.info("Serving static files from %s at /viewer/", _STATIC_DIR)
+        logger.info("Serving static files (SPA) from %s at /viewer/", _STATIC_DIR)
         app.mount(
             "/viewer/",
-            StaticFiles(directory=_STATIC_DIR, html=True),
+            SPAStaticFiles(directory=_STATIC_DIR, html=True),
             name="viewer-static",
         )
-
-        # SPA catch-all: React Router client-side routes like
-        # `/viewer/player/<document_id>` need to fall back to index.html
-        # rather than 404. The StaticFiles mount only serves exact files.
-        # This catch-all matches anything under /viewer/ that isn't an API
-        # route (/viewer/api/..., /viewer/media/..., /viewer/health,
-        # /viewer/openapi.json, /viewer/docs) or an existing static file,
-        # and returns the SPA shell so React Router can handle routing.
-        _INDEX = os.path.join(_STATIC_DIR, "index.html")
-
-        @app.get("/viewer/{full_path:path}")
-        def spa_fallback(full_path: str, request: Request):
-            # API/docs/health routes are matched earlier by their specific
-            # handlers; this handler only fires for unmatched paths. But
-            # double-check in case of an ordering quirk.
-            if full_path.startswith(("api/", "media/", "health", "openapi.json", "docs")):
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404, detail="Not Found")
-            # If the requested path maps to a real static file, let the
-            # StaticFiles mount handle it (won't reach here in practice
-            # because StaticFiles is mounted first).
-            candidate = os.path.join(_STATIC_DIR, full_path)
-            if os.path.isfile(candidate):
-                return FileResponse(candidate)
-            # Otherwise serve the SPA shell.
-            return FileResponse(_INDEX)
     else:
         logger.info(
             "Static directory %s not found — skipping SPA mount (dev mode?)",
