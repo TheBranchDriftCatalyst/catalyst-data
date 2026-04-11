@@ -1,0 +1,41 @@
+---
+# HTTP ingress for Neo4j Browser SPA (port 7474).
+# The browser loads from here, then its client-side JS opens a Bolt
+# connection to neo4j.talos00:7687 — see IngressRouteTCP below.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: neo4j-browser
+  labels:
+    app: neo4j
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`neo4j.talos00`)
+      kind: Rule
+      services:
+        - name: neo4j
+          port: 7474
+---
+# TCP ingress for Neo4j Bolt protocol (port 7687).
+# Requires the 'bolt' entrypoint on Traefik (added in talos-homelab
+# infrastructure/base/traefik/helmrelease.yaml). HostSNI(`*`) is required
+# for non-TLS TCP routing — matches any incoming connection on :7687.
+# LAN-only trust model: auth is Neo4j's own basic auth (neo4j/neo4j-homelab).
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: neo4j-bolt
+  labels:
+    app: neo4j
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  entryPoints:
+    - bolt
+  routes:
+    - match: HostSNI(`*`)
+      services:
+        - name: neo4j
+          port: 7687
