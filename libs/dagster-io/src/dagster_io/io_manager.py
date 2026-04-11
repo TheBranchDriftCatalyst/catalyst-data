@@ -19,6 +19,23 @@ from dagster_io.serializers import _extract_schema, deserialize, serialize, seri
 
 logger = get_logger(__name__)
 
+# S3 error codes that indicate a missing object/bucket. Used by
+# OptionalMinioIOManager.load_input to distinguish "never materialized" from
+# real errors. Module-level (not class attribute) because ConfigurableIOManager
+# is a Pydantic model and class-level dicts/sets become ModelPrivateAttr
+# descriptors that can't be iterated.
+_S3_MISSING_CODES = frozenset({"NoSuchKey", "404", "NoSuchBucket"})
+
+
+def _s3_is_missing(exc: BaseException) -> bool:
+    """Return True iff exc is a boto3 ClientError for a missing key/bucket."""
+    from botocore.exceptions import ClientError
+
+    if not isinstance(exc, ClientError):
+        return False
+    code = exc.response.get("Error", {}).get("Code", "")
+    return code in _S3_MISSING_CODES
+
 
 class MinioIOManager(ConfigurableIOManager):
     """S3-backed IO manager targeting a MinIO instance.
@@ -350,17 +367,6 @@ class OptionalMinioIOManager(MinioIOManager):
     https://docs.dagster.io/guides/build/jobs/unconnected-inputs
     """
 
-    _MISSING_CODES = {"NoSuchKey", "404", "NoSuchBucket"}
-
-    @classmethod
-    def _is_missing(cls, exc: Exception) -> bool:
-        """Return True iff exc is a boto3 ClientError for a missing key/bucket."""
-        from botocore.exceptions import ClientError
-        if not isinstance(exc, ClientError):
-            return False
-        code = exc.response.get("Error", {}).get("Code", "")
-        return code in cls._MISSING_CODES
-
     def load_input(self, context: InputContext) -> typing.Any:
         if context.has_asset_partitions:
             # Partition fan-in: load each partition independently and skip any
@@ -373,7 +379,7 @@ class OptionalMinioIOManager(MinioIOManager):
                 try:
                     result[k] = self._load_single(context, k)
                 except Exception as e:
-                    if self._is_missing(e):
+                    if _s3_is_missing(e):
                         logger.info(
                             "OptionalMinioIOManager: partition %s of %s not "
                             "materialized — skipping",
@@ -398,7 +404,7 @@ class OptionalMinioIOManager(MinioIOManager):
         try:
             return self._load_single(context)
         except Exception as e:
-            if self._is_missing(e):
+            if _s3_is_missing(e):
                 logger.info(
                     "OptionalMinioIOManager: upstream asset %s not materialized "
                     "— returning None for optional input",
