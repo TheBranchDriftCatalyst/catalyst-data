@@ -56,6 +56,23 @@ pre-commit:
       run: npx prettier --write {staged_files}
       stage_fixed: true
 
+    # ── Security: gitleaks secret scanning ──────────────────────────────
+    # Scans ONLY the staged diff (protect --staged), not the full repo.
+    # --no-banner  suppresses the ASCII art
+    # --redact     masks detected secrets in output so they aren't echoed
+    #              into terminal/logs/CI transcripts
+    # --verbose    shows what was scanned so we can eyeball hook output
+    #
+    # Config lives at .gitleaks.toml in the repo root (auto-discovered).
+    # That file extends gitleaks' built-in ruleset and adds a narrow
+    # allowlist for homelab-default passwords and test fixtures — see
+    # .gitleaks.toml for the exact justifications.
+    #
+    # Bypass for a single commit: LEFTHOOK=0 git commit ...
+    gitleaks:
+      tags: security
+      run: gitleaks protect --staged --no-banner --redact --verbose
+
     # ── Beads pre-commit flush ──────────────────────────────────────────
     # Preserve beads integration. This runs the same command the
     # beads-managed .git/hooks/pre-commit used to run before lefthook

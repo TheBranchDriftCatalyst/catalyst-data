@@ -1,0 +1,68 @@
+# gitleaks configuration for catalyst-data
+#
+# Invoked by the lefthook pre-commit hook as:
+#
+#     gitleaks protect --staged --no-banner --redact --verbose
+#
+# gitleaks auto-discovers this file at the repo root. We pull in the built-in
+# default ruleset (see [extend] below) and layer a narrow allowlist on top for
+# values that are intentionally committed to this homelab repository.
+#
+# To bypass the whole pre-commit hook for a single commit (WIP, emergencies):
+#
+#     LEFTHOOK=0 git commit ...
+#
+# To rescan the full working tree manually (slow — CI concern, not pre-commit):
+#
+#     gitleaks detect --no-banner --redact --verbose
+
+title = "catalyst-data gitleaks config"
+
+[extend]
+# Inherit gitleaks' built-in ruleset (AWS, GCP, Azure, Stripe, OpenAI, Slack,
+# GitHub tokens, generic high-entropy strings, etc). We only *add* allowlists
+# below — we don't redefine rules.
+useDefault = true
+
+[allowlist]
+description = "Homelab-default passwords and test fixtures intentionally committed to this repo"
+
+# We match against the raw secret value the rule extracted, not the full line.
+regexTarget = "match"
+
+# Regex allowlist — applied to every rule match, across every file.
+#
+# All three values are hardcoded homelab-default passwords that are shipped
+# alongside the k8s manifests as the literal in-cluster credentials. They're
+# not real secrets, and the same strings appear as fallback defaults in Python
+# source (packages/knowledge-graph/src/knowledge_graph/resources.py,
+# packages/media-ingest/src/media_ingest/viewer/services/annotation_store.py),
+# TypeScript source (packages/knowledge-graph-api/src/env.ts), Tiltfiles,
+# scripts/dashboard.sh, and README.md. A regex allowlist (rather than a path
+# allowlist) lets us keep the rules active for any *other* string in those
+# files while whitelisting just these three well-known values.
+regexes = [
+  # k8s/platform/dagster-instance.yaml, k8s/platform/postgres.yaml,
+  # k8s/platform/deployment.yaml, k8s/media-ingest/deployment.yaml
+  '''dagster-homelab''',
+
+  # k8s/knowledge-graph/deployment.yaml, k8s/media-ingest/deployment.yaml,
+  # k8s/platform/postgres-knowledge.yaml, Tiltfile
+  '''kg-homelab''',
+
+  # k8s/knowledge-graph/deployment.yaml, k8s/platform/neo4j.yaml,
+  # packages/knowledge-graph-api/src/env.ts, Tiltfile, scripts/dashboard.sh
+  '''neo4j-homelab''',
+]
+
+# Path allowlist — files that only contain deliberate fixture values.
+#
+# tests/conftest.py sets CONGRESS_API_KEY / OPENAI_API_KEY / DAGSTER_S3_* to
+# the literal strings "test-key" / "test" via monkeypatch.setenv so unit tests
+# never hit real APIs. Scoping the allowlist to conftest.py (not all of tests/)
+# keeps the default rules active over the rest of the test tree in case real
+# credentials ever leak into an actual test case.
+paths = [
+  '''(^|/)tests/conftest\.py$''',
+  '''(^|/)conftest\.py$''',
+]
