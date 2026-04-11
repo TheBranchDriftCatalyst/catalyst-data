@@ -113,3 +113,59 @@ class S3Client:
         except Exception:
             logger.debug("S3 head_object key=%s error", key)
             return None
+
+    def delete_object(self, key: str) -> None:
+        """Delete a single object. Idempotent — missing keys succeed silently."""
+        logger.debug("S3 delete_object bucket=%s key=%s", self.bucket, key)
+        with track_duration(S3_OPERATION_DURATION, {"operation": "delete_object", "bucket": self.bucket}):
+            self._client.delete_object(Bucket=self.bucket, Key=key)
+        S3_OPERATIONS.labels(operation="delete_object", bucket=self.bucket).inc()
+        logger.info("S3 delete_object complete key=%s", key)
+
+    def delete_objects(self, keys: list[str]) -> tuple[int, list[dict]]:
+        """Batch delete up to any number of objects.
+
+        Returns (deleted_count, errors). Automatically chunks into the
+        S3 batch limit of 1000 keys per request.
+
+        Note: MinIO's DeleteObjects implementation requires Content-MD5,
+        which botocore doesn't always set automatically. We fall back to
+        per-key deletes if a batch fails with MissingContentMD5.
+        """
+        if not keys:
+            return 0, []
+        logger.debug("S3 delete_objects bucket=%s count=%d", self.bucket, len(keys))
+        deleted = 0
+        errors: list[dict] = []
+        with track_duration(S3_OPERATION_DURATION, {"operation": "delete_objects", "bucket": self.bucket}):
+            for i in range(0, len(keys), 1000):
+                batch = keys[i : i + 1000]
+                try:
+                    resp = self._client.delete_objects(
+                        Bucket=self.bucket,
+                        Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
+                    )
+                    batch_errors = resp.get("Errors", []) or []
+                    errors.extend(batch_errors)
+                    deleted += len(batch) - len(batch_errors)
+                except self._client.exceptions.ClientError as e:
+                    # MinIO requires Content-MD5 for DeleteObjects; fall back to singles.
+                    if "MissingContentMD5" in str(e) or "Content-Md5" in str(e):
+                        logger.warning(
+                            "S3 delete_objects batch unsupported (MissingContentMD5), "
+                            "falling back to per-key deletes"
+                        )
+                        for k in batch:
+                            try:
+                                self._client.delete_object(Bucket=self.bucket, Key=k)
+                                deleted += 1
+                            except Exception as inner:
+                                errors.append({"Key": k, "Code": type(inner).__name__, "Message": str(inner)})
+                    else:
+                        raise
+        S3_OPERATIONS.labels(operation="delete_objects", bucket=self.bucket).inc()
+        logger.info(
+            "S3 delete_objects complete deleted=%d errors=%d total=%d",
+            deleted, len(errors), len(keys),
+        )
+        return deleted, errors
