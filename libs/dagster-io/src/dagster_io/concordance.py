@@ -278,8 +278,8 @@ class CrossSourceAligner:
 
     def __init__(
         self,
-        same_as_threshold: float = 0.72,
-        possible_same_as_threshold: float = 0.55,
+        same_as_threshold: float = 0.65,
+        possible_same_as_threshold: float = 0.50,
     ) -> None:
         self.same_as_threshold = same_as_threshold
         self.possible_same_as_threshold = possible_same_as_threshold
@@ -387,10 +387,16 @@ class CrossSourceAligner:
                         # Min length guard: skip trivially short substrings
                         if len(shorter) < 4:
                             continue
-                        # Min shared tokens guard (parity with ConcordanceEngine)
-                        tokens_na = _tokenize(na)
-                        tokens_nb = _tokenize(nb)
-                        if len(tokens_na & tokens_nb) < 2:
+                        # Min shared tokens guard: require >= 2 shared tokens
+                        # for multi-word names (parity with ConcordanceEngine),
+                        # but allow 1 shared token when the shorter name is a
+                        # single token (e.g. "Trump" in "Donald Trump" — the
+                        # entire shorter name IS the shared token).
+                        tokens_shorter = _tokenize(shorter)
+                        tokens_longer = _tokenize(longer)
+                        shared_count = len(tokens_shorter & tokens_longer)
+                        min_required = min(2, len(tokens_shorter))
+                        if shared_count < min_required:
                             continue
                         # Asymmetry penalty: heavily lopsided containment is
                         # weak evidence (e.g. "Biden" in "Joe Biden" is fine,
@@ -410,7 +416,7 @@ class CrossSourceAligner:
         for n in all_names_b:
             tokens_b |= _tokenize(n)
         jac = _jaccard(tokens_a, tokens_b)
-        if jac > 0.5:
+        if jac >= 0.5:
             signals.append((jac, "jaccard"))  # continuous value, not fixed
 
         # Signal 4: Embedding cosine similarity — use actual cosine (continuous)
