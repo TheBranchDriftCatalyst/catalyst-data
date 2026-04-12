@@ -6,6 +6,15 @@ metadata:
   labels:
     app: knowledge-graph-api
     app.kubernetes.io/part-of: catalyst-data
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/instance: "data"
+    gethomepage.dev/name: "Knowledge Graph API"
+    gethomepage.dev/description: "GraphQL API"
+    gethomepage.dev/group: "Data Services"
+    gethomepage.dev/icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/graphql.png"
+    gethomepage.dev/href: "http://kg-graphql.talos00"
+    gethomepage.dev/weight: "2"
 spec:
   entryPoints:
     - web

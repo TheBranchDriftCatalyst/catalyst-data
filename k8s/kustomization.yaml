@@ -46,6 +46,12 @@ resources:
   - data-explorer/deployment.yaml
   - data-explorer/service.yaml
   - data-explorer/ingressroute.yaml
+  # Homepage (data platform dashboard)
+  - homepage/deployment.yaml
+  - homepage/service.yaml
+  - homepage/ingressroute.yaml
+  - homepage/rbac.yaml
+  - homepage/configmap.yaml
   # Monitoring (ServiceMonitor, PrometheusRule, Grafana Dashboard)
   - monitoring/servicemonitor.yaml
   - monitoring/prometheusrule.yaml

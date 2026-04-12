@@ -1,0 +1,16 @@
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: catalyst-data-homepage
+  annotations:
+    gethomepage.dev/enabled: "false"
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`data-hub.talos00`)
+      kind: Rule
+      services:
+        - name: catalyst-data-homepage
+          port: 3000

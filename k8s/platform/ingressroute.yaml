@@ -5,6 +5,15 @@ metadata:
   name: dagster
   labels:
     app: dagster
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/instance: "data"
+    gethomepage.dev/name: "Dagster"
+    gethomepage.dev/description: "Data Pipeline Orchestrator"
+    gethomepage.dev/group: "Data Pipelines"
+    gethomepage.dev/icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/dagster.png"
+    gethomepage.dev/href: "http://dagster.talos00"
+    gethomepage.dev/weight: "1"
 spec:
   entryPoints:
     - web

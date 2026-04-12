@@ -1,0 +1,103 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalyst-data-homepage-config
+data:
+  kubernetes.yaml: |
+    mode: cluster
+    traefik: true
+    instance: "data"
+
+  settings.yaml: |
+    title: Catalyst Data Platform
+    background:
+      image: https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1920
+      blur: sm
+      opacity: 20
+    theme: dark
+    color: slate
+    headerStyle: clean
+    layout:
+      Data Pipelines:
+        style: row
+        columns: 3
+      Data Services:
+        style: row
+        columns: 3
+      Databases:
+        style: row
+        columns: 3
+      Code Locations:
+        style: row
+        columns: 4
+
+  widgets.yaml: |
+    - kubernetes:
+        cluster:
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
+          label: "Catalyst Data"
+        nodes:
+          show: false
+    - search:
+        provider: duckduckgo
+        target: _blank
+    - greeting:
+        text_size: 2xl
+        text: "Catalyst Data Platform"
+    - datetime:
+        text_size: xl
+        format:
+          dateStyle: long
+          timeStyle: short
+
+  services.yaml: |
+    - Code Locations:
+        - Congress Data:
+            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/python.png
+            description: Congressional data pipeline
+            siteMonitor: http://congress-data.catalyst-data.svc.cluster.local:4000
+        - Knowledge Graph:
+            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/python.png
+            description: Knowledge graph builder
+            siteMonitor: http://knowledge-graph.catalyst-data.svc.cluster.local:4000
+        - Media Ingest:
+            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/python.png
+            description: Media metadata ingest
+            siteMonitor: http://media-ingest.catalyst-data.svc.cluster.local:4000
+        - Open Leaks:
+            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/python.png
+            description: Leaked document ingestion
+            siteMonitor: http://open-leaks.catalyst-data.svc.cluster.local:4000
+
+    - Databases:
+        - Neo4j:
+            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/neo4j.png
+            href: http://neo4j.talos00
+            description: Graph Database
+            siteMonitor: http://neo4j.catalyst-data.svc.cluster.local:7474
+        - Dagster Postgres:
+            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/postgres.png
+            description: Pipeline Metadata DB
+            siteMonitor: http://dagster-postgres.catalyst-data.svc.cluster.local:5432
+        - Knowledge Postgres:
+            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/postgres.png
+            description: Knowledge Graph DB
+            siteMonitor: http://postgres-knowledge.catalyst-data.svc.cluster.local:5432
+
+  bookmarks.yaml: |
+    - Data Links:
+        - Dagster Docs:
+            - icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/dagster.png
+              href: https://docs.dagster.io/
+              description: Pipeline Framework
+        - Neo4j Docs:
+            - icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/neo4j.png
+              href: https://neo4j.com/docs/
+              description: Graph Database
+
+  docker.yaml: |
+    ---

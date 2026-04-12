@@ -1,0 +1,38 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalyst-data-homepage
+  labels:
+    app: catalyst-data-homepage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalyst-data-homepage
+  template:
+    metadata:
+      labels:
+        app: catalyst-data-homepage
+    spec:
+      serviceAccountName: catalyst-data-homepage
+      containers:
+        - name: homepage
+          image: ghcr.io/gethomepage/homepage:latest
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+          env:
+            - name: HOMEPAGE_ALLOWED_HOSTS
+              value: "*"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: catalyst-data-homepage-config
