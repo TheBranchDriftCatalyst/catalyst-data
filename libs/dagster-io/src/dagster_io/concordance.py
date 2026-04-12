@@ -278,8 +278,8 @@ class CrossSourceAligner:
 
     def __init__(
         self,
-        same_as_threshold: float = 0.85,
-        possible_same_as_threshold: float = 0.65,
+        same_as_threshold: float = 0.72,
+        possible_same_as_threshold: float = 0.55,
     ) -> None:
         self.same_as_threshold = same_as_threshold
         self.possible_same_as_threshold = possible_same_as_threshold
@@ -373,7 +373,7 @@ class CrossSourceAligner:
 
         # Signal 1: Exact name match (any name from either side)
         if all_names_a & all_names_b:
-            signals.append((0.95, "exact_name"))
+            signals.append((1.0, "exact_name"))
 
         # Signal 2: Substring containment (with guards matching ConcordanceEngine)
         # Guards: both names must be >= 4 chars, share >= 2 tokens, and the
@@ -402,7 +402,7 @@ class CrossSourceAligner:
                 if signals:
                     break
 
-        # Signal 3: Jaccard token overlap
+        # Signal 3: Jaccard token overlap — use actual coefficient (continuous)
         tokens_a = set()
         for n in all_names_a:
             tokens_a |= _tokenize(n)
@@ -411,23 +411,59 @@ class CrossSourceAligner:
             tokens_b |= _tokenize(n)
         jac = _jaccard(tokens_a, tokens_b)
         if jac > 0.5:
-            signals.append((0.70, "jaccard"))
+            signals.append((jac, "jaccard"))  # continuous value, not fixed
 
-        # Signal 4: Embedding cosine similarity
+        # Signal 4: Embedding cosine similarity — use actual cosine (continuous)
         if a.embedding and b.embedding:
             cos = _cosine_similarity(a.embedding, b.embedding)
             if cos > 0.80:
-                signals.append((0.75, "embedding"))
+                signals.append((cos, "embedding"))  # continuous value, not fixed
 
         if not signals:
             return None
 
-        # Combined score = max(signals) + 0.05 per additional signal, capped at 1.0
-        max_score = max(s[0] for s in signals)
-        bonus = 0.05 * (len(signals) - 1)
-        combined = min(max_score + bonus, 1.0)
+        # ── Weighted-average scoring with corroboration rule ──────────
+        #
+        # Replaces the old max-plus-bonus formula which created a bimodal
+        # dead-zone (487 edges stuck at exactly 0.80, zero between 0.86-0.99).
+        #
+        # Each signal contributes (importance_weight × signal_value) to a
+        # weighted average. Signal values are now continuous (actual jaccard
+        # coefficient, actual cosine similarity) instead of fixed constants,
+        # so the combined score forms a smooth continuum.
+        #
+        # Corroboration rule: sameAs requires EITHER exact_name OR >= 2
+        # signals above threshold. This ensures substring alone (even with
+        # guards) can never trigger a merge — it needs embedding or jaccard
+        # corroboration. Prevents false merges where substring containment
+        # is coincidental (e.g. "New York" in "New York Times" if both
+        # mis-tagged as the same entity type).
+        #
+        # References: Fellegi-Sunter (additive log-likelihood ratios),
+        # Splink (weighted comparison), cognitive council Sprint 2.
+        _SIGNAL_IMPORTANCE: dict[str, float] = {
+            "exact_name": 1.0,
+            "substring": 0.7,
+            "jaccard": 0.5,
+            "embedding": 0.6,
+        }
 
-        if combined >= self.same_as_threshold:
+        weighted_sum = 0.0
+        weight_total = 0.0
+        for value, sig_name in signals:
+            w = _SIGNAL_IMPORTANCE.get(sig_name, 0.5)
+            weighted_sum += w * value
+            weight_total += w
+
+        combined = weighted_sum / weight_total if weight_total > 0 else 0.0
+        combined = min(combined, 1.0)
+
+        evidence = [s[1] for s in signals]
+        has_exact = "exact_name" in evidence
+        has_corroboration = len(signals) >= 2
+
+        # Decision: sameAs requires exact_name OR multi-signal corroboration
+        if has_exact or (has_corroboration and combined >= self.same_as_threshold):
             alignment_type = AlignmentType.SAME_AS
         elif combined >= self.possible_same_as_threshold:
             alignment_type = AlignmentType.POSSIBLE_SAME_AS
@@ -439,6 +475,6 @@ class CrossSourceAligner:
             target_entity_id=b.candidate_id,
             alignment_type=alignment_type,
             score=round(combined, 3),
-            evidence=[s[1] for s in signals],
-            method="cross_source_aligner_v1",
+            evidence=evidence,
+            method="cross_source_aligner_v2",
         )

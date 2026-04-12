@@ -297,8 +297,7 @@ def test_substring_guard_allows_legitimate_containment():
     aligner = CrossSourceAligner()
     edges = aligner.align(sources)
     assert len(edges) >= 1
-    # substring (0.80) + jaccard > 0.5 (0.70) = max 0.80 + 0.05 = 0.85, which
-    # meets the new sameAs threshold of 0.85.
+    # substring + jaccard = 2 signals → corroboration rule satisfied → sameAs
     same_as_edges = [e for e in edges if e.alignment_type.value == "sameAs"]
     assert len(same_as_edges) >= 1
 
@@ -344,11 +343,13 @@ def test_substring_asymmetry_penalty():
         assert edge.alignment_type.value != "sameAs" or "substring" not in edge.evidence
 
 
-def test_lowered_threshold_promotes_multi_signal_edges():
-    """With threshold at 0.85, substring (0.80) + jaccard (0.70) produces sameAs.
+def test_multi_signal_corroboration_produces_sameas():
+    """Substring + jaccard (2 signals) produces sameAs via corroboration rule.
 
-    Combined = max(0.80, 0.70) + 0.05 = 0.85, which meets the new threshold.
-    Previously at 0.90 this would have been possibleSameAs.
+    With weighted-average scoring, substring (0.80) + jaccard (continuous)
+    produces a combined score. The corroboration rule requires >= 2 signals
+    for sameAs (unless exact_name fires). This test verifies that two
+    corroborating signals successfully merge.
     """
     aligner = CrossSourceAligner()
 
@@ -377,4 +378,63 @@ def test_lowered_threshold_promotes_multi_signal_edges():
     edge = aligner._score_pair(cand_a, cand_b)
     assert edge is not None
     assert edge.alignment_type.value == "sameAs"
-    assert edge.score >= 0.85
+    assert "substring" in edge.evidence
+    assert "jaccard" in edge.evidence
+    assert len(edge.evidence) >= 2  # corroboration rule satisfied
+
+
+def test_substring_alone_never_produces_sameas():
+    """Single substring signal (without corroboration) must NOT produce sameAs.
+
+    This is the core safety property: substring containment alone is not
+    sufficient evidence for entity identity. Requires embedding or jaccard
+    corroboration. Prevents false merges like "New York" / "New York Times"
+    when both are mis-tagged as the same entity type.
+    """
+    aligner = CrossSourceAligner()
+
+    # "Joe Biden" vs "President Joe Biden" with only substring+jaccard available
+    # But let's construct a case where ONLY substring fires:
+    # "Pelosi" vs "Nancy Pelosi" — substring but only 1 shared token ("pelosi")
+    # Guard rejects: min_shared_tokens=2 fails. So no edge at all. Good.
+
+    # Try a case where substring fires but jaccard doesn't:
+    # "Committee" vs "the Committee on" — won't fire (1 shared token, < 2)
+
+    # The real test: even if substring passes guards, single signal → NOT sameAs
+    # We test this by checking that the corroboration rule is enforced
+    # in the scoring output. With the weighted-average formula, a single
+    # substring signal produces a score but the classification rule blocks it.
+    cand_a = EntityCandidate(
+        candidate_id="cand-test-a",
+        canonical_name="Joe Biden",
+        candidate_type=MentionType.PERSON,
+        aliases=[],
+        mention_ids=["m-a"],
+        mention_count=5,
+        source_documents=["doc-a"],
+        code_location="source_a",
+    )
+    # "Spokesperson Joe Biden Says" — substring match on "joe biden"
+    # jaccard: {"joe","biden"} vs {"spokesperson","joe","biden","says"} = 2/4 = 0.5
+    # jaccard threshold is > 0.5 (strict), so 0.5 does NOT fire
+    cand_b = EntityCandidate(
+        candidate_id="cand-test-b",
+        canonical_name="Spokesperson Joe Biden Says",
+        candidate_type=MentionType.PERSON,
+        aliases=[],
+        mention_ids=["m-b"],
+        mention_count=3,
+        source_documents=["doc-b"],
+        code_location="source_b",
+    )
+
+    edge = aligner._score_pair(cand_a, cand_b)
+    # substring fires (joe biden in spokesperson joe biden says, 2 shared tokens,
+    # len ratio 9/27=0.33 < 0.4 → asymmetry penalty → 0.60 weight)
+    # jaccard = 2/4 = 0.5, NOT > 0.5 → does not fire
+    # Single signal → corroboration rule blocks sameAs
+    if edge is not None:
+        assert edge.alignment_type.value != "sameAs", (
+            f"Substring alone must not produce sameAs (score={edge.score}, evidence={edge.evidence})"
+        )
