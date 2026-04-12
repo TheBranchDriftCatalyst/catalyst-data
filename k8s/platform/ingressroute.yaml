@@ -14,6 +14,7 @@ metadata:
     gethomepage.dev/icon: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/dagster-dark.png"
     gethomepage.dev/href: "http://dagster.talos00"
     gethomepage.dev/siteMonitor: "http://dagster-webserver.catalyst-data.svc.cluster.local:3000"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/component=webserver"
     gethomepage.dev/weight: "1"
 spec:
   entryPoints:

@@ -15,6 +15,7 @@ metadata:
     gethomepage.dev/icon: "si-mediafire"
     gethomepage.dev/href: "http://media-explorer.talos00"
     gethomepage.dev/siteMonitor: "http://media-ingest.catalyst-data.svc.cluster.local:9090/metrics"
+    gethomepage.dev/pod-selector: "app=media-ingest"
     gethomepage.dev/weight: "3"
 spec:
   entryPoints:

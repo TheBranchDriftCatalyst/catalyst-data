@@ -18,6 +18,7 @@ metadata:
     gethomepage.dev/icon: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/neo4j.png"
     gethomepage.dev/href: "http://neo4j.talos00"
     gethomepage.dev/siteMonitor: "http://neo4j.catalyst-data.svc.cluster.local:7474"
+    gethomepage.dev/pod-selector: "app=neo4j"
     gethomepage.dev/weight: "1"
 spec:
   entryPoints:
