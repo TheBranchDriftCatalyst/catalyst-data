@@ -1,11 +1,55 @@
-import { ApolloServer } from "@apollo/server";
-import { ApolloServerPluginLandingPageLocalDefault } from "@apollo/server/plugin/landingPage/default";
+import { ApolloServer, type ApolloServerPlugin, type BaseContext } from "@apollo/server";
 import { startStandaloneServer } from "@apollo/server/standalone";
 import { Neo4jGraphQL } from "@neo4j/graphql";
 import { toGraphQLTypeDefs } from "@neo4j/introspector";
 import neo4j, { type Driver, type Session } from "neo4j-driver";
 
 import { loadConfig } from "./env.js";
+
+/**
+ * Self-hosted GraphiQL landing page plugin.
+ *
+ * Apollo Sandbox (the default) loads in an HTTPS iframe from Apollo's CDN,
+ * which can't POST to plain-HTTP endpoints (mixed-content block). This plugin
+ * serves GraphiQL directly from the server's own origin — same-origin requests,
+ * no iframe, no external service dependency for the UI itself.
+ */
+function graphiqlPlugin(): ApolloServerPlugin<BaseContext> {
+  return {
+    async serverWillStart() {
+      return {
+        async renderLandingPage() {
+          return {
+            html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Knowledge Graph — GraphQL</title>
+  <style>
+    body { height: 100%; margin: 0; width: 100%; overflow: hidden; }
+    #graphiql { height: 100vh; }
+  </style>
+  <link rel="stylesheet" href="https://unpkg.com/graphiql@3/graphiql.min.css" />
+</head>
+<body>
+  <div id="graphiql">Loading GraphiQL…</div>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/graphiql@3/graphiql.min.js"></script>
+  <script>
+    const fetcher = GraphiQL.createFetcher({ url: window.location.origin + '/' });
+    ReactDOM.createRoot(document.getElementById('graphiql')).render(
+      React.createElement(GraphiQL, { fetcher })
+    );
+  </script>
+</body>
+</html>`,
+          };
+        },
+      };
+    },
+  };
+}
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -38,9 +82,7 @@ async function main(): Promise<void> {
 
   const server = new ApolloServer({
     schema,
-    // Apollo Server 5 no longer embeds the Sandbox by default — explicitly
-    // enable it so http://kg-graphql.talos00 shows the query explorer.
-    plugins: [ApolloServerPluginLandingPageLocalDefault()],
+    plugins: [graphiqlPlugin()],
   });
 
   const { url } = await startStandaloneServer(server, {
