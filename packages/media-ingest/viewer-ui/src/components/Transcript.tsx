@@ -12,6 +12,8 @@ interface TranscriptProps {
   onSeek: (time: number) => void;
   highlightText?: string;
   className?: string;
+  /** Resolve a speaker label to its display name. */
+  resolveSpeaker?: (label: string | undefined) => string;
 }
 
 // Pre-built border classes to avoid dynamic generation
@@ -44,7 +46,10 @@ export default function Transcript({
   onSeek,
   highlightText,
   className = "",
+  resolveSpeaker,
 }: TranscriptProps) {
+  const displayName = (label: string | undefined) =>
+    resolveSpeaker ? resolveSpeaker(label) : (label ?? "Unknown");
   const containerRef = useRef<HTMLDivElement>(null);
   const activeSegRef = useRef<HTMLDivElement>(null);
 
@@ -111,7 +116,7 @@ export default function Transcript({
                     textClass,
                   )}
                 >
-                  <span>{seg.speaker}</span>
+                  <span>{displayName(seg.speaker)}</span>
                   <span className="text-zinc-600 font-normal text-[10px] font-mono tabular-nums">
                     {formatTime(seg.start)}
                   </span>
