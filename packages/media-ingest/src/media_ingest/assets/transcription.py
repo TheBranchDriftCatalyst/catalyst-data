@@ -146,6 +146,45 @@ def _load_openvino(config: MediaIngestConfig) -> tuple[Any, str]:
         raise
 
 
+def _estimate_word_timestamps(text: str, seg_start: float, seg_end: float) -> list[dict]:
+    """Estimate word-level timestamps by distributing segment time proportionally.
+
+    Splits the segment text into whitespace-delimited words and assigns each word
+    a time span proportional to its character length (plus a space). This gives
+    approximate timing sufficient for karaoke-style word highlighting in the UI.
+
+    Used as a fallback when the transcription backend (e.g. OpenVINO) does not
+    produce native word-level timestamps.
+    """
+    raw_words = text.split()
+    if not raw_words:
+        return []
+
+    # Weight each word by character count (+ 1 for the trailing space).
+    weights = [len(w) + 1 for w in raw_words]
+    total_weight = sum(weights)
+    duration = seg_end - seg_start
+
+    words = []
+    cursor = seg_start
+    for i, (w, weight) in enumerate(zip(raw_words, weights, strict=True)):
+        word_duration = (weight / total_weight) * duration
+        # Prefix with space to match faster-whisper convention (all words
+        # after the first carry a leading space so inline rendering works).
+        display_word = w if i == 0 else f" {w}"
+        words.append(
+            {
+                "start": round(cursor, 3),
+                "end": round(cursor + word_duration, 3),
+                "word": display_word,
+                "probability": 0.0,  # no confidence score available
+            }
+        )
+        cursor += word_duration
+
+    return words
+
+
 def _transcribe_openvino(pipe, audio_path: str) -> dict:
     import soundfile as sf
 
@@ -167,21 +206,29 @@ def _transcribe_openvino(pipe, audio_path: str) -> dict:
     segments_list = []
     if hasattr(result, "chunks") and result.chunks:
         for chunk in result.chunks:
-            segments_list.append(
-                {
-                    "start": chunk.start_ts,
-                    "end": chunk.end_ts,
-                    "text": chunk.text.strip(),
-                }
-            )
-    else:
-        segments_list.append(
-            {
-                "start": 0.0,
-                "end": duration_s,
-                "text": str(result).strip(),
+            text = chunk.text.strip()
+            seg = {
+                "start": chunk.start_ts,
+                "end": chunk.end_ts,
+                "text": text,
             }
-        )
+            # OpenVINO GenAI WhisperPipeline doesn't produce word-level
+            # timestamps, so estimate them from segment boundaries.
+            words = _estimate_word_timestamps(text, chunk.start_ts, chunk.end_ts)
+            if words:
+                seg["words"] = words
+            segments_list.append(seg)
+    else:
+        text = str(result).strip()
+        seg = {
+            "start": 0.0,
+            "end": duration_s,
+            "text": text,
+        }
+        words = _estimate_word_timestamps(text, 0.0, duration_s)
+        if words:
+            seg["words"] = words
+        segments_list.append(seg)
 
     language = "en"
     language_probability = 0.0
