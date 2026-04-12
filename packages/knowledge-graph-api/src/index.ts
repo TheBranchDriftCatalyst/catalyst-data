@@ -1,4 +1,5 @@
 import { ApolloServer } from "@apollo/server";
+import { ApolloServerPluginLandingPageLocalDefault } from "@apollo/server/plugin/landingPage/default";
 import { startStandaloneServer } from "@apollo/server/standalone";
 import { Neo4jGraphQL } from "@neo4j/graphql";
 import { toGraphQLTypeDefs } from "@neo4j/introspector";
@@ -37,7 +38,9 @@ async function main(): Promise<void> {
 
   const server = new ApolloServer({
     schema,
-    // Apollo Sandbox is the default landing page in non-production.
+    // Apollo Server 5 no longer embeds the Sandbox by default — explicitly
+    // enable it so http://kg-graphql.talos00 shows the query explorer.
+    plugins: [ApolloServerPluginLandingPageLocalDefault()],
   });
 
   const { url } = await startStandaloneServer(server, {
