@@ -42,13 +42,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --python /usr/bin/python3.12 \
         /tmp/dagster-io/
 
-# 2. Install package deps with OpenVINO extras + CPU-only PyTorch
+# 2. Install package deps with OpenVINO extras + Intel XPU PyTorch + IPEX
+#
+# The Intel Extension for PyTorch (IPEX) provides torch.xpu backend for
+# Intel Arc/Flex GPUs (gpu.intel.com/i915). Without IPEX, torch.xpu doesn't
+# exist and pyannote diarization silently falls back to CPU (see CD-844).
+#
+# Install order matters: torch XPU wheels first, then IPEX, then the package.
 COPY packages/media-ingest/pyproject.toml .
 RUN --mount=type=cache,target=/root/.cache/uv \
     mkdir -p src/media_ingest && \
     touch src/media_ingest/__init__.py && \
     uv pip install --system --python /usr/bin/python3.12 \
-        --extra-index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/ \
+        torch torchaudio intel-extension-for-pytorch && \
+    uv pip install --system --python /usr/bin/python3.12 \
         ".[openvino]" && \
     rm -rf src/media_ingest
 
