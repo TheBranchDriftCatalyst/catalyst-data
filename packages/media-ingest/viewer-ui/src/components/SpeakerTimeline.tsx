@@ -11,6 +11,8 @@ interface SpeakerTimelineProps {
   speakers: string[];
   onSeek: (time: number) => void;
   className?: string;
+  /** Resolve a speaker label to its display name. */
+  resolveSpeaker?: (label: string | undefined) => string;
 }
 
 const SPEAKER_BG_SWATCH = [
@@ -42,7 +44,10 @@ export default function SpeakerTimeline({
   speakers,
   onSeek,
   className = "",
+  resolveSpeaker,
 }: SpeakerTimelineProps) {
+  const displayName = (label: string | undefined) =>
+    resolveSpeaker ? resolveSpeaker(label) : (label ?? "Unknown");
   const barRef = useRef<HTMLDivElement>(null);
 
   const handleClick = useCallback(
@@ -89,7 +94,7 @@ export default function SpeakerTimeline({
                 width: `${Math.max(widthPct, 0.2)}%`,
                 backgroundColor: speakerColor(seg.speaker),
               }}
-              title={`${seg.speaker ?? "Unknown"}: ${formatTime(seg.start)} - ${formatTime(seg.end)}`}
+              title={`${displayName(seg.speaker)}: ${formatTime(seg.start)} - ${formatTime(seg.end)}`}
             />
           );
         })}
@@ -115,7 +120,7 @@ export default function SpeakerTimeline({
             return (
               <div key={speaker} className="flex items-center gap-1.5 text-xs">
                 <div className={cn("w-3 h-3 rounded-sm", SPEAKER_BG_SWATCH[idx])} />
-                <span className={SPEAKER_TEXT_SWATCH[idx]}>{speaker}</span>
+                <span className={SPEAKER_TEXT_SWATCH[idx]}>{displayName(speaker)}</span>
               </div>
             );
           })}

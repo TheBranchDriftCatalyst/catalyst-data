@@ -35,6 +35,33 @@ export function fetchAssertions(id: string): Promise<Assertion[]> {
   return apiFetch<Assertion[]>(`/documents/${encodeURIComponent(id)}/assertions`);
 }
 
+/** Speaker name mappings: { "SPEAKER_00": { display_name: "...", color_index: ... }, ... } */
+export type SpeakerMappings = Record<string, { display_name: string; color_index: number | null }>;
+
+export function fetchSpeakerNames(id: string): Promise<SpeakerMappings> {
+  return apiFetch<SpeakerMappings>(`/documents/${encodeURIComponent(id)}/speakers`);
+}
+
+export async function updateSpeakerName(
+  documentId: string,
+  label: string,
+  displayName: string,
+): Promise<{ label: string; display_name: string }> {
+  const res = await fetch(
+    `${API_BASE}/documents/${encodeURIComponent(documentId)}/speakers/${encodeURIComponent(label)}/name`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ display_name: displayName }),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
 /**
  * Constructs the media streaming URL for a document.
  * The backend serves files at /viewer/media/{source}/{relative_path}

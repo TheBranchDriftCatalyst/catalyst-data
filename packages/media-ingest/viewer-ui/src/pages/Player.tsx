@@ -16,6 +16,7 @@ import { ArrowLeft, Clock, Users, Globe, X, Highlighter } from "lucide-react";
 import { useDocumentData } from "@/hooks/useDocumentData";
 import { useMediaSync } from "@/hooks/useMediaSync";
 import { useMarkerData } from "@/hooks/useMarkerData";
+import { useSpeakerNames } from "@/hooks/useSpeakerNames";
 import MediaPlayer, { type MediaPlayerHandle } from "@/components/MediaPlayer";
 import SpeakerTimeline from "@/components/SpeakerTimeline";
 import Transcript from "@/components/Transcript";
@@ -39,6 +40,12 @@ export default function PlayerPage() {
     isError,
     errors,
   } = useDocumentData(documentId);
+
+  const {
+    nameMap: speakerNames,
+    setName: setSpeakerName,
+    resolve: resolveSpeaker,
+  } = useSpeakerNames(documentId);
 
   const playerRef = useRef<MediaPlayerHandle>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -230,6 +237,7 @@ export default function PlayerPage() {
                 currentTime={currentTime}
                 speakers={speakers}
                 onSeek={handleSeek}
+                resolveSpeaker={resolveSpeaker}
               />
             </div>
 
@@ -244,6 +252,7 @@ export default function PlayerPage() {
                 segments={segments}
                 speakers={speakers}
                 duration={effectiveDuration}
+                speakerNames={speakerNames}
               />
             </div>
           </div>
@@ -264,6 +273,7 @@ export default function PlayerPage() {
               activeWordIndex={activeWordIndex}
               onSeek={handleSeek}
               highlightText={highlightText}
+              resolveSpeaker={resolveSpeaker}
               className="flex-1 min-h-0"
             />
           </div>
@@ -340,6 +350,8 @@ export default function PlayerPage() {
                   segments={segments}
                   speakers={speakers}
                   duration={effectiveDuration}
+                  speakerNames={speakerNames}
+                  onSpeakerNameChange={setSpeakerName}
                 />
               </TabsContent>
             </Tabs>

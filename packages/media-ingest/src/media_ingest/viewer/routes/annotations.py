@@ -112,3 +112,15 @@ async def update_speaker_mappings(document_id: str, body: SpeakerMappingUpdate) 
     if _get_store().save_speaker_mappings(document_id, body.mappings):
         return {"updated": True, "mappings": body.mappings}
     raise HTTPException(500, "Failed to save speaker mappings")
+
+
+class SpeakerNameUpdate(BaseModel):
+    display_name: str = Field(..., max_length=200)
+
+
+@router.put("/documents/{document_id}/speakers/{label}/name")
+async def update_speaker_name(document_id: str, label: str, body: SpeakerNameUpdate) -> dict:
+    """Set the display name for a single speaker label."""
+    if _get_store().save_speaker_mappings(document_id, {label: body.display_name}):
+        return {"label": label, "display_name": body.display_name}
+    raise HTTPException(500, "Failed to save speaker name")
