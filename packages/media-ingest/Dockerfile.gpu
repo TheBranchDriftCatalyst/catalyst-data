@@ -111,7 +111,12 @@ COPY --from=builder /usr/lib/python3/dist-packages/ /usr/lib/python3/dist-packag
 COPY --from=builder /usr/local/lib/ /usr/local/lib/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
 
-# Ensure dagster CLI is on PATH
+# CRITICAL: uv copies a standalone Python to /usr/local/bin/python3.12 which
+# uses site-packages (source-build convention). The apt-installed Python at
+# /usr/bin/python3.12 uses dist-packages (Debian convention). pip/uv install
+# packages to dist-packages, so we MUST use the apt Python. Remove the uv
+# shadow so PATH resolves to /usr/bin/python3.12.
+RUN rm -f /usr/local/bin/python3.12 /usr/local/bin/python3 /usr/local/bin/python
 RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.12 /usr/bin/python
 
