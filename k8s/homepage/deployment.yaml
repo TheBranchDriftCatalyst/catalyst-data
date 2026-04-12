@@ -16,21 +16,6 @@ spec:
         app: catalyst-data-homepage
     spec:
       serviceAccountName: catalyst-data-homepage
-      initContainers:
-        - name: copy-config
-          image: busybox:latest
-          command:
-            - sh
-            - -c
-            - |
-              cp /config-source/* /app/config/
-              mkdir -p /app/config/logs
-              chmod -R 777 /app/config
-          volumeMounts:
-            - name: config-source
-              mountPath: /config-source
-            - name: config
-              mountPath: /app/config
       containers:
         - name: homepage
           image: ghcr.io/gethomepage/homepage:latest
@@ -38,8 +23,26 @@ spec:
             - name: http
               containerPort: 3000
           volumeMounts:
+            # ConfigMap files mounted individually via subPath so the
+            # dir stays writable (Homepage needs to create /app/config/logs/)
             - name: config
-              mountPath: /app/config
+              mountPath: /app/config/kubernetes.yaml
+              subPath: kubernetes.yaml
+            - name: config
+              mountPath: /app/config/settings.yaml
+              subPath: settings.yaml
+            - name: config
+              mountPath: /app/config/widgets.yaml
+              subPath: widgets.yaml
+            - name: config
+              mountPath: /app/config/services.yaml
+              subPath: services.yaml
+            - name: config
+              mountPath: /app/config/bookmarks.yaml
+              subPath: bookmarks.yaml
+            - name: config
+              mountPath: /app/config/docker.yaml
+              subPath: docker.yaml
           env:
             - name: HOMEPAGE_ALLOWED_HOSTS
               value: "*"
@@ -48,8 +51,6 @@ spec:
               cpu: 50m
               memory: 128Mi
       volumes:
-        - name: config-source
+        - name: config
           configMap:
             name: catalyst-data-homepage-config
-        - name: config
-          emptyDir: {}
