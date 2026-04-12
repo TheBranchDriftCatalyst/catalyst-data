@@ -7,9 +7,12 @@ data:
   kubernetes.yaml: |
     mode: cluster
     traefik: true
-    instance: "data"
 
   settings.yaml: |
+    # instanceName scopes which services this homepage discovers.
+    # Only IngressRoutes annotated with gethomepage.dev/instance: "data"
+    # will appear. Must be in settings.yaml, NOT kubernetes.yaml.
+    instanceName: data
     title: Catalyst Data Platform
     background:
       image: https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1920
