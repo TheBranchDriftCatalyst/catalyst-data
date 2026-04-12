@@ -19,3 +19,7 @@ packages/media-ingest/tests/.output/
 .coverage
 *.executed.ipynb
 .DS_Store
+*.tsbuildinfo
+*.png
+.playwright-mcp/
+.claude/

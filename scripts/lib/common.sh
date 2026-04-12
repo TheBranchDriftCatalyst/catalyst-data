@@ -1,0 +1,1 @@
+../../../talos-homelab/scripts/lib/common.sh

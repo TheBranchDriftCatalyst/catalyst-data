@@ -1,11 +1,7 @@
-# Catalyst Repository Metadata
-# Used by the profile page generator (@TheBranchDriftCatalyst)
-
+version: "0.1.1"
 name: "catalyst-data"
-description: "Multi-domain knowledge graph construction platform with LLM-based extraction, GPU-accelerated transcription, and cross-source entity resolution"
+description: "38-asset knowledge graph construction platform with MCP-contracted LLM extraction, dual-write KG (PostgreSQL+pgvector + Neo4j), GPU-accelerated transcription, and cross-source entity resolution running on a 5-node Talos cluster"
 repo_url: "https://github.com/TheBranchDriftCatalyst/catalyst-data"
-
-private: true
 status: "active"
 
 tech_stack:
@@ -13,24 +9,27 @@ tech_stack:
     - "python"
   frameworks:
     - "dagster"
-    - "langchain"
     - "pydantic"
     - "streamlit"
+    - "langgraph"
   tools:
+    - "docker"
     - "kubernetes"
     - "argocd"
-    - "docker"
-    - "minio"
     - "postgresql"
     - "neo4j"
+    - "minio"
     - "prometheus"
-    - "opentelemetry"
+    - "openai"
+    - "tilt"
+    - "kustomize"
   ml:
-    - "faster-whisper"
+    - "whisper"
     - "openvino"
+    - "faster-whisper"
     - "pyannote"
-    - "openai-embeddings"
-    - "huggingface-transformers"
+    - "spacy"
+    - "sentence-transformers"
 
 groups:
   - "catalyst-core"
@@ -39,80 +38,40 @@ groups:
   - "ai-ml"
 
 badges:
-  stars: false
-  issues: false
-  prs: false
-  license: false
+  stars: true
+  issues: true
+  prs: true
+  license: true
 
 highlights:
-  - "10-asset Dagster pipeline with Bronze/Silver/Gold/Platinum medallion architecture"
-  - "GPU-accelerated transcription: OpenVINO on Intel i915 (50x realtime)"
+  - "38 Dagster assets across 4 code locations (12 congress, 10 media, 13 open-leaks, 3 knowledge-graph) with Bronze/Silver/Gold/Platinum medallion architecture"
+  - "3-package LLM contract validation system with MCP-enforced structured output, 9 ConfigMap-mounted prompt templates, and 198 tests at 97% coverage"
+  - "GPU-accelerated transcription: dual backend (OpenVINO + faster-whisper) with automatic CPU fallback"
   - "Speaker diarization with pyannote + word-level alignment"
   - "LLM-based NER and qualified S-P-O assertion extraction with negation/hedge detection"
   - "Cross-source entity resolution (EDC framework) across 4 domains"
   - "Dual-write knowledge graph: PostgreSQL+pgvector + Neo4j"
-  - "Dynamic partitioning: per-file processing with auto-discovery sensor"
+  - "22 Prometheus metrics across 8 subsystems with 32 Kubernetes manifests"
   - "QSV AV1 hardware video transcoding for ultra compression"
-  - "12-page Streamlit data explorer with asset browser, semantic search, knowledge graph viz"
-  - "Cognitive Council: multi-agent deliberative architecture for architecture decisions"
+  - "13-page Streamlit data explorer with asset browser, semantic search, knowledge graph viz"
 
-# Domain packages
 domains:
-  congress-data:
-    description: "U.S. Congressional legislative data from congress.gov API"
-    entities: ["legislators", "committees", "bills", "states"]
-    predicates: ["member_of", "sponsors", "votes_for", "votes_against", "chairs"]
+  - congress-data
+  - open-leaks
+  - media-ingest
+  - knowledge-graph
+  - data-explorer
 
-  open-leaks:
-    description: "Leaked documents: WikiLeaks cables, ICIJ Offshore Leaks, Epstein court docs"
-    entities: ["diplomats", "shell_companies", "offshore_entities", "jurisdictions"]
-    predicates: ["owns", "transfers", "operates"]
-
-  media-ingest:
-    description: "Audio/video processing: transcription, diarization, NER, assertions"
-    entities: ["speakers", "organizations", "people_mentioned"]
-    predicates: ["states", "claims", "denies", "acknowledges", "questions", "references"]
-    assets:
-      - media_files
-      - media_metadata
-      - media_transcode
-      - media_documents
-      - media_transcriptions
-      - media_diarization
-      - media_chunks
-      - media_mentions
-      - media_assertions
-      - media_embeddings
-
-  knowledge-graph:
-    description: "Cross-source entity resolution and unified assertion graph"
-    outputs: ["canonical_entities", "entity_alignments", "assertion_graph"]
-    storage: ["postgresql+pgvector", "neo4j"]
-
-# Infrastructure
 infrastructure:
-  cluster: "Talos Kubernetes (5 nodes, 2 GPU workers)"
-  gpu: "Intel i915 (4x per GPU node) via intel-device-plugins"
-  storage:
-    - "MinIO S3 (medallion layer asset storage)"
-    - "TrueNAS NFS (media files, whisper model cache)"
-    - "PostgreSQL (Dagster metadata + knowledge graph)"
-    - "Neo4j (graph traversal)"
-  observability:
-    - "Prometheus metrics (LLM latency, embedding throughput, entity counts)"
-    - "OpenTelemetry distributed tracing"
-    - "Grafana dashboards"
-  cicd:
-    - "GitHub Actions (pytest + matrix Docker builds)"
-    - "ArgoCD GitOps (auto-deploy on push to main)"
-  secrets: "External Secrets Operator + 1Password (per-asset scoping)"
+  cluster: "talos-homelab"
+  gpu: "Intel Arc A380 (i915)"
+  storage: ["MinIO S3", "PostgreSQL+pgvector", "Neo4j"]
+  observability: ["Prometheus", "Grafana"]
+  cicd: "ArgoCD"
+  dev: "Tiltfile"
 
-# Architecture
 architecture:
-  pattern: "Medallion (Bronze → Silver → Gold → Platinum)"
-  orchestrator: "Dagster with k8s_job_executor (per-step K8s pods)"
-  partitioning: "DynamicPartitionsDefinition (per-document)"
-  sensor: "media_document_sensor (auto-discovers new files every 5 min)"
-  extraction_framework: "EDC (Extract, Define, Canonicalize)"
-  shared_library: "dagster-io (asset factories, extraction schemas, IO manager, resources)"
-  contracts: "catalyst-contracts-core (Provenance, MentionType, AlignmentType enums)"
+  pattern: "Medallion lakehouse"
+  orchestrator: "Dagster"
+  partitioning: "Dynamic per-file"
+  prompts: "9 ConfigMap-mounted Jinja2 templates"
