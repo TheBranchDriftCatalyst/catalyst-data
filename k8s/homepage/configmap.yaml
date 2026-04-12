@@ -58,38 +58,30 @@ data:
           timeStyle: short
 
   services.yaml: |
+    # Code locations are gRPC servers (not HTTP) — no siteMonitor
     - Code Locations:
         - Congress Data:
-            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/python.png
+            icon: si-python
             description: Congressional data pipeline
-            siteMonitor: http://congress-data.catalyst-data.svc.cluster.local:4000
         - Knowledge Graph:
-            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/python.png
+            icon: si-python
             description: Knowledge graph builder
-            siteMonitor: http://knowledge-graph.catalyst-data.svc.cluster.local:4000
         - Media Ingest:
-            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/python.png
+            icon: si-python
             description: Media metadata ingest
-            siteMonitor: http://media-ingest.catalyst-data.svc.cluster.local:4000
         - Open Leaks:
-            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/python.png
+            icon: si-python
             description: Leaked document ingestion
-            siteMonitor: http://open-leaks.catalyst-data.svc.cluster.local:4000
 
+    # Postgres uses TCP not HTTP — no siteMonitor. Neo4j is now
+    # discovered via IngressRoute annotation (Neo4j Browser).
     - Databases:
-        - Neo4j:
-            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/neo4j.png
-            href: http://neo4j.talos00
-            description: Graph Database
-            siteMonitor: http://neo4j.catalyst-data.svc.cluster.local:7474
         - Dagster Postgres:
-            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/postgres.png
+            icon: si-postgresql
             description: Pipeline Metadata DB
-            siteMonitor: http://dagster-postgres.catalyst-data.svc.cluster.local:5432
         - Knowledge Postgres:
-            icon: https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/postgres.png
+            icon: si-postgresql
             description: Knowledge Graph DB
-            siteMonitor: http://postgres-knowledge.catalyst-data.svc.cluster.local:5432
 
   bookmarks.yaml: |
     - Data Links:

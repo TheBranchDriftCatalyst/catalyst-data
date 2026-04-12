@@ -15,8 +15,9 @@ metadata:
     gethomepage.dev/name: "Neo4j Browser"
     gethomepage.dev/description: "Graph Database UI"
     gethomepage.dev/group: "Databases"
-    gethomepage.dev/icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/neo4j.png"
+    gethomepage.dev/icon: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/neo4j.png"
     gethomepage.dev/href: "http://neo4j.talos00"
+    gethomepage.dev/siteMonitor: "http://neo4j.catalyst-data.svc.cluster.local:7474"
     gethomepage.dev/weight: "1"
 spec:
   entryPoints:
