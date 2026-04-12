@@ -126,6 +126,14 @@ def _run_diarization(audio_path: str, hf_token: str, cache_dir: str) -> tuple:
             logger.info("pyannote pipeline moved to CUDA")
         except RuntimeError as e:
             logger.warning("CUDA not available, falling back to CPU: %s", e)
+    else:
+        logger.warning(
+            "No GPU available (torch.xpu=%s, torch.cuda=%s), running diarization "
+            "on CPU — this will be slow for long audio. Install intel-extension-for-pytorch "
+            "in Dockerfile.gpu to enable XPU acceleration (see CD-844).",
+            hasattr(torch, "xpu"),
+            torch.cuda.is_available(),
+        )
 
     # pyannote can't read MP4/MKV — extract audio first
     wav_path = extract_audio_to_wav(audio_path)
