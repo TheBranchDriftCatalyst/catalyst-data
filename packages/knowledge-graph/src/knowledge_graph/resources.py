@@ -95,10 +95,18 @@ class GraphDBResource(ConfigurableResource):
                     raise
 
     def upsert_canonical_entities(self, entities: list[dict[str, Any]]) -> int:
-        """Upsert canonical entities into PostgreSQL."""
+        """Replace canonical entities in PostgreSQL.
+
+        Uses DELETE + INSERT in one transaction instead of INSERT ON CONFLICT.
+        Each canonical_entities run produces a complete new set of entities
+        from re-clustering, so old canonical_ids that no longer exist in the
+        new clustering must be removed — otherwise stale entities accumulate
+        across runs (the canonical_id is a hash that changes when clusters
+        change).
+        """
         if not entities:
             return 0
-        logger.info("Upserting %d canonical entities to PostgreSQL", len(entities))
+        logger.info("Replacing %d canonical entities in PostgreSQL", len(entities))
         conn = self._pg_conn()
         try:
             with track_duration(
@@ -107,6 +115,15 @@ class GraphDBResource(ConfigurableResource):
             ):
                 with conn.cursor() as cur:
                     self._ensure_canonical_entities_schema(cur)
+                    # Delete all existing entities — the new set is the
+                    # complete truth. Cascade would handle FK refs, but
+                    # we don't have cascading deletes set up, so this is
+                    # safe as long as no other table references canonical_id
+                    # with a RESTRICT constraint.
+                    cur.execute("DELETE FROM canonical_entities")
+                    deleted = cur.rowcount
+                    if deleted:
+                        logger.info("Deleted %d old canonical entities before re-insert", deleted)
                     for ent in entities:
                         cur.execute(
                             """
@@ -153,10 +170,15 @@ class GraphDBResource(ConfigurableResource):
             conn.close()
 
     def upsert_alignment_edges(self, edges: list[dict[str, Any]]) -> int:
-        """Upsert alignment edges into PostgreSQL."""
+        """Replace alignment edges in PostgreSQL.
+
+        Same rationale as upsert_canonical_entities: each run produces
+        a complete new edge set from re-alignment, so stale edges must
+        be deleted.
+        """
         if not edges:
             return 0
-        logger.info("Upserting %d alignment edges to PostgreSQL", len(edges))
+        logger.info("Replacing %d alignment edges in PostgreSQL", len(edges))
         conn = self._pg_conn()
         try:
             with track_duration(
@@ -164,6 +186,10 @@ class GraphDBResource(ConfigurableResource):
                 {"backend": "postgresql", "operation": "upsert_edges"},
             ):
                 with conn.cursor() as cur:
+                    cur.execute("DELETE FROM alignment_edges")
+                    deleted = cur.rowcount
+                    if deleted:
+                        logger.info("Deleted %d old alignment edges before re-insert", deleted)
                     for edge in edges:
                         cur.execute(
                             """
@@ -193,10 +219,14 @@ class GraphDBResource(ConfigurableResource):
             conn.close()
 
     def upsert_assertions(self, assertions: list[dict[str, Any]]) -> int:
-        """Upsert assertions into PostgreSQL."""
+        """Replace assertions in PostgreSQL.
+
+        Same rationale as upsert_canonical_entities: each run produces
+        a complete set, stale assertion_ids must not accumulate.
+        """
         if not assertions:
             return 0
-        logger.info("Upserting %d assertions to PostgreSQL", len(assertions))
+        logger.info("Replacing %d assertions in PostgreSQL", len(assertions))
         conn = self._pg_conn()
         try:
             with track_duration(
@@ -204,6 +234,10 @@ class GraphDBResource(ConfigurableResource):
                 {"backend": "postgresql", "operation": "upsert_assertions"},
             ):
                 with conn.cursor() as cur:
+                    cur.execute("DELETE FROM assertions")
+                    deleted = cur.rowcount
+                    if deleted:
+                        logger.info("Deleted %d old assertions before re-insert", deleted)
                     for a in assertions:
                         cur.execute(
                             """
