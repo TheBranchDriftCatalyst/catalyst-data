@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchSpeakerNames, updateSpeakerName, type SpeakerMappings } from "@/api/client";
 
@@ -45,12 +45,15 @@ export function useSpeakerNames(documentId: string | undefined) {
   });
 
   // Build a simple label -> display_name map for consumers
-  const nameMap: Record<string, string> = {};
-  for (const [label, info] of Object.entries(mappings)) {
-    if (info.display_name) {
-      nameMap[label] = info.display_name;
+  const nameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const [label, info] of Object.entries(mappings)) {
+      if (info.display_name) {
+        map[label] = info.display_name;
+      }
     }
-  }
+    return map;
+  }, [mappings]);
 
   const setName = useCallback(
     (label: string, displayName: string) => {
