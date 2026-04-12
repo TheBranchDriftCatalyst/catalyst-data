@@ -27,8 +27,8 @@ def _clean_metrics_env(monkeypatch):
     for var in (
         "PROMETHEUS_PUSHGATEWAY_URL",
         "DAGSTER_CODE_LOCATION",
-        "DAGSTER_RUN_ID",
-        "DAGSTER_STEP_KEY",
+        "DAGSTER_RUN_JOB_NAME",
+        "DAGSTER_RUN_STEP_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
     yield
@@ -37,8 +37,8 @@ def _clean_metrics_env(monkeypatch):
 def test_push_metrics_calls_pushgateway_with_expected_args(monkeypatch):
     """Happy path: env vars → gateway + grouping_key + job wiring."""
     monkeypatch.setenv("DAGSTER_CODE_LOCATION", "test_loc")
-    monkeypatch.setenv("DAGSTER_RUN_ID", "test_run_123")
-    monkeypatch.setenv("DAGSTER_STEP_KEY", "test_step")
+    monkeypatch.setenv("DAGSTER_RUN_JOB_NAME", "test_job_xyz")
+    monkeypatch.setenv("DAGSTER_RUN_STEP_KEY", "test_step")
     monkeypatch.setenv("PROMETHEUS_PUSHGATEWAY_URL", "http://fake:9091")
 
     with patch.object(metrics_module, "push_to_gateway") as mock_push:
@@ -53,7 +53,7 @@ def test_push_metrics_calls_pushgateway_with_expected_args(monkeypatch):
 
     grouping_key = kwargs["grouping_key"]
     assert grouping_key["code_location"] == "test_loc"
-    assert grouping_key["run_id"] == "test_run_123"
+    assert grouping_key["job_name"] == "test_job_xyz"
     assert grouping_key["step_key"] == "test_step"
 
 
@@ -62,7 +62,7 @@ def test_push_metrics_swallows_exceptions(monkeypatch):
     the gateway is unreachable, returns an HTTP error, or the network blows up.
     """
     monkeypatch.setenv("DAGSTER_CODE_LOCATION", "test_loc")
-    monkeypatch.setenv("DAGSTER_RUN_ID", "test_run_123")
+    monkeypatch.setenv("DAGSTER_RUN_JOB_NAME", "test_job_xyz")
     monkeypatch.setenv("PROMETHEUS_PUSHGATEWAY_URL", "http://nonexistent.invalid:9091")
 
     def _boom(*args, **kwargs):
@@ -94,7 +94,7 @@ def test_push_metrics_strips_scheme(monkeypatch, raw_url, expected_gateway):
     should resolve to the same scheme-less gateway passed to push_to_gateway.
     """
     monkeypatch.setenv("DAGSTER_CODE_LOCATION", "test_loc")
-    monkeypatch.setenv("DAGSTER_RUN_ID", "test_run_123")
+    monkeypatch.setenv("DAGSTER_RUN_JOB_NAME", "test_job_xyz")
     monkeypatch.setenv("PROMETHEUS_PUSHGATEWAY_URL", raw_url)
 
     with patch.object(metrics_module, "push_to_gateway") as mock_push:
@@ -107,7 +107,11 @@ def test_push_metrics_strips_scheme(monkeypatch, raw_url, expected_gateway):
 
 def test_push_metrics_defaults_when_env_missing(monkeypatch):
     """With no env vars set, grouping_key should use documented fallbacks:
-    code_location=unknown, run_id=pid-<pid>, step_key=none.
+    code_location=unknown, job_name=unknown, step_key=pid-<pid>.
+
+    Step_key falls back to pid so bare-metal test runs still get a unique
+    grouping key per process — otherwise concurrent pytest workers would
+    clobber each other in a real pushgateway.
     """
     # All env vars pre-stripped by the autouse fixture.
 
@@ -123,5 +127,5 @@ def test_push_metrics_defaults_when_env_missing(monkeypatch):
 
     grouping_key = kwargs["grouping_key"]
     assert grouping_key["code_location"] == "unknown"
-    assert grouping_key["run_id"] == f"pid-{os.getpid()}"
-    assert grouping_key["step_key"] == "none"
+    assert grouping_key["job_name"] == "unknown"
+    assert grouping_key["step_key"] == f"pid-{os.getpid()}"

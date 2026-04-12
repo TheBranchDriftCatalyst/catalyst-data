@@ -370,9 +370,20 @@ def push_metrics(job_name: str = "dagster_step") -> None:
     bucket / count / sum samples).
 
     Grouping key is constructed from ``DAGSTER_CODE_LOCATION``,
-    ``DAGSTER_RUN_ID`` (with ``pid-<pid>`` fallback when unset), and
-    ``DAGSTER_STEP_KEY`` so concurrent step pods don't clobber each
-    other's pushes in the gateway's grouping-key index.
+    ``DAGSTER_RUN_JOB_NAME`` and ``DAGSTER_RUN_STEP_KEY`` — the exact
+    env vars Dagster's k8s_job_executor injects into step pods (see
+    dagster_k8s.executor._get_k8s_step_operator_env). Together with
+    code_location this gives per-step-in-job uniqueness so concurrent
+    step pods don't clobber each other in the gateway's grouping-key
+    index. Re-runs of the same (job, step) replace the previous
+    push — intended, since we care about current pipeline health not
+    historical trending (historical data lives in Mimir via scrapes
+    from the code-server pod's HTTP server).
+
+    Note there is NO ``DAGSTER_RUN_ID`` env var in upstream Dagster —
+    run_id is bundled inside the base64 ``DAGSTER_COMPRESSED_EXECUTE_STEP_ARGS``
+    blob, not exposed as a plain env var. Using run_id in the grouping
+    key would require first patching make_k8s_executor to inject it.
 
     Safe to call from ``atexit`` and SIGTERM handlers — exceptions are
     swallowed and logged rather than propagated, because raising during
@@ -385,20 +396,10 @@ def push_metrics(job_name: str = "dagster_step") -> None:
         )
         gateway = _strip_scheme(raw_endpoint)
 
-        run_id = os.getenv("DAGSTER_RUN_ID")
-        if not run_id:
-            run_id = f"pid-{os.getpid()}"
-            logger.warning(
-                "DAGSTER_RUN_ID not set, falling back to %s — concurrent "
-                "step pods on this process will clobber each other's "
-                "pushgateway grouping keys",
-                run_id,
-            )
-
         grouping_key = {
             "code_location": os.getenv("DAGSTER_CODE_LOCATION", "unknown"),
-            "run_id": run_id,
-            "step_key": os.getenv("DAGSTER_STEP_KEY", "none"),
+            "job_name": os.getenv("DAGSTER_RUN_JOB_NAME", "unknown"),
+            "step_key": os.getenv("DAGSTER_RUN_STEP_KEY", f"pid-{os.getpid()}"),
         }
 
         push_to_gateway(
