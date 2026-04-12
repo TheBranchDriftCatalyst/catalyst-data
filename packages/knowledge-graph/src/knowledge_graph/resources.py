@@ -239,6 +239,135 @@ class GraphDBResource(ConfigurableResource):
         finally:
             conn.close()
 
+    # -- Speaker profiles (pgvector) --
+
+    @staticmethod
+    def _ensure_speaker_profiles_schema(cur) -> None:
+        """Idempotently create speaker_profiles + speaker_profile_members tables."""
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS speaker_profiles (
+                profile_id       TEXT PRIMARY KEY,
+                centroid         vector(192) NOT NULL,
+                display_name     TEXT,
+                member_count     INT NOT NULL DEFAULT 0,
+                total_duration_s REAL NOT NULL DEFAULT 0,
+                first_seen       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_seen        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS speaker_profile_members (
+                profile_id    TEXT REFERENCES speaker_profiles(profile_id),
+                document_id   TEXT NOT NULL,
+                local_label   TEXT NOT NULL,
+                segment_count INT NOT NULL DEFAULT 0,
+                PRIMARY KEY (profile_id, document_id, local_label)
+            )
+        """)
+        # Safe to re-run — IF NOT EXISTS
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_speaker_profiles_centroid
+            ON speaker_profiles USING ivfflat (centroid vector_cosine_ops)
+        """)
+
+    def load_speaker_profiles(self) -> list[dict[str, Any]]:
+        """Load all speaker profiles from PostgreSQL."""
+        conn = self._pg_conn()
+        try:
+            with (
+                track_duration(
+                    GRAPH_DB_OPERATION_DURATION,
+                    {"backend": "postgresql", "operation": "load_speaker_profiles"},
+                ),
+                conn.cursor() as cur,
+            ):
+                self._ensure_speaker_profiles_schema(cur)
+                cur.execute("""
+                        SELECT profile_id, centroid, display_name, member_count,
+                               total_duration_s, first_seen, last_seen
+                        FROM speaker_profiles
+                    """)
+                rows = cur.fetchall()
+                profiles = []
+                for row in rows:
+                    profiles.append(
+                        {
+                            "profile_id": row[0],
+                            "centroid": list(row[1]) if row[1] else [],
+                            "display_name": row[2],
+                            "member_count": row[3],
+                            "total_duration_s": row[4],
+                            "first_seen": row[5].isoformat() if row[5] else "",
+                            "last_seen": row[6].isoformat() if row[6] else "",
+                        }
+                    )
+                GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="load_speaker_profiles").inc(len(profiles))
+                logger.info("Loaded %d speaker profiles from PostgreSQL", len(profiles))
+                return profiles
+        finally:
+            conn.close()
+
+    def upsert_speaker_profiles(self, profiles: list[dict[str, Any]]) -> int:
+        """Upsert speaker profiles + members into PostgreSQL."""
+        if not profiles:
+            return 0
+        logger.info("Upserting %d speaker profiles to PostgreSQL", len(profiles))
+        conn = self._pg_conn()
+        try:
+            with track_duration(
+                GRAPH_DB_OPERATION_DURATION,
+                {"backend": "postgresql", "operation": "upsert_speaker_profiles"},
+            ):
+                with conn.cursor() as cur:
+                    self._ensure_speaker_profiles_schema(cur)
+                    for prof in profiles:
+                        cur.execute(
+                            """
+                            INSERT INTO speaker_profiles (
+                                profile_id, centroid, display_name, member_count,
+                                total_duration_s, first_seen, last_seen
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (profile_id) DO UPDATE SET
+                                centroid = EXCLUDED.centroid,
+                                display_name = EXCLUDED.display_name,
+                                member_count = EXCLUDED.member_count,
+                                total_duration_s = EXCLUDED.total_duration_s,
+                                last_seen = EXCLUDED.last_seen
+                            """,
+                            (
+                                prof["profile_id"],
+                                prof.get("centroid"),
+                                prof.get("display_name"),
+                                prof.get("member_count", 0),
+                                prof.get("total_duration_s", 0.0),
+                                prof.get("first_seen"),
+                                prof.get("last_seen"),
+                            ),
+                        )
+                        # Upsert members
+                        for member in prof.get("members", []):
+                            cur.execute(
+                                """
+                                INSERT INTO speaker_profile_members (
+                                    profile_id, document_id, local_label, segment_count
+                                ) VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (profile_id, document_id, local_label) DO UPDATE SET
+                                    segment_count = EXCLUDED.segment_count
+                                """,
+                                (
+                                    prof["profile_id"],
+                                    member["document_id"],
+                                    member["local_label"],
+                                    member.get("segment_count", 0),
+                                ),
+                            )
+                conn.commit()
+                GRAPH_DB_OPERATIONS.labels(backend="postgresql", operation="upsert_speaker_profiles").inc(len(profiles))
+                logger.info("PostgreSQL upsert_speaker_profiles complete count=%d", len(profiles))
+                return len(profiles)
+        finally:
+            conn.close()
+
     # -- Neo4j writes --
 
     def sync_entities_to_neo4j(self, entities: list[dict[str, Any]]) -> int:

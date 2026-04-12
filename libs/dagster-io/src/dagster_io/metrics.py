@@ -236,6 +236,21 @@ MODEL_LOAD_DURATION = Histogram(
     registry=REGISTRY,
 )
 
+SPEAKER_PROFILES_TOTAL = Gauge(
+    "catalyst_speaker_profiles_total",
+    "Number of speaker profiles after clustering",
+    [],
+    registry=REGISTRY,
+)
+
+SPEAKER_PROFILE_MERGE_DISTANCE = Histogram(
+    "catalyst_speaker_profile_merge_distance",
+    "Cosine distance of merges into existing speaker profiles (for threshold calibration)",
+    [],
+    buckets=(0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50),
+    registry=REGISTRY,
+)
+
 TRANSCRIPTION_REALTIME_FACTOR = Histogram(
     "catalyst_transcription_realtime_factor",
     "Ratio of audio duration to transcription time (>1 means faster than realtime)",

@@ -73,6 +73,26 @@ data:
     CREATE INDEX IF NOT EXISTS idx_assert_object ON assertions (object_canonical_id);
     CREATE INDEX IF NOT EXISTS idx_assert_predicate ON assertions (predicate_canonical);
     CREATE INDEX IF NOT EXISTS idx_assert_code_location ON assertions (code_location);
+
+    -- Speaker identity tables (CD-34j.1)
+    CREATE TABLE IF NOT EXISTS speaker_profiles (
+        profile_id       TEXT PRIMARY KEY,
+        centroid         vector(192) NOT NULL,
+        display_name     TEXT,
+        member_count     INT NOT NULL DEFAULT 0,
+        total_duration_s REAL NOT NULL DEFAULT 0,
+        first_seen       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_speaker_profiles_centroid ON speaker_profiles USING ivfflat (centroid vector_cosine_ops);
+
+    CREATE TABLE IF NOT EXISTS speaker_profile_members (
+        profile_id    TEXT REFERENCES speaker_profiles(profile_id),
+        document_id   TEXT NOT NULL,
+        local_label   TEXT NOT NULL,
+        segment_count INT NOT NULL DEFAULT 0,
+        PRIMARY KEY (profile_id, document_id, local_label)
+    );
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

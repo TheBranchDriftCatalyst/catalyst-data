@@ -32,6 +32,7 @@ from dagster_io import (
     EmbeddingResource,
     LLMResource,
     MinioIOManager,
+    OptionalMinioIOManager,
     make_run_status_sensor,
 )
 from dagster_io.executor import make_k8s_executor
@@ -49,6 +50,8 @@ from media_ingest.assets import (
     media_files,
     media_mentions,
     media_metadata,
+    media_speaker_embeddings,
+    media_speaker_profiles,
     media_transcode,
     media_transcriptions,
 )
@@ -69,6 +72,9 @@ defs = Definitions(
         media_assertions,
         media_embeddings,
         media_entity_candidates,
+        # Speaker identity (CD-34j.1)
+        media_speaker_embeddings,
+        media_speaker_profiles,
     ],
     sensors=[
         media_document_sensor,
@@ -77,6 +83,7 @@ defs = Definitions(
     executor=_k8s_executor,
     resources={
         "io_manager": MinioIOManager(),
+        "optional_io_manager": OptionalMinioIOManager(),
         "chunking": ChunkingResource(),
         "llm": LLMResource(),
         "embeddings": EmbeddingResource(),

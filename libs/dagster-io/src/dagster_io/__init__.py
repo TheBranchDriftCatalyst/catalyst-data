@@ -51,6 +51,8 @@ from dagster_io.metrics import (
     S3_BYTES_TRANSFERRED,
     S3_OPERATION_DURATION,
     S3_OPERATIONS,
+    SPEAKER_PROFILE_MERGE_DISTANCE,
+    SPEAKER_PROFILES_TOTAL,
     TRANSCODE_COMPRESSION_RATIO,
     TRANSCODE_DURATION,
     TRANSCODE_SAVED_BYTES,
@@ -70,6 +72,8 @@ from dagster_io.models import (
     Mention,
     MentionType,
     Provenance,
+    SpeakerEmbedding,
+    SpeakerProfile,
 )
 from dagster_io.observability import configure_tracing, get_tracer, trace_operation
 from dagster_io.processing_tracker import ProcessingTracker
@@ -108,6 +112,8 @@ __all__ = [
     "AlignmentEdge",
     "AlignmentType",
     "ExtractionMethod",
+    "SpeakerEmbedding",
+    "SpeakerProfile",
     # Extraction schemas
     "MentionExtraction",
     "MentionExtractionResult",
@@ -158,6 +164,8 @@ __all__ = [
     "TRANSCODE_COMPRESSION_RATIO",
     "TRANSCODE_SAVED_BYTES",
     "MODEL_LOAD_DURATION",
+    "SPEAKER_PROFILES_TOTAL",
+    "SPEAKER_PROFILE_MERGE_DISTANCE",
     # DAG health (CD-59v)
     "DAGSTER_RUN_STATUS_TOTAL",
     "DAGSTER_RUN_DURATION_SECONDS",

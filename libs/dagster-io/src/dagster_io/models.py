@@ -171,3 +171,26 @@ class AlignmentEdge(BaseModel):
             ids = sorted([self.source_entity_id, self.target_entity_id])
             self.edge_id = _deterministic_id(ids[0], ids[1], self.alignment_type.value)
         return self
+
+
+class SpeakerEmbedding(BaseModel):
+    """Per-speaker centroid embedding from one document partition."""
+
+    partition_key: str
+    local_label: str  # pyannote's SPEAKER_XX
+    centroid: list[float]  # 192-d vector
+    segment_count: int
+    total_duration_s: float
+
+
+class SpeakerProfile(BaseModel):
+    """Cross-file speaker identity — one profile per real-world voice."""
+
+    profile_id: str  # sha1(centroid_bytes + first_seen_iso)[:16]
+    centroid: list[float]  # 192-d averaged centroid
+    display_name: str | None = None
+    member_count: int = 0
+    total_duration_s: float = 0.0
+    first_seen: str  # ISO timestamp
+    last_seen: str  # ISO timestamp
+    members: list[dict] = Field(default_factory=list)  # [{document_id, local_label, segment_count}]
