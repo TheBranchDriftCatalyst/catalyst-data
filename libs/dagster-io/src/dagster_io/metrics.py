@@ -10,10 +10,13 @@ from prometheus_client import (
     Counter,
     Gauge,
     Histogram,
+    push_to_gateway,
     start_http_server,
 )
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_PUSHGATEWAY_URL = "http://prometheus-pushgateway.monitoring.svc.cluster.local:9091"
 
 # Shared registry
 REGISTRY = CollectorRegistry()
@@ -345,68 +348,85 @@ def track_asset_materialization(code_location: str, layer: str):
 _metrics_server_started = False
 
 
-def push_metrics(job_name: str = "dagster_step") -> None:
-    """Push all collected metrics to Alloy via synchronous OTLP export.
+def _strip_scheme(gateway_url: str) -> str:
+    """Strip ``http://`` / ``https://`` prefix from a pushgateway URL.
 
-    Uses InMemoryMetricReader + direct exporter.export() — no background
-    threads, no PeriodicExportingMetricReader. Safe to call during atexit
-    or SIGTERM handling.
+    ``prometheus_client.push_to_gateway`` accepts both forms, but we
+    normalize to ``host:port`` so the gateway arg is always canonical
+    regardless of whether the env var was supplied with a scheme.
+    """
+    for scheme in ("http://", "https://"):
+        if gateway_url.startswith(scheme):
+            return gateway_url[len(scheme) :]
+    return gateway_url
+
+
+def push_metrics(job_name: str = "dagster_step") -> None:
+    """Push all collected metrics to the Prometheus pushgateway.
+
+    Uses ``prometheus_client.push_to_gateway`` which preserves native
+    Counter / Histogram / Gauge semantics (no lossy conversion to Gauge,
+    no zero-value sample skipping, no name collisions between histogram
+    bucket / count / sum samples).
+
+    Grouping key is constructed from ``DAGSTER_CODE_LOCATION``,
+    ``DAGSTER_RUN_ID`` (with ``pid-<pid>`` fallback when unset), and
+    ``DAGSTER_STEP_KEY`` so concurrent step pods don't clobber each
+    other's pushes in the gateway's grouping-key index.
+
+    Safe to call from ``atexit`` and SIGTERM handlers — exceptions are
+    swallowed and logged rather than propagated, because raising during
+    process shutdown is worse than losing a single metric push.
     """
     try:
-        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-            OTLPMetricExporter,
+        raw_endpoint = os.getenv(
+            "PROMETHEUS_PUSHGATEWAY_URL",
+            DEFAULT_PUSHGATEWAY_URL,
         )
-        from opentelemetry.sdk.metrics import MeterProvider
-        from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-        from opentelemetry.sdk.resources import Resource
-        from prometheus_client.openmetrics.exposition import generate_latest
-        from prometheus_client.parser import text_string_to_metric_families
+        gateway = _strip_scheme(raw_endpoint)
 
-        endpoint = os.getenv(
-            "OTEL_EXPORTER_OTLP_ENDPOINT",
-            "http://alloy.monitoring.svc.cluster.local:4317",
+        run_id = os.getenv("DAGSTER_RUN_ID")
+        if not run_id:
+            run_id = f"pid-{os.getpid()}"
+            logger.warning(
+                "DAGSTER_RUN_ID not set, falling back to %s — concurrent "
+                "step pods on this process will clobber each other's "
+                "pushgateway grouping keys",
+                run_id,
+            )
+
+        grouping_key = {
+            "code_location": os.getenv("DAGSTER_CODE_LOCATION", "unknown"),
+            "run_id": run_id,
+            "step_key": os.getenv("DAGSTER_STEP_KEY", "none"),
+        }
+
+        push_to_gateway(
+            gateway=gateway,
+            job=job_name,
+            registry=REGISTRY,
+            grouping_key=grouping_key,
+            timeout=10,
         )
-
-        metrics_text = generate_latest(REGISTRY).decode("utf-8")
-
-        resource = Resource.create(
-            {
-                "service.name": os.getenv("OTEL_SERVICE_NAME", "catalyst-data"),
-                "service.namespace": "catalyst-data",
-                "job": job_name,
-            }
+        logger.info(
+            "Pushed metrics to pushgateway at %s (job=%s, grouping_key=%s)",
+            gateway,
+            job_name,
+            grouping_key,
         )
-
-        reader = InMemoryMetricReader()
-        provider = MeterProvider(resource=resource, metric_readers=[reader])
-        meter = provider.get_meter("catalyst-data")
-
-        for family in text_string_to_metric_families(metrics_text):
-            for sample in family.samples:
-                if sample.value == 0:
-                    continue
-                gauge = meter.create_gauge(sample.name, description=family.documentation)
-                gauge.set(sample.value, sample.labels)
-
-        # Synchronous: read collected metrics, then export directly (no threads)
-        exporter = OTLPMetricExporter(endpoint=endpoint, insecure=True)
-        metrics_data = reader.get_metrics_data()
-        exporter.export(metrics_data, timeout_millis=10000)
-        exporter.shutdown()
-        provider.shutdown()
-        logger.info("Pushed metrics to Alloy OTLP at %s (job=%s)", endpoint, job_name)
-    except ImportError:
-        logger.warning("OpenTelemetry metrics packages not installed, skipping push")
     except Exception as e:
-        logger.warning("Failed to push metrics via OTLP: %s", e)
+        # Swallow — atexit and SIGTERM paths must never raise.
+        logger.warning("Failed to push metrics to pushgateway: %s", e)
 
 
 def start_metrics_server(port: int | None = None) -> None:
     """Initialize metrics: start HTTP server for scraping AND register push-on-exit.
 
-    Every process pushes metrics via synchronous OTLP on exit. Also registers
-    a SIGTERM handler so metrics are pushed when K8s terminates step pods.
-    The HTTP server is a bonus for live debugging but not the primary path.
+    Every process pushes metrics to the Prometheus pushgateway on exit.
+    Also registers a SIGTERM handler so metrics are pushed when K8s
+    terminates step pods. The HTTP server is a bonus for live debugging
+    but not the primary path — in short-lived step pods, the scrape
+    interval never hits before the pod exits.
     """
     import atexit
     import signal
@@ -435,7 +455,7 @@ def start_metrics_server(port: int | None = None) -> None:
         raise SystemExit(0)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
-    logger.info("Registered atexit + SIGTERM metric push via OTLP")
+    logger.info("Registered atexit + SIGTERM metric push via Prometheus pushgateway")
 
     # Also try to start HTTP server for live debugging (non-critical)
     port = port or int(os.getenv("METRICS_PORT", "9090"))

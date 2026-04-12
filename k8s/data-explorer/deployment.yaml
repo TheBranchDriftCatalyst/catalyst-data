@@ -35,6 +35,8 @@ spec:
             # S3 path helpers for reads so it needs a value here.
             - name: DAGSTER_CODE_LOCATION
               value: data_explorer
+            - name: PROMETHEUS_PUSHGATEWAY_URL
+              value: "http://prometheus-pushgateway.monitoring.svc.cluster.local:9091"
             - name: DAGSTER_S3_ENDPOINT_URL
               valueFrom:
                 secretKeyRef:
