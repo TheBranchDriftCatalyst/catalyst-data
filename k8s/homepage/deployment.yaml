@@ -16,6 +16,21 @@ spec:
         app: catalyst-data-homepage
     spec:
       serviceAccountName: catalyst-data-homepage
+      initContainers:
+        - name: copy-config
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              cp /config-source/* /app/config/
+              mkdir -p /app/config/logs
+              chmod -R 777 /app/config
+          volumeMounts:
+            - name: config-source
+              mountPath: /config-source
+            - name: config
+              mountPath: /app/config
       containers:
         - name: homepage
           image: ghcr.io/gethomepage/homepage:latest
@@ -33,6 +48,8 @@ spec:
               cpu: 50m
               memory: 128Mi
       volumes:
-        - name: config
+        - name: config-source
           configMap:
             name: catalyst-data-homepage-config
+        - name: config
+          emptyDir: {}
