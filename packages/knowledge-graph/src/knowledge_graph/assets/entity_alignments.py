@@ -79,13 +79,24 @@ def entity_alignments(
         )
 
         aligner = CrossSourceAligner()
-        edges = aligner.align(
-            {
-                "congress_data": congress_entity_candidates,
-                "open_leaks": leak_entity_candidates,
-                "media_ingest": media_entity_candidates,
-            }
-        )
+        sources = {
+            "congress_data": congress_entity_candidates,
+            "open_leaks": leak_entity_candidates,
+            "media_ingest": media_entity_candidates,
+        }
+
+        # Phase 1: intra-source — collapse duplicates within each source
+        intra_edges: list = []
+        for loc, candidates in sources.items():
+            if len(candidates) > 1:
+                intra_edges.extend(aligner.intra_source_align(candidates, loc))
+        context.log.info(f"Intra-source alignment: {len(intra_edges)} edges")
+
+        # Phase 2: cross-source — pairwise between different sources
+        cross_edges = aligner.align(sources)
+        context.log.info(f"Cross-source alignment: {len(cross_edges)} edges")
+
+        edges = intra_edges + cross_edges
 
         # Count by type
         same_as_count = sum(1 for e in edges if e.alignment_type.value == "sameAs")
@@ -120,6 +131,8 @@ def entity_alignments(
             edges,
             metadata={
                 "edge_count": len(edges),
+                "intra_source_edges": len(intra_edges),
+                "cross_source_edges": len(cross_edges),
                 "same_as_count": same_as_count,
                 "possible_same_as_count": possible_count,
                 "pg_upserted": pg_count,
