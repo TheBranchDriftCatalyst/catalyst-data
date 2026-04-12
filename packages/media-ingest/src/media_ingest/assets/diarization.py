@@ -26,7 +26,7 @@ tracer = get_tracer(__name__)
 
 WHISPER_MODEL_CACHE = "/data/whisper-models"
 
-# Diarization is CPU-bound (pyannote uses torch on CPU), needs HF token
+# Diarization runs on Intel XPU (GPU) when available, needs HF token
 DIARIZATION_K8S_CONFIG = {
     **NFS_VOLUMES_CONFIG,
     "dagster-k8s/config": {
@@ -34,8 +34,8 @@ DIARIZATION_K8S_CONFIG = {
         "container_config": {
             **NFS_VOLUMES_CONFIG["dagster-k8s/config"]["container_config"],
             "resources": {
-                "requests": {"cpu": "2", "memory": "8Gi"},
-                "limits": {"cpu": "4", "memory": "16Gi"},
+                "requests": {"cpu": "1", "memory": "8Gi", "gpu.intel.com/i915": "1"},
+                "limits": {"cpu": "2", "memory": "16Gi", "gpu.intel.com/i915": "1"},
             },
             "env_from": [
                 {"secret_ref": {"name": "hf-credentials"}},
@@ -81,8 +81,12 @@ def _patch_pyannote_auth():
                     setattr(mod, attr, _wrap(fn))
 
 
-def _run_diarization(audio_path: str, hf_token: str, cache_dir: str):
-    """Run pyannote speaker diarization pipeline."""
+def _run_diarization(audio_path: str, hf_token: str, cache_dir: str) -> tuple:
+    """Run pyannote speaker diarization pipeline.
+
+    Returns (diarization_output, resolved_device) where resolved_device
+    is 'xpu', 'cuda', or 'cpu' depending on what was actually available.
+    """
     import torch
 
     _patch_pyannote_auth()
@@ -105,10 +109,29 @@ def _run_diarization(audio_path: str, hf_token: str, cache_dir: str):
         raise RuntimeError(
             "Failed to load pyannote pipeline — accept license at https://hf.co/pyannote/speaker-diarization-3.1"
         )
+
+    # Try XPU (Intel GPU) first, fall back to CUDA then CPU
+    resolved_device = "cpu"
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
+        try:
+            pipeline.to(torch.device("xpu"))
+            resolved_device = "xpu"
+            logger.info("pyannote pipeline moved to XPU (Intel GPU)")
+        except RuntimeError as e:
+            logger.warning("XPU not available, falling back to CPU: %s", e)
+    elif torch.cuda.is_available():
+        try:
+            pipeline.to(torch.device("cuda"))
+            resolved_device = "cuda"
+            logger.info("pyannote pipeline moved to CUDA")
+        except RuntimeError as e:
+            logger.warning("CUDA not available, falling back to CPU: %s", e)
+
     # pyannote can't read MP4/MKV — extract audio first
     wav_path = extract_audio_to_wav(audio_path)
     try:
-        return pipeline(wav_path)
+        result = pipeline(wav_path)
+        return result, resolved_device
     finally:
         if os.path.exists(wav_path):
             os.unlink(wav_path)
@@ -223,7 +246,7 @@ def media_diarization(
         start = time.monotonic()
 
         try:
-            diarization = _run_diarization(source_path, hf_token, WHISPER_MODEL_CACHE)
+            diarization, resolved_device = _run_diarization(source_path, hf_token, WHISPER_MODEL_CACHE)
             segments = _assign_speakers(t["segments"], diarization)
             unique_speakers = {s.get("speaker") for s in segments if s.get("speaker")}
             speaker_text = _build_speaker_text(segments) if unique_speakers else None
@@ -232,6 +255,8 @@ def media_diarization(
             # Record diarization duration metric
             DIARIZATION_DURATION.observe(diarization_time)
 
+            context.log.info(f"Diarization complete on device={resolved_device}")
+
             output = {
                 **t,
                 "segments": segments,
@@ -239,6 +264,7 @@ def media_diarization(
                 "speaker_count": len(unique_speakers),
                 "speakers": sorted(unique_speakers) if unique_speakers else [],
                 "diarization_time_s": diarization_time,
+                "diarization_device": resolved_device,
             }
 
             context.log.info(f"Diarization complete: {len(unique_speakers)} speakers detected in {diarization_time}s")
@@ -262,6 +288,7 @@ def media_diarization(
                 "speaker_count": output.get("speaker_count", 0),
                 "speakers": MetadataValue.json(output.get("speakers", [])),
                 "diarization_time_s": MetadataValue.float(output.get("diarization_time_s", 0.0)),
+                "diarization_device": output.get("diarization_device", "cpu"),
                 "error": output.get("diarization_error"),
             },
         )
