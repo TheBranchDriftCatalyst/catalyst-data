@@ -331,6 +331,41 @@ class CrossSourceAligner:
         logger.info("Cross-source alignment complete: %d edges produced", len(edges))
         return edges
 
+    def intra_source_align(
+        self,
+        candidates: list[EntityCandidate],
+        code_location: str,
+    ) -> list[AlignmentEdge]:
+        """Align entity candidates WITHIN a single code location.
+
+        Same scoring logic as cross-source align, but pairwise over
+        candidates from the same source. This collapses duplicates that
+        ConcordanceEngine.resolve() couldn't merge because they were in
+        different partitions (e.g. "Joe Biden" in 15 different videos).
+        """
+        edges: list[AlignmentEdge] = []
+        for i, cand_a in enumerate(candidates):
+            for cand_b in candidates[i + 1 :]:
+                if cand_a.candidate_type != cand_b.candidate_type:
+                    continue
+                edge = self._score_pair(cand_a, cand_b)
+                if edge is not None:
+                    edges.append(edge)
+                    top_signal = _pick_top_signal(edge.evidence)
+                    ALIGNMENT_EDGES_TOTAL.labels(
+                        source_location=code_location,
+                        target_location=code_location,  # same source!
+                        alignment_type=edge.alignment_type.value,
+                        top_signal=top_signal,
+                    ).inc()
+        logger.info(
+            "Intra-source alignment for %s: %d candidates → %d edges",
+            code_location,
+            len(candidates),
+            len(edges),
+        )
+        return edges
+
     def _score_pair(self, a: EntityCandidate, b: EntityCandidate) -> AlignmentEdge | None:
         signals: list[tuple[float, str]] = []
         all_names_a = {a.canonical_name.lower().strip()} | {alias.lower().strip() for alias in a.aliases}

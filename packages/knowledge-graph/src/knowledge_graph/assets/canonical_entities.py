@@ -122,15 +122,29 @@ def canonical_entities(
             f"+ {len(media_entity_candidates)} media candidates"
         )
 
-        # Run cross-source alignment — only include sources that have data
+        # Run intra-source alignment first — collapse duplicates that
+        # ConcordanceEngine.resolve() couldn't merge across partitions.
+        # Then run cross-source alignment on the surviving candidates.
         aligner = CrossSourceAligner()
         sources = {
             "congress_data": congress_entity_candidates,
             "open_leaks": leak_entity_candidates,
             "media_ingest": media_entity_candidates,
         }
-        alignment_edges = aligner.align(sources)
-        context.log.info(f"Found {len(alignment_edges)} cross-source alignment edges")
+
+        # Phase 1: intra-source — same _score_pair logic within each source
+        intra_edges: list = []
+        for loc, candidates in sources.items():
+            if len(candidates) > 1:
+                intra_edges.extend(aligner.intra_source_align(candidates, loc))
+        context.log.info(f"Intra-source alignment: {len(intra_edges)} edges")
+
+        # Phase 2: cross-source — pairwise between different sources
+        cross_edges = aligner.align(sources)
+        context.log.info(f"Cross-source alignment: {len(cross_edges)} edges")
+
+        alignment_edges = intra_edges + cross_edges
+        context.log.info(f"Total alignment edges: {len(alignment_edges)}")
 
         # Build canonical entities from all candidates
         all_candidates = congress_entity_candidates + leak_entity_candidates + media_entity_candidates
