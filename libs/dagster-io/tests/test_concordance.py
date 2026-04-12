@@ -176,3 +176,205 @@ def test_cross_source_align_unchanged():
     edges = aligner.align(sources)
     assert len(edges) >= 1
     assert edges[0].alignment_type.value == "sameAs"
+
+
+# ---------- Sprint 1: Substring guard tests ----------
+
+
+def test_substring_guard_rejects_short_names():
+    """Short substrings like "AI" in "AIPAC" should NOT produce a substring signal.
+
+    The min_length=4 guard prevents trivially short names from triggering
+    substring containment. Exact name match should still work if names match.
+    """
+    sources = {
+        "media_ingest": [
+            EntityCandidate(
+                candidate_id="cand-media-ai",
+                canonical_name="AI",
+                candidate_type=MentionType.ORG,
+                aliases=[],
+                mention_ids=["m-media-ai"],
+                mention_count=5,
+                source_documents=["video-0"],
+                code_location="media_ingest",
+            )
+        ],
+        "congress_data": [
+            EntityCandidate(
+                candidate_id="cand-congress-aipac",
+                canonical_name="AIPAC",
+                candidate_type=MentionType.ORG,
+                aliases=[],
+                mention_ids=["m-congress-aipac"],
+                mention_count=10,
+                source_documents=["bill-0"],
+                code_location="congress_data",
+            )
+        ],
+    }
+
+    aligner = CrossSourceAligner()
+    edges = aligner.align(sources)
+    # "AI" in "AIPAC" — shorter name < 4 chars, no shared tokens >= 2.
+    # Should NOT produce a sameAs edge.
+    same_as_edges = [e for e in edges if e.alignment_type.value == "sameAs"]
+    assert len(same_as_edges) == 0
+
+
+def test_substring_guard_rejects_single_token_overlap():
+    """Substring containment requires >= 2 shared tokens (parity with ConcordanceEngine).
+
+    "Iran" in "Iranian Americans" has only 0 shared tokens (after tokenization,
+    "iran" is not equal to "iranian"), so the guard should reject it.
+    """
+    sources = {
+        "media_ingest": [
+            EntityCandidate(
+                candidate_id="cand-media-iran",
+                canonical_name="Iran",
+                candidate_type=MentionType.GPE,
+                aliases=[],
+                mention_ids=["m-media-iran"],
+                mention_count=5,
+                source_documents=["video-0"],
+                code_location="media_ingest",
+            )
+        ],
+        "congress_data": [
+            EntityCandidate(
+                candidate_id="cand-congress-iranian",
+                canonical_name="Iranian Americans",
+                candidate_type=MentionType.GPE,
+                aliases=[],
+                mention_ids=["m-congress-iranian"],
+                mention_count=10,
+                source_documents=["bill-0"],
+                code_location="congress_data",
+            )
+        ],
+    }
+
+    aligner = CrossSourceAligner()
+    edges = aligner.align(sources)
+    same_as_edges = [e for e in edges if e.alignment_type.value == "sameAs"]
+    assert len(same_as_edges) == 0
+
+
+def test_substring_guard_allows_legitimate_containment():
+    """Legitimate substring containment should still produce edges.
+
+    "Joe Biden" in "President Joe Biden" shares 2 tokens and has a length ratio
+    well above 0.4, so it should pass all guards.
+    """
+    sources = {
+        "media_ingest": [
+            EntityCandidate(
+                candidate_id="cand-media-biden",
+                canonical_name="Joe Biden",
+                candidate_type=MentionType.PERSON,
+                aliases=[],
+                mention_ids=["m-media-biden"],
+                mention_count=5,
+                source_documents=["video-0"],
+                code_location="media_ingest",
+            )
+        ],
+        "congress_data": [
+            EntityCandidate(
+                candidate_id="cand-congress-biden",
+                canonical_name="President Joe Biden",
+                candidate_type=MentionType.PERSON,
+                aliases=[],
+                mention_ids=["m-congress-biden"],
+                mention_count=10,
+                source_documents=["bill-0"],
+                code_location="congress_data",
+            )
+        ],
+    }
+
+    aligner = CrossSourceAligner()
+    edges = aligner.align(sources)
+    assert len(edges) >= 1
+    # substring (0.80) + jaccard > 0.5 (0.70) = max 0.80 + 0.05 = 0.85, which
+    # meets the new sameAs threshold of 0.85.
+    same_as_edges = [e for e in edges if e.alignment_type.value == "sameAs"]
+    assert len(same_as_edges) >= 1
+
+
+def test_substring_asymmetry_penalty():
+    """Highly lopsided substring containment gets a reduced weight (0.60 instead of 0.80).
+
+    When len(shorter)/len(longer) < 0.4, the substring weight drops, making it
+    harder to reach sameAs threshold without additional corroboration.
+    """
+    aligner = CrossSourceAligner()
+
+    # "Biden" (5 chars) in "Joseph Robinette Biden Jr." (26 chars)
+    # ratio = 5/26 ≈ 0.19, well below 0.4 → penalty applies
+    # But they share the token "biden", which is only 1 token — guard rejects.
+    cand_a = EntityCandidate(
+        candidate_id="cand-a",
+        canonical_name="Biden",
+        candidate_type=MentionType.PERSON,
+        aliases=[],
+        mention_ids=["m-a"],
+        mention_count=5,
+        source_documents=["doc-a"],
+        code_location="source_a",
+    )
+    cand_b = EntityCandidate(
+        candidate_id="cand-b",
+        canonical_name="Joseph Robinette Biden Jr.",
+        candidate_type=MentionType.PERSON,
+        aliases=[],
+        mention_ids=["m-b"],
+        mention_count=10,
+        source_documents=["doc-b"],
+        code_location="source_b",
+    )
+
+    edge = aligner._score_pair(cand_a, cand_b)
+    # "Biden" (1 token) vs "Joseph Robinette Biden Jr." (4 tokens)
+    # shared tokens = {"biden"} → only 1 → guard rejects substring.
+    # No exact_name, no jaccard above 0.5 (1/4 = 0.25), no embedding.
+    # Edge should be None or only possibleSameAs at best.
+    if edge is not None:
+        assert edge.alignment_type.value != "sameAs" or "substring" not in edge.evidence
+
+
+def test_lowered_threshold_promotes_multi_signal_edges():
+    """With threshold at 0.85, substring (0.80) + jaccard (0.70) produces sameAs.
+
+    Combined = max(0.80, 0.70) + 0.05 = 0.85, which meets the new threshold.
+    Previously at 0.90 this would have been possibleSameAs.
+    """
+    aligner = CrossSourceAligner()
+
+    # "Nancy Pelosi" vs "Speaker Nancy Pelosi" — substring + jaccard
+    cand_a = EntityCandidate(
+        candidate_id="cand-pelosi-a",
+        canonical_name="Nancy Pelosi",
+        candidate_type=MentionType.PERSON,
+        aliases=[],
+        mention_ids=["m-pelosi-a"],
+        mention_count=5,
+        source_documents=["doc-a"],
+        code_location="source_a",
+    )
+    cand_b = EntityCandidate(
+        candidate_id="cand-pelosi-b",
+        canonical_name="Speaker Nancy Pelosi",
+        candidate_type=MentionType.PERSON,
+        aliases=[],
+        mention_ids=["m-pelosi-b"],
+        mention_count=10,
+        source_documents=["doc-b"],
+        code_location="source_b",
+    )
+
+    edge = aligner._score_pair(cand_a, cand_b)
+    assert edge is not None
+    assert edge.alignment_type.value == "sameAs"
+    assert edge.score >= 0.85

@@ -160,8 +160,36 @@ def canonical_entities(
             if edge.alignment_type.value == "sameAs":
                 uf.union(edge.source_entity_id, edge.target_entity_id)
 
-        clusters = uf.clusters()
+        MAX_CLUSTER_SIZE = 20
+        raw_clusters = uf.clusters()
+
+        # --- Cluster-size safety cap ---
+        # If transitive closure produces a mega-cluster (> MAX_CLUSTER_SIZE
+        # members), split it by removing the weakest edge links.  We keep only
+        # the top-N members by mention_count; the rest become singletons.
+        # This prevents catastrophic over-merge regardless of scoring quality.
+        clusters: dict[str, list[str]] = {}
         cand_by_id = {c.candidate_id: c for c in all_candidates}
+        for root, member_ids in raw_clusters.items():
+            if len(member_ids) <= MAX_CLUSTER_SIZE:
+                clusters[root] = member_ids
+            else:
+                logger.warning(
+                    "Oversized cluster (%d members) rooted at %s — capping at %d. Sample members: %s",
+                    len(member_ids),
+                    root,
+                    MAX_CLUSTER_SIZE,
+                    [cand_by_id[mid].canonical_name for mid in member_ids[:5] if mid in cand_by_id],
+                )
+                # Keep the top-N by mention_count; eject the rest as singletons
+                scored = sorted(
+                    member_ids,
+                    key=lambda mid: cand_by_id[mid].mention_count if mid in cand_by_id else 0,
+                    reverse=True,
+                )
+                clusters[root] = scored[:MAX_CLUSTER_SIZE]
+                for singleton_id in scored[MAX_CLUSTER_SIZE:]:
+                    clusters[singleton_id] = [singleton_id]
 
         for _root, member_ids in clusters.items():
             members = [cand_by_id[mid] for mid in member_ids if mid in cand_by_id]

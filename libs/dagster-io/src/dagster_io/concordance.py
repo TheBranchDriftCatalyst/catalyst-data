@@ -273,12 +273,12 @@ class CrossSourceAligner:
     - Embedding cosine similarity: 0.75
 
     Combined score = max(signals) + 0.05 per additional signal, capped at 1.0
-    Thresholds: ≥0.90 → sameAs, ≥0.65 → possibleSameAs
+    Thresholds: ≥0.85 → sameAs, ≥0.65 → possibleSameAs
     """
 
     def __init__(
         self,
-        same_as_threshold: float = 0.90,
+        same_as_threshold: float = 0.85,
         possible_same_as_threshold: float = 0.65,
     ) -> None:
         self.same_as_threshold = same_as_threshold
@@ -375,12 +375,29 @@ class CrossSourceAligner:
         if all_names_a & all_names_b:
             signals.append((0.95, "exact_name"))
 
-        # Signal 2: Substring containment
+        # Signal 2: Substring containment (with guards matching ConcordanceEngine)
+        # Guards: both names must be >= 4 chars, share >= 2 tokens, and the
+        # shorter name must be at least 40% as long as the longer name to
+        # prevent "AI" matching "AIPAC" or "Ed" matching "Education".
         if not signals:
             for na in all_names_a:
                 for nb in all_names_b:
                     if na in nb or nb in na:
-                        signals.append((0.80, "substring"))
+                        shorter, longer = (na, nb) if len(na) <= len(nb) else (nb, na)
+                        # Min length guard: skip trivially short substrings
+                        if len(shorter) < 4:
+                            continue
+                        # Min shared tokens guard (parity with ConcordanceEngine)
+                        tokens_na = _tokenize(na)
+                        tokens_nb = _tokenize(nb)
+                        if len(tokens_na & tokens_nb) < 2:
+                            continue
+                        # Asymmetry penalty: heavily lopsided containment is
+                        # weak evidence (e.g. "Biden" in "Joe Biden" is fine,
+                        # but "Iran" in "Iranian Americans" is dubious).
+                        ratio = len(shorter) / len(longer) if len(longer) > 0 else 1.0
+                        sub_weight = 0.80 if ratio >= 0.4 else 0.60
+                        signals.append((sub_weight, "substring"))
                         break
                 if signals:
                     break
