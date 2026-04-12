@@ -18,9 +18,9 @@ from dagster import Definitions, DynamicPartitionsDefinition, SourceAsset
 from dagster_io import (
     MinioIOManager,
     OptionalMinioIOManager,
-    make_k8s_executor,
     make_run_status_sensor,
 )
+from dagster_io.executor import make_k8s_executor
 from knowledge_graph.resources import GraphDBResource
 
 _k8s_executor = make_k8s_executor("knowledge_graph")

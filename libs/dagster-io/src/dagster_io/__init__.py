@@ -11,7 +11,6 @@ from dagster_io.chunking import ChunkingResource, TextChunk, chunk_document, chu
 from dagster_io.concordance import ConcordanceEngine, CrossSourceAligner
 from dagster_io.document import Document
 from dagster_io.embedding_config import EmbeddingConfig, EmbeddingConfigResource
-from dagster_io.executor import make_k8s_executor
 from dagster_io.extraction_schemas import (
     AssertionExtractionResult,
     AssertionQualifiers,
@@ -81,8 +80,6 @@ __all__ = [
     # IO
     "MinioIOManager",
     "OptionalMinioIOManager",
-    # Executor
-    "make_k8s_executor",
     # Run-status sensor factory
     "make_run_status_sensor",
     # Resources

@@ -32,9 +32,9 @@ from dagster_io import (
     EmbeddingResource,
     LLMResource,
     MinioIOManager,
-    make_k8s_executor,
     make_run_status_sensor,
 )
+from dagster_io.executor import make_k8s_executor
 
 _k8s_executor = make_k8s_executor("media_ingest")
 _run_status_sensors = make_run_status_sensor("media_ingest")
