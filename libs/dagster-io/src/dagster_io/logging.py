@@ -157,21 +157,17 @@ def configure_logging(
     disabled = _parse_disabled_modules(disabled_modules or os.getenv("LOG_DISABLED_MODULES"))
     mod_levels = _parse_module_levels(module_levels or os.getenv("LOG_MODULE_LEVELS"))
 
-    # Create root handler
-    root_logger = logging.getLogger()
-    root_logger.setLevel(getattr(logging, level.upper(), logging.DEBUG))
-
-    # Remove existing handlers to avoid duplicates
-    root_logger.handlers.clear()
-
-    # Create formatters
-    if log_format == "json":
-        formatter = JsonFormatter()
-    else:
-        formatter = logging.Formatter(
-            "%(asctime)s [%(levelname)-8s] %(name)-40s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
+    # Configure OUR loggers only — do NOT touch the root logger or Dagster's
+    # handlers. Dagster has its own logging pipeline (writes structured events
+    # to stderr). We only configure catalyst/dagster_io/media_ingest/etc loggers.
+    #
+    # For Dagster compute logs readability, always use text format (not JSON).
+    # JSON is unreadable in the Dagster UI log viewer. Loki ingests from
+    # container stdout/stderr regardless of format.
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)-8s] %(name)-40s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     # stdout handler: DEBUG + INFO (normal operation logs)
     stdout_handler = logging.StreamHandler(sys.stdout)
@@ -190,8 +186,24 @@ def configure_logging(
         stdout_handler.addFilter(module_filter)
         stderr_handler.addFilter(module_filter)
 
-    root_logger.addHandler(stdout_handler)
-    root_logger.addHandler(stderr_handler)
+    # Attach handlers to our namespace loggers, NOT root.
+    # This prevents double-logging with Dagster's own handlers.
+    log_level = getattr(logging, level.upper(), logging.DEBUG)
+    for namespace in (
+        "dagster_io",
+        "media_ingest",
+        "congress_data",
+        "open_leaks",
+        "knowledge_graph",
+        "data_explorer",
+        "catalyst",
+    ):
+        ns_logger = logging.getLogger(namespace)
+        ns_logger.setLevel(log_level)
+        ns_logger.handlers.clear()
+        ns_logger.addHandler(stdout_handler)
+        ns_logger.addHandler(stderr_handler)
+        ns_logger.propagate = False  # don't bubble up to root / Dagster's handlers
 
     # Quiet noisy third-party loggers
     for noisy in (
