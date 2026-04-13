@@ -16,7 +16,10 @@ spec:
         "list": [
           {
             "builtIn": 1,
-            "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
             "enable": true,
             "hide": true,
             "iconColor": "rgba(0, 211, 255, 1)",
@@ -33,29 +36,53 @@ spec:
       "panels": [
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
           "id": 100,
           "title": "Pipeline Overview",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 5 },
-                  { "color": "red", "value": 10 }
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 5
+                  },
+                  {
+                    "color": "red",
+                    "value": 10
+                  }
                 ]
               },
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+          "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 0,
+            "y": 1
+          },
           "id": 1,
           "options": {
             "colorMode": "value",
@@ -63,7 +90,9 @@ spec:
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
-              "calcs": ["lastNotNull"],
+              "calcs": [
+                "lastNotNull"
+              ],
               "fields": "",
               "values": false
             },
@@ -73,23 +102,37 @@ spec:
           "type": "stat",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum(catalyst_active_asset_materializations)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "count(count by (step_key) (catalyst_asset_records_processed_total{job=\"dagster_step\"}))",
               "legendFormat": "Active",
               "refId": "A"
             }
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "blue", "value": 100 }
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "blue",
+                    "value": 100
+                  }
                 ]
               },
               "unit": "ops",
@@ -97,7 +140,12 @@ spec:
             },
             "overrides": []
           },
-          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+          "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 6,
+            "y": 1
+          },
           "id": 2,
           "options": {
             "colorMode": "value",
@@ -105,28 +153,38 @@ spec:
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
-              "calcs": ["lastNotNull"],
+              "calcs": [
+                "lastNotNull"
+              ],
               "fields": "",
               "values": false
             },
             "textMode": "auto"
           },
-          "title": "Records Processed Rate",
+          "title": "Records Processed",
           "type": "stat",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum(rate(catalyst_asset_records_processed_total[5m]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "sum(increase(catalyst_asset_records_processed_total[$__range]))",
               "legendFormat": "Records/s",
               "refId": "A"
             }
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -137,33 +195,62 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 1 },
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
           "id": 4,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Records Processed by Asset",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (code_location, asset_key) (rate(catalyst_asset_records_processed_total{code_location=~\"$code_location\"}[5m]))",
               "legendFormat": "{{ code_location }} / {{ asset_key }}",
               "refId": "A"
@@ -172,16 +259,26 @@ spec:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 7
+          },
           "id": 101,
           "title": "LLM Operations",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -192,39 +289,71 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "s",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 0, "y": 8 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 8
+          },
           "id": 5,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "LLM Request Duration",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.5, sum by (le, model, operation) (rate(catalyst_llm_request_duration_seconds_bucket[5m])))",
               "legendFormat": "{{ model }} / {{ operation }} p50",
               "refId": "A"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.99, sum by (le, model, operation) (rate(catalyst_llm_request_duration_seconds_bucket[5m])))",
               "legendFormat": "{{ model }} / {{ operation }} p99",
               "refId": "B"
@@ -232,10 +361,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -246,45 +380,79 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "short",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 6, "y": 8 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 6,
+            "y": 8
+          },
           "id": 6,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
-          "title": "LLM Token Burn Rate",
+          "title": "LLM Tokens Used",
           "description": "Tokens consumed per second, grouped by model and token_type.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (model, token_type) (rate(catalyst_llm_tokens_total[5m]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "sum by (model, token_type) (increase(catalyst_llm_tokens_total[$__range]))",
               "legendFormat": "{{ model }} ({{ token_type }})",
               "refId": "A"
             }
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -295,33 +463,62 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "reqps",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 8
+          },
           "id": 7,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "LLM Requests Rate",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (model) (rate(catalyst_llm_requests_total[5m]))",
               "legendFormat": "{{ model }}",
               "refId": "A"
@@ -329,32 +526,57 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 8
+          },
           "id": 8,
           "options": {
-            "legend": { "displayMode": "table", "placement": "bottom", "values": ["value", "percent"] },
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "values": [
+                "value",
+                "percent"
+              ]
+            },
             "pieType": "donut",
             "reduceOptions": {
-              "calcs": ["lastNotNull"],
+              "calcs": [
+                "lastNotNull"
+              ],
               "fields": "",
               "values": false
             },
-            "tooltip": { "mode": "single", "sort": "none" }
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
           },
           "title": "LLM Requests by Status",
           "description": "Excludes status=pending (counter leak, fixed in CD-5j5).",
           "type": "piechart",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (status) (increase(catalyst_llm_requests_total{status!=\"pending\"}[$__range]))",
               "legendFormat": "{{ status }}",
               "refId": "A"
@@ -362,10 +584,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -376,34 +603,63 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "percentunit",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 16
+          },
           "id": 43,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "LLM Error Rate by Model",
           "description": "LLM error rate per model (errors / total). Alert fires at >10%.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (model) (rate(catalyst_llm_requests_total{status=\"error\"}[5m])) / sum by (model) (rate(catalyst_llm_requests_total[5m]))",
               "legendFormat": "{{ model }}",
               "refId": "A"
@@ -412,16 +668,26 @@ spec:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 24
+          },
           "id": 102,
           "title": "Storage & Embeddings",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -432,33 +698,62 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 0, "y": 17 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 17
+          },
           "id": 9,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "S3 Operations Rate",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (operation) (rate(catalyst_s3_operations_total[5m]))",
               "legendFormat": "{{ operation }}",
               "refId": "A"
@@ -466,10 +761,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -480,34 +780,63 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "Bps",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 6, "y": 17 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 6,
+            "y": 17
+          },
           "id": 10,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "S3 Bytes Transferred",
           "description": "S3/MinIO bytes/sec by direction (upload|download).",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (direction) (rate(catalyst_s3_bytes_total[5m]))",
               "legendFormat": "{{ direction }}",
               "refId": "A"
@@ -515,10 +844,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -529,39 +863,71 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "s",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 12, "y": 17 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 17
+          },
           "id": 11,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Embedding Batch Duration",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.5, sum by (le, provider, model) (rate(catalyst_embedding_batch_duration_seconds_bucket[5m])))",
               "legendFormat": "{{ provider }} / {{ model }} p50",
               "refId": "A"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.99, sum by (le, provider, model) (rate(catalyst_embedding_batch_duration_seconds_bucket[5m])))",
               "legendFormat": "{{ provider }} / {{ model }} p99",
               "refId": "B"
@@ -569,10 +935,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -583,34 +954,63 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 18, "y": 17 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 17
+          },
           "id": 12,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Embedding Vectors/sec",
           "description": "Rate of embedding vectors created per second, grouped by provider.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (provider) (rate(catalyst_embedding_vectors_total[5m]))",
               "legendFormat": "{{ provider }}",
               "refId": "A"
@@ -619,16 +1019,26 @@ spec:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 25
+          },
           "id": 103,
           "title": "Entities & Knowledge Graph",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -639,33 +1049,62 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "normal" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 26 },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 26
+          },
           "id": 13,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Entities Extracted Rate by Type",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (entity_type) (rate(catalyst_entities_extracted_total[5m]))",
               "legendFormat": "{{ entity_type }}",
               "refId": "A"
@@ -673,10 +1112,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -687,34 +1131,63 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 26 },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 26
+          },
           "id": 14,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Assertions/sec by Domain",
           "description": "S-P-O triples created per second, grouped by code_location.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (code_location) (rate(catalyst_assertions_created_total{code_location=~\"$code_location\"}[5m]))",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
@@ -722,10 +1195,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -736,33 +1214,62 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 26 },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 26
+          },
           "id": 15,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Graph DB Operations",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (operation) (rate(catalyst_graph_db_operations_total[5m]))",
               "legendFormat": "{{ operation }}",
               "refId": "A"
@@ -771,16 +1278,26 @@ spec:
         },
         {
           "collapsed": true,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 34
+          },
           "id": 104,
           "title": "Logs",
           "type": "row"
         },
         {
-          "datasource": { "type": "loki", "uid": "loki-v2" },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-v2"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -791,53 +1308,136 @@ spec:
                 "drawStyle": "bars",
                 "fillOpacity": 50,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 1,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "normal" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "mappings": []
             },
             "overrides": [
               {
-                "matcher": { "id": "byName", "options": "ERROR" },
-                "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+                "matcher": {
+                  "id": "byName",
+                  "options": "ERROR"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "red",
+                      "mode": "fixed"
+                    }
+                  }
+                ]
               },
               {
-                "matcher": { "id": "byName", "options": "CRITICAL" },
-                "properties": [{ "id": "color", "value": { "fixedColor": "dark-red", "mode": "fixed" } }]
+                "matcher": {
+                  "id": "byName",
+                  "options": "CRITICAL"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "dark-red",
+                      "mode": "fixed"
+                    }
+                  }
+                ]
               },
               {
-                "matcher": { "id": "byName", "options": "WARNING" },
-                "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }]
+                "matcher": {
+                  "id": "byName",
+                  "options": "WARNING"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "yellow",
+                      "mode": "fixed"
+                    }
+                  }
+                ]
               },
               {
-                "matcher": { "id": "byName", "options": "INFO" },
-                "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+                "matcher": {
+                  "id": "byName",
+                  "options": "INFO"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "green",
+                      "mode": "fixed"
+                    }
+                  }
+                ]
               },
               {
-                "matcher": { "id": "byName", "options": "DEBUG" },
-                "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }]
+                "matcher": {
+                  "id": "byName",
+                  "options": "DEBUG"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "blue",
+                      "mode": "fixed"
+                    }
+                  }
+                ]
               }
             ]
           },
-          "gridPos": { "h": 10, "w": 12, "x": 0, "y": 35 },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 35
+          },
           "id": 17,
           "options": {
-            "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "sum"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Log Volume by Level",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "loki", "uid": "loki-v2" },
+              "datasource": {
+                "type": "loki",
+                "uid": "loki-v2"
+              },
               "expr": "sum by (level) (count_over_time({namespace=\"catalyst-data\"} | json | level != \"\" [1m]))",
               "legendFormat": "{{ level }}",
               "refId": "A"
@@ -845,8 +1445,16 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "loki", "uid": "loki-v2" },
-          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 45 },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-v2"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 45
+          },
           "id": 18,
           "options": {
             "dedupStrategy": "none",
@@ -862,7 +1470,10 @@ spec:
           "type": "logs",
           "targets": [
             {
-              "datasource": { "type": "loki", "uid": "loki-v2" },
+              "datasource": {
+                "type": "loki",
+                "uid": "loki-v2"
+              },
               "expr": "{namespace=\"catalyst-data\"} | json | level=~\"ERROR|CRITICAL\"",
               "refId": "A"
             }
@@ -870,16 +1481,26 @@ spec:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 55 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 55
+          },
           "id": 105,
           "title": "Infrastructure",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -890,33 +1511,62 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "short",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 56 },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 56
+          },
           "id": 19,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Pod CPU Usage",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"catalyst-data\", container!=\"\"}[5m]))",
               "legendFormat": "{{ pod }}",
               "refId": "A"
@@ -924,10 +1574,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -938,33 +1593,62 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "bytes",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 56 },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 56
+          },
           "id": 20,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Pod Memory Usage",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"catalyst-data\", container!=\"\"})",
               "legendFormat": "{{ pod }}",
               "refId": "A"
@@ -972,16 +1656,30 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 3 },
-                  { "color": "red", "value": 10 }
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 3
+                  },
+                  {
+                    "color": "red",
+                    "value": 10
+                  }
                 ]
               },
               "unit": "short",
@@ -989,7 +1687,12 @@ spec:
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 56 },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 56
+          },
           "id": 21,
           "options": {
             "colorMode": "value",
@@ -997,7 +1700,9 @@ spec:
             "justifyMode": "auto",
             "orientation": "horizontal",
             "reduceOptions": {
-              "calcs": ["lastNotNull"],
+              "calcs": [
+                "lastNotNull"
+              ],
               "fields": "",
               "values": false
             },
@@ -1008,8 +1713,11 @@ spec:
           "type": "stat",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"catalyst-data\"}[1h]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"catalyst-data\", pod!~\"dagster-run-.*|dagster-step-.*\"}[1h])) > 0",
               "legendFormat": "{{ pod }}",
               "refId": "A"
             }
@@ -1017,16 +1725,26 @@ spec:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 64 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 64
+          },
           "id": 106,
           "title": "Media Ingest",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1037,45 +1755,80 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "s",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 65 },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 65
+          },
           "id": 30,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Transcription Duration by Backend",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.5, rate(catalyst_transcription_duration_seconds_bucket[5m]))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.95, rate(catalyst_transcription_duration_seconds_bucket[5m]))",
               "legendFormat": "p95",
               "refId": "B"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.99, rate(catalyst_transcription_duration_seconds_bucket[5m]))",
               "legendFormat": "p99",
               "refId": "C"
@@ -1083,10 +1836,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1097,40 +1855,72 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "short",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 65 },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 65
+          },
           "id": 31,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Transcription Real-Time Factor",
           "description": "Audio duration / transcription time. >1 = faster than real-time.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.5, rate(catalyst_transcription_realtime_factor_bucket[5m]))",
               "legendFormat": "p50 RTF",
               "refId": "A"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.95, rate(catalyst_transcription_realtime_factor_bucket[5m]))",
               "legendFormat": "p95 RTF",
               "refId": "B"
@@ -1138,10 +1928,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1152,45 +1947,80 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "s",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 65 },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 65
+          },
           "id": 32,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Diarization Duration",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.5, rate(catalyst_diarization_duration_seconds_bucket[5m]))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.95, rate(catalyst_diarization_duration_seconds_bucket[5m]))",
               "legendFormat": "p95",
               "refId": "B"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.99, rate(catalyst_diarization_duration_seconds_bucket[5m]))",
               "legendFormat": "p99",
               "refId": "C"
@@ -1198,10 +2028,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1212,39 +2047,71 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "s",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 0, "y": 73 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 73
+          },
           "id": 33,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Transcode Duration",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.5, rate(catalyst_transcode_duration_seconds_bucket[5m]))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.99, rate(catalyst_transcode_duration_seconds_bucket[5m]))",
               "legendFormat": "p99",
               "refId": "B"
@@ -1252,10 +2119,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1266,40 +2138,72 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "short",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 6, "y": 73 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 6,
+            "y": 73
+          },
           "id": 34,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Transcode Compression Ratio",
           "description": "Original size / compressed size. Higher = more compression.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.5, rate(catalyst_transcode_compression_ratio_bucket[5m]))",
               "legendFormat": "p50 ratio",
               "refId": "A"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.95, rate(catalyst_transcode_compression_ratio_bucket[5m]))",
               "legendFormat": "p95 ratio",
               "refId": "B"
@@ -1307,10 +2211,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1321,34 +2230,63 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "Bps",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 12, "y": 73 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 73
+          },
           "id": 35,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Transcode Bytes Saved Rate",
           "description": "Bytes saved per second by transcoding (1h window).",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum(rate(catalyst_transcode_saved_bytes_total[1h]))",
               "legendFormat": "Saved",
               "refId": "A"
@@ -1356,10 +2294,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1370,39 +2313,71 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "s",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 18, "y": 73 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 73
+          },
           "id": 36,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Model Load Duration",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.5, rate(catalyst_model_load_duration_seconds_bucket[5m]))",
               "legendFormat": "{{ model_type }} p50",
               "refId": "A"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.99, rate(catalyst_model_load_duration_seconds_bucket[5m]))",
               "legendFormat": "{{ model_type }} p99",
               "refId": "B"
@@ -1411,16 +2386,26 @@ spec:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 81 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 81
+          },
           "id": 107,
           "title": "Pipeline Health (Cross-Domain)",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1431,34 +2416,63 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "normal" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 82 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 82
+          },
           "id": 40,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Throughput by Domain",
           "description": "Records processed per second, grouped by code_location (domain).",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (code_location) (rate(catalyst_asset_records_processed_total{code_location=~\"$code_location\"}[5m]))",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
@@ -1466,10 +2480,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1480,45 +2499,79 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "short",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 82 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 82
+          },
           "id": 41,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
-          "title": "Active Materializations by Domain",
+          "title": "Records Processed by Domain",
           "description": "Concurrent running materializations, summed across all pods, grouped by code_location.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (code_location) (catalyst_active_asset_materializations{code_location=~\"$code_location\"})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "sum by (code_location) (increase(catalyst_asset_records_processed_total{code_location=~\"$code_location\"}[$__range]))",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
             }
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1529,35 +2582,64 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "s",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 90 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 90
+          },
           "id": 42,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Asset Duration by Domain (p95)",
           "description": "p95 materialization duration across all domains and assets.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "histogram_quantile(0.95, sum by (code_location, asset_key, le) (rate(catalyst_asset_materialization_duration_seconds_bucket{code_location=~\"$code_location\", asset_key=~\"$asset_key\"}[5m])))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "histogram_quantile(0.95, sum by (code_location, le) (rate(catalyst_asset_materialization_duration_seconds_bucket{code_location=~\"$code_location\"}[$__rate_interval])))",
               "legendFormat": "{{ code_location }}/{{ asset_key }}",
               "refId": "A"
             }
@@ -1565,21 +2647,34 @@ spec:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 99 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 99
+          },
           "id": 108,
           "title": "At-a-Glance RED",
           "description": "Runs, Errors, Duration — the RED method applied to Dagster pipelines. Shows current pipeline health at a glance.",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "green", "value": null }
+                  {
+                    "color": "green",
+                    "value": null
+                  }
                 ]
               },
               "unit": "short",
@@ -1587,7 +2682,12 @@ spec:
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 0, "y": 100 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 100
+          },
           "id": 200,
           "options": {
             "colorMode": "value",
@@ -1595,18 +2695,23 @@ spec:
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
-              "calcs": ["lastNotNull"],
+              "calcs": [
+                "lastNotNull"
+              ],
               "fields": "",
               "values": false
             },
             "textMode": "auto"
           },
           "title": "Runs / 1h",
-          "description": "Total Dagster runs over the past hour, per code location.",
+          "description": "Total Dagster runs over the past hour, per code location. Requires run_status_sensor to be enabled in Dagster UI",
           "type": "stat",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (code_location) (increase(catalyst_dagster_run_status_total{code_location=~\"$code_location\"}[1h]))",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
@@ -1614,16 +2719,30 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 5 },
-                  { "color": "red", "value": 20 }
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 5
+                  },
+                  {
+                    "color": "red",
+                    "value": 20
+                  }
                 ]
               },
               "unit": "percent",
@@ -1631,7 +2750,12 @@ spec:
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 6, "y": 100 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 6,
+            "y": 100
+          },
           "id": 201,
           "options": {
             "colorMode": "value",
@@ -1639,18 +2763,23 @@ spec:
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
-              "calcs": ["lastNotNull"],
+              "calcs": [
+                "lastNotNull"
+              ],
               "fields": "",
               "values": false
             },
             "textMode": "auto"
           },
           "title": "Failure %",
-          "description": "Percentage of Dagster runs that failed in the past hour. clamp_min avoids divide-by-zero on quiet code locations.",
+          "description": "Percentage of Dagster runs that failed in the past hour. clamp_min avoids divide-by-zero on quiet code locations. Requires run_status_sensor to be enabled in Dagster UI",
           "type": "stat",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "100 * sum by (code_location) (increase(catalyst_dagster_run_status_total{code_location=~\"$code_location\", status=\"failure\"}[1h])) / clamp_min(sum by (code_location) (increase(catalyst_dagster_run_status_total{code_location=~\"$code_location\"}[1h])), 1)",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
@@ -1658,14 +2787,22 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "green", "value": null }
+                  {
+                    "color": "green",
+                    "value": null
+                  }
                 ]
               },
               "unit": "s",
@@ -1673,7 +2810,12 @@ spec:
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 12, "y": 100 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 100
+          },
           "id": 202,
           "options": {
             "colorMode": "value",
@@ -1681,18 +2823,23 @@ spec:
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
-              "calcs": ["lastNotNull"],
+              "calcs": [
+                "lastNotNull"
+              ],
               "fields": "",
               "values": false
             },
             "textMode": "auto"
           },
           "title": "p95 Run Duration",
-          "description": "p95 Dagster run duration over the past hour, per code location.",
+          "description": "p95 Dagster run duration over the past hour, per code location. Requires run_status_sensor to be enabled in Dagster UI",
           "type": "stat",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.95, sum by (code_location, le) (rate(catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}[1h])))",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
@@ -1700,16 +2847,30 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 3600 },
-                  { "color": "red", "value": 86400 }
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 3600
+                  },
+                  {
+                    "color": "red",
+                    "value": 86400
+                  }
                 ]
               },
               "unit": "s",
@@ -1717,7 +2878,12 @@ spec:
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 6, "x": 18, "y": 100 },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 100
+          },
           "id": 203,
           "options": {
             "colorMode": "value",
@@ -1725,18 +2891,23 @@ spec:
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
-              "calcs": ["lastNotNull"],
+              "calcs": [
+                "lastNotNull"
+              ],
               "fields": "",
               "values": false
             },
             "textMode": "auto"
           },
           "title": "Asset Freshness (max staleness)",
-          "description": "Max staleness across assets per code location. Green < 1h, yellow < 1d, red ≥ 1d.",
+          "description": "Max staleness across assets per code location. Green < 1h, yellow < 1d, red ≥ 1d. Requires run_status_sensor to be enabled in Dagster UI",
           "type": "stat",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "max by (code_location) (time() - catalyst_asset_last_materialized_timestamp_seconds{code_location=~\"$code_location\"})",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
@@ -1745,17 +2916,27 @@ spec:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 108 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 108
+          },
           "id": 109,
           "title": "Entity Concordance — Convergence",
           "description": "How well is cross-source entity resolution converging? Rising sameAs edges + falling reduction ratio = more dedup happening.",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1766,45 +2947,79 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "normal" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 109 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 109
+          },
           "id": 204,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Alignment Edges by Type",
           "description": "Rate of alignment edges produced by the concordance aligner, split by alignment type (sameAs vs possibleSameAs).",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (alignment_type) (rate(catalyst_alignment_edges_total{source_location=~\"$code_location\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "sum by (alignment_type) (increase(catalyst_alignment_edges_total{source_location=~\"$code_location\"}[$__range]))",
               "legendFormat": "{{ alignment_type }}",
               "refId": "A"
             }
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1815,53 +3030,96 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "normal" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 109 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 109
+          },
           "id": 205,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Alignment Signal Mix",
           "description": "Which scoring signal (exact_name / substring / jaccard / embedding) fires most — dominance of one signal may indicate the others aren't pulling their weight.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (top_signal) (rate(catalyst_alignment_edges_total{source_location=~\"$code_location\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "sum by (top_signal) (increase(catalyst_alignment_edges_total{source_location=~\"$code_location\"}[$__range]))",
               "legendFormat": "{{ top_signal }}",
               "refId": "A"
             }
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
               "custom": {
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-                "scaleDistribution": { "type": "linear" }
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                }
               },
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 117 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 117
+          },
           "id": 206,
           "options": {
             "calculate": false,
@@ -1875,19 +3133,38 @@ spec:
               "scheme": "Oranges",
               "steps": 64
             },
-            "exemplars": { "color": "rgba(255,0,255,0.7)" },
-            "filterValues": { "le": 1e-9 },
-            "legend": { "show": true },
-            "rowsFrame": { "layout": "auto" },
-            "tooltip": { "mode": "single", "showColorScale": false, "yHistogram": false },
-            "yAxis": { "axisPlacement": "left", "reverse": false, "unit": "short" }
+            "exemplars": {
+              "color": "rgba(255,0,255,0.7)"
+            },
+            "filterValues": {
+              "le": 1e-09
+            },
+            "legend": {
+              "show": true
+            },
+            "rowsFrame": {
+              "layout": "auto"
+            },
+            "tooltip": {
+              "mode": "single",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "reverse": false,
+              "unit": "short"
+            }
           },
           "title": "Entity Reduction Ratio",
           "description": "Ratio of canonical candidates to raw mentions. Lower = more dedup. If concentrated near 1.0, per-document concordance isn't collapsing anything.",
           "type": "heatmap",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (code_location, le) (increase(catalyst_entity_reduction_ratio_bucket{code_location=~\"$code_location\"}[$__rate_interval]))",
               "format": "heatmap",
               "legendFormat": "{{ le }}",
@@ -1896,10 +3173,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -1910,35 +3192,64 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "normal" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 117 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 117
+          },
           "id": 207,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Canonical Entities by Merge Count",
           "description": "Canonical entities bucketed by how many sources merged into them. Dominance of bucket '1' means the aligner isn't finding cross-source matches and the platinum layer is acting as a pass-through.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (source_count_bucket) (rate(catalyst_canonical_entities_total[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "sum by (source_count_bucket) (increase(catalyst_canonical_entities_total[$__range]))",
               "legendFormat": "Merged from {{ source_count_bucket }} source(s)",
               "refId": "A"
             }
@@ -1946,23 +3257,42 @@ spec:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 125 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 125
+          },
           "id": 110,
           "title": "Cross-Code-Location Fan-In",
           "description": "Partition coverage + optional SourceAsset hit rates across code locations. Catches silent data-routing bugs.",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 3600 },
-                  { "color": "red", "value": 86400 }
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 3600
+                  },
+                  {
+                    "color": "red",
+                    "value": 86400
+                  }
                 ]
               },
               "unit": "s",
@@ -1970,7 +3300,12 @@ spec:
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 126 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 126
+          },
           "id": 208,
           "options": {
             "displayMode": "gradient",
@@ -1978,7 +3313,9 @@ spec:
             "minVizWidth": 0,
             "orientation": "horizontal",
             "reduceOptions": {
-              "calcs": ["lastNotNull"],
+              "calcs": [
+                "lastNotNull"
+              ],
               "fields": "",
               "values": false
             },
@@ -1989,7 +3326,10 @@ spec:
           "type": "bargauge",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "time() - catalyst_asset_last_materialized_timestamp_seconds{code_location=~\"$code_location\"}",
               "legendFormat": "{{ code_location }}/{{ asset_key }}",
               "refId": "A"
@@ -1997,10 +3337,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -2011,45 +3356,79 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "normal" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 126 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 126
+          },
           "id": 209,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Assertions Created by Code Location",
           "description": "Assertions (S-P-O triples) produced per code location. Zero for a running code location = fan-in is broken.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (code_location) (rate(catalyst_assertions_created_total{code_location=~\"$code_location\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "sum by (code_location) (increase(catalyst_assertions_created_total{code_location=~\"$code_location\"}[$__range]))",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
             }
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -2060,35 +3439,64 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "normal" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 134 },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 134
+          },
           "id": 210,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Canonical Entities Gold-to-Platinum Funnel",
           "description": "Canonical entities produced per type. Compare against silver-layer entities_extracted_total to see the gold-to-platinum conversion funnel.",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
-              "expr": "sum by (entity_type) (rate(catalyst_canonical_entities_total[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
+              "expr": "sum by (entity_type) (increase(catalyst_canonical_entities_total[$__range]))",
               "legendFormat": "{{ entity_type }}",
               "refId": "A"
             }
@@ -2096,17 +3504,27 @@ spec:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 142 },
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 142
+          },
           "id": 111,
           "title": "DAG Health",
           "description": "Run-level + sensor health — did anything actually execute, and did it succeed?",
           "type": "row"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -2117,34 +3535,63 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "normal" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 143 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 143
+          },
           "id": 211,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Run Outcomes by Job",
-          "description": "Dagster run outcomes per job, stacked by status (success / failure / canceled).",
+          "description": "Dagster run outcomes per job, stacked by status (success / failure / canceled). Requires run_status_sensor to be enabled in Dagster UI",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (job_name, status) (rate(catalyst_dagster_run_status_total{code_location=~\"$code_location\"}[$__rate_interval]))",
               "legendFormat": "{{ job_name }} / {{ status }}",
               "refId": "A"
@@ -2152,10 +3599,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -2166,46 +3618,81 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "s",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 143 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 143
+          },
           "id": 212,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Run Duration p50/p95/p99",
-          "description": "Dagster run duration percentiles per code location.",
+          "description": "Dagster run duration percentiles per code location. Requires run_status_sensor to be enabled in Dagster UI",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.50, sum by (code_location, le) (rate(catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}[$__rate_interval])))",
               "legendFormat": "{{ code_location }} p50",
               "refId": "A"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.95, sum by (code_location, le) (rate(catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}[$__rate_interval])))",
               "legendFormat": "{{ code_location }} p95",
               "refId": "B"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "histogram_quantile(0.99, sum by (code_location, le) (rate(catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}[$__rate_interval])))",
               "legendFormat": "{{ code_location }} p99",
               "refId": "C"
@@ -2213,10 +3700,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -2227,34 +3719,63 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "normal" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 151 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 151
+          },
           "id": 213,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "Sensor Tick Outcomes",
-          "description": "Sensor tick outcomes per sensor. NOTE: metric is declared but not currently emitted — panel will show 'No data' until CD-59v follow-up wires emission from an instance-level sensor hook. Panel exists to light up automatically once emission lands.",
+          "description": "Sensor tick outcomes per sensor. NOTE: metric is declared but not currently emitted — panel will show 'No data' until CD-59v follow-up wires emission from an instance-level sensor hook. Panel exists to light up automatically once emission lands. Requires run_status_sensor to be enabled in Dagster UI",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (sensor_name, outcome) (rate(catalyst_dagster_sensor_tick_total{code_location=~\"$code_location\"}[$__rate_interval]))",
               "legendFormat": "{{ sensor_name }} / {{ outcome }}",
               "refId": "A"
@@ -2262,10 +3783,15 @@ spec:
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "custom": {
                 "axisBorderShow": false,
                 "axisCenteredZero": false,
@@ -2276,34 +3802,63 @@ spec:
                 "drawStyle": "line",
                 "fillOpacity": 10,
                 "gradientMode": "none",
-                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
                 "insertNulls": false,
                 "lineInterpolation": "smooth",
                 "lineWidth": 2,
                 "pointSize": 5,
-                "scaleDistribution": { "type": "linear" },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
                 "showPoints": "never",
                 "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" },
-                "thresholdsStyle": { "mode": "off" }
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
               "unit": "ops",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 151 },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 151
+          },
           "id": 214,
           "options": {
-            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
           "title": "LLM Prompt Cache Hit Rate",
-          "description": "Prompt tokens served from LLM prompt cache per second, by model. Zero for a model means it's not using / doesn't support prompt caching.",
+          "description": "Prompt tokens served from LLM prompt cache per second, by model. Zero for a model means it's not using / doesn't support prompt caching. Requires run_status_sensor to be enabled in Dagster UI",
           "type": "timeseries",
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "mimir"
+              },
               "expr": "sum by (model) (rate(catalyst_llm_tokens_cached_total[$__rate_interval]))",
               "legendFormat": "{{ model }}",
               "refId": "A"
@@ -2313,19 +3868,31 @@ spec:
       ],
       "refresh": "30s",
       "schemaVersion": 39,
-      "tags": ["dagster", "catalyst-data", "pipelines", "media-ingest"],
+      "tags": [
+        "dagster",
+        "catalyst-data",
+        "pipelines",
+        "media-ingest"
+      ],
       "templating": {
         "list": [
           {
             "name": "code_location",
             "label": "Code Location",
             "type": "query",
-            "datasource": { "type": "prometheus", "uid": "mimir" },
-            "query": "label_values(catalyst_active_asset_materializations, code_location)",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "mimir"
+            },
+            "query": "label_values(catalyst_asset_records_processed_total, code_location)",
             "multi": true,
             "includeAll": true,
             "allValue": ".*",
-            "current": { "selected": true, "text": "All", "value": "$__all" },
+            "current": {
+              "selected": true,
+              "text": "All",
+              "value": "$__all"
+            },
             "refresh": 1,
             "sort": 1
           },
@@ -2333,12 +3900,19 @@ spec:
             "name": "asset_key",
             "label": "Asset Key",
             "type": "query",
-            "datasource": { "type": "prometheus", "uid": "mimir" },
+            "datasource": {
+              "type": "prometheus",
+              "uid": "mimir"
+            },
             "query": "label_values(catalyst_asset_materialization_duration_seconds_bucket{code_location=~\"$code_location\"}, asset_key)",
             "multi": true,
             "includeAll": true,
             "allValue": ".*",
-            "current": { "selected": true, "text": "All", "value": "$__all" },
+            "current": {
+              "selected": true,
+              "text": "All",
+              "value": "$__all"
+            },
             "refresh": 2,
             "sort": 1
           },
@@ -2347,14 +3921,21 @@ spec:
             "label": "Interval",
             "type": "interval",
             "query": "1m,5m,15m,1h",
-            "current": { "selected": true, "text": "5m", "value": "5m" },
+            "current": {
+              "selected": true,
+              "text": "5m",
+              "value": "5m"
+            },
             "auto": false,
             "auto_count": 30,
             "auto_min": "10s"
           }
         ]
       },
-      "time": { "from": "now-6h", "to": "now" },
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
       "timepicker": {},
       "timezone": "browser",
       "title": "Dagster Pipelines - Catalyst Data",
