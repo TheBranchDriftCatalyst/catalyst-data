@@ -110,6 +110,9 @@ data:
       config:
         bucket: catalyst-data
         prefix: compute-logs
+        local_dir: /tmp/dagster-compute-logs
+        upload_interval: 30
+        skip_empty_files: true
         endpoint_url:
           env: DAGSTER_S3_ENDPOINT_URL
 
