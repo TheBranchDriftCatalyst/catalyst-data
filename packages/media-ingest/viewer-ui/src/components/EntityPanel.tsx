@@ -31,6 +31,8 @@ interface EntityPanelProps {
   mentions: Mention[];
   onEntityClick?: (text: string) => void;
   onEntitySelect?: (entityText: string | null) => void;
+  /** Called when a mention is clicked to seek video + scroll transcript. Receives time in seconds. */
+  onMentionSeek?: (timeInSeconds: number) => void;
   selectedEntityText?: string | null;
   /** Annotation helpers — optional; panel works without them. */
   getStatus?: (targetId: string) => AnnotationStatus;
@@ -91,6 +93,7 @@ export default function EntityPanel({
   mentions,
   onEntityClick,
   onEntitySelect,
+  onMentionSeek,
   selectedEntityText,
   getStatus,
   onApprove,
@@ -294,6 +297,7 @@ export default function EntityPanel({
                         onApprove={onApprove}
                         onReject={onReject}
                         onEdit={onEdit}
+                        onSeek={onMentionSeek}
                         onClick={(m) => {
                           onEntityClick?.(m.text);
                           if (onEntitySelect) {

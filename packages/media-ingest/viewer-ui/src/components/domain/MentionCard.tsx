@@ -1,9 +1,10 @@
 import { useState, useCallback } from "react";
 import { Badge, Input } from "@thebranchdriftcatalyst/catalyst-ui";
-import { Check, X, Pencil } from "lucide-react";
+import { Check, X, Pencil, Clock } from "lucide-react";
 import type { Mention, AnnotationStatus } from "@/types/media";
 import ConfidenceBadge from "./ConfidenceBadge";
 import { cn } from "@/lib/utils";
+import { formatTime } from "@/lib/speakers";
 
 // ── Type config (mirrors EntityPanel for consistency) ────────────────────
 
@@ -39,6 +40,8 @@ interface MentionCardProps {
   onReject?: (targetId: string) => void;
   onEdit?: (targetId: string, edits: Record<string, unknown>) => void;
   onClick?: (mention: Mention) => void;
+  /** Called to seek the video/transcript to this mention's timestamp (seconds). */
+  onSeek?: (timeInSeconds: number) => void;
   className?: string;
 }
 
@@ -50,6 +53,7 @@ export default function MentionCard({
   onReject,
   onEdit,
   onClick,
+  onSeek,
   className,
 }: MentionCardProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -91,7 +95,13 @@ export default function MentionCard({
         statusBorder,
         className,
       )}
-      onClick={() => onClick?.(mention)}
+      onClick={() => {
+        onClick?.(mention);
+        // Seek to the mention's temporal position if available
+        if (onSeek && mention.provenance?.temporal_start_ms != null) {
+          onSeek(mention.provenance.temporal_start_ms / 1000);
+        }
+      }}
     >
       {/* Row 1: Entity name + type badge + confidence */}
       <div className="flex items-center gap-1.5 min-w-0">
@@ -131,11 +141,19 @@ export default function MentionCard({
         {confidence > 0 && <ConfidenceBadge confidence={confidence} className="flex-shrink-0" />}
       </div>
 
-      {/* Row 2: Context snippet */}
+      {/* Row 2: Context snippet + timestamp */}
       {mention.context && (
         <p className="text-[11px] text-zinc-500 mt-1 line-clamp-2 leading-relaxed">
           ...{mention.context}...
         </p>
+      )}
+
+      {/* Timestamp indicator — shown when temporal provenance exists */}
+      {mention.provenance?.temporal_start_ms != null && (
+        <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-zinc-500 font-mono tabular-nums">
+          <Clock className="h-2.5 w-2.5" />
+          {formatTime(mention.provenance.temporal_start_ms / 1000)}
+        </span>
       )}
 
       {/* Row 3: HITL controls — visible on hover or when status is set */}

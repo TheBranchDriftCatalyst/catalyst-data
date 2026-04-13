@@ -16,6 +16,7 @@ import { ArrowLeft, Clock, Users, Globe, X, Highlighter } from "lucide-react";
 import { useDocumentData } from "@/hooks/useDocumentData";
 import { useMediaSync } from "@/hooks/useMediaSync";
 import { useMarkerData } from "@/hooks/useMarkerData";
+import { useTranscriptScroll } from "@/hooks/useTranscriptScroll";
 import { useSpeakerNames } from "@/hooks/useSpeakerNames";
 import { useAnnotations } from "@/hooks/useAnnotations";
 import MediaPlayer, { type MediaPlayerHandle } from "@/components/MediaPlayer";
@@ -64,6 +65,10 @@ export default function PlayerPage() {
 
   const { activeSegmentIndex, activeWordIndex } = useMediaSync(segments, currentTime);
 
+  const { scrollToTimestamp, transcriptRef, scrollHighlightIndex } = useTranscriptScroll({
+    segments,
+  });
+
   // Compute timeline markers from mentions/assertions + selection state
   const markers = useMarkerData({
     mentions,
@@ -95,6 +100,15 @@ export default function PlayerPage() {
     // Clear assertion selection when selecting an entity
     if (entityText) setSelectedAssertionId(null);
   }, []);
+
+  const handleMentionSeek = useCallback(
+    (timeInSeconds: number) => {
+      playerRef.current?.seek(timeInSeconds);
+      setCurrentTime(timeInSeconds);
+      scrollToTimestamp(timeInSeconds);
+    },
+    [scrollToTimestamp],
+  );
 
   const handleAssertionSelect = useCallback((assertionId: string | null) => {
     setSelectedAssertionId(assertionId);
@@ -302,6 +316,8 @@ export default function PlayerPage() {
               onSeek={handleSeek}
               highlightText={highlightText}
               resolveSpeaker={resolveSpeaker}
+              transcriptContainerRef={transcriptRef}
+              scrollHighlightIndex={scrollHighlightIndex}
               className="flex-1 min-h-0"
             />
           </div>
@@ -359,6 +375,7 @@ export default function PlayerPage() {
                   mentions={mentions}
                   onEntityClick={handleEntityClick}
                   onEntitySelect={handleEntitySelect}
+                  onMentionSeek={handleMentionSeek}
                   selectedEntityText={selectedEntityText}
                   getStatus={getStatus}
                   onApprove={handleMentionApprove}
