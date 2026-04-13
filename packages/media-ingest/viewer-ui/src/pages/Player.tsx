@@ -146,25 +146,17 @@ export default function PlayerPage() {
       // Clear entity selection when selecting an assertion
       if (assertionId) {
         setSelectedEntityText(null);
-        // Seek + scroll to the assertion's temporal position
-        const trans = diarization ?? transcription ?? null;
-        const a = assertions.find((x) => {
-          const aid = x.assertion_id ?? `${x.subject_text}_${x.predicate}_${x.object_text}`;
-          return aid === assertionId;
-        });
-        if (a?.provenance?.chunk_id) {
-          const match = /[_:]chunk[_-](\d+)$/.exec(a.provenance.chunk_id);
-          const idx = match ? parseInt(match[1]!, 10) : null;
-          const seg = idx != null ? trans?.segments[idx] : null;
-          if (seg) {
-            playerRef.current?.seek(seg.start);
-            setCurrentTime(seg.start);
-            scrollToTimestamp(seg.start);
-          }
+        // Seek + scroll to the assertion's temporal position via markers
+        // The markers array already has the correct timestamp (computed by useMarkerData)
+        const marker = markers.find((m) => m.id === `assertion-${assertionId}`);
+        if (marker) {
+          playerRef.current?.seek(marker.timestamp);
+          setCurrentTime(marker.timestamp);
+          scrollToTimestamp(marker.timestamp);
         }
       }
     },
-    [assertions, diarization, transcription, scrollToTimestamp],
+    [markers, scrollToTimestamp],
   );
 
   const handleMentionApprove = useCallback(

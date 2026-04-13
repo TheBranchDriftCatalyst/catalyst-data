@@ -28,25 +28,6 @@ function assertionColor(confidence: number): string {
 
 // ── Chunk-to-timestamp mapping ────────────────────────────────────────
 
-/**
- * Build a lookup from chunk index to the transcription segment's start/end time.
- *
- * chunk_id format: `{document_id}_chunk_{index}`
- * We map chunk index -> segment index (1:1 when chunks come from transcription segments).
- */
-function buildChunkTimestampMap(
-  transcription: Transcription | null,
-): Map<number, { start: number; end: number }> {
-  const map = new Map<number, { start: number; end: number }>();
-  if (!transcription) return map;
-
-  for (let i = 0; i < transcription.segments.length; i++) {
-    const seg = transcription.segments[i]!;
-    map.set(i, { start: seg.start, end: seg.end });
-  }
-  return map;
-}
-
 /** Extract chunk index from a chunk_id like "doc-abc_chunk_3" or "doc-abc:chunk-3". */
 function parseChunkIndex(chunkId: string): number | null {
   const match = /[_:]chunk[_-](\d+)$/.exec(chunkId);
@@ -55,12 +36,53 @@ function parseChunkIndex(chunkId: string): number | null {
 }
 
 /**
+ * Find the transcript segment that contains the given text.
+ * Chunks span multiple segments, so we can't use chunk_index as segment_index.
+ * Instead, search segments for the mention/assertion text.
+ *
+ * Uses chunk_index as a rough estimate for search start position, then
+ * expands outward. Falls back to full linear scan.
+ */
+function findSegmentByText(
+  text: string,
+  segments: Transcription["segments"],
+  chunkIndex: number | null,
+): { start: number; end: number } | null {
+  if (segments.length === 0) return null;
+
+  const needle = text.toLowerCase();
+
+  // Estimate: each chunk ≈ 7-8 segments, so chunk N starts around segment N*8
+  const estimate = chunkIndex != null ? Math.min(chunkIndex * 8, segments.length - 1) : 0;
+
+  // Search outward from estimate, up to 30 segments in each direction
+  const radius = 30;
+  const lo = Math.max(0, estimate - radius);
+  const hi = Math.min(segments.length - 1, estimate + radius);
+
+  for (let i = lo; i <= hi; i++) {
+    if (segments[i]!.text.toLowerCase().includes(needle)) {
+      return { start: segments[i]!.start, end: segments[i]!.end };
+    }
+  }
+
+  // Full scan fallback (rare — only if estimate was way off)
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i]!.text.toLowerCase().includes(needle)) {
+      return { start: segments[i]!.start, end: segments[i]!.end };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Get the timestamp for a mention, using provenance temporal data first,
- * then falling back to chunk_id mapping into transcription segments.
+ * then text-based segment search as fallback.
  */
 function getMentionTimestamp(
   mention: Mention,
-  chunkMap: Map<number, { start: number; end: number }>,
+  segments: Transcription["segments"],
 ): { start: number; end: number } | null {
   // 1. Prefer provenance temporal timestamps (most precise)
   const prov = mention.provenance;
@@ -72,14 +94,10 @@ function getMentionTimestamp(
     };
   }
 
-  // 2. Fall back to chunk_id -> segment mapping
+  // 2. Text-based search within transcript segments
   const chunkId = prov?.chunk_id ?? mention.chunk_id;
-  if (!chunkId) return null;
-
-  const idx = parseChunkIndex(chunkId);
-  if (idx === null) return null;
-
-  return chunkMap.get(idx) ?? null;
+  const chunkIdx = chunkId ? parseChunkIndex(chunkId) : null;
+  return findSegmentByText(mention.text, segments, chunkIdx);
 }
 
 /**
@@ -87,7 +105,7 @@ function getMentionTimestamp(
  */
 function getAssertionTimestamp(
   assertion: Assertion,
-  chunkMap: Map<number, { start: number; end: number }>,
+  segments: Transcription["segments"],
 ): { start: number; end: number } | null {
   const prov = assertion.provenance;
   if (!prov) return null;
@@ -101,12 +119,12 @@ function getAssertionTimestamp(
     };
   }
 
-  // 2. Fall back to chunk_id -> segment mapping
-  if (!prov.chunk_id) return null;
-  const idx = parseChunkIndex(prov.chunk_id);
-  if (idx === null) return null;
-
-  return chunkMap.get(idx) ?? null;
+  // 2. Text-based search — try subject_text first (most specific), then object
+  const chunkIdx = prov.chunk_id ? parseChunkIndex(prov.chunk_id) : null;
+  return (
+    findSegmentByText(assertion.subject_text, segments, chunkIdx) ??
+    findSegmentByText(assertion.object_text, segments, chunkIdx)
+  );
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────
@@ -134,7 +152,7 @@ export function useMarkerData({
   selectedAssertionId,
 }: UseMarkerDataParams): TimelineMarker[] {
   return useMemo(() => {
-    const chunkMap = buildChunkTimestampMap(transcription);
+    const segments = transcription?.segments ?? [];
     const markers: TimelineMarker[] = [];
 
     // If an assertion is selected, only show that assertion's marker
@@ -143,7 +161,7 @@ export function useMarkerData({
         const aid = a.assertion_id ?? `${a.subject_text}_${a.predicate}_${a.object_text}`;
         if (aid !== selectedAssertionId) continue;
 
-        const ts = getAssertionTimestamp(a, chunkMap);
+        const ts = getAssertionTimestamp(a, segments);
         if (!ts) continue;
 
         markers.push({
@@ -166,7 +184,7 @@ export function useMarkerData({
 
     for (let i = 0; i < mentionsToProcess.length; i++) {
       const m = mentionsToProcess[i]!;
-      const ts = getMentionTimestamp(m, chunkMap);
+      const ts = getMentionTimestamp(m, segments);
       if (!ts) continue;
 
       markers.push({
@@ -184,7 +202,7 @@ export function useMarkerData({
     if (!selectedEntityText) {
       for (let i = 0; i < assertions.length; i++) {
         const a = assertions[i]!;
-        const ts = getAssertionTimestamp(a, chunkMap);
+        const ts = getAssertionTimestamp(a, segments);
         if (!ts) continue;
 
         const aid = a.assertion_id ?? `${a.subject_text}_${a.predicate}_${a.object_text}_${i}`;

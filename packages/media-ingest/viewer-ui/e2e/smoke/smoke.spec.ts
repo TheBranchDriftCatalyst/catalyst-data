@@ -40,7 +40,7 @@ test.describe("Smoke Tests @smoke", () => {
 
     // After filtering, there should be fewer documents visible
     // Check that "Full Show" document is visible
-    await expect(page.getByRole("heading", { name: /Full Show/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Full Show/ }).first()).toBeVisible();
   });
 
   test("Player page loads for canonical document", async ({ page }) => {
