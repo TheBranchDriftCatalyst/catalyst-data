@@ -31,6 +31,15 @@ data:
     -- path but re-running it here keeps the ConfigMap self-describing.
     ALTER TABLE canonical_entities
         ADD COLUMN IF NOT EXISTS source_code_locations TEXT[] NOT NULL DEFAULT '{}';
+    ALTER TABLE canonical_entities
+        ADD COLUMN IF NOT EXISTS source_candidate_ids TEXT[] DEFAULT '{}';
+
+    -- Alignment edge denormalized metadata (human-readable names + provenance)
+    ALTER TABLE alignment_edges ADD COLUMN IF NOT EXISTS source_name TEXT DEFAULT '';
+    ALTER TABLE alignment_edges ADD COLUMN IF NOT EXISTS target_name TEXT DEFAULT '';
+    ALTER TABLE alignment_edges ADD COLUMN IF NOT EXISTS entity_type TEXT DEFAULT '';
+    ALTER TABLE alignment_edges ADD COLUMN IF NOT EXISTS source_code_location TEXT DEFAULT '';
+    ALTER TABLE alignment_edges ADD COLUMN IF NOT EXISTS target_code_location TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS alignment_edges (
         edge_id TEXT PRIMARY KEY,
@@ -40,6 +49,11 @@ data:
         score REAL NOT NULL,
         evidence JSONB DEFAULT '[]',
         method TEXT DEFAULT '',
+        source_name TEXT DEFAULT '',
+        target_name TEXT DEFAULT '',
+        entity_type TEXT DEFAULT '',
+        source_code_location TEXT DEFAULT '',
+        target_code_location TEXT DEFAULT '',
         created_at TIMESTAMPTZ DEFAULT NOW()
     );
 

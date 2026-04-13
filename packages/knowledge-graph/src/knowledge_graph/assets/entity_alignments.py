@@ -114,12 +114,27 @@ def entity_alignments(
         )
         context.log.info(f"Found {len(edges)} alignment edges: {same_as_count} sameAs, {possible_count} possibleSameAs")
 
-        # Write to PostgreSQL + Neo4j
+        # Enrich edges with human-readable metadata before writing.
+        # Build candidate_id → candidate lookup for denormalization.
+        all_candidates = congress_entity_candidates + leak_entity_candidates + media_entity_candidates
+        cand_by_id = {c.candidate_id: c for c in all_candidates}
+
         edge_dicts = [e.model_dump() for e in edges]
         for d in edge_dicts:
             d["alignment_type"] = (
                 d["alignment_type"].value if hasattr(d["alignment_type"], "value") else d["alignment_type"]
             )
+            src = cand_by_id.get(d["source_entity_id"])
+            tgt = cand_by_id.get(d["target_entity_id"])
+            d["source_name"] = src.canonical_name if src else ""
+            d["target_name"] = tgt.canonical_name if tgt else ""
+            d["entity_type"] = (
+                src.candidate_type.value
+                if src and hasattr(src.candidate_type, "value")
+                else (src.candidate_type if src else "")
+            )
+            d["source_code_location"] = src.code_location if src else ""
+            d["target_code_location"] = tgt.code_location if tgt else ""
 
         pg_count = graph_db.upsert_alignment_edges(edge_dicts)
         context.log.info(f"Wrote {pg_count} edges to PostgreSQL")

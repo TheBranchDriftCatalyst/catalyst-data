@@ -26,6 +26,15 @@ logger = get_logger(__name__)
 # manual migration.
 _CANONICAL_ENTITIES_MIGRATIONS: tuple[str, ...] = (
     "ALTER TABLE canonical_entities ADD COLUMN IF NOT EXISTS source_code_locations TEXT[] NOT NULL DEFAULT '{}'",
+    "ALTER TABLE canonical_entities ADD COLUMN IF NOT EXISTS source_candidate_ids TEXT[] DEFAULT '{}'",
+)
+
+_ALIGNMENT_EDGES_MIGRATIONS: tuple[str, ...] = (
+    "ALTER TABLE alignment_edges ADD COLUMN IF NOT EXISTS source_name TEXT DEFAULT ''",
+    "ALTER TABLE alignment_edges ADD COLUMN IF NOT EXISTS target_name TEXT DEFAULT ''",
+    "ALTER TABLE alignment_edges ADD COLUMN IF NOT EXISTS entity_type TEXT DEFAULT ''",
+    "ALTER TABLE alignment_edges ADD COLUMN IF NOT EXISTS source_code_location TEXT DEFAULT ''",
+    "ALTER TABLE alignment_edges ADD COLUMN IF NOT EXISTS target_code_location TEXT DEFAULT ''",
 )
 
 
@@ -130,9 +139,9 @@ class GraphDBResource(ConfigurableResource):
                         INSERT INTO canonical_entities (
                             canonical_id, canonical_name, entity_type, aliases,
                             external_ids, embedding, mention_count,
-                            source_code_locations,
+                            source_code_locations, source_candidate_ids,
                             first_seen, last_seen
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (canonical_id) DO UPDATE SET
                             canonical_name = EXCLUDED.canonical_name,
                             aliases = EXCLUDED.aliases,
@@ -140,6 +149,7 @@ class GraphDBResource(ConfigurableResource):
                             embedding = EXCLUDED.embedding,
                             mention_count = EXCLUDED.mention_count,
                             source_code_locations = EXCLUDED.source_code_locations,
+                            source_candidate_ids = EXCLUDED.source_candidate_ids,
                             last_seen = EXCLUDED.last_seen
                         """,
                             (
@@ -150,11 +160,8 @@ class GraphDBResource(ConfigurableResource):
                                 json.dumps(ent.get("external_ids", {})),
                                 ent.get("embedding"),
                                 ent.get("mention_count", 0),
-                                # Legacy CanonicalEntity dicts pre-dating
-                                # CD-7np may not carry this field; default
-                                # to an empty array so the NOT NULL
-                                # DEFAULT '{}' column contract holds.
                                 ent.get("source_code_locations") or [],
+                                ent.get("source_candidate_ids") or [],
                                 ent.get("first_seen"),
                                 ent.get("last_seen"),
                             ),
@@ -186,6 +193,9 @@ class GraphDBResource(ConfigurableResource):
                 {"backend": "postgresql", "operation": "upsert_edges"},
             ):
                 with conn.cursor() as cur:
+                    # Run schema migrations for new columns
+                    for stmt in _ALIGNMENT_EDGES_MIGRATIONS:
+                        cur.execute(stmt)
                     cur.execute("DELETE FROM alignment_edges")
                     deleted = cur.rowcount
                     if deleted:
@@ -195,11 +205,18 @@ class GraphDBResource(ConfigurableResource):
                             """
                         INSERT INTO alignment_edges (
                             edge_id, source_entity_id, target_entity_id,
-                            alignment_type, score, evidence, method
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            alignment_type, score, evidence, method,
+                            source_name, target_name, entity_type,
+                            source_code_location, target_code_location
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (edge_id) DO UPDATE SET
                             score = EXCLUDED.score,
-                            evidence = EXCLUDED.evidence
+                            evidence = EXCLUDED.evidence,
+                            source_name = EXCLUDED.source_name,
+                            target_name = EXCLUDED.target_name,
+                            entity_type = EXCLUDED.entity_type,
+                            source_code_location = EXCLUDED.source_code_location,
+                            target_code_location = EXCLUDED.target_code_location
                         """,
                             (
                                 edge["edge_id"],
@@ -209,6 +226,11 @@ class GraphDBResource(ConfigurableResource):
                                 edge["score"],
                                 json.dumps(edge.get("evidence", [])),
                                 edge.get("method", ""),
+                                edge.get("source_name", ""),
+                                edge.get("target_name", ""),
+                                edge.get("entity_type", ""),
+                                edge.get("source_code_location", ""),
+                                edge.get("target_code_location", ""),
                             ),
                         )
                 conn.commit()
