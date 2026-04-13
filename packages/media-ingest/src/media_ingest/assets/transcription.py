@@ -263,6 +263,11 @@ def media_transcriptions(
     config: MediaIngestConfig,
     media_documents: list[MediaDocument],
 ) -> Output[dict[str, Any]]:
+    if not context.has_partition_key:
+        raise RuntimeError(
+            "media_transcriptions must be materialized with a partition key "
+            "(one partition = one media file). Select a partition in the Dagster UI."
+        )
     partition_key = context.partition_key
     with trace_operation(
         "media_transcriptions",
