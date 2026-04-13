@@ -164,23 +164,34 @@ def configure_logging(
     # Remove existing handlers to avoid duplicates
     root_logger.handlers.clear()
 
-    # Create handler with appropriate formatter
-    handler = logging.StreamHandler(sys.stdout)
+    # Create formatters
     if log_format == "json":
-        handler.setFormatter(JsonFormatter())
+        formatter = JsonFormatter()
     else:
-        handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s [%(levelname)-8s] %(name)-40s | %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            )
+        formatter = logging.Formatter(
+            "%(asctime)s [%(levelname)-8s] %(name)-40s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-    # Add module filter
-    if disabled or mod_levels:
-        handler.addFilter(ModuleFilter(disabled_modules=disabled, module_levels=mod_levels))
+    # stdout handler: DEBUG + INFO (normal operation logs)
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setFormatter(formatter)
+    stdout_handler.setLevel(logging.DEBUG)
+    stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
 
-    root_logger.addHandler(handler)
+    # stderr handler: WARNING + ERROR + CRITICAL (actual problems)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setFormatter(formatter)
+    stderr_handler.setLevel(logging.WARNING)
+
+    # Add module filter to both handlers
+    if disabled or mod_levels:
+        module_filter = ModuleFilter(disabled_modules=disabled, module_levels=mod_levels)
+        stdout_handler.addFilter(module_filter)
+        stderr_handler.addFilter(module_filter)
+
+    root_logger.addHandler(stdout_handler)
+    root_logger.addHandler(stderr_handler)
 
     # Quiet noisy third-party loggers
     for noisy in (
