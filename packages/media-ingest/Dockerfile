@@ -1,4 +1,19 @@
 # syntax=docker/dockerfile:1
+# ---------- media-ingest: OpenVINO + Intel XPU (Arc/Flex) ----------
+# Build: docker build --platform linux/amd64 -f packages/media-ingest/Dockerfile -t media-ingest .
+#
+# Unified image — runs on both GPU and CPU:
+# - With gpu.intel.com/i915: diarization uses torch.xpu (5x faster)
+# - Without GPU: falls back to CPU transparently
+#
+# Uses Ubuntu 24.04 (Intel GPU packages require Ubuntu repos).
+# Includes OpenVINO GenAI (transcription) + torch XPU (diarization).
+#
+# Key insight: torch 2.7+xpu wheels auto-install all Intel runtime deps via pip
+# (intel-sycl-rt, intel-pti, intel-cmplr-lib-rt, etc). The .so files land in
+# {prefix}/lib/ which needs LD_LIBRARY_PATH. No IPEX needed — native XPU since 2.5.
+# See: https://docs.pytorch.org/docs/stable/notes/get_start_xpu.html
+
 # ---------- stage 0: build React SPA ----------
 FROM node:22-slim AS ui-builder
 WORKDIR /ui
@@ -7,53 +22,114 @@ RUN npm ci
 COPY packages/media-ingest/viewer-ui/ .
 RUN npm run build
 
-# ---------- stage 1: build Python ----------
-FROM python:3.12-slim AS builder
+# ---------- stage 1: build Python (Ubuntu + Python 3.12) ----------
+FROM ubuntu:24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3.12 python3.12-dev python3.12-venv \
+        python3-pip curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
+# Allow uv to install into system Python (Ubuntu marks it EXTERNALLY-MANAGED)
+RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
+ENV UV_PYTHON=/usr/bin/python3.12
+
 WORKDIR /app
 
-# 1. Install shared libs — changes infrequently, cached aggressively
+# 1. Install shared libs
 COPY libs/catalyst-contracts-core/ /tmp/catalyst-contracts-core/
 COPY libs/dagster-io/              /tmp/dagster-io/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system /tmp/catalyst-contracts-core/ && \
-    uv pip install --system /tmp/dagster-io/
+    uv pip install --system --python /usr/bin/python3.12 \
+        /tmp/catalyst-contracts-core/ && \
+    uv pip install --system --python /usr/bin/python3.12 \
+        /tmp/dagster-io/
 
-# 2. Install package dependencies — only re-runs when pyproject.toml changes
-#    Use CPU-only PyTorch wheels to avoid pulling ~2GB CUDA runtime
+# 2. Install PyTorch XPU + package deps
+#
+# Step A: Install torch+torchaudio from the XPU index. This auto-pulls
+# intel-sycl-rt (libsycl.so), intel-pti (libpti_view.so), and other
+# Intel runtime pip packages as declared dependencies of the XPU wheel.
+# Pin to >=2.6,<2.8 matching pyproject.toml constraints.
+#
+# Step B: Install the package with OpenVINO extras from PyPI.
+# --extra-index-url ensures torch XPU wheel is found when resolving
+# the torch>=2.6 constraint from pyproject.toml (otherwise uv would
+# try to downgrade to the PyPI CPU wheel).
 COPY packages/media-ingest/pyproject.toml .
 RUN --mount=type=cache,target=/root/.cache/uv \
     mkdir -p src/media_ingest && \
     touch src/media_ingest/__init__.py && \
-    uv pip install --system \
-        --extra-index-url https://download.pytorch.org/whl/cpu \
-        . && \
+    python3.12 -m pip install --no-cache-dir \
+        "torch>=2.6,<2.8" "torchaudio>=2.6,<2.8" \
+        --index-url https://download.pytorch.org/whl/xpu && \
+    uv pip install --system --python /usr/bin/python3.12 \
+        ".[openvino]" && \
     rm -rf src/media_ingest
 
-# 3. Copy real source — changes most often, deps already cached
+# 3. Copy real source
 COPY packages/media-ingest/src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --no-deps --reinstall-package media-ingest .
+    uv pip install --system --python /usr/bin/python3.12 \
+        --no-deps --reinstall-package media-ingest .
 
-# ---------- stage 2: runtime ----------
-FROM python:3.12-slim
+# ---------- stage 2: runtime (Ubuntu + Intel GPU) ----------
+FROM ubuntu:24.04
 
-# Runtime system dependencies:
-#   ffmpeg       - media processing / audio extraction
-#   libsndfile1  - soundfile (required by pyannote.audio)
-#   libgomp1     - OpenMP (required by ctranslate2/faster-whisper)
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System deps + Intel GPU kernel-mode driver userspace (OpenCL + Level Zero)
+# The heavy Intel runtime libs (SYCL, PTI, compiler-rt) come from pip packages
+# auto-installed as torch XPU dependencies — no apt oneAPI packages needed.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg libsndfile1 libgomp1 && \
+    apt-get install -y --no-install-recommends \
+        python3.12 python3.12-venv \
+        ffmpeg libsndfile1 libgomp1 \
+        gnupg ca-certificates wget && \
+    wget -qO- https://repositories.intel.com/gpu/intel-graphics.key | \
+        gpg --dearmor -o /usr/share/keyrings/intel-graphics.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu noble unified" \
+        > /etc/apt/sources.list.d/intel-gpu.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ocl-icd-libopencl1 intel-opencl-icd \
+        libze-intel-gpu1 libze1 && \
+    apt-get purge -y gnupg wget && \
+    apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY --from=builder /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
+# Copy Python site-packages + binaries + Intel runtime libs from builder.
+# Intel pip packages (intel-pti, intel-sycl-rt, intel-cmplr-lib-rt, etc.)
+# install .so files into {prefix}/lib/ via pip's data-files mechanism, so
+# we copy the entire /usr/local/lib/ tree to get them all (libpti_view.so,
+# libsycl.so, libsvml.so, libumf.so, libtcm.so, etc.).
+COPY --from=builder /usr/lib/python3/dist-packages/ /usr/lib/python3/dist-packages/
+COPY --from=builder /usr/local/lib/ /usr/local/lib/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
 
+# CRITICAL: uv copies a standalone Python to /usr/local/bin/python3.12 which
+# uses site-packages (source-build convention). The apt-installed Python at
+# /usr/bin/python3.12 uses dist-packages (Debian convention). pip/uv install
+# packages to dist-packages, so we MUST use the apt Python. Remove the uv
+# shadow so PATH resolves to /usr/bin/python3.12.
+RUN rm -f /usr/local/bin/python3.12 /usr/local/bin/python3 /usr/local/bin/python
+RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python
+
 ENV DAGSTER_HOME=/opt/dagster/dagster_home
+ENV PYTHONPATH=/usr/local/lib/python3.12/dist-packages:/usr/lib/python3/dist-packages
+# CRITICAL: Intel pip runtime libs (.so files) install to {prefix}/lib/
+# which is NOT on LD_LIBRARY_PATH by default. Without this, torch fails
+# with "libpti_view.so.0.10: cannot open shared object file".
+ENV LD_LIBRARY_PATH=/usr/local/lib:${LD_LIBRARY_PATH}
+ENV SYCL_CACHE_DIR=/tmp/sycl_cache
 RUN mkdir -p $DAGSTER_HOME
 
 # Copy React SPA build
@@ -61,7 +137,7 @@ COPY --from=ui-builder /ui/dist /app/viewer-static
 
 EXPOSE 4000 8080
 
-CMD ["dagster", "code-server", "start", \
+CMD ["python3", "-m", "dagster", "code-server", "start", \
      "--host", "0.0.0.0", \
      "--port", "4000", \
      "--module-name", "media_ingest"]
