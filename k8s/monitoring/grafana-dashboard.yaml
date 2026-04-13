@@ -345,7 +345,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, model, operation) (rate(catalyst_llm_request_duration_seconds_bucket[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, model, operation) (catalyst_llm_request_duration_seconds_bucket))",
               "legendFormat": "{{ model }} / {{ operation }} p50",
               "refId": "A"
             },
@@ -354,7 +354,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, model, operation) (rate(catalyst_llm_request_duration_seconds_bucket[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, model, operation) (catalyst_llm_request_duration_seconds_bucket))",
               "legendFormat": "{{ model }} / {{ operation }} p99",
               "refId": "B"
             }
@@ -919,7 +919,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, provider, model) (rate(catalyst_embedding_batch_duration_seconds_bucket[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, provider, model) (catalyst_embedding_batch_duration_seconds_bucket))",
               "legendFormat": "{{ provider }} / {{ model }} p50",
               "refId": "A"
             },
@@ -928,7 +928,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, provider, model) (rate(catalyst_embedding_batch_duration_seconds_bucket[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, provider, model) (catalyst_embedding_batch_duration_seconds_bucket))",
               "legendFormat": "{{ provider }} / {{ model }} p99",
               "refId": "B"
             }
@@ -1811,7 +1811,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.5, rate(catalyst_transcription_duration_seconds_bucket[5m]))",
+              "expr": "histogram_quantile(0.5, sum by (le) (catalyst_transcription_duration_seconds_bucket))",
               "legendFormat": "p50",
               "refId": "A"
             },
@@ -1820,7 +1820,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.95, rate(catalyst_transcription_duration_seconds_bucket[5m]))",
+              "expr": "histogram_quantile(0.95, sum by (le) (catalyst_transcription_duration_seconds_bucket))",
               "legendFormat": "p95",
               "refId": "B"
             },
@@ -1829,7 +1829,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.99, rate(catalyst_transcription_duration_seconds_bucket[5m]))",
+              "expr": "histogram_quantile(0.99, sum by (le) (catalyst_transcription_duration_seconds_bucket))",
               "legendFormat": "p99",
               "refId": "C"
             }
@@ -1912,7 +1912,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.5, rate(catalyst_transcription_realtime_factor_bucket[5m]))",
+              "expr": "histogram_quantile(0.5, sum by (le) (catalyst_transcription_realtime_factor_bucket))",
               "legendFormat": "p50 RTF",
               "refId": "A"
             },
@@ -1921,7 +1921,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.95, rate(catalyst_transcription_realtime_factor_bucket[5m]))",
+              "expr": "histogram_quantile(0.95, sum by (le) (catalyst_transcription_realtime_factor_bucket))",
               "legendFormat": "p95 RTF",
               "refId": "B"
             }
@@ -2003,7 +2003,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.5, rate(catalyst_diarization_duration_seconds_bucket[5m]))",
+              "expr": "histogram_quantile(0.5, sum by (le) (catalyst_diarization_duration_seconds_bucket))",
               "legendFormat": "p50",
               "refId": "A"
             },
@@ -2012,7 +2012,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.95, rate(catalyst_diarization_duration_seconds_bucket[5m]))",
+              "expr": "histogram_quantile(0.95, sum by (le) (catalyst_diarization_duration_seconds_bucket))",
               "legendFormat": "p95",
               "refId": "B"
             },
@@ -2021,7 +2021,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.99, rate(catalyst_diarization_duration_seconds_bucket[5m]))",
+              "expr": "histogram_quantile(0.99, sum by (le) (catalyst_diarization_duration_seconds_bucket))",
               "legendFormat": "p99",
               "refId": "C"
             }
@@ -2103,7 +2103,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.5, rate(catalyst_transcode_duration_seconds_bucket[5m]))",
+              "expr": "histogram_quantile(0.5, sum by (le) (catalyst_transcode_duration_seconds_bucket))",
               "legendFormat": "p50",
               "refId": "A"
             },
@@ -2112,7 +2112,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.99, rate(catalyst_transcode_duration_seconds_bucket[5m]))",
+              "expr": "histogram_quantile(0.99, sum by (le) (catalyst_transcode_duration_seconds_bucket))",
               "legendFormat": "p99",
               "refId": "B"
             }
@@ -2195,7 +2195,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.5, rate(catalyst_transcode_compression_ratio_bucket[5m]))",
+              "expr": "histogram_quantile(0.5, sum by (le) (catalyst_transcode_compression_ratio_bucket))",
               "legendFormat": "p50 ratio",
               "refId": "A"
             },
@@ -2204,7 +2204,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.95, rate(catalyst_transcode_compression_ratio_bucket[5m]))",
+              "expr": "histogram_quantile(0.95, sum by (le) (catalyst_transcode_compression_ratio_bucket))",
               "legendFormat": "p95 ratio",
               "refId": "B"
             }
@@ -2369,7 +2369,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.5, rate(catalyst_model_load_duration_seconds_bucket[5m]))",
+              "expr": "histogram_quantile(0.5, sum by (le) (catalyst_model_load_duration_seconds_bucket))",
               "legendFormat": "{{ model_type }} p50",
               "refId": "A"
             },
@@ -2378,7 +2378,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.99, rate(catalyst_model_load_duration_seconds_bucket[5m]))",
+              "expr": "histogram_quantile(0.99, sum by (le) (catalyst_model_load_duration_seconds_bucket))",
               "legendFormat": "{{ model_type }} p99",
               "refId": "B"
             }
@@ -2639,7 +2639,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.95, sum by (code_location, le) (rate(catalyst_asset_materialization_duration_seconds_bucket{code_location=~\"$code_location\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (code_location, le) (catalyst_asset_materialization_duration_seconds_bucket{code_location=~\"$code_location\"}))",
               "legendFormat": "{{ code_location }}/{{ asset_key }}",
               "refId": "A"
             }
@@ -2840,7 +2840,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.95, sum by (code_location, le) (rate(catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}[1h])))",
+              "expr": "histogram_quantile(0.95, sum by (code_location, le) (catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}))",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
             }
@@ -3675,7 +3675,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.50, sum by (code_location, le) (rate(catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (code_location, le) (catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}))",
               "legendFormat": "{{ code_location }} p50",
               "refId": "A"
             },
@@ -3684,7 +3684,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.95, sum by (code_location, le) (rate(catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (code_location, le) (catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}))",
               "legendFormat": "{{ code_location }} p95",
               "refId": "B"
             },
@@ -3693,7 +3693,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "histogram_quantile(0.99, sum by (code_location, le) (rate(catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.99, sum by (code_location, le) (catalyst_dagster_run_duration_seconds_bucket{code_location=~\"$code_location\"}))",
               "legendFormat": "{{ code_location }} p99",
               "refId": "C"
             }
