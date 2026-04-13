@@ -80,16 +80,19 @@ def get_tracer(name: str):
 
 @contextmanager
 def trace_operation(name: str, tracer=None, attributes: dict[str, Any] | None = None):
-    """Context manager for easy span creation.
+    """Context manager for easy span creation + asset duration metric.
 
     Usage:
         tracer = get_tracer(__name__)
         with trace_operation("extract_entities", tracer, {"chunk_count": 100}):
             entities = extract(chunks)
     """
+    import time
+
     if tracer is None:
         tracer = get_tracer("catalyst-data")
 
+    start = time.monotonic()
     try:
         from opentelemetry import trace as otel_trace
 
@@ -102,6 +105,22 @@ def trace_operation(name: str, tracer=None, attributes: dict[str, Any] | None = 
                 raise
     except ImportError:
         yield None
+    finally:
+        # Emit asset materialization duration metric
+        duration = time.monotonic() - start
+        attrs = attributes or {}
+        code_location = attrs.get("code_location", "unknown")
+        layer = attrs.get("layer", "unknown")
+        try:
+            from dagster_io.metrics import ASSET_MATERIALIZATION_DURATION
+
+            ASSET_MATERIALIZATION_DURATION.labels(
+                code_location=code_location,
+                asset_key=name,
+                layer=layer,
+            ).observe(duration)
+        except Exception:
+            pass  # metrics not critical
 
 
 class _NoOpTracer:

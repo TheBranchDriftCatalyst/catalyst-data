@@ -19,6 +19,7 @@ from dagster import (
 )
 
 from dagster_io.logging import get_logger
+from dagster_io.metrics import DAGSTER_SENSOR_TICK_TOTAL
 from dagster_io.s3_client import S3Client
 
 logger = get_logger(__name__)
@@ -90,10 +91,16 @@ def media_document_sensor(context: SensorEvaluationContext):
         all_doc_ids = _load_document_ids(client)
     except Exception as e:
         logger.warning("media_document_sensor: failed to load document IDs from S3: %s", e)
+        DAGSTER_SENSOR_TICK_TOTAL.labels(
+            code_location="media_ingest", sensor_name="media_document_sensor", outcome="failure"
+        ).inc()
         yield SkipReason(f"Failed to read media_documents from S3: {e}")
         return
 
     if not all_doc_ids:
+        DAGSTER_SENSOR_TICK_TOTAL.labels(
+            code_location="media_ingest", sensor_name="media_document_sensor", outcome="skipped"
+        ).inc()
         yield SkipReason("No documents found in media_documents S3 data")
         return
 
@@ -113,6 +120,9 @@ def media_document_sensor(context: SensorEvaluationContext):
     new_ids = [doc_id for doc_id in all_doc_ids if doc_id not in existing_partitions]
 
     if not new_ids:
+        DAGSTER_SENSOR_TICK_TOTAL.labels(
+            code_location="media_ingest", sensor_name="media_document_sensor", outcome="skipped"
+        ).inc()
         yield SkipReason(f"All {len(all_doc_ids)} documents already have partitions registered")
         return
 
@@ -137,4 +147,7 @@ def media_document_sensor(context: SensorEvaluationContext):
             partition_key=doc_id,
         )
 
+    DAGSTER_SENSOR_TICK_TOTAL.labels(
+        code_location="media_ingest", sensor_name="media_document_sensor", outcome="success"
+    ).inc()
     logger.info("media_document_sensor: yielded %d RunRequests for new documents", len(batch))
