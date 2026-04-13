@@ -97,7 +97,7 @@ export default function SpeakerBreakdown({
   }
 
   return (
-    <div className={className}>
+    <div data-testid="speaker-breakdown" className={className}>
       {/* Stacked bar chart */}
       <div className="flex w-full h-7 rounded-md overflow-hidden bg-surface-2">
         {stats.map(({ speaker, percentage }) => {
@@ -135,7 +135,7 @@ export default function SpeakerBreakdown({
         {stats.map(({ speaker, totalTime, segmentCount, percentage }) => {
           const idx = speakerIndex(speaker);
           return (
-            <div key={speaker} className="space-y-1">
+            <div key={speaker} data-testid={`speaker-row-${speaker}`} className="space-y-1">
               <div className="flex items-center gap-3 text-sm">
                 {/* Color dot */}
                 <div className={cn("w-2.5 h-2.5 rounded-full flex-shrink-0", BG_CLASSES[idx])} />

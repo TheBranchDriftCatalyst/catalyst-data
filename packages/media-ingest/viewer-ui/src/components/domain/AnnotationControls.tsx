@@ -43,6 +43,7 @@ export default function AnnotationControls({
           return (
             <button
               key={opt.value}
+              data-testid={`annotation-filter-${opt.value}`}
               className={cn(
                 "flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] transition-colors whitespace-nowrap",
                 isActive
@@ -69,6 +70,7 @@ export default function AnnotationControls({
       {/* Bulk actions */}
       <div className="flex items-center gap-0.5 flex-shrink-0">
         <Button
+          data-testid="bulk-approve"
           variant="ghost"
           size="icon-sm"
           className="h-6 w-6 text-zinc-500 hover:text-green-400"
@@ -79,6 +81,7 @@ export default function AnnotationControls({
           <CheckCheck className="h-3.5 w-3.5" />
         </Button>
         <Button
+          data-testid="bulk-reject"
           variant="ghost"
           size="icon-sm"
           className="h-6 w-6 text-zinc-500 hover:text-red-400"

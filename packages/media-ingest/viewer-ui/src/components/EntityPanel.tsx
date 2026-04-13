@@ -211,12 +211,13 @@ export default function EntityPanel({
   }
 
   return (
-    <div className={cn("flex flex-col", className)}>
+    <div data-testid="entity-panel" className={cn("flex flex-col", className)}>
       {/* Search filter */}
       <div className="p-2 border-b border-white/5 flex-shrink-0">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
           <Input
+            data-testid="entity-search"
             type="text"
             placeholder="Filter entities..."
             value={searchText}
@@ -249,6 +250,7 @@ export default function EntityPanel({
                 key={group.type}
                 open={isExpanded}
                 onOpenChange={() => toggleType(group.type)}
+                data-testid={`entity-group-${group.type}`}
               >
                 <CollapsibleTrigger className="w-full">
                   <div

@@ -90,6 +90,7 @@ export default function MentionCard({
 
   return (
     <div
+      data-testid={`mention-card-${targetId}`}
       className={cn(
         "group px-3 py-2 hover:bg-white/[0.04] transition-colors cursor-pointer",
         statusBorder,
@@ -164,6 +165,7 @@ export default function MentionCard({
         )}
       >
         <button
+          data-testid="mention-approve"
           className={cn(
             "p-0.5 rounded transition-colors",
             status === "approved"
@@ -180,6 +182,7 @@ export default function MentionCard({
         </button>
 
         <button
+          data-testid="mention-reject"
           className={cn(
             "p-0.5 rounded transition-colors",
             status === "rejected"
@@ -196,6 +199,7 @@ export default function MentionCard({
         </button>
 
         <button
+          data-testid="mention-edit"
           className="p-0.5 rounded text-zinc-500 hover:text-blue-400 hover:bg-blue-900/20 transition-colors"
           onClick={(e) => {
             e.stopPropagation();

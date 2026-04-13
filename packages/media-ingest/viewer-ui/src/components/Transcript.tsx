@@ -114,7 +114,7 @@ export default function Transcript({
   let lastOrigIdx = -1;
 
   return (
-    <ScrollArea className={className}>
+    <ScrollArea data-testid="transcript" className={className}>
       <div ref={containerRef} className="space-y-1 p-3">
         {segments.map((seg, segIdx) => {
           // Map back to the original index for data attributes and active matching

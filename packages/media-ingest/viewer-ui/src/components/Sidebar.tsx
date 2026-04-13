@@ -85,6 +85,7 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
   if (collapsed) {
     return (
       <div
+        data-testid="sidebar"
         className={cn(
           "w-12 bg-surface-1 border-r border-white/5 flex flex-col items-center py-3 gap-2",
           className,
@@ -92,7 +93,7 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
       >
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" onClick={onToggle}>
+            <Button data-testid="sidebar-toggle" variant="ghost" size="icon-sm" onClick={onToggle}>
               <PanelLeft className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
@@ -116,7 +117,10 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
   }
 
   return (
-    <div className={cn("w-72 bg-surface-1 border-r border-white/5 flex flex-col", className)}>
+    <div
+      data-testid="sidebar"
+      className={cn("w-72 bg-surface-1 border-r border-white/5 flex flex-col", className)}
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-white/5">
         <Link
@@ -128,7 +132,7 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
         </Link>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" onClick={onToggle}>
+            <Button data-testid="sidebar-toggle" variant="ghost" size="icon-sm" onClick={onToggle}>
               <PanelLeftClose className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
@@ -214,6 +218,7 @@ function DocumentListItem({ doc, isActive }: { doc: MediaDocument; isActive: boo
   return (
     <Link
       to={`/player/${encodeURIComponent(doc.id)}`}
+      data-testid={`sidebar-item-${doc.id}`}
       className={cn(
         "block px-3 py-2 border-b border-white/[0.03] transition-colors",
         isActive

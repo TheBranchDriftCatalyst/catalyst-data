@@ -229,13 +229,13 @@ export default function PlayerPage() {
 
   return (
     <ErrorBoundary>
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <div data-testid="player-page" className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* Top header bar */}
         <header className="flex items-center gap-3 px-4 py-2 bg-surface-1 border-b border-white/5 flex-shrink-0">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon-sm" asChild>
-                <Link to="/">
+                <Link to="/" data-testid="back-button">
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
               </Button>
@@ -246,7 +246,9 @@ export default function PlayerPage() {
           <Separator orientation="vertical" className="h-5" />
 
           <div className="flex-1 min-w-0">
-            <h1 className="text-sm font-medium text-zinc-200 truncate">{doc.title}</h1>
+            <h1 data-testid="document-title" className="text-sm font-medium text-zinc-200 truncate">
+              {doc.title}
+            </h1>
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -289,7 +291,10 @@ export default function PlayerPage() {
 
         {/* Highlight bar */}
         {highlightText && (
-          <div className="flex items-center gap-2 px-4 py-1.5 bg-amber-950/30 border-b border-amber-900/30 flex-shrink-0">
+          <div
+            data-testid="highlight-bar"
+            className="flex items-center gap-2 px-4 py-1.5 bg-amber-950/30 border-b border-amber-900/30 flex-shrink-0"
+          >
             <Highlighter className="h-3 w-3 text-amber-500" />
             <span className="text-xs text-amber-300">
               Highlighting: <strong>{highlightText}</strong>
@@ -307,7 +312,10 @@ export default function PlayerPage() {
 
         {/* Highlight reel bar */}
         {isFilteredPlayback && selectedEntityText && (
-          <div className="flex items-center gap-2 px-4 py-1.5 bg-indigo-950/30 border-b border-indigo-900/30 flex-shrink-0">
+          <div
+            data-testid="highlight-reel-bar"
+            className="flex items-center gap-2 px-4 py-1.5 bg-indigo-950/30 border-b border-indigo-900/30 flex-shrink-0"
+          >
             <Play className="h-3 w-3 text-indigo-400 fill-indigo-400" />
             <span className="text-xs text-indigo-300">
               Highlight Reel: <strong>{selectedEntityText}</strong>

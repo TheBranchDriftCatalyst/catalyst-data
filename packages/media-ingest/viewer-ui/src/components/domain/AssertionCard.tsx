@@ -33,6 +33,7 @@ export default function AssertionCard({
 
   return (
     <div
+      data-testid={`assertion-card-${targetId}`}
       className={cn(
         "group px-3 py-2 hover:bg-white/[0.04] transition-colors cursor-pointer",
         statusBorder,
@@ -104,6 +105,7 @@ export default function AssertionCard({
         )}
       >
         <button
+          data-testid="assertion-approve"
           className={cn(
             "p-0.5 rounded transition-colors",
             status === "approved"
@@ -120,6 +122,7 @@ export default function AssertionCard({
         </button>
 
         <button
+          data-testid="assertion-reject"
           className={cn(
             "p-0.5 rounded transition-colors",
             status === "rejected"

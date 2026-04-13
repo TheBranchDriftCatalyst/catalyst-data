@@ -142,12 +142,13 @@ export default function AssertionPanel({
   }
 
   return (
-    <div className={cn("flex flex-col", className)}>
+    <div data-testid="assertion-panel" className={cn("flex flex-col", className)}>
       {/* Filter */}
       <div className="p-2 border-b border-white/5 flex-shrink-0">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
           <Input
+            data-testid="assertion-search"
             type="text"
             placeholder="Filter assertions..."
             value={filterText}

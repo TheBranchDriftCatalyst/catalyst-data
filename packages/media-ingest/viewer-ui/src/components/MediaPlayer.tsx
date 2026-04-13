@@ -128,8 +128,16 @@ const MediaPlayer = forwardRef<MediaPlayerHandle, MediaPlayerProps>(function Med
 
   if (isVideo) {
     return (
-      <div className={cn("relative bg-black rounded-lg overflow-hidden", className)}>
-        <video {...commonProps} className="w-full h-full object-contain" playsInline />
+      <div
+        data-testid="media-player"
+        className={cn("relative bg-black rounded-lg overflow-hidden", className)}
+      >
+        <video
+          {...commonProps}
+          data-testid="video-element"
+          className="w-full h-full object-contain"
+          playsInline
+        />
         {markerOverlay}
       </div>
     );
@@ -137,7 +145,11 @@ const MediaPlayer = forwardRef<MediaPlayerHandle, MediaPlayerProps>(function Med
 
   // Audio-only: show a compact player with card styling
   return (
-    <Card interactive={false} className={cn("overflow-hidden", className)}>
+    <Card
+      interactive={false}
+      data-testid="media-player"
+      className={cn("overflow-hidden", className)}
+    >
       <CardContent className="flex items-center gap-4 p-4">
         <div className="w-14 h-14 rounded-lg bg-surface-2 flex items-center justify-center flex-shrink-0">
           <AudioLines className="h-7 w-7 text-zinc-400" />
@@ -147,6 +159,7 @@ const MediaPlayer = forwardRef<MediaPlayerHandle, MediaPlayerProps>(function Med
           <p className="text-xs text-zinc-500">{doc.metadata.extension?.toUpperCase()} Audio</p>
           <audio
             {...commonProps}
+            data-testid="audio-element"
             ref={mediaRef as React.RefObject<HTMLAudioElement>}
             className="w-full h-10 mt-2 [&::-webkit-media-controls-panel]:bg-surface-2"
           />

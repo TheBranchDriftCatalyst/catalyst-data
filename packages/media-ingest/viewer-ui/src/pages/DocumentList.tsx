@@ -104,12 +104,12 @@ export default function DocumentList() {
 
   return (
     <ScrollArea className="flex-1">
-      <div className="p-6 max-w-[1800px] mx-auto">
+      <div data-testid="document-list-page" className="p-6 max-w-[1800px] mx-auto">
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-zinc-100 tracking-tight">Media Library</h1>
           <p className="text-sm text-zinc-500 mt-1 flex items-center gap-3">
-            <span>{documents.length} documents</span>
+            <span data-testid="document-count">{documents.length} documents</span>
             {totalDuration > 0 && (
               <>
                 <Separator orientation="vertical" className="h-3" />
@@ -137,6 +137,7 @@ export default function DocumentList() {
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
             <Input
+              data-testid="search-input"
               type="text"
               placeholder="Search by title..."
               value={search}
@@ -216,7 +217,7 @@ export default function DocumentList() {
 
         {/* Loading */}
         {isLoading && (
-          <>
+          <div data-testid="loading-skeleton">
             {viewMode === "grid" ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {Array.from({ length: 8 }).map((_, i) => (
@@ -230,12 +231,12 @@ export default function DocumentList() {
                 ))}
               </div>
             )}
-          </>
+          </div>
         )}
 
         {/* Error */}
         {isError && (
-          <Card interactive={false} className="max-w-lg mx-auto mt-8">
+          <Card interactive={false} data-testid="error-state" className="max-w-lg mx-auto mt-8">
             <CardContent className="flex flex-col items-center text-center py-8">
               <div className="rounded-full bg-red-950/50 p-3 mb-4">
                 <AlertCircle className="h-6 w-6 text-red-400" />
@@ -251,7 +252,10 @@ export default function DocumentList() {
 
         {/* Empty state */}
         {!isLoading && !isError && filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
+          <div
+            data-testid="empty-state"
+            className="flex flex-col items-center justify-center py-16 text-zinc-500"
+          >
             <FileQuestion className="h-12 w-12 mb-3 text-zinc-700" />
             {search ? (
               <p className="text-sm">No documents match &ldquo;{search}&rdquo;</p>
@@ -292,7 +296,11 @@ function DocumentCard({ doc }: { doc: MediaDocument }) {
   const sizeBytes = doc.metadata.size_bytes;
 
   return (
-    <Link to={`/player/${encodeURIComponent(doc.id)}`} className="group block">
+    <Link
+      to={`/player/${encodeURIComponent(doc.id)}`}
+      data-testid={`document-card-${doc.id}`}
+      className="group block"
+    >
       <Card className="overflow-hidden h-full transition-all group-hover:border-white/15">
         {/* Thumbnail area */}
         <div className="relative h-32 bg-surface-2 flex items-center justify-center">
@@ -350,6 +358,7 @@ function DocumentRow({ doc }: { doc: MediaDocument }) {
   return (
     <Link
       to={`/player/${encodeURIComponent(doc.id)}`}
+      data-testid={`document-row-${doc.id}`}
       className="group flex items-center gap-4 px-4 py-2.5 hover:bg-white/[0.04] transition-colors"
     >
       {/* Type icon */}
