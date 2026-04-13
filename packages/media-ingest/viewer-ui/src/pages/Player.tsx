@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   Button,
@@ -12,10 +12,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@thebranchdriftcatalyst/catalyst-ui";
-import { ArrowLeft, Clock, Users, Globe, X, Highlighter } from "lucide-react";
+import { ArrowLeft, Clock, Users, Globe, X, Highlighter, Play } from "lucide-react";
 import { useDocumentData } from "@/hooks/useDocumentData";
 import { useMediaSync } from "@/hooks/useMediaSync";
 import { useMarkerData } from "@/hooks/useMarkerData";
+import { useFilteredPlayback } from "@/hooks/useFilteredPlayback";
 import { useTranscriptScroll } from "@/hooks/useTranscriptScroll";
 import { useSpeakerNames } from "@/hooks/useSpeakerNames";
 import { useAnnotations } from "@/hooks/useAnnotations";
@@ -78,14 +79,43 @@ export default function PlayerPage() {
     selectedAssertionId,
   });
 
+  // Build time ranges for filtered playback from the current markers
+  const filteredRanges = useMemo(() => {
+    if (!selectedEntityText) return [];
+    return markers
+      .filter((m) => m.endTimestamp != null && m.endTimestamp !== m.timestamp)
+      .map((m) => ({ start: m.timestamp, end: m.endTimestamp! }))
+      .concat(
+        markers
+          .filter((m) => m.endTimestamp == null || m.endTimestamp === m.timestamp)
+          .map((m) => ({ start: m.timestamp, end: m.timestamp + 1 })),
+      )
+      .sort((a, b) => a.start - b.start);
+  }, [markers, selectedEntityText]);
+
   const handleSeek = useCallback((time: number) => {
     playerRef.current?.seek(time);
     setCurrentTime(time);
   }, []);
 
-  const handleTimeUpdate = useCallback((time: number) => {
-    setCurrentTime(time);
+  const handlePause = useCallback(() => {
+    playerRef.current?.pause();
   }, []);
+
+  const { isFilteredPlayback, onTimeUpdate: filteredPlaybackTimeUpdate } = useFilteredPlayback({
+    ranges: filteredRanges,
+    seek: handleSeek,
+    pause: handlePause,
+    enabled: selectedEntityText != null,
+  });
+
+  const handleTimeUpdate = useCallback(
+    (time: number) => {
+      setCurrentTime(time);
+      filteredPlaybackTimeUpdate(time);
+    },
+    [filteredPlaybackTimeUpdate],
+  );
 
   const handleDurationChange = useCallback((d: number) => {
     setDuration(d);
@@ -250,6 +280,27 @@ export default function PlayerPage() {
               className="h-5 w-5 ml-auto"
             >
               <X className="h-3 w-3 text-amber-500" />
+            </Button>
+          </div>
+        )}
+
+        {/* Highlight reel bar */}
+        {isFilteredPlayback && selectedEntityText && (
+          <div className="flex items-center gap-2 px-4 py-1.5 bg-indigo-950/30 border-b border-indigo-900/30 flex-shrink-0">
+            <Play className="h-3 w-3 text-indigo-400 fill-indigo-400" />
+            <span className="text-xs text-indigo-300">
+              Highlight Reel: <strong>{selectedEntityText}</strong>
+            </span>
+            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 tabular-nums">
+              {filteredRanges.length} segment{filteredRanges.length !== 1 ? "s" : ""}
+            </Badge>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => handleEntitySelect(null)}
+              className="h-5 w-5 ml-auto"
+            >
+              <X className="h-3 w-3 text-indigo-400" />
             </Button>
           </div>
         )}
