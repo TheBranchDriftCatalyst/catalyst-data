@@ -1,7 +1,8 @@
 import { useRef, useEffect, useCallback } from "react";
-import { ScrollArea } from "@thebranchdriftcatalyst/catalyst-ui";
-import { MessageSquare } from "lucide-react";
+import { Input, ScrollArea } from "@thebranchdriftcatalyst/catalyst-ui";
+import { MessageSquare, Search, X, ChevronUp, ChevronDown } from "lucide-react";
 import type { Segment, Word } from "@/types/media";
+import { useTranscriptSearch, type TranscriptMatch } from "@/hooks/useTranscriptSearch";
 import { speakerIndex, formatTime } from "@/lib/speakers";
 import { cn } from "@/lib/utils";
 
@@ -69,9 +70,27 @@ export default function Transcript({
   const internalContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = transcriptContainerRef ?? internalContainerRef;
   const activeSegRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-scroll to active segment
+  // Transcript search hook
+  const {
+    query: searchQuery,
+    inputValue: searchInputValue,
+    setInputValue: setSearchInputValue,
+    clearSearch,
+    matches: searchMatches,
+    matchCount: searchMatchCount,
+    currentMatchIndex,
+    nextMatch,
+    prevMatch,
+    matchesForSegment,
+    currentMatchSegmentIndex,
+  } = useTranscriptSearch({ segments });
+
+  // Auto-scroll to active segment (from playback)
   useEffect(() => {
+    // Don't auto-scroll from playback while user is navigating search results
+    if (searchQuery) return;
     if (activeSegRef.current && containerRef.current) {
       const container = containerRef.current;
       const element = activeSegRef.current;
@@ -89,13 +108,48 @@ export default function Transcript({
         });
       }
     }
-  }, [activeSegmentIndex]);
+  }, [activeSegmentIndex, searchQuery, containerRef]);
+
+  // Auto-scroll to current search match
+  useEffect(() => {
+    if (currentMatchSegmentIndex < 0 || !containerRef.current) return;
+    const container = containerRef.current;
+    // Find the active match element
+    const activeEl = container.querySelector("[data-search-active='true']");
+    if (activeEl) {
+      activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    // Fallback: scroll to the segment containing the match
+    const segEl = container.querySelector(`[data-segment-index="${currentMatchSegmentIndex}"]`);
+    if (segEl) {
+      segEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [currentMatchIndex, currentMatchSegmentIndex, containerRef]);
 
   const handleSegmentClick = useCallback(
     (time: number) => {
       onSeek(time);
     },
     [onSeek],
+  );
+
+  // Keyboard shortcuts in search input
+  const handleSearchKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          prevMatch();
+        } else {
+          nextMatch();
+        }
+      } else if (e.key === "Escape") {
+        clearSearch();
+        searchInputRef.current?.blur();
+      }
+    },
+    [nextMatch, prevMatch, clearSearch],
   );
 
   if (segments.length === 0) {
@@ -109,102 +163,396 @@ export default function Transcript({
     );
   }
 
+  // Determine the current match object (for identifying the active match in rendering)
+  const currentMatch =
+    currentMatchIndex >= 0 && currentMatchIndex < searchMatches.length
+      ? searchMatches[currentMatchIndex]!
+      : null;
+
   // Group consecutive segments by speaker for visual grouping
   let lastSpeaker: string | null = null;
   let lastOrigIdx = -1;
 
   return (
-    <ScrollArea data-testid="transcript" className={className}>
-      <div ref={containerRef} className="space-y-1 p-3">
-        {segments.map((seg, segIdx) => {
-          // Map back to the original index for data attributes and active matching
-          const origIdx = filteredIndices ? filteredIndices[segIdx]! : segIdx;
-          const isActive = origIdx === activeSegmentIndex;
-          const isScrollTarget = origIdx === scrollHighlightIndex;
-          const idx = speakerIndex(seg.speaker);
-          const borderClass = BORDER_CLASSES[idx]!;
-          const textClass = TEXT_CLASSES[idx]!;
-          const showSpeakerLabel = seg.speaker !== lastSpeaker;
-          lastSpeaker = seg.speaker ?? null;
-
-          // Show a collapsed divider when filtered and indices are non-contiguous
-          const showCollapsedDivider = isFiltered && lastOrigIdx >= 0 && origIdx - lastOrigIdx > 1;
-          lastOrigIdx = origIdx;
-
-          return (
-            <div key={origIdx}>
-              {/* Collapsed segment gap indicator */}
-              {showCollapsedDivider && <div className="collapsed-segment-divider" />}
-
-              {/* Speaker label when speaker changes */}
-              {showSpeakerLabel && seg.speaker && (
-                <div
-                  className={cn(
-                    "text-xs font-semibold mt-3 mb-1 flex items-center gap-2",
-                    textClass,
-                  )}
-                >
-                  <span>{displayName(seg.speaker)}</span>
-                  <span className="text-zinc-600 font-normal text-[10px] font-mono tabular-nums">
-                    {formatTime(seg.start)}
-                  </span>
-                </div>
-              )}
-
-              {/* Segment block */}
-              <div
-                ref={isActive ? activeSegRef : undefined}
-                data-segment-index={origIdx}
-                className={cn(
-                  "px-3 py-1.5 rounded-r-md cursor-pointer transition-all duration-200",
-                  "border-l-2",
-                  borderClass,
-                  isActive ? "bg-white/[0.08] segment-active" : "hover:bg-white/[0.04]",
-                  isScrollTarget && "scroll-target-highlight",
-                )}
-                onClick={() => handleSegmentClick(seg.start)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    handleSegmentClick(seg.start);
-                  }
-                }}
-                aria-label={`Segment at ${formatTime(seg.start)}: ${seg.text.slice(0, 50)}`}
+    <div className={cn("flex flex-col min-h-0", className)}>
+      {/* Search bar */}
+      <div className="flex-shrink-0 px-3 py-2 border-b border-white/5">
+        <div className="flex items-center gap-1.5">
+          <div className="relative flex-1">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none" />
+            <Input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search transcript..."
+              value={searchInputValue}
+              onChange={(e) => setSearchInputValue(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              className="h-7 pl-7 pr-7 text-xs bg-surface-0 border-white/10 placeholder:text-zinc-600"
+            />
+            {searchInputValue && (
+              <button
+                onClick={clearSearch}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-white/10 text-zinc-500 hover:text-zinc-300 transition-colors"
+                aria-label="Clear search"
               >
-                {/* Word-level rendering when available */}
-                {seg.words && seg.words.length > 0 ? (
-                  <p className="text-sm leading-relaxed">
-                    {seg.words.map((word, wIdx) => (
-                      <WordSpan
-                        key={wIdx}
-                        word={word}
-                        isActive={isActive && wIdx === activeWordIndex}
-                        highlightText={highlightText}
-                        onClick={() => onSeek(word.start)}
-                      />
-                    ))}
-                  </p>
-                ) : (
-                  <p className="text-sm leading-relaxed text-zinc-300">
-                    {highlightText ? highlightInText(seg.text, highlightText) : seg.text}
-                  </p>
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+          {searchQuery && (
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              <span className="text-[10px] text-zinc-500 tabular-nums whitespace-nowrap min-w-[4rem] text-center">
+                {searchMatchCount > 0
+                  ? `${currentMatchIndex + 1} of ${searchMatchCount}`
+                  : "0 results"}
+              </span>
+              <button
+                onClick={prevMatch}
+                disabled={searchMatchCount === 0}
+                className="p-0.5 rounded hover:bg-white/10 text-zinc-500 hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                aria-label="Previous match"
+              >
+                <ChevronUp className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={nextMatch}
+                disabled={searchMatchCount === 0}
+                className="p-0.5 rounded hover:bg-white/10 text-zinc-500 hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                aria-label="Next match"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Transcript body */}
+      <ScrollArea data-testid="transcript" className="flex-1 min-h-0">
+        <div ref={containerRef} className="space-y-1 p-3">
+          {segments.map((seg, segIdx) => {
+            // Map back to the original index for data attributes and active matching
+            const origIdx = filteredIndices ? filteredIndices[segIdx]! : segIdx;
+            const isActive = origIdx === activeSegmentIndex;
+            const isScrollTarget = origIdx === scrollHighlightIndex;
+            const idx = speakerIndex(seg.speaker);
+            const borderClass = BORDER_CLASSES[idx]!;
+            const textClass = TEXT_CLASSES[idx]!;
+            const showSpeakerLabel = seg.speaker !== lastSpeaker;
+            lastSpeaker = seg.speaker ?? null;
+
+            // Show a collapsed divider when filtered and indices are non-contiguous
+            const showCollapsedDivider =
+              isFiltered && lastOrigIdx >= 0 && origIdx - lastOrigIdx > 1;
+            lastOrigIdx = origIdx;
+
+            // Get search matches for this segment
+            const segSearchMatches = searchQuery ? matchesForSegment(segIdx) : [];
+
+            return (
+              <div key={origIdx}>
+                {/* Collapsed segment gap indicator */}
+                {showCollapsedDivider && <div className="collapsed-segment-divider" />}
+
+                {/* Speaker label when speaker changes */}
+                {showSpeakerLabel && seg.speaker && (
+                  <div
+                    className={cn(
+                      "text-xs font-semibold mt-3 mb-1 flex items-center gap-2",
+                      textClass,
+                    )}
+                  >
+                    <span>{displayName(seg.speaker)}</span>
+                    <span className="text-zinc-600 font-normal text-[10px] font-mono tabular-nums">
+                      {formatTime(seg.start)}
+                    </span>
+                  </div>
                 )}
 
-                {/* Timestamp (subtle, on hover) */}
-                {!showSpeakerLabel && (
-                  <span className="text-[10px] text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity font-mono tabular-nums">
-                    {formatTime(seg.start)}
-                  </span>
-                )}
+                {/* Segment block */}
+                <div
+                  ref={isActive ? activeSegRef : undefined}
+                  data-segment-index={origIdx}
+                  className={cn(
+                    "px-3 py-1.5 rounded-r-md cursor-pointer transition-all duration-200",
+                    "border-l-2",
+                    borderClass,
+                    isActive ? "bg-white/[0.08] segment-active" : "hover:bg-white/[0.04]",
+                    isScrollTarget && "scroll-target-highlight",
+                  )}
+                  onClick={() => handleSegmentClick(seg.start)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleSegmentClick(seg.start);
+                    }
+                  }}
+                  aria-label={`Segment at ${formatTime(seg.start)}: ${seg.text.slice(0, 50)}`}
+                >
+                  {/* Word-level rendering when available */}
+                  {seg.words && seg.words.length > 0 ? (
+                    <p className="text-sm leading-relaxed">
+                      {renderWordsWithSearch(
+                        seg.words,
+                        segSearchMatches,
+                        currentMatch,
+                        segIdx,
+                        isActive,
+                        activeWordIndex,
+                        highlightText,
+                        onSeek,
+                        seg.text,
+                      )}
+                    </p>
+                  ) : (
+                    <p className="text-sm leading-relaxed text-zinc-300">
+                      {segSearchMatches.length > 0
+                        ? highlightSearchInText(seg.text, segSearchMatches, currentMatch, segIdx)
+                        : highlightText
+                          ? highlightInText(seg.text, highlightText)
+                          : seg.text}
+                    </p>
+                  )}
+
+                  {/* Timestamp (subtle, on hover) */}
+                  {!showSpeakerLabel && (
+                    <span className="text-[10px] text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity font-mono tabular-nums">
+                      {formatTime(seg.start)}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </ScrollArea>
+            );
+          })}
+        </div>
+      </ScrollArea>
+    </div>
   );
+}
+
+/**
+ * Render word spans with search match highlighting overlaid.
+ * Search matches are computed on the full segment text, so we map character
+ * offsets back to individual word boundaries.
+ */
+function renderWordsWithSearch(
+  words: Word[],
+  segSearchMatches: TranscriptMatch[],
+  currentMatch: TranscriptMatch | null,
+  segIdx: number,
+  isSegmentActive: boolean,
+  activeWordIndex: number,
+  highlightText: string | undefined,
+  onSeek: (time: number) => void,
+  fullText: string,
+): React.ReactNode {
+  if (segSearchMatches.length === 0) {
+    // No search matches — use normal word rendering
+    return words.map((word, wIdx) => (
+      <WordSpan
+        key={wIdx}
+        word={word}
+        isActive={isSegmentActive && wIdx === activeWordIndex}
+        highlightText={highlightText}
+        onClick={() => onSeek(word.start)}
+      />
+    ));
+  }
+
+  // Build a character-level map of the full text to identify which ranges are
+  // search matches and which is the active match. We then split word text
+  // accordingly.
+  //
+  // First, build a map from character position → which word it belongs to.
+  // Words in whisper output have their own .word property (which includes
+  // leading spaces). We reconstruct positions by scanning the full text.
+  const wordPositions: { start: number; end: number }[] = [];
+  let pos = 0;
+  for (const w of words) {
+    const wText = w.word;
+    const idx = fullText.indexOf(wText, pos);
+    if (idx >= 0) {
+      wordPositions.push({ start: idx, end: idx + wText.length });
+      pos = idx + wText.length;
+    } else {
+      // Fallback: assume contiguous
+      wordPositions.push({ start: pos, end: pos + wText.length });
+      pos += wText.length;
+    }
+  }
+
+  // For each word, determine what parts overlap with search matches
+  const result: React.ReactNode[] = [];
+  for (let wIdx = 0; wIdx < words.length; wIdx++) {
+    const word = words[wIdx]!;
+    const wp = wordPositions[wIdx]!;
+    const isWordActive = isSegmentActive && wIdx === activeWordIndex;
+
+    // Find overlapping search matches
+    const overlapping = segSearchMatches.filter(
+      (m) => m.startChar < wp.end && m.endChar > wp.start,
+    );
+
+    if (overlapping.length === 0) {
+      // No search match — render normally
+      result.push(
+        <WordSpan
+          key={wIdx}
+          word={word}
+          isActive={isWordActive}
+          highlightText={highlightText}
+          onClick={() => onSeek(word.start)}
+        />,
+      );
+    } else {
+      // Split the word text into matched / unmatched fragments
+      const fragments = splitWordByMatches(word.word, wp.start, overlapping, currentMatch, segIdx);
+      result.push(
+        <span
+          key={wIdx}
+          className={cn(
+            "karaoke-word cursor-pointer rounded-sm",
+            isWordActive && "karaoke-word-active font-medium px-0.5",
+            !isWordActive && "text-zinc-300 hover:text-zinc-100",
+          )}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSeek(word.start);
+          }}
+          title={`${formatTime(word.start)} (${(word.probability * 100).toFixed(0)}% conf)`}
+        >
+          {fragments}
+        </span>,
+      );
+    }
+  }
+  return result;
+}
+
+/** Split a word's text into fragments based on search match boundaries. */
+function splitWordByMatches(
+  wordText: string,
+  wordStart: number,
+  matches: TranscriptMatch[],
+  currentMatch: TranscriptMatch | null,
+  segIdx: number,
+): React.ReactNode[] {
+  // Build cut points within the word (relative to word start)
+  const cuts = new Set<number>();
+  cuts.add(0);
+  cuts.add(wordText.length);
+  for (const m of matches) {
+    const relStart = Math.max(0, m.startChar - wordStart);
+    const relEnd = Math.min(wordText.length, m.endChar - wordStart);
+    cuts.add(relStart);
+    cuts.add(relEnd);
+  }
+  const sortedCuts = Array.from(cuts).sort((a, b) => a - b);
+
+  const fragments: React.ReactNode[] = [];
+  for (let i = 0; i < sortedCuts.length - 1; i++) {
+    const from = sortedCuts[i]!;
+    const to = sortedCuts[i + 1]!;
+    if (from === to) continue;
+    const fragText = wordText.slice(from, to);
+    const absFrom = wordStart + from;
+
+    // Check if this fragment is within a search match
+    const isInMatch = matches.some((m) => absFrom >= m.startChar && absFrom < m.endChar);
+    // Check if this is the active/current match
+    const isActiveMatch =
+      isInMatch &&
+      currentMatch !== null &&
+      currentMatch.segmentIndex === segIdx &&
+      matches.some(
+        (m) =>
+          m.startChar === currentMatch.startChar &&
+          m.endChar === currentMatch.endChar &&
+          m.segmentIndex === currentMatch.segmentIndex &&
+          absFrom >= m.startChar &&
+          absFrom < m.endChar,
+      );
+
+    if (isInMatch) {
+      fragments.push(
+        <mark
+          key={i}
+          className={cn(
+            "rounded-sm px-0",
+            isActiveMatch ? "transcript-search-active" : "transcript-search-match",
+          )}
+          data-search-active={isActiveMatch ? "true" : undefined}
+        >
+          {fragText}
+        </mark>,
+      );
+    } else {
+      fragments.push(<span key={i}>{fragText}</span>);
+    }
+  }
+  return fragments;
+}
+
+/** Highlight search matches in plain text (no word-level data). */
+function highlightSearchInText(
+  text: string,
+  matches: TranscriptMatch[],
+  currentMatch: TranscriptMatch | null,
+  segIdx: number,
+): React.ReactNode {
+  if (matches.length === 0) return text;
+
+  // Build cut points
+  const cuts = new Set<number>();
+  cuts.add(0);
+  cuts.add(text.length);
+  for (const m of matches) {
+    cuts.add(m.startChar);
+    cuts.add(m.endChar);
+  }
+  const sortedCuts = Array.from(cuts).sort((a, b) => a - b);
+
+  const parts: React.ReactNode[] = [];
+  for (let i = 0; i < sortedCuts.length - 1; i++) {
+    const from = sortedCuts[i]!;
+    const to = sortedCuts[i + 1]!;
+    if (from === to) continue;
+    const frag = text.slice(from, to);
+
+    const isInMatch = matches.some((m) => from >= m.startChar && from < m.endChar);
+    const isActiveMatch =
+      isInMatch &&
+      currentMatch !== null &&
+      currentMatch.segmentIndex === segIdx &&
+      matches.some(
+        (m) =>
+          m.startChar === currentMatch.startChar &&
+          m.endChar === currentMatch.endChar &&
+          m.segmentIndex === currentMatch.segmentIndex &&
+          from >= m.startChar &&
+          from < m.endChar,
+      );
+
+    if (isInMatch) {
+      parts.push(
+        <mark
+          key={i}
+          className={cn(
+            "rounded-sm px-0.5",
+            isActiveMatch ? "transcript-search-active" : "transcript-search-match",
+          )}
+          data-search-active={isActiveMatch ? "true" : undefined}
+        >
+          {frag}
+        </mark>,
+      );
+    } else {
+      parts.push(<span key={i}>{frag}</span>);
+    }
+  }
+  return parts;
 }
 
 /** Individual word span with active highlighting (karaoke effect) */
@@ -241,7 +589,7 @@ function WordSpan({
   );
 }
 
-/** Highlight matching text within a string */
+/** Highlight matching text within a string (entity highlight, amber) */
 function highlightInText(text: string, query: string): React.ReactNode {
   if (!query) return text;
   const regex = new RegExp(`(${escapeRegex(query)})`, "gi");

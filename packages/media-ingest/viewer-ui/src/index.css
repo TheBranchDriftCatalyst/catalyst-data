@@ -111,6 +111,19 @@
   animation: scroll-target-flash 1.5s ease-out forwards;
 }
 
+/* ── Transcript search highlights ───────────────────────────────── */
+.transcript-search-match {
+  background-color: color-mix(in srgb, #22d3ee 25%, transparent);
+  color: #a5f3fc;
+}
+
+.transcript-search-active {
+  background-color: color-mix(in srgb, #22d3ee 50%, transparent);
+  color: #ecfeff;
+  outline: 1px solid color-mix(in srgb, #22d3ee 60%, transparent);
+  outline-offset: 0px;
+}
+
 /* ── Collapsed segment divider (filter mode) ─────────────────────── */
 .collapsed-segment-divider {
   height: 2px;
