@@ -17,7 +17,7 @@ import { useDocumentData } from "@/hooks/useDocumentData";
 import { useMediaSync } from "@/hooks/useMediaSync";
 import { useMarkerData } from "@/hooks/useMarkerData";
 import { useSpeakerNames } from "@/hooks/useSpeakerNames";
-import { useTranscriptScroll } from "@/hooks/useTranscriptScroll";
+import { useAnnotations } from "@/hooks/useAnnotations";
 import MediaPlayer, { type MediaPlayerHandle } from "@/components/MediaPlayer";
 import SpeakerTimeline from "@/components/SpeakerTimeline";
 import Transcript from "@/components/Transcript";
@@ -48,6 +48,8 @@ export default function PlayerPage() {
     resolve: resolveSpeaker,
   } = useSpeakerNames(documentId);
 
+  const { getStatus, approve, reject, edit, bulkApprove, bulkReject } = useAnnotations(documentId);
+
   const playerRef = useRef<MediaPlayerHandle>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -61,17 +63,6 @@ export default function PlayerPage() {
   const effectiveDuration = duration || diarization?.duration_s || transcription?.duration_s || 0;
 
   const { activeSegmentIndex, activeWordIndex } = useMediaSync(segments, currentTime);
-
-  const {
-    scrollToTimestamp,
-    filterSegments,
-    clearFilter,
-    filteredSegments,
-    filteredIndices,
-    isFiltered,
-    transcriptRef,
-    scrollHighlightIndex,
-  } = useTranscriptScroll({ segments });
 
   // Compute timeline markers from mentions/assertions + selection state
   const markers = useMarkerData({
@@ -99,33 +90,11 @@ export default function PlayerPage() {
     setHighlightText((prev) => (prev === text ? undefined : text));
   }, []);
 
-  const handleEntitySelect = useCallback(
-    (entityText: string | null) => {
-      setSelectedEntityText(entityText);
-      // Clear assertion selection when selecting an entity
-      if (entityText) {
-        setSelectedAssertionId(null);
-
-        // Filter transcript to segments containing this entity's mentions
-        const matchingIndices = new Set<number>();
-        const lowerText = entityText.toLowerCase();
-        for (const m of mentions) {
-          if (m.text.trim().toLowerCase() !== lowerText) continue;
-          // Try to resolve the segment index from the mention's chunk_id
-          const chunkMatch = /_chunk_(\d+)$/.exec(m.provenance?.chunk_id ?? m.chunk_id ?? "");
-          if (chunkMatch) {
-            matchingIndices.add(parseInt(chunkMatch[1]!, 10));
-          }
-        }
-        if (matchingIndices.size > 0) {
-          filterSegments(Array.from(matchingIndices).sort((a, b) => a - b));
-        }
-      } else {
-        clearFilter();
-      }
-    },
-    [mentions, filterSegments, clearFilter],
-  );
+  const handleEntitySelect = useCallback((entityText: string | null) => {
+    setSelectedEntityText(entityText);
+    // Clear assertion selection when selecting an entity
+    if (entityText) setSelectedAssertionId(null);
+  }, []);
 
   const handleAssertionSelect = useCallback((assertionId: string | null) => {
     setSelectedAssertionId(assertionId);
@@ -133,12 +102,36 @@ export default function PlayerPage() {
     if (assertionId) setSelectedEntityText(null);
   }, []);
 
+  const handleMentionApprove = useCallback(
+    (targetId: string) => approve("mention", targetId),
+    [approve],
+  );
+
+  const handleMentionReject = useCallback(
+    (targetId: string) => reject("mention", targetId),
+    [reject],
+  );
+
+  const handleMentionEdit = useCallback(
+    (targetId: string, edits: Record<string, unknown>) => edit("mention", targetId, edits),
+    [edit],
+  );
+
+  const handleAssertionApprove = useCallback(
+    (targetId: string) => approve("assertion", targetId),
+    [approve],
+  );
+
+  const handleAssertionReject = useCallback(
+    (targetId: string) => reject("assertion", targetId),
+    [reject],
+  );
+
   const handleMarkerClick = useCallback(
     (marker: TimelineMarker) => {
       handleSeek(marker.timestamp);
-      scrollToTimestamp(marker.timestamp);
     },
-    [handleSeek, scrollToTimestamp],
+    [handleSeek],
   );
 
   // Loading state
@@ -247,10 +240,10 @@ export default function PlayerPage() {
           </div>
         )}
 
-        {/* Main content area — three columns (CSS grid) */}
-        <div className="flex-1 player-grid">
+        {/* Main content area — three columns */}
+        <div className="flex-1 flex min-h-0 overflow-hidden">
           {/* Left column: media player + timeline */}
-          <div className="flex flex-col min-h-0 border-r border-white/5">
+          <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 border-r border-white/5">
             {/* Media player */}
             <div className="flex-shrink-0 p-4 pb-2">
               <MediaPlayer
@@ -293,46 +286,28 @@ export default function PlayerPage() {
           </div>
 
           {/* Center column: transcript */}
-          <div className="flex flex-col min-h-0 border-r border-white/5">
+          <div className="flex-1 min-w-[300px] flex flex-col min-h-0 border-r border-white/5">
             <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between flex-shrink-0">
               <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
                 Transcript
               </h2>
-              <div className="flex items-center gap-2">
-                {isFiltered && (
-                  <button
-                    onClick={clearFilter}
-                    className="text-[10px] text-accent hover:text-accent/80 transition-colors"
-                  >
-                    Clear filter
-                  </button>
-                )}
-                {segments.length > 0 && (
-                  <span className="text-[10px] text-zinc-600">
-                    {isFiltered
-                      ? `${filteredSegments.length} / ${segments.length} segments`
-                      : `${segments.length} segments`}
-                  </span>
-                )}
-              </div>
+              {segments.length > 0 && (
+                <span className="text-[10px] text-zinc-600">{segments.length} segments</span>
+              )}
             </div>
             <Transcript
-              segments={filteredSegments}
+              segments={segments}
               activeSegmentIndex={activeSegmentIndex}
               activeWordIndex={activeWordIndex}
               onSeek={handleSeek}
               highlightText={highlightText}
               resolveSpeaker={resolveSpeaker}
-              transcriptContainerRef={transcriptRef}
-              scrollHighlightIndex={scrollHighlightIndex}
-              isFiltered={isFiltered}
-              filteredIndices={filteredIndices}
               className="flex-1 min-h-0"
             />
           </div>
 
           {/* Right column: Entities / Assertions tabbed panel */}
-          <div className="flex flex-col min-h-0">
+          <div className="w-[320px] xl:w-[380px] flex flex-col min-h-0 flex-shrink-0">
             <Tabs defaultValue="entities" className="flex flex-col h-full">
               <TabsList className="flex-shrink-0 w-full rounded-none border-b border-white/5 bg-surface-1 h-10 px-1">
                 <TabsTrigger
@@ -385,6 +360,12 @@ export default function PlayerPage() {
                   onEntityClick={handleEntityClick}
                   onEntitySelect={handleEntitySelect}
                   selectedEntityText={selectedEntityText}
+                  getStatus={getStatus}
+                  onApprove={handleMentionApprove}
+                  onReject={handleMentionReject}
+                  onEdit={handleMentionEdit}
+                  onBulkApprove={bulkApprove}
+                  onBulkReject={bulkReject}
                   className="h-full"
                 />
               </TabsContent>
@@ -394,6 +375,11 @@ export default function PlayerPage() {
                   assertions={assertions}
                   onAssertionSelect={handleAssertionSelect}
                   selectedAssertionId={selectedAssertionId}
+                  getStatus={getStatus}
+                  onApprove={handleAssertionApprove}
+                  onReject={handleAssertionReject}
+                  onBulkApprove={bulkApprove}
+                  onBulkReject={bulkReject}
                   className="h-full"
                 />
               </TabsContent>

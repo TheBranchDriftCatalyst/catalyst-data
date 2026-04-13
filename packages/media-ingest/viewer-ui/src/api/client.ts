@@ -1,4 +1,11 @@
-import type { MediaDocument, Transcription, Diarization, Mention, Assertion } from "@/types/media";
+import type {
+  MediaDocument,
+  Transcription,
+  Diarization,
+  Mention,
+  Assertion,
+  Annotation,
+} from "@/types/media";
 
 const API_BASE = "/viewer/api";
 
@@ -79,6 +86,72 @@ export function getMediaUrl(doc: MediaDocument): string {
     .split("/")
     .map(encodeURIComponent)
     .join("/")}`;
+}
+
+// ── Annotation endpoints ──────────────────────────────────────────────────
+
+export function fetchAnnotations(documentId: string): Promise<Annotation[]> {
+  return apiFetch<Annotation[]>(`/documents/${encodeURIComponent(documentId)}/annotations`);
+}
+
+export interface AnnotationCreatePayload {
+  target_type: "mention" | "assertion" | "segment" | "speaker";
+  target_id: string;
+  action: "approve" | "reject" | "edit" | "flag";
+  edits?: Record<string, unknown>;
+  reviewer?: string;
+  notes?: string;
+}
+
+export async function createAnnotation(
+  documentId: string,
+  payload: AnnotationCreatePayload,
+): Promise<Annotation> {
+  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/annotations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+export async function updateAnnotation(
+  annotationId: string,
+  payload: Partial<Pick<AnnotationCreatePayload, "action" | "edits" | "reviewer" | "notes">>,
+): Promise<Annotation> {
+  const res = await fetch(`${API_BASE}/annotations/${encodeURIComponent(annotationId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+export async function bulkCreateAnnotations(
+  documentId: string,
+  annotations: AnnotationCreatePayload[],
+): Promise<{ created: number }> {
+  const res = await fetch(
+    `${API_BASE}/documents/${encodeURIComponent(documentId)}/annotations/bulk`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ annotations }),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
 }
 
 /** File extensions that should render as video */

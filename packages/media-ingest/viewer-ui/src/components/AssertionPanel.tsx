@@ -1,73 +1,120 @@
-import { useState, useMemo } from "react";
-import {
-  Badge,
-  Input,
-  Progress,
-  ScrollArea,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@thebranchdriftcatalyst/catalyst-ui";
-import { Search, MessageSquareQuote, ChevronRight } from "lucide-react";
-import type { Assertion } from "@/types/media";
+import { useState, useMemo, useCallback } from "react";
+import { Input, ScrollArea } from "@thebranchdriftcatalyst/catalyst-ui";
+import { Search, MessageSquareQuote } from "lucide-react";
+import type { Assertion, AnnotationStatus } from "@/types/media";
+import { AssertionCard, AnnotationControls, type StatusFilter } from "./domain";
 import { cn } from "@/lib/utils";
 
 interface AssertionPanelProps {
   assertions: Assertion[];
   onAssertionSelect?: (assertionId: string | null) => void;
   selectedAssertionId?: string | null;
+  /** Annotation helpers — optional; panel works without them. */
+  getStatus?: (targetId: string) => AnnotationStatus;
+  onApprove?: (targetId: string) => void;
+  onReject?: (targetId: string) => void;
+  onBulkApprove?: (items: { targetType: "assertion"; targetId: string }[]) => void;
+  onBulkReject?: (items: { targetType: "assertion"; targetId: string }[]) => void;
   className?: string;
 }
 
 type SortField = "confidence" | "predicate" | "subject";
 
+/** Produce a stable target ID for an assertion. */
+function assertionTargetId(a: Assertion, index: number): string {
+  return a.assertion_id ?? `assertion_${a.subject_text}_${a.predicate}_${a.object_text}_${index}`;
+}
+
 export default function AssertionPanel({
   assertions,
   onAssertionSelect,
   selectedAssertionId,
+  getStatus,
+  onApprove,
+  onReject,
+  onBulkApprove,
+  onBulkReject,
   className = "",
 }: AssertionPanelProps) {
   const [sortBy, setSortBy] = useState<SortField>("confidence");
   const [sortAsc, setSortAsc] = useState(false);
   const [filterText, setFilterText] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
+  // Assertions with stable IDs
+  const assertionsWithIds = useMemo(
+    () => assertions.map((a, i) => ({ assertion: a, targetId: assertionTargetId(a, i) })),
+    [assertions],
+  );
+
+  // Apply text filter, status filter, and sort
   const sorted = useMemo(() => {
-    let filtered = assertions;
+    let filtered = assertionsWithIds;
+
     if (filterText) {
       const q = filterText.toLowerCase();
-      filtered = assertions.filter(
-        (a) =>
+      filtered = filtered.filter(
+        ({ assertion: a }) =>
           a.subject_text.toLowerCase().includes(q) ||
           a.predicate.toLowerCase().includes(q) ||
           a.object_text.toLowerCase().includes(q),
       );
     }
 
+    if (statusFilter !== "all" && getStatus) {
+      filtered = filtered.filter(({ targetId }) => getStatus(targetId) === statusFilter);
+    }
+
     return [...filtered].sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
         case "confidence":
-          cmp = a.confidence - b.confidence;
+          cmp = a.assertion.confidence - b.assertion.confidence;
           break;
         case "predicate":
-          cmp = a.predicate_canonical.localeCompare(b.predicate_canonical);
+          cmp = a.assertion.predicate_canonical.localeCompare(b.assertion.predicate_canonical);
           break;
         case "subject":
-          cmp = a.subject_text.localeCompare(b.subject_text);
+          cmp = a.assertion.subject_text.localeCompare(b.assertion.subject_text);
           break;
       }
       return sortAsc ? cmp : -cmp;
     });
-  }, [assertions, sortBy, sortAsc, filterText]);
+  }, [assertionsWithIds, sortBy, sortAsc, filterText, statusFilter, getStatus]);
+
+  // Visible target IDs for bulk actions
+  const visibleTargetIds = useMemo(() => sorted.map((s) => s.targetId), [sorted]);
+
+  // Counts
+  const counts = useMemo(() => {
+    if (!getStatus) return { approved: 0, rejected: 0, pending: 0, total: visibleTargetIds.length };
+    let approved = 0;
+    let rejected = 0;
+    let pending = 0;
+    for (const tid of visibleTargetIds) {
+      const s = getStatus(tid);
+      if (s === "approved") approved++;
+      else if (s === "rejected") rejected++;
+      else pending++;
+    }
+    return { approved, rejected, pending, total: visibleTargetIds.length };
+  }, [visibleTargetIds, getStatus]);
+
+  const handleBulkApprove = useCallback(() => {
+    if (!getStatus) return;
+    const pendingItems = visibleTargetIds
+      .filter((tid) => getStatus(tid) === "pending")
+      .map((tid) => ({ targetType: "assertion" as const, targetId: tid }));
+    onBulkApprove?.(pendingItems);
+  }, [visibleTargetIds, getStatus, onBulkApprove]);
+
+  const handleBulkReject = useCallback(() => {
+    if (!getStatus) return;
+    const pendingItems = visibleTargetIds
+      .filter((tid) => getStatus(tid) === "pending")
+      .map((tid) => ({ targetType: "assertion" as const, targetId: tid }));
+    onBulkReject?.(pendingItems);
+  }, [visibleTargetIds, getStatus, onBulkReject]);
 
   const handleSort = (field: SortField) => {
     if (sortBy === field) {
@@ -110,53 +157,68 @@ export default function AssertionPanel({
         </div>
       </div>
 
-      {/* Table */}
+      {/* Annotation controls */}
+      {getStatus && (
+        <AnnotationControls
+          counts={counts}
+          filter={statusFilter}
+          onFilterChange={setStatusFilter}
+          onApproveAll={handleBulkApprove}
+          onRejectAll={handleBulkReject}
+        />
+      )}
+
+      {/* Sort bar */}
+      <div className="flex items-center gap-3 px-3 py-1.5 border-b border-white/5 text-[10px] text-zinc-500">
+        <button
+          className="hover:text-zinc-300 transition-colors"
+          onClick={() => handleSort("subject")}
+        >
+          Subject{sortIcon("subject")}
+        </button>
+        <button
+          className="hover:text-zinc-300 transition-colors"
+          onClick={() => handleSort("predicate")}
+        >
+          Predicate{sortIcon("predicate")}
+        </button>
+        <button
+          className="hover:text-zinc-300 transition-colors ml-auto"
+          onClick={() => handleSort("confidence")}
+        >
+          Confidence{sortIcon("confidence")}
+        </button>
+      </div>
+
+      {/* Card list */}
       <ScrollArea className="flex-1">
-        <Table>
-          <TableHeader>
-            <TableRow interactive={false}>
-              <TableHead
-                className="cursor-pointer hover:text-zinc-300 transition-colors text-xs"
-                onClick={() => handleSort("subject")}
-              >
-                Subject{sortIcon("subject")}
-              </TableHead>
-              <TableHead
-                className="cursor-pointer hover:text-zinc-300 transition-colors text-xs"
-                onClick={() => handleSort("predicate")}
-              >
-                Predicate{sortIcon("predicate")}
-              </TableHead>
-              <TableHead className="text-xs">Object</TableHead>
-              <TableHead
-                className="cursor-pointer hover:text-zinc-300 transition-colors text-right text-xs w-20"
-                onClick={() => handleSort("confidence")}
-              >
-                Conf{sortIcon("confidence")}
-              </TableHead>
-              <TableHead className="text-xs w-20 text-center">Flags</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sorted.map((assertion, i) => {
-              const aid =
-                assertion.assertion_id ??
-                `${assertion.subject_text}_${assertion.predicate}_${assertion.object_text}`;
-              return (
-                <AssertionRow
-                  key={i}
-                  assertion={assertion}
-                  isSelected={selectedAssertionId === aid}
-                  onSelect={() => {
-                    if (onAssertionSelect) {
-                      onAssertionSelect(selectedAssertionId === aid ? null : aid);
-                    }
-                  }}
-                />
-              );
-            })}
-          </TableBody>
-        </Table>
+        <div className="divide-y divide-white/[0.03]">
+          {sorted.map(({ assertion, targetId }) => {
+            const aid =
+              assertion.assertion_id ??
+              `${assertion.subject_text}_${assertion.predicate}_${assertion.object_text}`;
+            return (
+              <AssertionCard
+                key={targetId}
+                assertion={assertion}
+                targetId={targetId}
+                status={getStatus ? getStatus(targetId) : "pending"}
+                onApprove={onApprove}
+                onReject={onReject}
+                onClick={() => {
+                  if (onAssertionSelect) {
+                    onAssertionSelect(selectedAssertionId === aid ? null : aid);
+                  }
+                }}
+                className={
+                  selectedAssertionId === aid
+                    ? "bg-white/[0.08] ring-1 ring-inset ring-white/10"
+                    : ""
+                }
+              />
+            );
+          })}
+        </div>
       </ScrollArea>
 
       {/* Summary footer */}
@@ -164,121 +226,5 @@ export default function AssertionPanel({
         {sorted.length} of {assertions.length} assertions
       </div>
     </div>
-  );
-}
-
-function AssertionRow({
-  assertion,
-  isSelected,
-  onSelect,
-}: {
-  assertion: Assertion;
-  isSelected?: boolean;
-  onSelect?: () => void;
-}) {
-  const [showQualifiers, setShowQualifiers] = useState(false);
-  const qualifierEntries = Object.entries(assertion.qualifiers);
-  const hasQualifiers = qualifierEntries.length > 0;
-
-  const confidenceVariant =
-    assertion.confidence > 0.8
-      ? undefined
-      : assertion.confidence > 0.5
-        ? ("secondary" as const)
-        : ("destructive" as const);
-
-  return (
-    <Collapsible open={showQualifiers} onOpenChange={setShowQualifiers}>
-      <TableRow
-        interactive
-        className={cn(
-          hasQualifiers ? "cursor-pointer" : "",
-          isSelected && "bg-white/[0.08] ring-1 ring-inset ring-white/10",
-        )}
-        onClick={onSelect}
-      >
-        {/* Subject */}
-        <TableCell className="text-xs text-zinc-200 font-medium">
-          {assertion.subject_text}
-        </TableCell>
-
-        {/* Predicate */}
-        <TableCell className="text-xs">
-          <span className="text-zinc-400">{assertion.predicate}</span>
-          {assertion.predicate !== assertion.predicate_canonical && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-zinc-600 text-[10px] ml-1 cursor-help">*</span>
-              </TooltipTrigger>
-              <TooltipContent>Canonical: {assertion.predicate_canonical}</TooltipContent>
-            </Tooltip>
-          )}
-        </TableCell>
-
-        {/* Object */}
-        <TableCell className="text-xs text-zinc-300">{assertion.object_text}</TableCell>
-
-        {/* Confidence */}
-        <TableCell>
-          <div className="flex items-center justify-end gap-1.5">
-            <Progress
-              value={assertion.confidence * 100}
-              variant={confidenceVariant}
-              className="w-10 h-1.5"
-            />
-            <span className="text-[10px] tabular-nums text-zinc-500 min-w-[28px] text-right font-mono">
-              {(assertion.confidence * 100).toFixed(0)}%
-            </span>
-          </div>
-        </TableCell>
-
-        {/* Flags */}
-        <TableCell>
-          <CollapsibleTrigger asChild>
-            <div className="flex items-center gap-1 justify-center">
-              {assertion.negated && (
-                <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4">
-                  NEG
-                </Badge>
-              )}
-              {assertion.hedged && (
-                <Badge
-                  variant="outline"
-                  className="text-[9px] px-1 py-0 h-4 text-yellow-300 border-yellow-800/50"
-                >
-                  HEDGED
-                </Badge>
-              )}
-              {hasQualifiers && (
-                <ChevronRight
-                  className={cn(
-                    "h-3 w-3 text-zinc-600 transition-transform",
-                    showQualifiers && "rotate-90",
-                  )}
-                />
-              )}
-            </div>
-          </CollapsibleTrigger>
-        </TableCell>
-      </TableRow>
-
-      {/* Qualifier expansion row */}
-      {hasQualifiers && (
-        <CollapsibleContent asChild>
-          <tr className="bg-surface-1">
-            <td colSpan={5} className="px-6 py-2">
-              <div className="flex flex-wrap gap-1.5">
-                {qualifierEntries.map(([key, value]) => (
-                  <Badge key={key} variant="outline" className="text-[10px] gap-1">
-                    <span className="text-zinc-500 font-medium">{key}:</span>
-                    <span className="text-zinc-300">{value}</span>
-                  </Badge>
-                ))}
-              </div>
-            </td>
-          </tr>
-        </CollapsibleContent>
-      )}
-    </Collapsible>
   );
 }

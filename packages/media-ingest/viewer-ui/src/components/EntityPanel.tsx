@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   Badge,
   Input,
@@ -6,9 +6,6 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
 } from "@thebranchdriftcatalyst/catalyst-ui";
 import {
   ChevronDown,
@@ -26,7 +23,8 @@ import {
   Tag,
   Crosshair,
 } from "lucide-react";
-import type { Mention } from "@/types/media";
+import type { Mention, AnnotationStatus } from "@/types/media";
+import { MentionCard, AnnotationControls, type StatusFilter } from "./domain";
 import { cn } from "@/lib/utils";
 
 interface EntityPanelProps {
@@ -34,18 +32,24 @@ interface EntityPanelProps {
   onEntityClick?: (text: string) => void;
   onEntitySelect?: (entityText: string | null) => void;
   selectedEntityText?: string | null;
+  /** Annotation helpers — optional; panel works without them. */
+  getStatus?: (targetId: string) => AnnotationStatus;
+  onApprove?: (targetId: string) => void;
+  onReject?: (targetId: string) => void;
+  onEdit?: (targetId: string, edits: Record<string, unknown>) => void;
+  onBulkApprove?: (items: { targetType: "mention"; targetId: string }[]) => void;
+  onBulkReject?: (items: { targetType: "mention"; targetId: string }[]) => void;
   className?: string;
 }
 
-interface GroupedEntity {
-  text: string;
-  count: number;
-  contexts: string[];
+interface MentionWithId {
+  mention: Mention;
+  targetId: string;
 }
 
 interface MentionGroup {
   type: string;
-  entities: GroupedEntity[];
+  mentions: MentionWithId[];
   totalCount: number;
 }
 
@@ -78,63 +82,107 @@ function getTypeConfig(type: string) {
   return TYPE_CONFIG[type.toUpperCase()] ?? DEFAULT_CONFIG;
 }
 
+/** Produce a stable target ID for a mention. */
+function mentionTargetId(m: Mention, index: number): string {
+  return `mention_${m.document_id}_${m.chunk_id}_${m.mention_type}_${m.text}_${index}`;
+}
+
 export default function EntityPanel({
   mentions,
   onEntityClick,
   onEntitySelect,
   selectedEntityText,
+  getStatus,
+  onApprove,
+  onReject,
+  onEdit,
+  onBulkApprove,
+  onBulkReject,
   className = "",
 }: EntityPanelProps) {
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
   const [searchText, setSearchText] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
+  // Build mentions with stable IDs
+  const mentionsWithIds = useMemo(
+    () => mentions.map((m, i) => ({ mention: m, targetId: mentionTargetId(m, i) })),
+    [mentions],
+  );
+
+  // Group by type
   const groups = useMemo(() => {
-    const typeMap = new Map<string, Map<string, GroupedEntity>>();
+    const typeMap = new Map<string, MentionWithId[]>();
 
-    for (const m of mentions) {
-      const type = m.mention_type;
+    for (const item of mentionsWithIds) {
+      const type = item.mention.mention_type;
       if (!typeMap.has(type)) {
-        typeMap.set(type, new Map());
+        typeMap.set(type, []);
       }
-      const entities = typeMap.get(type)!;
-      const normalized = m.text.trim();
-      if (!entities.has(normalized)) {
-        entities.set(normalized, {
-          text: normalized,
-          count: 0,
-          contexts: [],
-        });
-      }
-      const entity = entities.get(normalized)!;
-      entity.count += 1;
-      if (entity.contexts.length < 3) {
-        entity.contexts.push(m.context);
-      }
+      typeMap.get(type)!.push(item);
     }
 
     const result: MentionGroup[] = [];
-    for (const [type, entities] of typeMap) {
-      const sorted = Array.from(entities.values()).sort((a, b) => b.count - a.count);
-      result.push({
-        type,
-        entities: sorted,
-        totalCount: sorted.reduce((sum, e) => sum + e.count, 0),
-      });
+    for (const [type, items] of typeMap) {
+      result.push({ type, mentions: items, totalCount: items.length });
     }
 
     return result.sort((a, b) => b.totalCount - a.totalCount);
-  }, [mentions]);
+  }, [mentionsWithIds]);
 
+  // Apply search + status filters
   const filteredGroups = useMemo(() => {
-    if (!searchText) return groups;
     const q = searchText.toLowerCase();
     return groups
-      .map((g) => ({
-        ...g,
-        entities: g.entities.filter((e) => e.text.toLowerCase().includes(q)),
-      }))
-      .filter((g) => g.entities.length > 0);
-  }, [groups, searchText]);
+      .map((g) => {
+        let items = g.mentions;
+        if (searchText) {
+          items = items.filter((m) => m.mention.text.toLowerCase().includes(q));
+        }
+        if (statusFilter !== "all" && getStatus) {
+          items = items.filter((m) => getStatus(m.targetId) === statusFilter);
+        }
+        return { ...g, mentions: items, totalCount: items.length };
+      })
+      .filter((g) => g.mentions.length > 0);
+  }, [groups, searchText, statusFilter, getStatus]);
+
+  // Flat list of currently visible target IDs (for bulk actions + counts)
+  const visibleTargetIds = useMemo(
+    () => filteredGroups.flatMap((g) => g.mentions.map((m) => m.targetId)),
+    [filteredGroups],
+  );
+
+  // Counts for annotation controls
+  const counts = useMemo(() => {
+    if (!getStatus) return { approved: 0, rejected: 0, pending: 0, total: visibleTargetIds.length };
+    let approved = 0;
+    let rejected = 0;
+    let pending = 0;
+    for (const tid of visibleTargetIds) {
+      const s = getStatus(tid);
+      if (s === "approved") approved++;
+      else if (s === "rejected") rejected++;
+      else pending++;
+    }
+    return { approved, rejected, pending, total: visibleTargetIds.length };
+  }, [visibleTargetIds, getStatus]);
+
+  const handleBulkApprove = useCallback(() => {
+    if (!getStatus) return;
+    const pendingItems = visibleTargetIds
+      .filter((tid) => getStatus(tid) === "pending")
+      .map((tid) => ({ targetType: "mention" as const, targetId: tid }));
+    onBulkApprove?.(pendingItems);
+  }, [visibleTargetIds, getStatus, onBulkApprove]);
+
+  const handleBulkReject = useCallback(() => {
+    if (!getStatus) return;
+    const pendingItems = visibleTargetIds
+      .filter((tid) => getStatus(tid) === "pending")
+      .map((tid) => ({ targetType: "mention" as const, targetId: tid }));
+    onBulkReject?.(pendingItems);
+  }, [visibleTargetIds, getStatus, onBulkReject]);
 
   const toggleType = (type: string) => {
     setExpandedTypes((prev) => {
@@ -175,6 +223,17 @@ export default function EntityPanel({
         </div>
       </div>
 
+      {/* Annotation controls */}
+      {getStatus && (
+        <AnnotationControls
+          counts={counts}
+          filter={statusFilter}
+          onFilterChange={setStatusFilter}
+          onApproveAll={handleBulkApprove}
+          onRejectAll={handleBulkReject}
+        />
+      )}
+
       <ScrollArea className="flex-1">
         <div className="space-y-0.5 p-2">
           {filteredGroups.map((group) => {
@@ -207,9 +266,6 @@ export default function EntityPanel({
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={cn("text-[10px] opacity-70", config.color)}>
-                        {group.entities.length} unique
-                      </span>
                       <Badge
                         variant="secondary"
                         className="text-[10px] px-1.5 py-0 h-5 tabular-nums"
@@ -228,56 +284,27 @@ export default function EntityPanel({
                 </CollapsibleTrigger>
 
                 <CollapsibleContent>
-                  <div className="bg-surface-1/50 border-x border-b border-white/5 rounded-b-md overflow-hidden">
-                    {group.entities.map((entity) => (
-                      <Tooltip key={entity.text}>
-                        <TooltipTrigger asChild>
-                          <button
-                            className={cn(
-                              "w-full flex items-center justify-between px-3 py-1.5 hover:bg-white/[0.04] transition-colors text-left group",
-                              selectedEntityText?.toLowerCase() === entity.text.toLowerCase() &&
-                                "bg-white/[0.08] ring-1 ring-inset ring-white/10",
-                            )}
-                            onClick={() => {
-                              onEntityClick?.(entity.text);
-                              if (onEntitySelect) {
-                                onEntitySelect(
-                                  selectedEntityText?.toLowerCase() === entity.text.toLowerCase()
-                                    ? null
-                                    : entity.text,
-                                );
-                              }
-                            }}
-                          >
-                            <span
-                              className={cn(
-                                "text-sm truncate mr-2 transition-colors",
-                                selectedEntityText?.toLowerCase() === entity.text.toLowerCase()
-                                  ? "text-zinc-100 font-medium"
-                                  : "text-zinc-300 group-hover:text-zinc-100",
-                              )}
-                            >
-                              {entity.text}
-                            </span>
-                            {entity.count > 1 && (
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] px-1 py-0 h-4 tabular-nums flex-shrink-0"
-                              >
-                                x{entity.count}
-                              </Badge>
-                            )}
-                          </button>
-                        </TooltipTrigger>
-                        {entity.contexts.length > 0 && (
-                          <TooltipContent side="left" className="max-w-xs">
-                            <p className="text-xs font-medium mb-1">Context:</p>
-                            <p className="text-xs text-zinc-400 line-clamp-3">
-                              ...{entity.contexts[0]}...
-                            </p>
-                          </TooltipContent>
-                        )}
-                      </Tooltip>
+                  <div className="bg-surface-1/50 border-x border-b border-white/5 rounded-b-md overflow-hidden divide-y divide-white/[0.03]">
+                    {group.mentions.map((item) => (
+                      <MentionCard
+                        key={item.targetId}
+                        mention={item.mention}
+                        targetId={item.targetId}
+                        status={getStatus ? getStatus(item.targetId) : "pending"}
+                        onApprove={onApprove}
+                        onReject={onReject}
+                        onEdit={onEdit}
+                        onClick={(m) => {
+                          onEntityClick?.(m.text);
+                          if (onEntitySelect) {
+                            onEntitySelect(
+                              selectedEntityText?.toLowerCase() === m.text.toLowerCase()
+                                ? null
+                                : m.text,
+                            );
+                          }
+                        }}
+                      />
                     ))}
                   </div>
                 </CollapsibleContent>

@@ -102,3 +102,18 @@ export interface TimelineMarker {
   type: "entity" | "assertion";
   category?: string;
 }
+
+/** Human annotation (approve/reject/edit/flag) on a pipeline output. */
+export interface Annotation {
+  annotation_id: string;
+  document_id: string;
+  target_type: "mention" | "assertion" | "segment" | "speaker";
+  target_id: string;
+  action: "approve" | "reject" | "edit" | "flag";
+  edits: Record<string, unknown>;
+  reviewer: string;
+  notes: string;
+  created_at: string | null;
+}
+
+export type AnnotationStatus = "pending" | "approved" | "rejected";
