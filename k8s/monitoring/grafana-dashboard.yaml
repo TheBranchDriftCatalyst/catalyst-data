@@ -437,7 +437,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (model, token_type) (increase(catalyst_llm_tokens_total[$__range]))",
+              "expr": "sum by (model, token_type) (increase(catalyst_llm_tokens[$__range]))",
               "legendFormat": "{{ model }} ({{ token_type }})",
               "refId": "A"
             }
@@ -3859,7 +3859,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (model) (rate(catalyst_llm_tokens_cached_total[$__rate_interval]))",
+              "expr": "sum by (model) (rate(catalyst_llm_tokens_cached[$__rate_interval]))",
               "legendFormat": "{{ model }}",
               "refId": "A"
             }

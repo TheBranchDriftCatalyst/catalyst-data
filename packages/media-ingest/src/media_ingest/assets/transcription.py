@@ -42,8 +42,8 @@ WHISPER_K8S_CONFIG = {
         "container_config": {
             **NFS_VOLUMES_CONFIG["dagster-k8s/config"]["container_config"],
             "resources": {
-                "requests": {"cpu": "1", "memory": "8Gi", "gpu.intel.com/i915": "1"},
-                "limits": {"cpu": "2", "memory": "16Gi", "gpu.intel.com/i915": "1"},
+                "requests": {"cpu": "1", "memory": "12Gi", "gpu.intel.com/i915": "1"},
+                "limits": {"cpu": "2", "memory": "24Gi", "gpu.intel.com/i915": "1"},
             },
         },
     },
