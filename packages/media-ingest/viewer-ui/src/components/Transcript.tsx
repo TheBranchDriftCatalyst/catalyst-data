@@ -14,6 +14,18 @@ interface TranscriptProps {
   className?: string;
   /** Resolve a speaker label to its display name. */
   resolveSpeaker?: (label: string | undefined) => string;
+  /** Ref forwarded from useTranscriptScroll — attached to the scrollable inner container. */
+  transcriptContainerRef?: React.RefObject<HTMLDivElement | null>;
+  /** When >= 0, the segment at this index receives a temporary scroll-target highlight. */
+  scrollHighlightIndex?: number;
+  /**
+   * When true, only the segments present in `segments` are shown (the caller
+   * has already filtered). A thin divider is rendered when consecutive original
+   * indices are non-contiguous.
+   */
+  isFiltered?: boolean;
+  /** Original indices of each segment in the unfiltered list (parallel to `segments`). */
+  filteredIndices?: number[];
 }
 
 // Pre-built border classes to avoid dynamic generation
@@ -47,10 +59,15 @@ export default function Transcript({
   highlightText,
   className = "",
   resolveSpeaker,
+  transcriptContainerRef,
+  scrollHighlightIndex = -1,
+  isFiltered = false,
+  filteredIndices,
 }: TranscriptProps) {
   const displayName = (label: string | undefined) =>
     resolveSpeaker ? resolveSpeaker(label) : (label ?? "Unknown");
-  const containerRef = useRef<HTMLDivElement>(null);
+  const internalContainerRef = useRef<HTMLDivElement>(null);
+  const containerRef = transcriptContainerRef ?? internalContainerRef;
   const activeSegRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to active segment
@@ -94,20 +111,31 @@ export default function Transcript({
 
   // Group consecutive segments by speaker for visual grouping
   let lastSpeaker: string | null = null;
+  let lastOrigIdx = -1;
 
   return (
     <ScrollArea className={className}>
       <div ref={containerRef} className="space-y-1 p-3">
         {segments.map((seg, segIdx) => {
-          const isActive = segIdx === activeSegmentIndex;
+          // Map back to the original index for data attributes and active matching
+          const origIdx = filteredIndices ? filteredIndices[segIdx]! : segIdx;
+          const isActive = origIdx === activeSegmentIndex;
+          const isScrollTarget = origIdx === scrollHighlightIndex;
           const idx = speakerIndex(seg.speaker);
           const borderClass = BORDER_CLASSES[idx]!;
           const textClass = TEXT_CLASSES[idx]!;
           const showSpeakerLabel = seg.speaker !== lastSpeaker;
           lastSpeaker = seg.speaker ?? null;
 
+          // Show a collapsed divider when filtered and indices are non-contiguous
+          const showCollapsedDivider = isFiltered && lastOrigIdx >= 0 && origIdx - lastOrigIdx > 1;
+          lastOrigIdx = origIdx;
+
           return (
-            <div key={segIdx}>
+            <div key={origIdx}>
+              {/* Collapsed segment gap indicator */}
+              {showCollapsedDivider && <div className="collapsed-segment-divider" />}
+
               {/* Speaker label when speaker changes */}
               {showSpeakerLabel && seg.speaker && (
                 <div
@@ -126,11 +154,13 @@ export default function Transcript({
               {/* Segment block */}
               <div
                 ref={isActive ? activeSegRef : undefined}
+                data-segment-index={origIdx}
                 className={cn(
                   "px-3 py-1.5 rounded-r-md cursor-pointer transition-all duration-200",
                   "border-l-2",
                   borderClass,
                   isActive ? "bg-white/[0.08] segment-active" : "hover:bg-white/[0.04]",
+                  isScrollTarget && "scroll-target-highlight",
                 )}
                 onClick={() => handleSegmentClick(seg.start)}
                 role="button"
@@ -195,8 +225,8 @@ function WordSpan({
   return (
     <span
       className={cn(
-        "cursor-pointer transition-colors duration-100 rounded-sm",
-        isActive && "bg-accent text-zinc-950 font-medium px-0.5",
+        "karaoke-word cursor-pointer rounded-sm",
+        isActive && "karaoke-word-active font-medium px-0.5",
         isHighlighted && !isActive && "bg-amber-900/50 text-amber-200",
         !isActive && !isHighlighted && "text-zinc-300 hover:text-zinc-100",
       )}

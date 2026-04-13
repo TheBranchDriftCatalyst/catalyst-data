@@ -17,6 +17,7 @@ import { useDocumentData } from "@/hooks/useDocumentData";
 import { useMediaSync } from "@/hooks/useMediaSync";
 import { useMarkerData } from "@/hooks/useMarkerData";
 import { useSpeakerNames } from "@/hooks/useSpeakerNames";
+import { useTranscriptScroll } from "@/hooks/useTranscriptScroll";
 import MediaPlayer, { type MediaPlayerHandle } from "@/components/MediaPlayer";
 import SpeakerTimeline from "@/components/SpeakerTimeline";
 import Transcript from "@/components/Transcript";
@@ -61,6 +62,17 @@ export default function PlayerPage() {
 
   const { activeSegmentIndex, activeWordIndex } = useMediaSync(segments, currentTime);
 
+  const {
+    scrollToTimestamp,
+    filterSegments,
+    clearFilter,
+    filteredSegments,
+    filteredIndices,
+    isFiltered,
+    transcriptRef,
+    scrollHighlightIndex,
+  } = useTranscriptScroll({ segments });
+
   // Compute timeline markers from mentions/assertions + selection state
   const markers = useMarkerData({
     mentions,
@@ -87,11 +99,33 @@ export default function PlayerPage() {
     setHighlightText((prev) => (prev === text ? undefined : text));
   }, []);
 
-  const handleEntitySelect = useCallback((entityText: string | null) => {
-    setSelectedEntityText(entityText);
-    // Clear assertion selection when selecting an entity
-    if (entityText) setSelectedAssertionId(null);
-  }, []);
+  const handleEntitySelect = useCallback(
+    (entityText: string | null) => {
+      setSelectedEntityText(entityText);
+      // Clear assertion selection when selecting an entity
+      if (entityText) {
+        setSelectedAssertionId(null);
+
+        // Filter transcript to segments containing this entity's mentions
+        const matchingIndices = new Set<number>();
+        const lowerText = entityText.toLowerCase();
+        for (const m of mentions) {
+          if (m.text.trim().toLowerCase() !== lowerText) continue;
+          // Try to resolve the segment index from the mention's chunk_id
+          const chunkMatch = /_chunk_(\d+)$/.exec(m.provenance?.chunk_id ?? m.chunk_id ?? "");
+          if (chunkMatch) {
+            matchingIndices.add(parseInt(chunkMatch[1]!, 10));
+          }
+        }
+        if (matchingIndices.size > 0) {
+          filterSegments(Array.from(matchingIndices).sort((a, b) => a - b));
+        }
+      } else {
+        clearFilter();
+      }
+    },
+    [mentions, filterSegments, clearFilter],
+  );
 
   const handleAssertionSelect = useCallback((assertionId: string | null) => {
     setSelectedAssertionId(assertionId);
@@ -102,8 +136,9 @@ export default function PlayerPage() {
   const handleMarkerClick = useCallback(
     (marker: TimelineMarker) => {
       handleSeek(marker.timestamp);
+      scrollToTimestamp(marker.timestamp);
     },
-    [handleSeek],
+    [handleSeek, scrollToTimestamp],
   );
 
   // Loading state
@@ -212,10 +247,10 @@ export default function PlayerPage() {
           </div>
         )}
 
-        {/* Main content area — three columns */}
-        <div className="flex-1 flex min-h-0 overflow-hidden">
+        {/* Main content area — three columns (CSS grid) */}
+        <div className="flex-1 player-grid">
           {/* Left column: media player + timeline */}
-          <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 border-r border-white/5">
+          <div className="flex flex-col min-h-0 border-r border-white/5">
             {/* Media player */}
             <div className="flex-shrink-0 p-4 pb-2">
               <MediaPlayer
@@ -258,28 +293,46 @@ export default function PlayerPage() {
           </div>
 
           {/* Center column: transcript */}
-          <div className="flex-1 min-w-[300px] flex flex-col min-h-0 border-r border-white/5">
+          <div className="flex flex-col min-h-0 border-r border-white/5">
             <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between flex-shrink-0">
               <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
                 Transcript
               </h2>
-              {segments.length > 0 && (
-                <span className="text-[10px] text-zinc-600">{segments.length} segments</span>
-              )}
+              <div className="flex items-center gap-2">
+                {isFiltered && (
+                  <button
+                    onClick={clearFilter}
+                    className="text-[10px] text-accent hover:text-accent/80 transition-colors"
+                  >
+                    Clear filter
+                  </button>
+                )}
+                {segments.length > 0 && (
+                  <span className="text-[10px] text-zinc-600">
+                    {isFiltered
+                      ? `${filteredSegments.length} / ${segments.length} segments`
+                      : `${segments.length} segments`}
+                  </span>
+                )}
+              </div>
             </div>
             <Transcript
-              segments={segments}
+              segments={filteredSegments}
               activeSegmentIndex={activeSegmentIndex}
               activeWordIndex={activeWordIndex}
               onSeek={handleSeek}
               highlightText={highlightText}
               resolveSpeaker={resolveSpeaker}
+              transcriptContainerRef={transcriptRef}
+              scrollHighlightIndex={scrollHighlightIndex}
+              isFiltered={isFiltered}
+              filteredIndices={filteredIndices}
               className="flex-1 min-h-0"
             />
           </div>
 
           {/* Right column: Entities / Assertions tabbed panel */}
-          <div className="w-[320px] xl:w-[380px] flex flex-col min-h-0 flex-shrink-0">
+          <div className="flex flex-col min-h-0">
             <Tabs defaultValue="entities" className="flex flex-col h-full">
               <TabsList className="flex-shrink-0 w-full rounded-none border-b border-white/5 bg-surface-1 h-10 px-1">
                 <TabsTrigger

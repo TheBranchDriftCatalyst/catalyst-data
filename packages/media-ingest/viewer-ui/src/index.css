@@ -59,6 +59,84 @@
   animation: segment-pulse 2s ease-in-out infinite;
 }
 
+/* ── Karaoke word cursor ─────────────────────────────────────────── */
+
+/* Base word style — position: relative so the underline pseudo-element can anchor */
+.karaoke-word {
+  position: relative;
+  display: inline;
+  transition: color 0.12s ease-out;
+}
+
+/* Sliding underline + glow on the active word */
+.karaoke-word-active {
+  color: var(--color-accent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+.karaoke-word-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--color-accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent);
+  animation: karaoke-underline-in 0.15s ease-out forwards;
+}
+
+@keyframes karaoke-underline-in {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+/* ── Scroll-target flash ─────────────────────────────────────────── */
+@keyframes scroll-target-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.scroll-target-highlight {
+  animation: scroll-target-flash 1.5s ease-out forwards;
+}
+
+/* ── Collapsed segment divider (filter mode) ─────────────────────── */
+.collapsed-segment-divider {
+  height: 2px;
+  margin: 4px 12px;
+  border-radius: 1px;
+  background: var(--color-surface-3);
+  opacity: 0.4;
+}
+
+/* ── 3-column grid layout ────────────────────────────────────────── */
+.player-grid {
+  display: grid;
+  grid-template-columns: minmax(400px, 45%) minmax(300px, 1fr) minmax(280px, 380px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Stack panels on narrower viewports */
+@media (max-width: 1024px) {
+  .player-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+    overflow-y: auto;
+  }
+}
+
 /* Loading skeleton shimmer */
 @keyframes shimmer {
   0% {
