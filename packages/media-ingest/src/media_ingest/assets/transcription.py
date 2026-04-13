@@ -75,6 +75,133 @@ def extract_audio_to_wav(audio_path: str) -> str:
     return wav_path
 
 
+# ── Audio chunking for long files ──────────────────────────────────────────
+
+# Maximum chunk duration in seconds. 30 minutes keeps peak memory under ~4GB
+# per chunk (16kHz mono float32 = ~115MB raw + model overhead).
+_CHUNK_DURATION_S = 1800
+# Overlap between chunks to avoid cutting words at boundaries.
+# Segments in the overlap zone are deduplicated by timestamp.
+_CHUNK_OVERLAP_S = 5
+
+
+def _get_audio_duration(audio_path: str) -> float:
+    """Get audio duration in seconds via ffprobe."""
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            audio_path,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return float(result.stdout.strip())
+
+
+def _split_audio_chunks(
+    audio_path: str, chunk_duration: int = _CHUNK_DURATION_S, overlap: int = _CHUNK_OVERLAP_S
+) -> list[tuple[str, float]]:
+    """Split audio into fixed-duration WAV chunks via ffmpeg.
+
+    Returns list of (chunk_wav_path, start_offset_seconds).
+    Each chunk overlaps the next by `overlap` seconds to avoid
+    cutting words at boundaries.
+    """
+    total_duration = _get_audio_duration(audio_path)
+    if total_duration <= chunk_duration + overlap:
+        # Short enough — no splitting needed
+        wav = extract_audio_to_wav(audio_path)
+        return [(wav, 0.0)]
+
+    chunks = []
+    offset = 0.0
+    while offset < total_duration:
+        chunk_path = tempfile.mktemp(suffix=f"_chunk{len(chunks)}.wav")
+        # Include overlap at the start (except first chunk)
+        actual_start = max(0, offset - overlap) if offset > 0 else 0
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-ss",
+                str(actual_start),
+                "-i",
+                audio_path,
+                "-t",
+                str(chunk_duration + overlap),
+                "-vn",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-c:a",
+                "pcm_s16le",
+                chunk_path,
+            ],
+            capture_output=True,
+            check=True,
+            timeout=300,
+        )
+        chunks.append((chunk_path, actual_start))
+        offset += chunk_duration
+
+    logger.info(
+        "Split %.0fs audio into %d chunks of %ds (+%ds overlap)",
+        total_duration,
+        len(chunks),
+        chunk_duration,
+        overlap,
+    )
+    return chunks
+
+
+def _merge_chunked_segments(all_chunk_results: list[tuple[dict, float]]) -> dict:
+    """Merge transcription results from multiple chunks into a single result.
+
+    Deduplicates segments in the overlap zone by keeping the segment from
+    whichever chunk it falls more centrally in.
+    """
+    merged_segments = []
+    seen_end = 0.0
+
+    for result, offset in all_chunk_results:
+        for seg in result.get("segments", []):
+            # Adjust timestamps by chunk offset
+            adj_start = seg["start"] + offset
+            adj_end = seg["end"] + offset
+
+            # Skip segments that overlap with already-merged content
+            if adj_start < seen_end - 0.5:
+                continue
+
+            adj_seg = {**seg, "start": adj_start, "end": adj_end}
+            if seg.get("words"):
+                adj_seg["words"] = [{**w, "start": w["start"] + offset, "end": w["end"] + offset} for w in seg["words"]]
+            merged_segments.append(adj_seg)
+            seen_end = adj_end
+
+    # Use metadata from first chunk
+    first_result = all_chunk_results[0][0] if all_chunk_results else {}
+    total_duration = sum(r.get("duration_s", 0) for r, _ in all_chunk_results)
+    # Actual duration is from last segment end, not sum of chunks (overlaps)
+    if merged_segments:
+        total_duration = merged_segments[-1]["end"]
+
+    return {
+        "segments": merged_segments,
+        "language": first_result.get("language", "en"),
+        "language_probability": first_result.get("language_probability", 0.0),
+        "duration_s": total_duration,
+    }
+
+
 # ── Backend: faster-whisper ──────────────────────────────────────────────────
 
 
@@ -185,17 +312,14 @@ def _estimate_word_timestamps(text: str, seg_start: float, seg_end: float) -> li
     return words
 
 
-def _transcribe_openvino(pipe, audio_path: str) -> dict:
+def _transcribe_openvino_chunk(pipe, wav_path: str) -> dict:
+    """Transcribe a single WAV chunk with OpenVINO."""
     import soundfile as sf
 
-    wav_path = extract_audio_to_wav(audio_path)
-    try:
-        raw_speech, sr = sf.read(wav_path, dtype="float32")
-        if raw_speech.ndim > 1:
-            raw_speech = raw_speech.mean(axis=1)
-        duration_s = len(raw_speech) / sr
-    finally:
-        os.unlink(wav_path)
+    raw_speech, sr = sf.read(wav_path, dtype="float32")
+    if raw_speech.ndim > 1:
+        raw_speech = raw_speech.mean(axis=1)
+    duration_s = len(raw_speech) / sr
 
     result = pipe.generate(
         raw_speech.tolist(),
@@ -212,19 +336,13 @@ def _transcribe_openvino(pipe, audio_path: str) -> dict:
                 "end": chunk.end_ts,
                 "text": text,
             }
-            # OpenVINO GenAI WhisperPipeline doesn't produce word-level
-            # timestamps, so estimate them from segment boundaries.
             words = _estimate_word_timestamps(text, chunk.start_ts, chunk.end_ts)
             if words:
                 seg["words"] = words
             segments_list.append(seg)
     else:
         text = str(result).strip()
-        seg = {
-            "start": 0.0,
-            "end": duration_s,
-            "text": text,
-        }
+        seg = {"start": 0.0, "end": duration_s, "text": text}
         words = _estimate_word_timestamps(text, 0.0, duration_s)
         if words:
             seg["words"] = words
@@ -244,6 +362,29 @@ def _transcribe_openvino(pipe, audio_path: str) -> dict:
         "language_probability": language_probability,
         "duration_s": duration_s,
     }
+
+
+def _transcribe_openvino(pipe, audio_path: str) -> dict:
+    """Transcribe audio with OpenVINO, chunking long files to bound memory."""
+    chunks = _split_audio_chunks(audio_path)
+    try:
+        if len(chunks) == 1:
+            # Short file — single chunk, no merging needed
+            wav_path, offset = chunks[0]
+            return _transcribe_openvino_chunk(pipe, wav_path)
+
+        # Long file — transcribe each chunk and merge
+        chunk_results = []
+        for i, (wav_path, offset) in enumerate(chunks):
+            logger.info("Transcribing chunk %d/%d (offset=%.0fs)", i + 1, len(chunks), offset)
+            result = _transcribe_openvino_chunk(pipe, wav_path)
+            chunk_results.append((result, offset))
+
+        return _merge_chunked_segments(chunk_results)
+    finally:
+        for wav_path, _ in chunks:
+            if os.path.exists(wav_path):
+                os.unlink(wav_path)
 
 
 # ── Dagster asset ────────────────────────────────────────────────────────────

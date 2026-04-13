@@ -165,7 +165,7 @@ def configure_logging(
     root_logger.handlers.clear()
 
     # Create handler with appropriate formatter
-    handler = logging.StreamHandler(sys.stderr)
+    handler = logging.StreamHandler(sys.stdout)
     if log_format == "json":
         handler.setFormatter(JsonFormatter())
     else:
