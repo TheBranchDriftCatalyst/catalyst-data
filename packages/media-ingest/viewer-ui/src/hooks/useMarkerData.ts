@@ -47,9 +47,9 @@ function buildChunkTimestampMap(
   return map;
 }
 
-/** Extract chunk index from a chunk_id like "doc-abc_chunk_3". */
+/** Extract chunk index from a chunk_id like "doc-abc_chunk_3" or "doc-abc:chunk-3". */
 function parseChunkIndex(chunkId: string): number | null {
-  const match = /_chunk_(\d+)$/.exec(chunkId);
+  const match = /[_:]chunk[_-](\d+)$/.exec(chunkId);
   if (!match) return null;
   return parseInt(match[1]!, 10);
 }

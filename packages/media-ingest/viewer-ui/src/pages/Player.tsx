@@ -140,11 +140,32 @@ export default function PlayerPage() {
     [scrollToTimestamp],
   );
 
-  const handleAssertionSelect = useCallback((assertionId: string | null) => {
-    setSelectedAssertionId(assertionId);
-    // Clear entity selection when selecting an assertion
-    if (assertionId) setSelectedEntityText(null);
-  }, []);
+  const handleAssertionSelect = useCallback(
+    (assertionId: string | null) => {
+      setSelectedAssertionId(assertionId);
+      // Clear entity selection when selecting an assertion
+      if (assertionId) {
+        setSelectedEntityText(null);
+        // Seek + scroll to the assertion's temporal position
+        const trans = diarization ?? transcription ?? null;
+        const a = assertions.find((x) => {
+          const aid = x.assertion_id ?? `${x.subject_text}_${x.predicate}_${x.object_text}`;
+          return aid === assertionId;
+        });
+        if (a?.provenance?.chunk_id) {
+          const match = /[_:]chunk[_-](\d+)$/.exec(a.provenance.chunk_id);
+          const idx = match ? parseInt(match[1]!, 10) : null;
+          const seg = idx != null ? trans?.segments[idx] : null;
+          if (seg) {
+            playerRef.current?.seek(seg.start);
+            setCurrentTime(seg.start);
+            scrollToTimestamp(seg.start);
+          }
+        }
+      }
+    },
+    [assertions, diarization, transcription, scrollToTimestamp],
+  );
 
   const handleMentionApprove = useCallback(
     (targetId: string) => approve("mention", targetId),
