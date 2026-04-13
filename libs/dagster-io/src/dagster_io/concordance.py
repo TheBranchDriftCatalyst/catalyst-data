@@ -172,18 +172,26 @@ class ConcordanceEngine:
             # Build unique surface forms for pairwise comparison
             surfaces = list(normed.keys())
 
-            # Pass 2: Substring containment
+            # Pass 2: Substring containment (with guards)
+            # Uses strict min_shared_tokens (no adaptive reduction for
+            # single-token names) to prevent "Donald" bridging "Donald Trump"
+            # and "Donald Rumsfeld" via transitive closure. The platinum-layer
+            # CrossSourceAligner uses adaptive min(2, len_shorter) instead.
             for i, a in enumerate(surfaces):
-                tokens_a = _tokenize(a)
                 for b in surfaces[i + 1 :]:
-                    tokens_b = _tokenize(b)
-                    shared = len(tokens_a & tokens_b)
+                    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+                    if len(shorter) < 4:
+                        continue
+                    tokens_shorter = _tokenize(shorter)
+                    tokens_longer = _tokenize(longer)
+                    shared = len(tokens_shorter & tokens_longer)
                     if shared < self.min_shared_tokens:
                         continue
+                    ratio = len(shorter) / len(longer) if len(longer) > 0 else 1.0
+                    if ratio < 0.4:
+                        continue
                     if a in b or b in a:
-                        rep_a = normed[a][0].mention_id
-                        rep_b = normed[b][0].mention_id
-                        uf.union(rep_a, rep_b)
+                        uf.union(normed[a][0].mention_id, normed[b][0].mention_id)
 
             # Pass 3: Jaccard overlap
             for i, a in enumerate(surfaces):
@@ -196,15 +204,26 @@ class ConcordanceEngine:
                     if _jaccard(tokens_a, tokens_b) > self.jaccard_threshold:
                         uf.union(normed[a][0].mention_id, normed[b][0].mention_id)
 
-            # Pass 4: Embedding cosine similarity (optional)
+            # Pass 4: Embedding cosine similarity (with guards matching CrossSourceAligner)
             if embeddings:
                 for i, a in enumerate(surfaces):
                     emb_a = embeddings.get(a)
                     if emb_a is None:
                         continue
+                    tokens_a = _tokenize(a)
                     for b in surfaces[i + 1 :]:
                         emb_b = embeddings.get(b)
                         if emb_b is None:
+                            continue
+                        tokens_b = _tokenize(b)
+                        shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+                        if len(shorter) < 4:
+                            continue
+                        shared = len(tokens_a & tokens_b)
+                        if shared < self.min_shared_tokens:
+                            continue
+                        ratio = len(shorter) / len(longer) if len(longer) > 0 else 1.0
+                        if ratio < 0.4:
                             continue
                         if _cosine_similarity(emb_a, emb_b) > self.cosine_threshold:
                             uf.union(normed[a][0].mention_id, normed[b][0].mention_id)
@@ -409,18 +428,26 @@ class CrossSourceAligner:
                     break
 
         # Signal 3: Jaccard token overlap — use actual coefficient (continuous)
+        # Guard: require >= 2 shared tokens to prevent single-token names
+        # (e.g. "Donald") from producing meaningful jaccard with multi-token
+        # names (jaccard({"donald"}, {"donald","trump"}) = 0.5 is noise).
         tokens_a = set()
         for n in all_names_a:
             tokens_a |= _tokenize(n)
         tokens_b = set()
         for n in all_names_b:
             tokens_b |= _tokenize(n)
+        shared_tokens = len(tokens_a & tokens_b)
         jac = _jaccard(tokens_a, tokens_b)
-        if jac >= 0.5:
+        if jac >= 0.5 and shared_tokens >= 2:
             signals.append((jac, "jaccard"))  # continuous value, not fixed
 
         # Signal 4: Embedding cosine similarity — use actual cosine (continuous)
-        if a.embedding and b.embedding:
+        # Guard: require >= 2 shared tokens. Embedding similarity alone is
+        # unreliable for names with low token overlap — "Donald Trump" and
+        # "Donald Rumsfeld" can have >0.80 cosine similarity due to shared
+        # political context, but only share 1 token ("donald").
+        if a.embedding and b.embedding and shared_tokens >= 2:
             cos = _cosine_similarity(a.embedding, b.embedding)
             if cos > 0.80:
                 signals.append((cos, "embedding"))  # continuous value, not fixed
