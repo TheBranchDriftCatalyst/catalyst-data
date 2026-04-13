@@ -120,10 +120,35 @@
   opacity: 0.4;
 }
 
-/* ── 3-column grid layout ────────────────────────────────────────── */
+/* ── Resizable bottom panel ─────────────────────────────────────── */
+.resizable-panel-handle {
+  position: relative;
+  height: 8px;
+  flex-shrink: 0;
+  border-bottom: 1px solid color-mix(in srgb, white 5%, transparent);
+}
+
+.resizable-panel-handle::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 3px;
+  border-radius: 1.5px;
+  background: var(--color-surface-3);
+  transition: background 0.15s;
+}
+
+.resizable-panel-handle:hover::before {
+  background: #52525b;
+}
+
+/* ── 2-column + bottom dock layout ──────────────────────────────── */
 .player-grid {
   display: grid;
-  grid-template-columns: minmax(400px, 45%) minmax(300px, 1fr) minmax(280px, 380px);
+  grid-template-columns: minmax(400px, 45%) minmax(300px, 1fr);
   min-height: 0;
   overflow: hidden;
 }
@@ -132,7 +157,7 @@
 @media (max-width: 1024px) {
   .player-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto 1fr;
     overflow-y: auto;
   }
 }

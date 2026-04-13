@@ -26,6 +26,7 @@ import Transcript from "@/components/Transcript";
 import SpeakerBreakdown from "@/components/SpeakerBreakdown";
 import EntityPanel from "@/components/EntityPanel";
 import AssertionPanel from "@/components/AssertionPanel";
+import ResizablePanel from "@/components/ResizablePanel";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PlayerSkeleton } from "@/components/Skeleton";
 import { formatTime } from "@/lib/speakers";
@@ -326,78 +327,81 @@ export default function PlayerPage() {
           </div>
         )}
 
-        {/* Main content area — three columns */}
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          {/* Left column: media player + timeline */}
-          <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 border-r border-white/5">
-            {/* Media player */}
-            <div className="flex-shrink-0 p-4 pb-2">
-              <MediaPlayer
-                ref={playerRef}
-                document={doc}
-                markers={markers}
-                onMarkerClick={handleMarkerClick}
-                onTimeUpdate={handleTimeUpdate}
-                onDurationChange={handleDurationChange}
-                className="max-h-[50vh]"
-              />
+        {/* Main content area — 2-column top + bottom dock */}
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          {/* Top section: 2-column layout */}
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            {/* Left column: media player + timeline + speaker breakdown */}
+            <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 border-r border-white/5">
+              {/* Media player */}
+              <div className="flex-shrink-0 p-4 pb-2">
+                <MediaPlayer
+                  ref={playerRef}
+                  document={doc}
+                  markers={markers}
+                  onMarkerClick={handleMarkerClick}
+                  onTimeUpdate={handleTimeUpdate}
+                  onDurationChange={handleDurationChange}
+                  className="max-h-[50vh]"
+                />
+              </div>
+
+              {/* Speaker timeline */}
+              <div className="flex-shrink-0 px-4 pb-3">
+                <SpeakerTimeline
+                  segments={segments}
+                  duration={effectiveDuration}
+                  currentTime={currentTime}
+                  speakers={speakers}
+                  onSeek={handleSeek}
+                  resolveSpeaker={resolveSpeaker}
+                />
+              </div>
+
+              <Separator />
+
+              {/* Speaker breakdown */}
+              <div className="flex-1 min-h-0 overflow-y-auto p-4">
+                <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
+                  Speaker Breakdown
+                </h3>
+                <SpeakerBreakdown
+                  segments={segments}
+                  speakers={speakers}
+                  duration={effectiveDuration}
+                  speakerNames={speakerNames}
+                />
+              </div>
             </div>
 
-            {/* Speaker timeline */}
-            <div className="flex-shrink-0 px-4 pb-3">
-              <SpeakerTimeline
+            {/* Right column: transcript (full remaining width) */}
+            <div className="flex-1 min-w-[300px] flex flex-col min-h-0">
+              <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between flex-shrink-0">
+                <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                  Transcript
+                </h2>
+                {segments.length > 0 && (
+                  <span className="text-[10px] text-zinc-600">{segments.length} segments</span>
+                )}
+              </div>
+              <Transcript
                 segments={segments}
-                duration={effectiveDuration}
-                currentTime={currentTime}
-                speakers={speakers}
+                activeSegmentIndex={activeSegmentIndex}
+                activeWordIndex={activeWordIndex}
                 onSeek={handleSeek}
+                highlightText={highlightText}
                 resolveSpeaker={resolveSpeaker}
-              />
-            </div>
-
-            <Separator />
-
-            {/* Speaker breakdown */}
-            <div className="flex-1 min-h-0 overflow-y-auto p-4">
-              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
-                Speaker Breakdown
-              </h3>
-              <SpeakerBreakdown
-                segments={segments}
-                speakers={speakers}
-                duration={effectiveDuration}
-                speakerNames={speakerNames}
+                transcriptContainerRef={transcriptRef}
+                scrollHighlightIndex={scrollHighlightIndex}
+                className="flex-1 min-h-0"
               />
             </div>
           </div>
 
-          {/* Center column: transcript */}
-          <div className="flex-1 min-w-[300px] flex flex-col min-h-0 border-r border-white/5">
-            <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between flex-shrink-0">
-              <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                Transcript
-              </h2>
-              {segments.length > 0 && (
-                <span className="text-[10px] text-zinc-600">{segments.length} segments</span>
-              )}
-            </div>
-            <Transcript
-              segments={segments}
-              activeSegmentIndex={activeSegmentIndex}
-              activeWordIndex={activeWordIndex}
-              onSeek={handleSeek}
-              highlightText={highlightText}
-              resolveSpeaker={resolveSpeaker}
-              transcriptContainerRef={transcriptRef}
-              scrollHighlightIndex={scrollHighlightIndex}
-              className="flex-1 min-h-0"
-            />
-          </div>
-
-          {/* Right column: Entities / Assertions tabbed panel */}
-          <div className="w-[320px] xl:w-[380px] flex flex-col min-h-0 flex-shrink-0">
+          {/* Bottom dock: Entities / Assertions / Speakers tabbed panel */}
+          <ResizablePanel defaultHeight={280} minHeight={120} maxHeight={600}>
             <Tabs defaultValue="entities" className="flex flex-col h-full">
-              <TabsList className="flex-shrink-0 w-full rounded-none border-b border-white/5 bg-surface-1 h-10 px-1">
+              <TabsList className="flex-shrink-0 w-full rounded-none border-b border-white/5 bg-surface-1 h-9 px-1">
                 <TabsTrigger
                   value="entities"
                   className="flex-1 text-xs data-[state=active]:bg-surface-2"
@@ -483,7 +487,7 @@ export default function PlayerPage() {
                 />
               </TabsContent>
             </Tabs>
-          </div>
+          </ResizablePanel>
         </div>
       </div>
     </ErrorBoundary>
