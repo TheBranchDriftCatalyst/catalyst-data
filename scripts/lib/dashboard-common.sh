@@ -1,1 +1,0 @@
-../../../talos-homelab/scripts/lib/dashboard-common.sh
