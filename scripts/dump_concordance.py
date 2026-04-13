@@ -80,10 +80,10 @@ def query_via_psycopg(sql: str, host: str, port: int, dbname: str, user: str, pa
 def dump_audit(query_fn, output_dir: Path):
     """Single denormalized CSV — one row per entity, everything inline."""
 
-    # 1. Load all entities
+    # 1. Load all entities (including source_candidate_ids for edge→entity mapping)
     entities = query_fn("""
         SELECT canonical_id, canonical_name, entity_type, aliases,
-               mention_count, source_code_locations
+               mention_count, source_code_locations, source_candidate_ids
         FROM canonical_entities
         ORDER BY mention_count DESC
     """)
@@ -96,8 +96,7 @@ def dump_audit(query_fn, output_dir: Path):
         FROM alignment_edges
     """)
 
-    # 3. Build edge lookup: entity_id → list of (partner_name, type, score, evidence)
-    entity_by_id = {e["canonical_id"]: e for e in entities}
+    # 3. Build edge lookup keyed by canonical_id
 
     # Map candidate_ids → canonical entity via source_candidate_ids
     candidate_to_canonical: dict[str, dict] = {}
@@ -105,18 +104,20 @@ def dump_audit(query_fn, output_dir: Path):
         for cid in ent.get("source_candidate_ids") or []:
             candidate_to_canonical[cid] = ent
 
+    # entity_edges keyed by CANONICAL_ID (not candidate_id) so the
+    # flat-row loop can look up edges by the entity's canonical_id.
     entity_edges: dict[str, list[dict]] = defaultdict(list)
     for edge in edges:
-        src_id, tgt_id = edge["source_entity_id"], edge["target_entity_id"]
-        # Prefer denormalized names from PG; fall back to candidate→canonical mapping
+        src_cand_id, tgt_cand_id = edge["source_entity_id"], edge["target_entity_id"]
+        # Use denormalized names from PG columns
         src_name = edge.get("source_name") or ""
         tgt_name = edge.get("target_name") or ""
         if not src_name:
-            ce = candidate_to_canonical.get(src_id)
-            src_name = ce["canonical_name"] if ce else src_id[:12]
+            ce = candidate_to_canonical.get(src_cand_id)
+            src_name = ce["canonical_name"] if ce else src_cand_id[:12]
         if not tgt_name:
-            ce = candidate_to_canonical.get(tgt_id)
-            tgt_name = ce["canonical_name"] if ce else tgt_id[:12]
+            ce = candidate_to_canonical.get(tgt_cand_id)
+            tgt_name = ce["canonical_name"] if ce else tgt_cand_id[:12]
 
         evidence = edge.get("evidence", [])
         ev_str = ", ".join(evidence) if isinstance(evidence, list) else str(evidence)
@@ -128,70 +129,18 @@ def dump_audit(query_fn, output_dir: Path):
             "score": edge["score"],
             "evidence": ev_str,
         }
-        entity_edges[src_id].append({**edge_info, "partner": tgt_name, "partner_location": tgt_loc})
-        entity_edges[tgt_id].append({**edge_info, "partner": src_name, "partner_location": src_loc})
 
-    # 4. Build union-find for cluster grouping
-    parent: dict[str, str] = {}
+        # Map candidate_id → canonical_id for keying
+        src_canonical = candidate_to_canonical.get(src_cand_id, {}).get("canonical_id", src_cand_id)
+        tgt_canonical = candidate_to_canonical.get(tgt_cand_id, {}).get("canonical_id", tgt_cand_id)
+        entity_edges[src_canonical].append({**edge_info, "partner": tgt_name, "partner_location": tgt_loc})
+        entity_edges[tgt_canonical].append({**edge_info, "partner": src_name, "partner_location": src_loc})
 
-    def find(x):
-        parent.setdefault(x, x)
-        if parent[x] != x:
-            parent[x] = find(parent[x])
-        return parent[x]
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
-
-    # Resolve entity by canonical_id OR candidate_id
-    def resolve_name(eid):
-        ent = entity_by_id.get(eid)
-        if ent:
-            return ent
-        ce = candidate_to_canonical.get(eid)
-        return ce if ce else None
-
-    for e in entities:
-        find(e["canonical_id"])
-    for edge in edges:
-        if edge["alignment_type"] == "sameAs":
-            # Map candidate_ids to canonical_ids if possible
-            src_ce = candidate_to_canonical.get(edge["source_entity_id"])
-            tgt_ce = candidate_to_canonical.get(edge["target_entity_id"])
-            src_key = src_ce["canonical_id"] if src_ce else edge["source_entity_id"]
-            tgt_key = tgt_ce["canonical_id"] if tgt_ce else edge["target_entity_id"]
-            find(src_key)
-            find(tgt_key)
-            union(src_key, tgt_key)
-
-    # Group clusters and pick primary (highest mention_count)
-    clusters: dict[str, list[str]] = defaultdict(list)
-    for eid in parent:
-        clusters[find(eid)].append(eid)
-
-    # Map entity_id → (cluster_label, cluster_size, is_primary)
-    entity_cluster: dict[str, dict] = {}
-    for _root, members in clusters.items():
-        members_sorted = sorted(
-            members,
-            key=lambda mid: entity_by_id.get(mid, {}).get("mention_count", 0),
-            reverse=True,
-        )
-        primary = entity_by_id.get(members_sorted[0], {})
-        cluster_label = primary.get("canonical_name", "?")
-        cluster_size = len(members)
-        member_names = [entity_by_id.get(mid, {}).get("canonical_name", "?") for mid in members_sorted]
-        for rank, mid in enumerate(members_sorted, 1):
-            entity_cluster[mid] = {
-                "cluster_label": cluster_label,
-                "cluster_size": cluster_size,
-                "is_primary": rank == 1,
-                "cluster_members": "; ".join(
-                    n for n in member_names if n != entity_by_id.get(mid, {}).get("canonical_name")
-                ),
-            }
+    # 4. Each canonical entity IS already a cluster (union-find ran in the asset).
+    # "merged_with" shows the sameAs edge partners for this entity — i.e.,
+    # which OTHER entity candidates were considered the same by the aligner.
+    # The number of source_candidate_ids tells how many gold-layer candidates
+    # were collapsed into this canonical entity.
 
     # 5. Build flat rows
     rows = []
@@ -199,7 +148,7 @@ def dump_audit(query_fn, output_dir: Path):
         eid = ent["canonical_id"]
         aliases = ent.get("aliases") or []
         sources = ent.get("source_code_locations") or []
-        cluster = entity_cluster.get(eid, {})
+        candidate_ids = ent.get("source_candidate_ids") or []
         ent_edges = entity_edges.get(eid, [])
 
         # Separate sameAs and possibleSameAs edges
@@ -216,6 +165,10 @@ def dump_audit(query_fn, output_dir: Path):
             for e in sorted(possible_partners, key=lambda x: -x["score"])
         )
 
+        # Unique sameAs partner names (deduplicated)
+        sameas_names = sorted({e["partner"] for e in sameas_partners})
+        merged_with = "; ".join(n for n in sameas_names if n != ent["canonical_name"])
+
         rows.append(
             {
                 "entity_name": ent["canonical_name"],
@@ -225,10 +178,8 @@ def dump_audit(query_fn, output_dir: Path):
                 "alias_count": len(aliases),
                 "sources": "; ".join(sources),
                 "source_count": len(sources),
-                "cluster_label": cluster.get("cluster_label", ent["canonical_name"]),
-                "cluster_size": cluster.get("cluster_size", 1),
-                "is_cluster_primary": cluster.get("is_primary", True),
-                "merged_with": cluster.get("cluster_members", ""),
+                "candidate_count": len(candidate_ids),
+                "merged_with": merged_with,
                 "sameas_edges": sameas_str,
                 "sameas_count": len(sameas_partners),
                 "possible_edges": possible_str,
@@ -246,9 +197,7 @@ def dump_audit(query_fn, output_dir: Path):
         "alias_count",
         "sources",
         "source_count",
-        "cluster_label",
-        "cluster_size",
-        "is_cluster_primary",
+        "candidate_count",
         "merged_with",
         "sameas_edges",
         "sameas_count",
@@ -260,18 +209,16 @@ def dump_audit(query_fn, output_dir: Path):
         w.writeheader()
         w.writerows(rows)
     print(f"  {path.name}: {len(rows)} rows")
-    return entities, edges, clusters
+    return entities, edges
 
 
-def dump_summary(entities, edges, clusters, output_dir: Path):
+def dump_summary(entities, edges, output_dir: Path):
     """Summary CSV — one row per stat, scannable at a glance."""
     total = len(entities)
     sameas_edges = [e for e in edges if e.get("alignment_type") == "sameAs"]
     possible_edges = [e for e in edges if e.get("alignment_type") == "possibleSameAs"]
-    multi_clusters = {k: v for k, v in clusters.items() if len(v) > 1}
-    singletons = total - sum(len(v) for v in multi_clusters.values())
+    multi_candidate = [e for e in entities if len(e.get("source_candidate_ids") or []) > 1]
     type_counts = Counter(e.get("entity_type", "?") for e in entities)
-    entity_by_id = {e["canonical_id"]: e for e in entities}
 
     rows = []
 
@@ -280,15 +227,8 @@ def dump_summary(entities, edges, clusters, output_dir: Path):
     rows.append({"category": "overview", "metric": "total_alignment_edges", "value": len(edges)})
     rows.append({"category": "overview", "metric": "sameas_edges", "value": len(sameas_edges)})
     rows.append({"category": "overview", "metric": "possible_sameas_edges", "value": len(possible_edges)})
-    rows.append({"category": "overview", "metric": "merged_clusters", "value": len(multi_clusters)})
-    rows.append({"category": "overview", "metric": "singletons", "value": singletons})
-    rows.append(
-        {
-            "category": "overview",
-            "metric": "max_cluster_size",
-            "value": max((len(v) for v in clusters.values()), default=0),
-        }
-    )
+    rows.append({"category": "overview", "metric": "multi_candidate_entities", "value": len(multi_candidate)})
+    rows.append({"category": "overview", "metric": "singletons", "value": total - len(multi_candidate)})
     if total > 0:
         total_mentions = sum(e.get("mention_count", 0) for e in entities)
         rows.append({"category": "overview", "metric": "total_mentions", "value": total_mentions})
@@ -317,16 +257,15 @@ def dump_summary(entities, edges, clusters, output_dir: Path):
     for b in sorted(score_buckets):
         rows.append({"category": "score_distribution", "metric": b, "value": score_buckets[b]})
 
-    # Merged clusters detail
-    for _root, members in sorted(multi_clusters.items(), key=lambda x: -len(x[1])):
-        members_sorted = sorted(members, key=lambda m: entity_by_id.get(m, {}).get("mention_count", 0), reverse=True)
-        names = [entity_by_id.get(m, {}).get("canonical_name", "?") for m in members_sorted]
-        total_mentions = sum(entity_by_id.get(m, {}).get("mention_count", 0) for m in members)
+    # Multi-candidate entities (entities formed from 2+ gold-layer candidates)
+    for e in sorted(multi_candidate, key=lambda x: -x.get("mention_count", 0)):
+        n_cands = len(e.get("source_candidate_ids") or [])
+        aliases = e.get("aliases") or []
         rows.append(
             {
-                "category": "merged_clusters",
-                "metric": f"{names[0]} (+{len(names) - 1} merged)",
-                "value": f"{total_mentions} mentions: {', '.join(names)}",
+                "category": "multi_candidate_entities",
+                "metric": f"{e['canonical_name']} ({e.get('entity_type', '?')})",
+                "value": f"{e.get('mention_count', 0)} mentions, {n_cands} candidates merged, aliases: {', '.join(aliases[:5])}",
             }
         )
 
@@ -387,8 +326,8 @@ def main():
 
     print(f"Dumping concordance audit to {output_dir}/\n")
 
-    entities, edges, clusters = dump_audit(query_fn, output_dir)
-    dump_summary(entities, edges, clusters, output_dir)
+    entities, edges = dump_audit(query_fn, output_dir)
+    dump_summary(entities, edges, output_dir)
 
     print(f"\nDone. Open {output_dir}/ to review.")
     print("  concordance_audit.csv   — one row per entity, all context inline")
