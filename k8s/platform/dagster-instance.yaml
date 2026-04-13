@@ -116,5 +116,18 @@ data:
         endpoint_url:
           env: DAGSTER_S3_ENDPOINT_URL
 
+    # Capture our Python loggers into Dagster's structured event log.
+    # These show up in the Events tab with proper run/step metadata,
+    # alongside Dagster's own events. No custom StreamHandlers needed.
+    python_logs:
+      managed_python_loggers:
+        - dagster_io
+        - media_ingest
+        - congress_data
+        - open_leaks
+        - knowledge_graph
+        - data_explorer
+      python_log_level: INFO
+
     telemetry:
       enabled: false

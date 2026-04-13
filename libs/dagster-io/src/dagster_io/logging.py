@@ -157,53 +157,55 @@ def configure_logging(
     disabled = _parse_disabled_modules(disabled_modules or os.getenv("LOG_DISABLED_MODULES"))
     mod_levels = _parse_module_levels(module_levels or os.getenv("LOG_MODULE_LEVELS"))
 
-    # Configure OUR loggers only — do NOT touch the root logger or Dagster's
-    # handlers. Dagster has its own logging pipeline (writes structured events
-    # to stderr). We only configure catalyst/dagster_io/media_ingest/etc loggers.
+    # Dagster captures our loggers via managed_python_loggers in dagster.yaml.
+    # During Dagster runs, those logs appear in the structured Events tab with
+    # run/step metadata. We only add a fallback console handler for non-Dagster
+    # contexts (local dev, scripts, tests).
     #
-    # For Dagster compute logs readability, always use text format (not JSON).
-    # JSON is unreadable in the Dagster UI log viewer. Loki ingests from
-    # container stdout/stderr regardless of format.
-    formatter = logging.Formatter(
-        "%(asctime)s [%(levelname)-8s] %(name)-40s | %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    # Detection: Dagster sets DAGSTER_RUN_JOB_NAME in step pods. If present,
+    # Dagster's own handlers are active — don't add ours.
+    in_dagster = os.getenv("DAGSTER_RUN_JOB_NAME") is not None
 
-    # stdout handler: DEBUG + INFO (normal operation logs)
-    stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setFormatter(formatter)
-    stdout_handler.setLevel(logging.DEBUG)
-    stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
-
-    # stderr handler: WARNING + ERROR + CRITICAL (actual problems)
-    stderr_handler = logging.StreamHandler(sys.stderr)
-    stderr_handler.setFormatter(formatter)
-    stderr_handler.setLevel(logging.WARNING)
-
-    # Add module filter to both handlers
-    if disabled or mod_levels:
-        module_filter = ModuleFilter(disabled_modules=disabled, module_levels=mod_levels)
-        stdout_handler.addFilter(module_filter)
-        stderr_handler.addFilter(module_filter)
-
-    # Attach handlers to our namespace loggers, NOT root.
-    # This prevents double-logging with Dagster's own handlers.
     log_level = getattr(logging, level.upper(), logging.DEBUG)
-    for namespace in (
-        "dagster_io",
-        "media_ingest",
-        "congress_data",
-        "open_leaks",
-        "knowledge_graph",
-        "data_explorer",
-        "catalyst",
-    ):
-        ns_logger = logging.getLogger(namespace)
-        ns_logger.setLevel(log_level)
-        ns_logger.handlers.clear()
-        ns_logger.addHandler(stdout_handler)
-        ns_logger.addHandler(stderr_handler)
-        ns_logger.propagate = False  # don't bubble up to root / Dagster's handlers
+
+    if not in_dagster:
+        # Outside Dagster (local dev, scripts): add console handler
+        formatter = logging.Formatter(
+            "%(asctime)s [%(levelname)-8s] %(name)-40s | %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(formatter)
+
+        if disabled or mod_levels:
+            handler.addFilter(ModuleFilter(disabled_modules=disabled, module_levels=mod_levels))
+
+        for namespace in (
+            "dagster_io",
+            "media_ingest",
+            "congress_data",
+            "open_leaks",
+            "knowledge_graph",
+            "data_explorer",
+            "catalyst",
+        ):
+            ns_logger = logging.getLogger(namespace)
+            ns_logger.setLevel(log_level)
+            ns_logger.handlers.clear()
+            ns_logger.addHandler(handler)
+            ns_logger.propagate = False
+    else:
+        # Inside Dagster: just set levels, Dagster's managed_python_loggers handles capture
+        for namespace in (
+            "dagster_io",
+            "media_ingest",
+            "congress_data",
+            "open_leaks",
+            "knowledge_graph",
+            "data_explorer",
+            "catalyst",
+        ):
+            logging.getLogger(namespace).setLevel(log_level)
 
     # Quiet noisy third-party loggers
     for noisy in (
