@@ -53,7 +53,7 @@ def _flatten_partition_fanin(value, model_cls=None) -> list:
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED, CANONICAL_ENTITIES_TOTAL
 from dagster_io.observability import get_tracer, trace_operation
-from knowledge_graph.resources import GraphDBResource
+from knowledge_graph.resources import GraphDBResource, load_entity_overrides
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -159,6 +159,45 @@ def canonical_entities(
         for edge in alignment_edges:
             if edge.alignment_type.value == "sameAs":
                 uf.union(edge.source_entity_id, edge.target_entity_id)
+
+        # ── HITL forced merges from viewer_entity_overrides ──
+        overrides = load_entity_overrides(
+            pg_host=graph_db.pg_host,
+            pg_port=graph_db.pg_port,
+            pg_database=graph_db.pg_database,
+            pg_user=graph_db.pg_user,
+            pg_password=graph_db.pg_password,
+        )
+        forced_merges = 0
+        if overrides:
+            # Index candidates by (normalized_name, entity_type) for fast lookup
+            cand_by_name_type: dict[tuple[str, str], list[str]] = {}
+            for cand in all_candidates:
+                etype = cand.candidate_type.value if hasattr(cand.candidate_type, "value") else str(cand.candidate_type)
+                key = (cand.canonical_name.lower(), etype)
+                cand_by_name_type.setdefault(key, []).append(cand.candidate_id)
+                # Also index by aliases
+                for alias in cand.aliases:
+                    alias_key = (alias.lower(), etype)
+                    cand_by_name_type.setdefault(alias_key, []).append(cand.candidate_id)
+
+            for override in overrides:
+                alias_key = (override["alias_text"].lower(), override["entity_type"])
+                target_key = (override["target_name"].lower(), override["entity_type"])
+                alias_ids = cand_by_name_type.get(alias_key, [])
+                target_ids = cand_by_name_type.get(target_key, [])
+                if alias_ids and target_ids:
+                    for aid in alias_ids:
+                        for tid in target_ids:
+                            uf.union(aid, tid)
+                            forced_merges += 1
+                elif not alias_ids:
+                    logger.info(
+                        "HITL override: no candidate found for alias '%s' (%s)",
+                        override["alias_text"],
+                        override["entity_type"],
+                    )
+            context.log.info(f"HITL overrides: {len(overrides)} rules, {forced_merges} forced merges")
 
         MAX_CLUSTER_SIZE = 20
         raw_clusters = uf.clusters()
@@ -271,6 +310,8 @@ def canonical_entities(
                 "canonical_entity_count": len(canonical_list),
                 "source_candidates": len(all_candidates),
                 "alignment_edges": len(alignment_edges),
+                "hitl_overrides": len(overrides) if overrides else 0,
+                "hitl_forced_merges": forced_merges,
                 "pg_upserted": pg_count,
                 "neo4j_synced": neo4j_count,
             },

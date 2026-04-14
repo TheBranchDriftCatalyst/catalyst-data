@@ -89,6 +89,22 @@ data:
     CREATE INDEX IF NOT EXISTS idx_assert_code_location ON assertions (code_location);
 
     -- Speaker identity tables (CD-34j.1)
+    -- HITL entity alias overrides (CD-3sz)
+    CREATE TABLE IF NOT EXISTS viewer_entity_overrides (
+        override_id TEXT PRIMARY KEY,
+        alias_text TEXT NOT NULL,
+        target_name TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        reviewer TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_veo_active ON viewer_entity_overrides(is_active);
+    CREATE INDEX IF NOT EXISTS idx_veo_alias ON viewer_entity_overrides(alias_text);
+
+    -- Speaker identity tables (CD-34j.1)
     CREATE TABLE IF NOT EXISTS speaker_profiles (
         profile_id       TEXT PRIMARY KEY,
         centroid         vector(192) NOT NULL,

@@ -5,6 +5,7 @@ import { ThemeProvider, TooltipProvider } from "@thebranchdriftcatalyst/catalyst
 import Sidebar from "@/components/Sidebar";
 import DocumentList from "@/pages/DocumentList";
 import PlayerPage from "@/pages/Player";
+import EntityOverrides from "@/pages/EntityOverrides";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +37,7 @@ export default function App() {
                 <Routes>
                   <Route path="/" element={<DocumentList />} />
                   <Route path="/player/:documentId" element={<PlayerPage />} />
+                  <Route path="/overrides" element={<EntityOverrides />} />
                 </Routes>
               </main>
             </div>

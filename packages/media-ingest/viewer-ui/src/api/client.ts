@@ -154,6 +154,68 @@ export async function bulkCreateAnnotations(
   return res.json();
 }
 
+// ── Entity Override endpoints (HITL alias merges) ────────────────────────
+
+export interface EntityOverride {
+  override_id: string;
+  alias_text: string;
+  target_name: string;
+  entity_type: string;
+  reviewer: string;
+  notes: string;
+  is_active: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export function fetchEntityOverrides(activeOnly = true): Promise<EntityOverride[]> {
+  return apiFetch<EntityOverride[]>(`/entity-overrides?active_only=${activeOnly}`);
+}
+
+export async function createEntityOverride(payload: {
+  alias_text: string;
+  target_name: string;
+  entity_type: string;
+  notes?: string;
+}): Promise<EntityOverride> {
+  const res = await fetch(`${API_BASE}/entity-overrides`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+export async function deleteEntityOverride(overrideId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/entity-overrides/${encodeURIComponent(overrideId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+}
+
+export async function toggleEntityOverride(
+  overrideId: string,
+  isActive: boolean,
+): Promise<EntityOverride> {
+  const res = await fetch(`${API_BASE}/entity-overrides/${encodeURIComponent(overrideId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_active: isActive }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
 /** File extensions that should render as video */
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv"]);
 

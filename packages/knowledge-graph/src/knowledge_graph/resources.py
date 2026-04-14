@@ -38,6 +38,27 @@ _ALIGNMENT_EDGES_MIGRATIONS: tuple[str, ...] = (
 )
 
 
+def load_entity_overrides(pg_host: str, pg_port: int, pg_database: str, pg_user: str, pg_password: str) -> list[dict]:
+    """Load active HITL entity alias overrides from PostgreSQL.
+
+    Returns list of dicts with alias_text, target_name, entity_type.
+    Returns empty list if table doesn't exist or PG is unreachable.
+    """
+    try:
+        import psycopg
+
+        with psycopg.connect(
+            host=pg_host, port=pg_port, dbname=pg_database, user=pg_user, password=pg_password
+        ) as conn:
+            rows = conn.execute(
+                "SELECT alias_text, target_name, entity_type FROM viewer_entity_overrides WHERE is_active = true"
+            ).fetchall()
+            return [{"alias_text": r[0], "target_name": r[1], "entity_type": r[2]} for r in rows]
+    except Exception as exc:
+        logger.warning("Could not load entity overrides: %s", exc)
+        return []
+
+
 class GraphDBResource(ConfigurableResource):
     """Wraps both Neo4j and PostgreSQL for dual-write graph storage.
 

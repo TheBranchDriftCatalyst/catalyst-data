@@ -124,3 +124,46 @@ async def update_speaker_name(document_id: str, label: str, body: SpeakerNameUpd
     if _get_store().save_speaker_mappings(document_id, {label: body.display_name}):
         return {"label": label, "display_name": body.display_name}
     raise HTTPException(500, "Failed to save speaker name")
+
+
+# ── Entity Override Endpoints (HITL alias merges) ───────────────────────
+
+
+class EntityOverrideCreate(BaseModel):
+    alias_text: str = Field(..., min_length=1, max_length=200)
+    target_name: str = Field(..., min_length=1, max_length=200)
+    entity_type: str = Field(..., min_length=1, max_length=50)
+    reviewer: str = ""
+    notes: str = ""
+
+
+class EntityOverrideToggle(BaseModel):
+    is_active: bool
+
+
+@router.get("/entity-overrides")
+async def list_entity_overrides(active_only: bool = True) -> list[dict]:
+    return _get_store().list_entity_overrides(active_only)
+
+
+@router.post("/entity-overrides")
+async def create_entity_override(body: EntityOverrideCreate) -> dict:
+    result = _get_store().create_entity_override(body.model_dump())
+    if result is None:
+        raise HTTPException(500, "Failed to create entity override")
+    return result
+
+
+@router.patch("/entity-overrides/{override_id}")
+async def toggle_entity_override(override_id: str, body: EntityOverrideToggle) -> dict:
+    result = _get_store().toggle_entity_override(override_id, body.is_active)
+    if result is None:
+        raise HTTPException(404, "Override not found")
+    return result
+
+
+@router.delete("/entity-overrides/{override_id}")
+async def delete_entity_override(override_id: str) -> dict:
+    if _get_store().delete_entity_override(override_id):
+        return {"deleted": True}
+    raise HTTPException(404, "Override not found")
