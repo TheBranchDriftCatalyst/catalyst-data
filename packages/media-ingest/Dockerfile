@@ -41,7 +41,9 @@ ENV UV_PYTHON=/usr/bin/python3.12
 
 WORKDIR /app
 
-# 1. Install shared libs
+# 1. Install shared libs — copy pyproject.toml first for dep caching,
+#    then full source. Changes to tests/docs won't bust this layer
+#    thanks to .dockerignore excluding tests/ and docs/.
 COPY libs/catalyst-contracts-core/ /tmp/catalyst-contracts-core/
 COPY libs/dagster-io/              /tmp/dagster-io/
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -56,23 +58,27 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # intel-sycl-rt (libsycl.so), intel-pti (libpti_view.so), and other
 # Intel runtime pip packages as declared dependencies of the XPU wheel.
 # Pin to >=2.6,<2.8 matching pyproject.toml constraints.
+# Uses --mount=type=cache for pip downloads (~2GB torch wheel).
 #
 # Step B: Install the package with OpenVINO extras from PyPI.
 # --extra-index-url ensures torch XPU wheel is found when resolving
 # the torch>=2.6 constraint from pyproject.toml (otherwise uv would
 # try to downgrade to the PyPI CPU wheel).
 COPY packages/media-ingest/pyproject.toml .
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
     mkdir -p src/media_ingest && \
     touch src/media_ingest/__init__.py && \
-    python3.12 -m pip install --no-cache-dir \
+    python3.12 -m pip install \
         "torch>=2.6,<2.8" "torchaudio>=2.6,<2.8" \
         --index-url https://download.pytorch.org/whl/xpu && \
     uv pip install --system --python /usr/bin/python3.12 \
         ".[openvino]" && \
     rm -rf src/media_ingest
 
-# 3. Copy real source
+# 3. Copy real source — only the src/ dir changes on code updates.
+#    Dependencies are already installed from step 2, so this layer
+#    only reinstalls the local package (fast, no network).
 COPY packages/media-ingest/src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --python /usr/bin/python3.12 \
