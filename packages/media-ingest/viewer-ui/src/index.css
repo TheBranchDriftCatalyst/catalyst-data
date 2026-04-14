@@ -38,7 +38,9 @@ body {
 }
 
 /* Monospace headers for that intelligence workstation feel */
-h1, h2, h3 {
+h1,
+h2,
+h3 {
   font-family: var(--font-display);
   letter-spacing: -0.02em;
 }
@@ -52,7 +54,9 @@ h1, h2, h3 {
 }
 
 /* Monospace for timestamps, counts, metadata */
-.tabular-nums, .font-mono, time,
+.tabular-nums,
+.font-mono,
+time,
 [class*="text-zinc-500"][class*="tabular"] {
   font-family: var(--font-display);
   font-feature-settings: "tnum";
@@ -78,11 +82,14 @@ h1, h2, h3 {
 
 /* Subtle inner glow on cards */
 [data-testid^="document-card-"] > div {
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
 }
 [data-testid^="document-card-"]:hover > div {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06),
-              0 4px 24px rgba(0, 0, 0, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
 /* Scrollbar styling */
