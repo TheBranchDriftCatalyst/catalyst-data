@@ -55,6 +55,7 @@ from media_ingest.assets import (
     media_transcode,
     media_transcriptions,
 )
+from media_ingest.schedules import media_discovery_schedule
 from media_ingest.sensors import media_document_sensor
 
 defs = Definitions(
@@ -79,6 +80,9 @@ defs = Definitions(
     sensors=[
         media_document_sensor,
         *_run_status_sensors,
+    ],
+    schedules=[
+        media_discovery_schedule,
     ],
     executor=_k8s_executor,
     resources={
