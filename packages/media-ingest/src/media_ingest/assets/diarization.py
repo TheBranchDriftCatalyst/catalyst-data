@@ -14,7 +14,7 @@ from typing import Any
 from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSET_RECORDS_PROCESSED, DIARIZATION_DURATION
+from dagster_io.metrics import ASSET_RECORDS_PROCESSED, DIARIZATION_DURATION, DIARIZATION_REALTIME_FACTOR
 from dagster_io.observability import get_tracer, trace_operation
 from media_ingest.assets.discovery import NFS_VOLUMES_CONFIG
 from media_ingest.assets.transcription import extract_audio_to_wav
@@ -260,8 +260,12 @@ def media_diarization(
             speaker_text = _build_speaker_text(segments) if unique_speakers else None
             diarization_time = round(time.monotonic() - start, 1)
 
-            # Record diarization duration metric
+            # Record diarization duration + realtime factor metrics
             DIARIZATION_DURATION.observe(diarization_time)
+            audio_duration = t.get("duration_s", 0)
+            if diarization_time > 0 and audio_duration > 0:
+                rtf = audio_duration / diarization_time
+                DIARIZATION_REALTIME_FACTOR.labels(device=resolved_device).observe(rtf)
 
             context.log.info(f"Diarization complete on device={resolved_device}")
 

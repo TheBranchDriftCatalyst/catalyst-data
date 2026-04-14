@@ -251,7 +251,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (code_location, asset_key) (rate(catalyst_asset_records_processed_total{code_location=~\"$code_location\"}[5m]))",
+              "expr": "sum by (code_location, asset_key) (increase(catalyst_asset_records_processed_total{code_location=~\"$code_location\"}[$__range]))",
               "legendFormat": "{{ code_location }} / {{ asset_key }}",
               "refId": "A"
             }
@@ -519,7 +519,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (model) (rate(catalyst_llm_requests_total[5m]))",
+              "expr": "sum by (model) (increase(catalyst_llm_requests_total[$__range]))",
               "legendFormat": "{{ model }}",
               "refId": "A"
             }
@@ -660,7 +660,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (model) (rate(catalyst_llm_requests_total{status=\"error\"}[5m])) / sum by (model) (rate(catalyst_llm_requests_total[5m]))",
+              "expr": "sum by (model) (increase(catalyst_llm_requests_total{status=\"error\"}[$__range])) / sum by (model) (increase(catalyst_llm_requests_total[$__range]))",
               "legendFormat": "{{ model }}",
               "refId": "A"
             }
@@ -754,7 +754,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (operation) (rate(catalyst_s3_operations_total[5m]))",
+              "expr": "sum by (operation) (increase(catalyst_s3_operations_total[$__range]))",
               "legendFormat": "{{ operation }}",
               "refId": "A"
             }
@@ -837,7 +837,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (direction) (rate(catalyst_s3_bytes_total[5m]))",
+              "expr": "sum by (direction) (increase(catalyst_s3_bytes_total[$__range]))",
               "legendFormat": "{{ direction }}",
               "refId": "A"
             }
@@ -1011,7 +1011,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (provider) (rate(catalyst_embedding_vectors_total[5m]))",
+              "expr": "sum by (provider) (increase(catalyst_embedding_vectors_total[$__range]))",
               "legendFormat": "{{ provider }}",
               "refId": "A"
             }
@@ -1105,7 +1105,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (entity_type) (rate(catalyst_entities_extracted_total[5m]))",
+              "expr": "sum by (entity_type) (increase(catalyst_entities_extracted_total[$__range]))",
               "legendFormat": "{{ entity_type }}",
               "refId": "A"
             }
@@ -1188,7 +1188,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (code_location) (rate(catalyst_assertions_created_total{code_location=~\"$code_location\"}[5m]))",
+              "expr": "sum by (code_location) (increase(catalyst_assertions_created_total{code_location=~\"$code_location\"}[$__range]))",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
             }
@@ -1270,7 +1270,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (operation) (rate(catalyst_graph_db_operations_total[5m]))",
+              "expr": "sum by (operation) (increase(catalyst_graph_db_operations_total[$__range]))",
               "legendFormat": "{{ operation }}",
               "refId": "A"
             }
@@ -2028,6 +2028,52 @@ spec:
           ]
         },
         {
+          "datasource": { "type": "prometheus", "uid": "mimir" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisBorderShow": false, "axisCenteredZero": false,
+                "axisColorMode": "text", "axisPlacement": "auto",
+                "drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "stepAfter",
+                "lineWidth": 2, "pointSize": 5, "showPoints": "auto",
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
+              },
+              "thresholds": { "mode": "absolute", "steps": [
+                { "color": "red", "value": null },
+                { "color": "yellow", "value": 1 },
+                { "color": "green", "value": 5 }
+              ]},
+              "unit": "x"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 6, "x": 18, "y": 63 },
+          "id": 998,
+          "options": {
+            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "title": "Diarization Real-Time Factor",
+          "description": "Audio duration / diarization time. >1 = faster than realtime. XPU target: 5-10x.",
+          "type": "timeseries",
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "expr": "histogram_quantile(0.5, sum by (le, device) (catalyst_diarization_realtime_factor_bucket))",
+              "legendFormat": "p50 RTF ({{ device }})",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "mimir" },
+              "expr": "histogram_quantile(0.95, sum by (le, device) (catalyst_diarization_realtime_factor_bucket))",
+              "legendFormat": "p95 RTF ({{ device }})",
+              "refId": "B"
+            }
+          ]
+        },
+        {
           "datasource": {
             "type": "prometheus",
             "uid": "mimir"
@@ -2287,7 +2333,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum(rate(catalyst_transcode_saved_bytes_total[1h]))",
+              "expr": "sum(increase(catalyst_transcode_saved_bytes_total[$__range]))",
               "legendFormat": "Saved",
               "refId": "A"
             }
@@ -2473,7 +2519,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (code_location) (rate(catalyst_asset_records_processed_total{code_location=~\"$code_location\"}[5m]))",
+              "expr": "sum by (code_location) (increase(catalyst_asset_records_processed_total{code_location=~\"$code_location\"}[$__range]))",
               "legendFormat": "{{ code_location }}",
               "refId": "A"
             }
@@ -3592,7 +3638,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (job_name, status) (rate(catalyst_dagster_run_status_total{code_location=~\"$code_location\"}[$__rate_interval]))",
+              "expr": "sum by (job_name, status) (increase(catalyst_dagster_run_status_total{code_location=~\"$code_location\"}[$__range]))",
               "legendFormat": "{{ job_name }} / {{ status }}",
               "refId": "A"
             }
@@ -3776,7 +3822,7 @@ spec:
                 "type": "prometheus",
                 "uid": "mimir"
               },
-              "expr": "sum by (sensor_name, outcome) (rate(catalyst_dagster_sensor_tick_total{code_location=~\"$code_location\"}[$__rate_interval]))",
+              "expr": "sum by (sensor_name, outcome) (increase(catalyst_dagster_sensor_tick_total{code_location=~\"$code_location\"}[$__range]))",
               "legendFormat": "{{ sensor_name }} / {{ outcome }}",
               "refId": "A"
             }

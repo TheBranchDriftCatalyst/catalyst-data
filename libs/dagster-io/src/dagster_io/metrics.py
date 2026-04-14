@@ -412,6 +412,13 @@ DIARIZATION_DURATION = Histogram(
     buckets=(10, 30, 60, 120, 300, 600, 1200, 1800, 3600),
 )
 
+DIARIZATION_REALTIME_FACTOR = Histogram(
+    "catalyst_diarization_realtime_factor",
+    "Ratio of audio duration to diarization time (>1 = faster than realtime)",
+    ["device"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0),
+)
+
 TRANSCODE_DURATION = Histogram(
     "catalyst_transcode_duration_seconds",
     "Duration of video transcode operations",
