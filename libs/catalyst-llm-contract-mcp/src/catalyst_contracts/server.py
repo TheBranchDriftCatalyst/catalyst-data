@@ -124,6 +124,72 @@ def validate_concordance_candidates(
 
 
 @mcp.tool()
+def find_spans(
+    texts: list[str],
+    source_text: str,
+) -> list[dict[str, Any]]:
+    """Find exact character offsets for entity texts in source text.
+
+    Use this when you need to determine span_start/span_end for mentions.
+    Returns all occurrences of each text in the source. Case-sensitive.
+
+    Args:
+        texts: List of entity text strings to locate.
+        source_text: The full document text to search in.
+
+    Returns:
+        List of {text, spans: [{start, end}]} for each input text.
+        If a text is not found, spans will be empty.
+    """
+    results = []
+    for text in texts:
+        spans = []
+        start = 0
+        while True:
+            idx = source_text.find(text, start)
+            if idx == -1:
+                break
+            spans.append({"start": idx, "end": idx + len(text)})
+            start = idx + 1
+        results.append({"text": text, "spans": spans})
+    return results
+
+
+@mcp.tool()
+def find_spans_fuzzy(
+    texts: list[str],
+    source_text: str,
+) -> list[dict[str, Any]]:
+    """Find approximate character offsets when exact match fails.
+
+    Performs case-insensitive search and also tries with leading/trailing
+    whitespace stripped. Use as a fallback when find_spans returns empty.
+
+    Args:
+        texts: List of entity text strings to locate.
+        source_text: The full document text to search in.
+
+    Returns:
+        List of {text, spans: [{start, end, match}]} for each input text.
+    """
+    source_lower = source_text.lower()
+    results = []
+    for text in texts:
+        spans = []
+        needle = text.strip().lower()
+        start = 0
+        while True:
+            idx = source_lower.find(needle, start)
+            if idx == -1:
+                break
+            matched = source_text[idx : idx + len(needle)]
+            spans.append({"start": idx, "end": idx + len(needle), "match": matched})
+            start = idx + 1
+        results.append({"text": text, "spans": spans})
+    return results
+
+
+@mcp.tool()
 def generate_repair_instructions(
     validation_result: dict,
     original_payload: dict,

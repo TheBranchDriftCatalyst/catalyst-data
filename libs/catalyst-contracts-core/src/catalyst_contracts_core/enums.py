@@ -14,6 +14,13 @@ class MentionType(StrEnum):
     MONEY = "MONEY"
     NORP = "NORP"
     FACILITY = "FACILITY"
+    DOCUMENT = "DOCUMENT"
+    BOOK = "BOOK"
+    ROLE = "ROLE"
+    # Geopolitical/strategic domain
+    STRATEGIC_ASSET = "STRATEGIC_ASSET"  # chokepoints, pipelines, trade routes, military bases
+    # Finance domain
+    FINANCIAL_INSTRUMENT = "FINANCIAL_INSTRUMENT"  # stocks, bonds, derivatives, funds
     OTHER = "OTHER"
 
 
