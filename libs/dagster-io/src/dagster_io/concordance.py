@@ -96,6 +96,50 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
+def _idf_weighted_jaccard(a: set[str], b: set[str], idf: dict[str, float]) -> float:
+    """Jaccard weighted by IDF — rare shared tokens count more."""
+    if not a or not b:
+        return 0.0
+    intersection = a & b
+    union = a | b
+    if not union:
+        return 0.0
+    idf_inter = sum(idf.get(t, 1.0) for t in intersection)
+    idf_union = sum(idf.get(t, 1.0) for t in union)
+    return idf_inter / idf_union if idf_union > 0 else 0.0
+
+
+def compute_idf(candidates: list) -> dict[str, float]:
+    """Compute IDF for all tokens across entity candidate names.
+
+    IDF(t) = log(N / df(t)) where N = number of unique entities and
+    df(t) = number of entities containing token t.
+
+    Returns dict mapping token → IDF score.
+    """
+    # Collect all unique entity name sets (canonical + aliases)
+    entity_token_sets: list[set[str]] = []
+    for cand in candidates:
+        name_set: set[str] = set()
+        name_set |= _tokenize(cand.canonical_name)
+        for alias in cand.aliases:
+            name_set |= _tokenize(alias)
+        entity_token_sets.append(name_set)
+
+    n = len(entity_token_sets)
+    if n == 0:
+        return {}
+
+    # Count document frequency per token
+    df: dict[str, int] = defaultdict(int)
+    for token_set in entity_token_sets:
+        for token in token_set:
+            df[token] += 1
+
+    # IDF with smoothing: log((N + 1) / (df + 1)) + 1
+    return {token: math.log((n + 1) / (count + 1)) + 1 for token, count in df.items()}
+
+
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     if len(a) != len(b) or not a:
         return 0.0
@@ -317,12 +361,16 @@ class CrossSourceAligner:
         """
         edges: list[AlignmentEdge] = []
         locations = list(sources.keys())
-        total_candidates = sum(len(v) for v in sources.values())
+        all_candidates = [c for cands in sources.values() for c in cands]
+        total_candidates = len(all_candidates)
         logger.info(
             "Cross-source alignment starting: %d locations, %d total candidates",
             len(locations),
             total_candidates,
         )
+
+        # Compute IDF across the full corpus for token weighting
+        idf = compute_idf(all_candidates) if all_candidates else {}
 
         for i, loc_a in enumerate(locations):
             for loc_b in locations[i + 1 :]:
@@ -332,13 +380,9 @@ class CrossSourceAligner:
                         if cand_a.candidate_type != cand_b.candidate_type:
                             continue
 
-                        edge = self._score_pair(cand_a, cand_b)
+                        edge = self._score_pair(cand_a, cand_b, idf)
                         if edge is not None:
                             edges.append(edge)
-                            # AlignmentEdge itself doesn't carry the source /
-                            # target code_location (it's implicit in the
-                            # candidate ids), so we emit the metric from the
-                            # outer-loop scope where loc_a/loc_b are known.
                             top_signal = _pick_top_signal(edge.evidence)
                             ALIGNMENT_EDGES_TOTAL.labels(
                                 source_location=loc_a,
@@ -362,12 +406,13 @@ class CrossSourceAligner:
         ConcordanceEngine.resolve() couldn't merge because they were in
         different partitions (e.g. "Joe Biden" in 15 different videos).
         """
+        idf = compute_idf(candidates) if candidates else {}
         edges: list[AlignmentEdge] = []
         for i, cand_a in enumerate(candidates):
             for cand_b in candidates[i + 1 :]:
                 if cand_a.candidate_type != cand_b.candidate_type:
                     continue
-                edge = self._score_pair(cand_a, cand_b)
+                edge = self._score_pair(cand_a, cand_b, idf)
                 if edge is not None:
                     edges.append(edge)
                     top_signal = _pick_top_signal(edge.evidence)
@@ -385,7 +430,12 @@ class CrossSourceAligner:
         )
         return edges
 
-    def _score_pair(self, a: EntityCandidate, b: EntityCandidate) -> AlignmentEdge | None:
+    def _score_pair(
+        self,
+        a: EntityCandidate,
+        b: EntityCandidate,
+        idf: dict[str, float] | None = None,
+    ) -> AlignmentEdge | None:
         signals: list[tuple[float, str]] = []
         all_names_a = {a.canonical_name.lower().strip()} | {alias.lower().strip() for alias in a.aliases}
         all_names_b = {b.canonical_name.lower().strip()} | {alias.lower().strip() for alias in b.aliases}
@@ -394,43 +444,43 @@ class CrossSourceAligner:
         if all_names_a & all_names_b:
             signals.append((1.0, "exact_name"))
 
-        # Signal 2: Substring containment (with guards matching ConcordanceEngine)
-        # Guards: both names must be >= 4 chars, share >= 2 tokens, and the
-        # shorter name must be at least 40% as long as the longer name to
-        # prevent "AI" matching "AIPAC" or "Ed" matching "Education".
+        # Signal 2: Substring containment (with guards + IDF modulation)
         if not signals:
             for na in all_names_a:
                 for nb in all_names_b:
                     if na in nb or nb in na:
                         shorter, longer = (na, nb) if len(na) <= len(nb) else (nb, na)
-                        # Min length guard: skip trivially short substrings
                         if len(shorter) < 4:
                             continue
-                        # Min shared tokens guard: require >= 2 shared tokens
-                        # for multi-word names (parity with ConcordanceEngine),
-                        # but allow 1 shared token when the shorter name is a
-                        # single token (e.g. "Trump" in "Donald Trump" — the
-                        # entire shorter name IS the shared token).
                         tokens_shorter = _tokenize(shorter)
                         tokens_longer = _tokenize(longer)
-                        shared_count = len(tokens_shorter & tokens_longer)
+                        shared = tokens_shorter & tokens_longer
+                        shared_count = len(shared)
                         min_required = min(2, len(tokens_shorter))
                         if shared_count < min_required:
                             continue
-                        # Asymmetry penalty: heavily lopsided containment is
-                        # weak evidence (e.g. "Biden" in "Joe Biden" is fine,
-                        # but "Iran" in "Iranian Americans" is dubious).
                         ratio = len(shorter) / len(longer) if len(longer) > 0 else 1.0
                         sub_weight = 0.80 if ratio >= 0.4 else 0.60
-                        signals.append((sub_weight, "substring"))
+
+                        # IDF modulation: boost if shared tokens are rare,
+                        # penalize if shared tokens are common (e.g. "National",
+                        # "John"). Normalized to [0.7, 1.3] range so IDF
+                        # adjusts but doesn't dominate.
+                        if idf and shared:
+                            avg_shared_idf = sum(idf.get(t, 1.0) for t in shared) / len(shared)
+                            all_tokens = tokens_shorter | tokens_longer
+                            avg_corpus_idf = sum(idf.get(t, 1.0) for t in all_tokens) / max(len(all_tokens), 1)
+                            idf_ratio = avg_shared_idf / avg_corpus_idf if avg_corpus_idf > 0 else 1.0
+                            idf_modifier = max(0.7, min(1.3, idf_ratio))
+                            sub_weight *= idf_modifier
+
+                        signals.append((min(sub_weight, 1.0), "substring"))
                         break
                 if signals:
                     break
 
-        # Signal 3: Jaccard token overlap — use actual coefficient (continuous)
-        # Guard: require >= 2 shared tokens to prevent single-token names
-        # (e.g. "Donald") from producing meaningful jaccard with multi-token
-        # names (jaccard({"donald"}, {"donald","trump"}) = 0.5 is noise).
+        # Signal 3: IDF-weighted Jaccard token overlap (continuous)
+        # Guard: require >= 2 shared tokens.
         tokens_a = set()
         for n in all_names_a:
             tokens_a |= _tokenize(n)
@@ -438,19 +488,18 @@ class CrossSourceAligner:
         for n in all_names_b:
             tokens_b |= _tokenize(n)
         shared_tokens = len(tokens_a & tokens_b)
-        jac = _jaccard(tokens_a, tokens_b)
-        if jac >= 0.5 and shared_tokens >= 2:
-            signals.append((jac, "jaccard"))  # continuous value, not fixed
 
-        # Signal 4: Embedding cosine similarity — use actual cosine (continuous)
-        # Guard: require >= 2 shared tokens. Embedding similarity alone is
-        # unreliable for names with low token overlap — "Donald Trump" and
-        # "Donald Rumsfeld" can have >0.80 cosine similarity due to shared
-        # political context, but only share 1 token ("donald").
+        # Use IDF-weighted jaccard when IDF is available, raw jaccard otherwise
+        jac = _idf_weighted_jaccard(tokens_a, tokens_b, idf) if idf else _jaccard(tokens_a, tokens_b)
+        if jac >= 0.5 and shared_tokens >= 2:
+            signals.append((jac, "jaccard"))
+
+        # Signal 4: Embedding cosine similarity (continuous)
+        # Guard: require >= 2 shared tokens.
         if a.embedding and b.embedding and shared_tokens >= 2:
             cos = _cosine_similarity(a.embedding, b.embedding)
             if cos > 0.80:
-                signals.append((cos, "embedding"))  # continuous value, not fixed
+                signals.append((cos, "embedding"))
 
         if not signals:
             return None
@@ -511,3 +560,52 @@ class CrossSourceAligner:
             evidence=evidence,
             method="cross_source_aligner_v2",
         )
+
+
+def check_cluster_coherence(
+    cluster_ids: list[str],
+    edges: list[AlignmentEdge],
+    min_pairwise_score: float = 0.45,
+) -> list[str]:
+    """Check cluster coherence and remove weakest members.
+
+    For a cluster of N candidates, ensures every member has at least one
+    sameAs edge to another cluster member with score >= min_pairwise_score.
+    Members with no qualifying edge are ejected as singletons.
+
+    This catches cases where transitive closure pulls in a weakly-connected
+    member: A↔B (0.9) + B↔C (0.7) → cluster {A,B,C}, but A↔C may have
+    no direct edge or a score below threshold.
+
+    Args:
+        cluster_ids: List of candidate IDs in the cluster.
+        edges: All sameAs alignment edges.
+        min_pairwise_score: Minimum score for a member's best edge.
+
+    Returns:
+        List of member IDs that should remain in the cluster.
+        Ejected members become singletons in the caller.
+    """
+    if len(cluster_ids) <= 2:
+        return cluster_ids
+
+    cluster_set = set(cluster_ids)
+
+    # Build adjacency: member_id → best_score_to_any_other_cluster_member
+    best_score: dict[str, float] = {cid: 0.0 for cid in cluster_ids}
+    for edge in edges:
+        if edge.source_entity_id in cluster_set and edge.target_entity_id in cluster_set:
+            score = edge.score
+            if score > best_score.get(edge.source_entity_id, 0.0):
+                best_score[edge.source_entity_id] = score
+            if score > best_score.get(edge.target_entity_id, 0.0):
+                best_score[edge.target_entity_id] = score
+
+    # Keep members whose best intra-cluster edge score meets threshold
+    coherent = [cid for cid in cluster_ids if best_score.get(cid, 0.0) >= min_pairwise_score]
+
+    # If coherence check would eject everyone (degenerate case), keep all
+    if not coherent:
+        return cluster_ids
+
+    return coherent

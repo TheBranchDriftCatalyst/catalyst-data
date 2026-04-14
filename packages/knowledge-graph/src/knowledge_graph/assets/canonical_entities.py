@@ -151,7 +151,7 @@ def canonical_entities(
         canonical_list: list[CanonicalEntity] = []
 
         # Build alignment groups (union-find on sameAs edges)
-        from dagster_io.concordance import _UnionFind
+        from dagster_io.concordance import _UnionFind, check_cluster_coherence
 
         uf = _UnionFind()
         for cand in all_candidates:
@@ -229,6 +229,26 @@ def canonical_entities(
                 clusters[root] = scored[:MAX_CLUSTER_SIZE]
                 for singleton_id in scored[MAX_CLUSTER_SIZE:]:
                     clusters[singleton_id] = [singleton_id]
+
+        # --- Cluster coherence check (Sprint 2) ---
+        # Ensure every member has at least one strong intra-cluster edge.
+        # Catches weakly-connected members pulled in by transitive closure.
+        same_as_edges = [e for e in alignment_edges if e.alignment_type.value == "sameAs"]
+        coherence_ejections = 0
+        coherent_clusters: dict[str, list[str]] = {}
+        for root, member_ids in clusters.items():
+            if len(member_ids) <= 2:
+                coherent_clusters[root] = member_ids
+                continue
+            coherent_ids = check_cluster_coherence(member_ids, same_as_edges)
+            coherent_clusters[root] = coherent_ids
+            ejected = set(member_ids) - set(coherent_ids)
+            for eid in ejected:
+                coherent_clusters[eid] = [eid]
+                coherence_ejections += 1
+        clusters = coherent_clusters
+        if coherence_ejections:
+            context.log.info(f"Cluster coherence: ejected {coherence_ejections} weakly-connected members")
 
         for _root, member_ids in clusters.items():
             members = [cand_by_id[mid] for mid in member_ids if mid in cand_by_id]
@@ -312,6 +332,7 @@ def canonical_entities(
                 "alignment_edges": len(alignment_edges),
                 "hitl_overrides": len(overrides) if overrides else 0,
                 "hitl_forced_merges": forced_merges,
+                "coherence_ejections": coherence_ejections,
                 "pg_upserted": pg_count,
                 "neo4j_synced": neo4j_count,
             },
