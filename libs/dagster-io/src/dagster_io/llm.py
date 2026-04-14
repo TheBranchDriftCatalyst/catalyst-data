@@ -257,8 +257,10 @@ class LLMResource(ConfigurableResource):
         log_every: int = 50,
         operation: str = "batch",
         max_concurrency: int = 5,
+        max_retries: int = 3,
+        retry_delay: float = 2.0,
     ) -> list[Any]:
-        """Invoke a chain over a list of items with concurrent execution.
+        """Invoke a chain over a list of items with concurrent execution + retry.
 
         Args:
             chain: LangChain runnable (e.g. from with_structured_output).
@@ -267,6 +269,8 @@ class LLMResource(ConfigurableResource):
             log_every: Log progress every N items.
             operation: Label for metrics/logs.
             max_concurrency: Max parallel LLM requests (default 5).
+            max_retries: Retry failed requests up to N times with exponential backoff.
+            retry_delay: Base delay between retries in seconds (doubles each attempt).
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -279,31 +283,69 @@ class LLMResource(ConfigurableResource):
         )
 
         def _invoke_one(idx: int, item: T) -> tuple[int, Any]:
-            start = time.monotonic()
-            result = chain.invoke(_normalize_messages(messages_fn(item)))
-            duration = time.monotonic() - start
-            LLM_REQUEST_DURATION.labels(model=self.model, operation=operation).observe(duration)
-            LLM_REQUESTS.labels(model=self.model, operation=operation, status="success").inc()
-            return idx, result
+            last_err = None
+            for attempt in range(max_retries + 1):
+                try:
+                    start = time.monotonic()
+                    result = chain.invoke(_normalize_messages(messages_fn(item)))
+                    duration = time.monotonic() - start
+                    LLM_REQUEST_DURATION.labels(model=self.model, operation=operation).observe(duration)
+                    LLM_REQUESTS.labels(model=self.model, operation=operation, status="success").inc()
+                    return idx, result
+                except Exception as e:
+                    last_err = e
+                    LLM_REQUESTS.labels(model=self.model, operation=operation, status="error").inc()
+                    if attempt < max_retries:
+                        delay = retry_delay * (2**attempt)
+                        logger.warning(
+                            "LLM %s item %d/%d failed (attempt %d/%d), retrying in %.1fs: %s",
+                            operation,
+                            idx + 1,
+                            len(items),
+                            attempt + 1,
+                            max_retries + 1,
+                            delay,
+                            e,
+                        )
+                        time.sleep(delay)
+                    else:
+                        logger.error(
+                            "LLM %s item %d/%d failed after %d attempts: %s",
+                            operation,
+                            idx + 1,
+                            len(items),
+                            max_retries + 1,
+                            e,
+                        )
+            raise last_err  # type: ignore[misc]
 
-        # Preserve order: results[i] corresponds to items[i]
         results: list[Any] = [None] * len(items)
         completed = 0
+        errors = 0
 
         with ThreadPoolExecutor(max_workers=max_concurrency) as pool:
             futures = {pool.submit(_invoke_one, i, item): i for i, item in enumerate(items)}
             for future in as_completed(futures):
-                idx, result = future.result()
-                results[idx] = result
+                try:
+                    idx, result = future.result()
+                    results[idx] = result
+                except Exception as e:
+                    errors += 1
+                    logger.error("LLM %s permanent failure: %s", operation, e)
+                    # Don't abort the whole batch — continue with remaining items
                 completed += 1
                 if completed % log_every == 0 or completed == len(items):
                     logger.info(
-                        "LLM %s progress: %d/%d (%.0f%%)",
+                        "LLM %s progress: %d/%d (%.0f%%)%s",
                         operation,
                         completed,
                         len(items),
                         completed / len(items) * 100,
+                        f" ({errors} errors)" if errors else "",
                     )
+
+        if errors:
+            logger.warning("LLM %s completed with %d/%d errors", operation, errors, len(items))
 
         return results
 
