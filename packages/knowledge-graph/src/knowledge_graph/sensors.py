@@ -7,20 +7,29 @@ so the knowledge graph stays up-to-date as new documents flow through.
 
 from dagster import (
     AssetKey,
+    AssetSelection,
     DefaultSensorStatus,
     EventLogEntry,
     RunRequest,
     SensorEvaluationContext,
     asset_sensor,
+    define_asset_job,
 )
 
 from dagster_io.logging import get_logger
 
 logger = get_logger(__name__)
 
+platinum_resolution_job = define_asset_job(
+    name="platinum_resolution_job",
+    selection=AssetSelection.assets("canonical_entities", "entity_alignments"),
+    description="Cross-source entity resolution + alignment edge persistence.",
+)
+
 
 @asset_sensor(
     asset_key=AssetKey("media_entity_candidates"),
+    job=platinum_resolution_job,
     name="platinum_resolution_sensor",
     description=(
         "Triggers canonical_entities + entity_alignments when new "
@@ -38,8 +47,4 @@ def platinum_resolution_sensor(context: SensorEvaluationContext, asset_event: Ev
     )
     yield RunRequest(
         run_key=f"platinum_resolution_{context.cursor}",
-        asset_selection=[
-            AssetKey("canonical_entities"),
-            AssetKey("entity_alignments"),
-        ],
     )

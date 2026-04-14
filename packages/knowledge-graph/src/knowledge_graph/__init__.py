@@ -79,7 +79,7 @@ from knowledge_graph.assets import (  # noqa: E402
     canonical_entities,
     entity_alignments,
 )
-from knowledge_graph.sensors import platinum_resolution_sensor  # noqa: E402
+from knowledge_graph.sensors import platinum_resolution_job, platinum_resolution_sensor  # noqa: E402
 
 defs = Definitions(
     assets=[
@@ -94,6 +94,9 @@ defs = Definitions(
         canonical_entities,
         entity_alignments,
         assertion_graph,
+    ],
+    jobs=[
+        platinum_resolution_job,
     ],
     sensors=[
         platinum_resolution_sensor,
