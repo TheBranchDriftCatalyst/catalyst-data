@@ -1,8 +1,10 @@
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
 import { Input, ScrollArea } from "@thebranchdriftcatalyst/catalyst-ui";
-import { MessageSquare, Search, X, ChevronUp, ChevronDown } from "lucide-react";
-import type { Segment, Word } from "@/types/media";
+import { MessageSquare, Search, X, ChevronUp, ChevronDown, Eye, EyeOff } from "lucide-react";
+import type { Segment, Word, Mention } from "@/types/media";
 import { useTranscriptSearch, type TranscriptMatch } from "@/hooks/useTranscriptSearch";
+import { useInlineAnnotations } from "@/hooks/useInlineAnnotations";
+import AnnotatedText from "@/components/AnnotatedText";
 import { speakerIndex, formatTime } from "@/lib/speakers";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +29,10 @@ interface TranscriptProps {
   isFiltered?: boolean;
   /** Original indices of each segment in the unfiltered list (parallel to `segments`). */
   filteredIndices?: number[];
+  /** Entity mentions to render as inline highlights in the transcript. */
+  mentions?: Mention[];
+  /** Called when a user clicks an entity highlight in the transcript text. */
+  onEntityClick?: (text: string) => void;
 }
 
 // Pre-built border classes to avoid dynamic generation
@@ -64,6 +70,8 @@ export default function Transcript({
   scrollHighlightIndex = -1,
   isFiltered = false,
   filteredIndices,
+  mentions,
+  onEntityClick,
 }: TranscriptProps) {
   const displayName = (label: string | undefined) =>
     resolveSpeaker ? resolveSpeaker(label) : (label ?? "Unknown");
@@ -71,6 +79,10 @@ export default function Transcript({
   const containerRef = transcriptContainerRef ?? internalContainerRef;
   const activeSegRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [showEntityHighlights, setShowEntityHighlights] = useState(true);
+
+  // Inline entity annotations
+  const annotationMap = useInlineAnnotations(segments, mentions);
 
   // Transcript search hook
   const {
@@ -224,6 +236,27 @@ export default function Transcript({
               </button>
             </div>
           )}
+          {mentions && mentions.length > 0 && (
+            <button
+              onClick={() => setShowEntityHighlights((v) => !v)}
+              className={cn(
+                "p-1 rounded transition-colors flex-shrink-0",
+                showEntityHighlights
+                  ? "text-blue-400 hover:bg-blue-900/20"
+                  : "text-zinc-600 hover:bg-white/10 hover:text-zinc-400",
+              )}
+              aria-label={
+                showEntityHighlights ? "Hide entity highlights" : "Show entity highlights"
+              }
+              title={showEntityHighlights ? "Hide entity highlights" : "Show entity highlights"}
+            >
+              {showEntityHighlights ? (
+                <Eye className="h-3.5 w-3.5" />
+              ) : (
+                <EyeOff className="h-3.5 w-3.5" />
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -248,6 +281,9 @@ export default function Transcript({
 
             // Get search matches for this segment
             const segSearchMatches = searchQuery ? matchesForSegment(segIdx) : [];
+
+            // Get entity annotations for this segment (if enabled)
+            const segAnnotations = showEntityHighlights ? annotationMap.get(segIdx) : undefined;
 
             return (
               <div key={origIdx}>
@@ -304,15 +340,24 @@ export default function Transcript({
                         highlightText,
                         onSeek,
                         seg.text,
+                        segAnnotations,
                       )}
                     </p>
                   ) : (
                     <p className="text-sm leading-relaxed text-zinc-300">
-                      {segSearchMatches.length > 0
-                        ? highlightSearchInText(seg.text, segSearchMatches, currentMatch, segIdx)
-                        : highlightText
-                          ? highlightInText(seg.text, highlightText)
-                          : seg.text}
+                      {segSearchMatches.length > 0 ? (
+                        highlightSearchInText(seg.text, segSearchMatches, currentMatch, segIdx)
+                      ) : highlightText ? (
+                        highlightInText(seg.text, highlightText)
+                      ) : segAnnotations && segAnnotations.length > 0 ? (
+                        <AnnotatedText
+                          text={seg.text}
+                          annotations={segAnnotations}
+                          onEntityClick={onEntityClick}
+                        />
+                      ) : (
+                        seg.text
+                      )}
                     </p>
                   )}
 
@@ -347,18 +392,49 @@ function renderWordsWithSearch(
   highlightText: string | undefined,
   onSeek: (time: number) => void,
   fullText: string,
+  annotations?: import("@/hooks/useInlineAnnotations").InlineAnnotation[],
 ): React.ReactNode {
   if (segSearchMatches.length === 0) {
-    // No search matches — use normal word rendering
-    return words.map((word, wIdx) => (
-      <WordSpan
-        key={wIdx}
-        word={word}
-        isActive={isSegmentActive && wIdx === activeWordIndex}
-        highlightText={highlightText}
-        onClick={() => onSeek(word.start)}
-      />
-    ));
+    // No search matches — use normal word rendering with optional entity annotations
+    // Pre-compute word positions for annotation matching
+    let wordPositionsForAnnotations: { start: number; end: number }[] | undefined;
+    if (annotations && annotations.length > 0) {
+      wordPositionsForAnnotations = [];
+      let p = 0;
+      for (const w of words) {
+        const wText = w.word;
+        const i = fullText.indexOf(wText, p);
+        if (i >= 0) {
+          wordPositionsForAnnotations.push({ start: i, end: i + wText.length });
+          p = i + wText.length;
+        } else {
+          wordPositionsForAnnotations.push({ start: p, end: p + wText.length });
+          p += wText.length;
+        }
+      }
+    }
+
+    return words.map((word, wIdx) => {
+      // Check if this word falls within any entity annotation span
+      let entityType: string | undefined;
+      if (wordPositionsForAnnotations && annotations) {
+        const wp = wordPositionsForAnnotations[wIdx];
+        if (wp) {
+          const ann = annotations.find((a) => wp.start >= a.start && wp.end <= a.end);
+          if (ann) entityType = ann.entityType;
+        }
+      }
+      return (
+        <WordSpan
+          key={wIdx}
+          word={word}
+          isActive={isSegmentActive && wIdx === activeWordIndex}
+          highlightText={highlightText}
+          onClick={() => onSeek(word.start)}
+          entityType={entityType}
+        />
+      );
+    });
   }
 
   // Build a character-level map of the full text to identify which ranges are
@@ -561,11 +637,13 @@ function WordSpan({
   isActive,
   highlightText,
   onClick,
+  entityType,
 }: {
   word: Word;
   isActive: boolean;
   highlightText?: string;
   onClick: () => void;
+  entityType?: string;
 }) {
   const text = word.word;
   const isHighlighted = highlightText && text.toLowerCase().includes(highlightText.toLowerCase());
@@ -576,7 +654,11 @@ function WordSpan({
         "karaoke-word cursor-pointer rounded-sm",
         isActive && "karaoke-word-active font-medium px-0.5",
         isHighlighted && !isActive && "bg-amber-900/50 text-amber-200",
-        !isActive && !isHighlighted && "text-zinc-300 hover:text-zinc-100",
+        !isActive &&
+          !isHighlighted &&
+          entityType &&
+          `entity-highlight entity-highlight-${entityType}`,
+        !isActive && !isHighlighted && !entityType && "text-zinc-300 hover:text-zinc-100",
       )}
       onClick={(e) => {
         e.stopPropagation();

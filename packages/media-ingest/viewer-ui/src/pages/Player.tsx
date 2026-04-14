@@ -398,6 +398,8 @@ export default function PlayerPage() {
                 transcriptContainerRef={transcriptRef}
                 scrollHighlightIndex={scrollHighlightIndex}
                 className="flex-1 min-h-0"
+                mentions={mentions}
+                onEntityClick={handleEntityClick}
               />
             </div>
           </div>
