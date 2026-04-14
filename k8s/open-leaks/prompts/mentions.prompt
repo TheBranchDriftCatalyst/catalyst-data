@@ -23,6 +23,11 @@ Entity types to extract:
 - MONEY: financial amounts, transactions, transfers, investments
 - NORP: nationalities, political groups, ethnic groups
 - FACILITY: embassies, consulates, offices, buildings
+- DOCUMENT: leaked cables, memos, classified reports, dossiers ("State Department cable", "WikiLeaks cable")
+- BOOK: books, authored works referenced in documents
+- ROLE: titles, positions ("Ambassador", "Station Chief", "Director of National Intelligence")
+- STRATEGIC_ASSET: pipelines, chokepoints, bases, trade routes, arms systems ("Nord Stream", "Pine Gap", "Patriot missile system")
+- FINANCIAL_INSTRUMENT: shell company instruments, offshore accounts, securities ("bearer shares", "Swiss numbered account")
 - OTHER: any other notable entity
 
 For each entity, provide:

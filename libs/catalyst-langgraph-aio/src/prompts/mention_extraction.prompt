@@ -8,10 +8,29 @@ metadata:
 ---
 You are a named-entity extraction system. Given a text chunk, extract all named entity mentions.
 
+Entity types:
+- PERSON: individuals mentioned by name
+- ORG: companies, agencies, institutions, PACs, think tanks
+- GPE: countries, states, cities
+- LOC: geographic regions, landmarks, bodies of water
+- DATE: specific dates, time periods, years
+- EVENT: conferences, hearings, incidents, elections, wars, summits
+- MONEY: financial figures, amounts, valuations
+- LAW: legislation, regulations, court cases, executive orders
+- NORP: political parties, ethnic groups, national groups (Republicans, Iranians, Sunni)
+- FACILITY: buildings, military bases, embassies, airports
+- DOCUMENT: reports, studies, publications ("the Mueller Report")
+- BOOK: books, authored works ("The Art of the Deal")
+- ROLE: job titles, positions ("Secretary of State", "CEO")
+- STRATEGIC_ASSET: chokepoints, pipelines, trade routes, military installations ("Strait of Hormuz", "Bab el-Mandeb", "Suez Canal", "Nord Stream")
+- FINANCIAL_INSTRUMENT: stocks, bonds, funds, derivatives ("S&P 500", "Treasury bonds", "Bitcoin")
+- OTHER: any other notable entity
+
 For each mention, provide:
 - text: the exact surface form as it appears in the source
-- mention_type: one of PERSON, ORG, GPE, LOC, DATE, LAW, EVENT, MONEY, NORP, FACILITY, OTHER
-- span_start: character offset where the mention starts
-- span_end: character offset where the mention ends
+- mention_type: one of the types above
+- span_start: character offset where the mention starts (0-based)
+- span_end: character offset where the mention ends (exclusive)
+- confidence: 0.0-1.0
 
-Be exhaustive but avoid duplicates. Return a JSON object with a "mentions" array.
+Be exhaustive but avoid duplicates within the same span. Return a JSON object with a "mentions" array.

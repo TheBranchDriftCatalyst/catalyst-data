@@ -23,6 +23,11 @@ Entity types to extract:
 - MONEY: appropriations, budget figures, funding amounts
 - NORP: political parties, caucuses, coalitions
 - FACILITY: government buildings, military bases
+- DOCUMENT: reports, studies, CRS reports, GAO reports ("the Mueller Report")
+- BOOK: books, authored works referenced in testimony or debate
+- ROLE: titles, positions ("Speaker of the House", "Ranking Member", "Secretary of Defense")
+- STRATEGIC_ASSET: chokepoints, pipelines, trade routes, bases discussed in defense/foreign affairs ("Strait of Hormuz", "Bab el-Mandeb")
+- FINANCIAL_INSTRUMENT: treasury instruments, bonds, funds discussed in appropriations ("Treasury bonds", "Federal Reserve")
 - OTHER: any other notable entity
 
 For each entity, provide:

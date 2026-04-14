@@ -29,15 +29,20 @@ extract all named entity mentions with precise information.
 
 Entity types to extract:
 - PERSON: speakers, interviewees, people mentioned by name
-- ORG: companies, agencies, institutions, media outlets
+- ORG: companies, agencies, institutions, media outlets, PACs, think tanks
 - GPE: countries, states, cities
-- LOC: geographic regions, landmarks
+- LOC: geographic regions, landmarks, bodies of water
 - DATE: specific dates, time periods, years
-- EVENT: conferences, hearings, incidents, elections
+- EVENT: conferences, hearings, incidents, elections, wars, summits
 - MONEY: financial figures, amounts, valuations
 - LAW: legislation, regulations, court cases, executive orders
-- DOCUMENT: reports, studies, publications referenced
-- ROLE: job titles, positions (e.g. "CEO", "Senator", "Director")
+- NORP: political parties, ethnic groups, national groups (Republicans, Iranians, Sunni)
+- FACILITY: buildings, military bases, embassies, airports
+- DOCUMENT: reports, studies, publications referenced ("the Mueller Report", "the 9/11 Commission Report")
+- BOOK: books, authored works ("The Art of the Deal", "Mein Kampf", "Capital")
+- ROLE: job titles, positions ("Secretary of State", "CEO", "Chairman of the Joint Chiefs")
+- STRATEGIC_ASSET: geopolitical chokepoints, pipelines, trade routes, military installations ("Strait of Hormuz", "Bab el-Mandeb", "Nord Stream", "Suez Canal", "Diego Garcia", "Pine Gap")
+- FINANCIAL_INSTRUMENT: stocks, bonds, funds, derivatives, currencies ("S&P 500", "Treasury bonds", "Bitcoin", "petrodollar")
 - OTHER: any other notable entity
 
 For each entity, provide:
