@@ -122,6 +122,11 @@ classDiagram
         MONEY
         NORP
         FACILITY
+        DOCUMENT
+        BOOK
+        ROLE
+        STRATEGIC_ASSET
+        FINANCIAL_INSTRUMENT
         OTHER
     }
 
@@ -131,6 +136,18 @@ classDiagram
         possibleSameAs
         relatedTo
         partOf
+    }
+
+    class EntityOverride {
+        +str override_id ‹UUID›
+        +str alias_text
+        +str target_name
+        +str entity_type
+        +str reviewer
+        +str notes
+        +bool is_active
+        +str created_at
+        +str updated_at
     }
 
     class ExtractionMethod {
@@ -158,6 +175,7 @@ classDiagram
     EntityCandidate ..> AlignmentEdge : linked by
     MediaDocument ..> TextChunk : chunked into
     Assertion ..> Mention : references subject/object
+    EntityOverride ..> CanonicalEntity : forces merge of
 ```
 
 ## Extraction Pipeline Flow
@@ -173,16 +191,16 @@ flowchart TB
         CHK[TextChunks<br/><i>800/150 for speech<br/>1000/200 for text</i>]
     end
 
-    subgraph Gold["Gold Layer — Domain Extractors"]
+    subgraph Gold["Gold Layer — LangGraph Validated Extraction"]
         direction LR
-        subgraph Extractors["Specialized Extractors"]
+        subgraph Extractors["Domain Extractors (extract → validate → repair)"]
             EX1[Congress Extractor<br/><i>legislators, bills,<br/>votes, committees</i>]
             EX2[Leaks Extractor<br/><i>offshore entities,<br/>transactions, diplomats</i>]
             EX3[Media Extractor<br/><i>speakers, speech acts,<br/>claims, references</i>]
             EX4[Financial Extractor<br/><i>tickers, predictions,<br/>sentiment, targets</i>]
             EX5[Geopolitical Extractor<br/><i>nations, treaties,<br/>conflicts, sanctions</i>]
         end
-        MEN[Mentions<br/><i>PERSON, ORG, GPE,<br/>MONEY, TICKER...</i>]
+        MEN[Mentions<br/><i>16 types: PERSON, ORG, GPE,<br/>STRATEGIC_ASSET, BOOK...</i>]
         ASS[Assertions<br/><i>S-P-O with qualifiers,<br/>confidence, hedging</i>]
         EMB[Embeddings<br/><i>text-embedding-3-small<br/>1536-dim</i>]
     end

@@ -244,18 +244,47 @@ Then:
 
 This is one place where you absolutely want **human-supervised review queues** for the gray band. Human-supervised KG construction pipelines explicitly combine extraction with downstream fusion and review because fully automatic merge policies still over-collapse entities. ([Webis Downloads][10])
 
+#### 5.3.1 Current implementation: ConcordanceEngine + CrossSourceAligner
+
+The pipeline implements a two-stage concordance architecture:
+
+**Stage 1 — ConcordanceEngine** (gold layer, per code location):
+Multi-pass resolution of Mentions → EntityCandidates within one source:
+- Pass 1: Exact case-insensitive grouping
+- Pass 2: Substring containment (min 4 chars, ≥2 shared tokens, ratio ≥0.4)
+- Pass 3: Jaccard token overlap >0.6 (≥2 shared tokens)
+- Pass 4: Embedding cosine similarity >0.85 (same guards as substring)
+
+**Stage 2 — CrossSourceAligner** (platinum layer, cross-source):
+Multi-signal weighted-average scoring with IDF frequency adjustment:
+
+| Signal | Weight | Description |
+|--------|--------|-------------|
+| exact_name | 1.0 | Any name from candidate A matches any name from candidate B |
+| substring | 0.7 | Containment with IDF modulation (rare tokens boost, common tokens penalize) |
+| embedding | 0.6 | Cosine similarity >0.80 (requires ≥2 shared tokens) |
+| jaccard | 0.5 | IDF-weighted token overlap ≥0.5 (requires ≥2 shared tokens) |
+
+**IDF weighting**: Token importance is weighted by Inverse Document Frequency across all candidates. Common tokens like "National" or "John" get lower IDF (less informative), while rare tokens like "Pelosi" or "Rumsfeld" get higher IDF. Applied to both substring signal modulation (±30% range) and IDF-weighted Jaccard overlap.
+
+**Corroboration rule**: sameAs requires EITHER exact_name OR ≥2 signals with combined score ≥0.65. This prevents any single signal (especially substring) from triggering a merge alone.
+
+**Safety mechanisms**:
+- Cluster-size cap (MAX_CLUSTER_SIZE=20) — oversized clusters are split by mention_count
+- Cluster coherence check — every member must have ≥1 intra-cluster edge with score ≥0.45; weakly-connected members ejected as singletons
+- Min shared tokens guard — prevents "Donald" from bridging "Donald Trump" and "Donald Rumsfeld" via transitive closure
+
+**HITL overrides**: The `viewer_entity_overrides` table stores human-declared alias merges (e.g., "Trump" → "Donald Trump"). These are loaded before union-find and injected as forced merges, bypassing the automatic guards for cases humans can trivially resolve.
+
 ### 5.4 Practical concordance object model
 
-You want at least:
+The system implements:
 
-* `Mention`
-* `EntityCandidate`
-* `CanonicalEntity`
-* `Alias`
-* `ExternalIdentifier`
-* `AlignmentEdge`
-* `MergeDecision`
-* `EvidenceBundle`
+* `Mention` — raw extraction with span offsets and provenance
+* `EntityCandidate` — within-source clustering output (gold layer)
+* `CanonicalEntity` — cross-source resolved entity (platinum layer)
+* `AlignmentEdge` — scored pairwise link with evidence (sameAs / possibleSameAs)
+* `viewer_entity_overrides` — HITL forced merge directives
 
 That model keeps the system auditable.
 

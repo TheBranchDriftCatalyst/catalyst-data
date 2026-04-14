@@ -16,14 +16,14 @@ graph TD
     end
 
     subgraph Gold["Gold Layer (ML + Extraction)"]
-        MT[media_transcriptions<br/><i>OpenVINO GPU whisper<br/>or faster-whisper CPU</i>]
-        MDIA[media_diarization<br/><i>pyannote speaker ID<br/>+ segment alignment</i>]
-        MME[media_mentions<br/><i>NER via LLM</i>]
-        MA[media_assertions<br/><i>S-P-O via LLM<br/>speech-act predicates</i>]
+        MT[media_transcriptions<br/><i>OpenVINO GPU whisper<br/>chunked for long audio</i>]
+        MDIA[media_diarization<br/><i>pyannote speaker ID<br/>XPU accelerated</i>]
+        MME[media_mentions<br/><i>LangGraph validated NER<br/>16 entity types</i>]
+        MA[media_assertions<br/><i>LangGraph validated S-P-O<br/>MCP contract checks</i>]
         ME[media_embeddings<br/><i>text-embedding-3-small</i>]
     end
 
-    MF --> MM --> MTC --> MD
+    MF --> MM --> MD
     MD -.->|sensor registers partitions| MT
     MT --> MDIA --> MC
     MC --> MME
@@ -165,8 +165,8 @@ graph TB
 
     subgraph Platinum["PLATINUM — Unified Knowledge Graph"]
         direction LR
-        CE[canonical_entities]
-        EA[entity_alignments<br/><i>sameAs / possibleSameAs</i>]
+        CE[canonical_entities<br/><i>IDF-weighted scoring<br/>cluster coherence<br/>HITL overrides</i>]
+        EA[entity_alignments<br/><i>sameAs / possibleSameAs<br/>multi-signal evidence</i>]
         AG[assertion_graph<br/><i>full provenance</i>]
     end
 
