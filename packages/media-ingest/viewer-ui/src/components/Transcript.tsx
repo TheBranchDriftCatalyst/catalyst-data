@@ -415,12 +415,16 @@ function renderWordsWithSearch(
     }
 
     return words.map((word, wIdx) => {
-      // Check if this word falls within any entity annotation span
+      // Check if this word falls within any entity annotation span.
+      // Words may have leading whitespace (" Trump") — trim it for matching
+      // since annotations reference the text without leading spaces.
       let entityType: string | undefined;
       if (wordPositionsForAnnotations && annotations) {
         const wp = wordPositionsForAnnotations[wIdx];
         if (wp) {
-          const ann = annotations.find((a) => wp.start >= a.start && wp.end <= a.end);
+          const leadingSpaces = word.word.length - word.word.trimStart().length;
+          const trimmedStart = wp.start + leadingSpaces;
+          const ann = annotations.find((a) => trimmedStart >= a.start && trimmedStart < a.end);
           if (ann) entityType = ann.entityType;
         }
       }
