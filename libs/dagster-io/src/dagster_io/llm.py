@@ -94,6 +94,7 @@ def _normalize_messages(messages: list) -> list:
             normalized.append(msg)
     return normalized
 
+
 T = TypeVar("T")
 
 
@@ -143,10 +144,12 @@ class LLMResource(ConfigurableResource):
     def complete(self, prompt: str, *, system: str = "") -> str:
         """Send a chat completion and return the text response."""
         logger.debug("LLM complete model=%s prompt_len=%d", self.model, len(prompt))
-        messages = _normalize_messages([
-            *([SystemMessage(content=system)] if system else []),
-            HumanMessage(content=prompt),
-        ])
+        messages = _normalize_messages(
+            [
+                *([SystemMessage(content=system)] if system else []),
+                HumanMessage(content=prompt),
+            ]
+        )
         # Note: LLM_REQUESTS is only incremented on terminal states (success or
         # error). A previous in-flight status increment at request start was
         # never paired with a decrement, so it grew monotonically and the
@@ -253,8 +256,9 @@ class LLMResource(ConfigurableResource):
         *,
         log_every: int = 50,
         operation: str = "batch",
+        max_concurrency: int = 5,
     ) -> list[Any]:
-        """Invoke a chain over a list of items with progress logging.
+        """Invoke a chain over a list of items with concurrent execution.
 
         Args:
             chain: LangChain runnable (e.g. from with_structured_output).
@@ -262,23 +266,45 @@ class LLMResource(ConfigurableResource):
             items: Items to process.
             log_every: Log progress every N items.
             operation: Label for metrics/logs.
+            max_concurrency: Max parallel LLM requests (default 5).
         """
-        logger.info("LLM %s starting: %d items, model=%s", operation, len(items), self.model)
-        results = []
-        for i, item in enumerate(items):
-            with track_duration(LLM_REQUEST_DURATION, {"model": self.model, "operation": operation}):
-                result = chain.invoke(_normalize_messages(messages_fn(item)))
-            results.append(result)
-            LLM_REQUESTS.labels(model=self.model, operation=operation, status="success").inc()
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            if (i + 1) % log_every == 0 or (i + 1) == len(items):
-                logger.info(
-                    "LLM %s progress: %d/%d (%.0f%%)",
-                    operation,
-                    i + 1,
-                    len(items),
-                    (i + 1) / len(items) * 100,
-                )
+        logger.info(
+            "LLM %s starting: %d items, model=%s, concurrency=%d",
+            operation,
+            len(items),
+            self.model,
+            max_concurrency,
+        )
+
+        def _invoke_one(idx: int, item: T) -> tuple[int, Any]:
+            start = time.monotonic()
+            result = chain.invoke(_normalize_messages(messages_fn(item)))
+            duration = time.monotonic() - start
+            LLM_REQUEST_DURATION.labels(model=self.model, operation=operation).observe(duration)
+            LLM_REQUESTS.labels(model=self.model, operation=operation, status="success").inc()
+            return idx, result
+
+        # Preserve order: results[i] corresponds to items[i]
+        results: list[Any] = [None] * len(items)
+        completed = 0
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as pool:
+            futures = {pool.submit(_invoke_one, i, item): i for i, item in enumerate(items)}
+            for future in as_completed(futures):
+                idx, result = future.result()
+                results[idx] = result
+                completed += 1
+                if completed % log_every == 0 or completed == len(items):
+                    logger.info(
+                        "LLM %s progress: %d/%d (%.0f%%)",
+                        operation,
+                        completed,
+                        len(items),
+                        completed / len(items) * 100,
+                    )
+
         return results
 
 
