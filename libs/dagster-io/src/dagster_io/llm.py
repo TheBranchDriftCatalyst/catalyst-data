@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import time
-import unicodedata
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -71,17 +70,14 @@ logger = get_logger(__name__)
 
 
 def _normalize_text(text: str) -> str:
-    """Normalize text for LLM APIs — NFKC normalization + control char removal.
+    """Normalize text for LLM APIs — delegates to shared normalize_text().
 
-    NFKC converts fullwidth characters to ASCII equivalents (e.g., ： → :, ｜ → |),
-    decomposes ligatures, and normalizes compatible forms. This prevents JSON
-    serialization issues with litellm/OpenAI APIs that choke on fullwidth Unicode.
+    Kept as a thin wrapper for backwards compatibility with existing tests
+    that import ``_normalize_text`` from this module.
     """
-    # NFKC: fullwidth → ASCII, ligatures decomposed, compatible forms normalized
-    text = unicodedata.normalize("NFKC", text)
-    # Strip null bytes and other control chars (except newline/tab)
-    text = "".join(c for c in text if c >= " " or c in "\n\r\t")
-    return text
+    from dagster_io.text import normalize_text
+
+    return normalize_text(text)
 
 
 def _normalize_messages(messages: list) -> list:

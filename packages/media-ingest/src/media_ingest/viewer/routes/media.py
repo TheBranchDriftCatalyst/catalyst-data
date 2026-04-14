@@ -112,6 +112,95 @@ def _range_stream(file_path: str, start: int, end: int) -> Generator[bytes, None
             yield data
 
 
+_THUMB_CACHE_DIR = "/tmp/catalyst-thumbnails"
+
+
+def _generate_thumbnail(video_path: str, thumb_path: str) -> bool:
+    """Generate a JPEG thumbnail from a video file at ~10% mark.
+
+    Returns True if thumbnail was created successfully.
+    """
+    import subprocess
+
+    # Get duration to seek to 10% mark
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", video_path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        duration = float(probe.stdout.strip()) if probe.returncode == 0 else 0
+    except (ValueError, subprocess.TimeoutExpired):
+        duration = 0
+
+    seek_pos = max(1.0, duration * 0.1) if duration > 10 else 1.0
+
+    os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-ss",
+                str(seek_pos),
+                "-i",
+                video_path,
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=320:-2",
+                "-q:v",
+                "5",
+                "-y",
+                thumb_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+
+
+@router.get("/thumbnail/{source}/{path:path}")
+def get_thumbnail(source: str, path: str) -> Response:
+    """Serve a JPEG thumbnail for a video file, generating on first request."""
+    from fastapi.responses import FileResponse
+
+    root = _MEDIA_ROOTS.get(source)
+    if root is None:
+        raise HTTPException(status_code=400, detail=f"Unknown media source: {source}")
+
+    full_path = os.path.normpath(os.path.join(root, path))
+    if not full_path.startswith(root):
+        raise HTTPException(status_code=403, detail="Path traversal not allowed")
+
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Check if it's a video file
+    ext = os.path.splitext(full_path)[1].lower()
+    if ext not in {".mp4", ".mkv", ".webm", ".avi", ".mov"}:
+        raise HTTPException(status_code=400, detail="Thumbnails only for video files")
+
+    # Cache key: hash of the full path
+    import hashlib
+
+    path_hash = hashlib.sha256(full_path.encode()).hexdigest()[:16]
+    thumb_path = os.path.join(_THUMB_CACHE_DIR, f"{path_hash}.jpg")
+
+    # Serve cached thumbnail if exists
+    if os.path.isfile(thumb_path):
+        return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
+    # Generate thumbnail
+    if not _generate_thumbnail(full_path, thumb_path):
+        raise HTTPException(status_code=500, detail="Failed to generate thumbnail")
+
+    return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @router.get("/{source}/{path:path}")
 def stream_media(source: str, path: str, request: Request) -> Response:
     """Stream a media file with optional HTTP Range support."""

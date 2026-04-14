@@ -309,19 +309,34 @@ function DocumentCard({ doc }: { doc: MediaDocument }) {
       <Card className="overflow-hidden h-full transition-all group-hover:border-white/15 group-hover:shadow-lg group-hover:shadow-black/20">
         {/* Thumbnail area */}
         <div className="relative h-36 bg-gradient-to-br from-surface-2 to-surface-0 flex items-center justify-center overflow-hidden">
-          {/* Subtle grid pattern */}
-          <div
-            className="absolute inset-0 opacity-[0.04]"
-            style={{
-              backgroundImage:
-                "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)",
-              backgroundSize: "24px 24px",
-            }}
-          />
-          {hasVideo ? (
-            <Video className="h-8 w-8 text-zinc-700 group-hover:text-zinc-500 transition-colors relative z-10" />
+          {doc.thumbnail_url ? (
+            <img
+              src={doc.thumbnail_url}
+              alt=""
+              loading="lazy"
+              className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+              onError={(e) => {
+                // Fall back to icon on error
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
           ) : (
-            <AudioLines className="h-8 w-8 text-zinc-700 group-hover:text-zinc-500 transition-colors relative z-10" />
+            <>
+              {/* Subtle grid pattern */}
+              <div
+                className="absolute inset-0 opacity-[0.04]"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)",
+                  backgroundSize: "24px 24px",
+                }}
+              />
+              {hasVideo ? (
+                <Video className="h-8 w-8 text-zinc-700 group-hover:text-zinc-500 transition-colors relative z-10" />
+              ) : (
+                <AudioLines className="h-8 w-8 text-zinc-700 group-hover:text-zinc-500 transition-colors relative z-10" />
+              )}
+            </>
           )}
           {/* Bottom gradient fade */}
           <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-surface-0/80 to-transparent" />

@@ -39,12 +39,15 @@ def list_documents() -> list[dict]:
     svc = _svc()
     docs = svc.list_documents()
 
-    # Enrich each document with a media URL if resolvable
+    # Enrich each document with a media URL + thumbnail URL if resolvable
     for doc in docs:
         source_path = doc.get("source_path", "")
         media_url = svc.resolve_media_url(source_path)
         if media_url:
             doc["media_url"] = media_url
+            # Add thumbnail URL for video files
+            if doc.get("metadata", {}).get("has_video"):
+                doc["thumbnail_url"] = media_url.replace("/viewer/media/", "/viewer/media/thumbnail/")
 
     return docs
 

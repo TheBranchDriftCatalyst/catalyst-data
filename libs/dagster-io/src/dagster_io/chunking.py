@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import CHUNK_PROCESSING_DURATION, CHUNKS_CREATED, track_duration
+from dagster_io.text import normalize_text
 
 logger = get_logger(__name__)
 
@@ -108,6 +109,10 @@ class ChunkingResource(ConfigurableResource):
             chunk_size: Override the resource default for this call.
             chunk_overlap: Override the resource default for this call.
         """
+        # Normalize at ingestion — NFKC converts fullwidth chars, strips control chars
+        title = normalize_text(title) if title else title
+        content = normalize_text(content) if content else content
+
         size = chunk_size or self.chunk_size
         overlap = chunk_overlap or self.chunk_overlap
         logger.debug(
@@ -163,6 +168,10 @@ class ChunkingResource(ConfigurableResource):
         Use for metadata-only or very short documents (members, committees,
         offshore entities) where splitting would add noise.
         """
+        # Normalize at ingestion
+        title = normalize_text(title) if title else title
+        content = normalize_text(content) if content else content
+
         text = content.strip()
         if not text:
             return []

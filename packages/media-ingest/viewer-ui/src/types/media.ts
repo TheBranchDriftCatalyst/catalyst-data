@@ -5,6 +5,7 @@ export interface MediaDocument {
   source_path: string;
   document_type: string;
   domain: string;
+  thumbnail_url?: string;
   metadata: {
     extension: string;
     size_bytes: number;
