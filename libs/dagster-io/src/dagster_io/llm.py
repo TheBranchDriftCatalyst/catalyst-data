@@ -321,31 +321,21 @@ class LLMResource(ConfigurableResource):
 
         results: list[Any] = [None] * len(items)
         completed = 0
-        errors = 0
 
         with ThreadPoolExecutor(max_workers=max_concurrency) as pool:
             futures = {pool.submit(_invoke_one, i, item): i for i, item in enumerate(items)}
             for future in as_completed(futures):
-                try:
-                    idx, result = future.result()
-                    results[idx] = result
-                except Exception as e:
-                    errors += 1
-                    logger.error("LLM %s permanent failure: %s", operation, e)
-                    # Don't abort the whole batch — continue with remaining items
+                idx, result = future.result()  # raises on permanent failure — fails the step
+                results[idx] = result
                 completed += 1
                 if completed % log_every == 0 or completed == len(items):
                     logger.info(
-                        "LLM %s progress: %d/%d (%.0f%%)%s",
+                        "LLM %s progress: %d/%d (%.0f%%)",
                         operation,
                         completed,
                         len(items),
                         completed / len(items) * 100,
-                        f" ({errors} errors)" if errors else "",
                     )
-
-        if errors:
-            logger.warning("LLM %s completed with %d/%d errors", operation, errors, len(items))
 
         return results
 
