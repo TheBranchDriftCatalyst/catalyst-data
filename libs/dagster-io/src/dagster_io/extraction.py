@@ -1,0 +1,236 @@
+"""Validated extraction via LangGraph — shared helper for all code locations.
+
+Wraps the catalyst-langgraph-aio extraction graph (extract → validate → repair)
+and runs it per-chunk with concurrency. This replaces raw llm.invoke_batch() calls
+so ALL extractions get MCP contract validation and span-checked repair.
+
+Usage in Dagster assets:
+    from dagster_io.extraction import extract_validated
+
+    mentions, assertions = extract_validated(
+        chunks=media_chunks,
+        code_location="media_ingest",
+        mention_prompt=MENTION_SYSTEM_PROMPT,
+        assertion_prompt=ASSERTION_SYSTEM_PROMPT,
+        max_concurrency=5,
+    )
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+from dagster_io.logging import get_logger
+from dagster_io.metrics import (
+    ENTITIES_EXTRACTED,
+    LLM_REQUEST_DURATION,
+    LLM_REQUESTS,
+)
+
+logger = get_logger(__name__)
+
+
+def _build_graph():
+    """Build the LangGraph extraction graph with real validators."""
+    from catalyst_contracts.validators.mention_validator import (
+        validate_mentions as _validate_mentions,
+    )
+    from catalyst_contracts.validators.proposition_validator import (
+        validate_propositions as _validate_propositions,
+    )
+    from catalyst_langgraph.clients.llm import LLMClient
+    from catalyst_langgraph.clients.mcp import DirectMCPClient
+    from catalyst_langgraph.graph import build_extraction_graph
+    from catalyst_langgraph.repository.base import ArtifactRepository
+
+    class _ValidatorHandler:
+        """Direct handler for MCP validation — no subprocess needed."""
+
+        def validate_mentions(self, mentions, source_text, document_id):
+            result = _validate_mentions(mentions, source_text, document_id)
+            return result.model_dump(mode="json")
+
+        def validate_propositions(self, propositions, known_mention_ids, source_text):
+            result = _validate_propositions(propositions, set(known_mention_ids), source_text)
+            return result.model_dump(mode="json")
+
+    class _NullRepository(ArtifactRepository):
+        """No-op repository — Dagster's IO manager handles persistence."""
+
+        async def save_mentions(self, document_id, chunk_id, mentions):
+            pass
+
+        async def save_propositions(self, document_id, chunk_id, propositions):
+            pass
+
+        async def load_mentions(self, document_id, chunk_id):
+            return []
+
+        async def load_propositions(self, document_id, chunk_id):
+            return []
+
+    llm_client = LLMClient()
+    mcp_client = DirectMCPClient(_ValidatorHandler())
+    repo = _NullRepository()
+
+    return build_extraction_graph(llm_client, mcp_client, repo)
+
+
+async def _extract_chunk(graph, chunk_text: str, document_id: str, chunk_id: str) -> dict:
+    """Run the full extraction graph on one chunk."""
+    state = {
+        "raw_text": chunk_text,
+        "source_metadata": {
+            "document_id": document_id,
+            "chunk_id": chunk_id,
+        },
+        "max_retries": 3,
+    }
+    result = await graph.ainvoke(state)
+    return {
+        "mentions": result.get("accepted_mentions", []),
+        "propositions": result.get("accepted_propositions", []),
+        "status": result.get("status", "unknown"),
+        "mention_retries": result.get("mention_retry_count", 0),
+        "proposition_retries": result.get("proposition_retry_count", 0),
+    }
+
+
+def extract_validated(
+    chunks: list,
+    code_location: str,
+    *,
+    max_concurrency: int = 5,
+    max_retries: int = 3,
+) -> tuple[list, list]:
+    """Run validated extraction on a list of TextChunk objects.
+
+    Uses the LangGraph extraction graph with MCP contract validation
+    and repair cycles. Runs chunks concurrently.
+
+    Args:
+        chunks: List of TextChunk objects (must have .text, .document_id, .chunk_id).
+        code_location: For metrics labeling.
+        max_concurrency: Max parallel extraction graphs.
+        max_retries: Max repair attempts per chunk.
+
+    Returns:
+        (all_mentions, all_assertions) — flattened lists of Mention and
+        Assertion domain model instances.
+    """
+    from dagster_io.models import Assertion, Mention, MentionType
+
+    if not chunks:
+        return [], []
+
+    graph = _build_graph()
+    all_mentions: list[dict] = []
+    all_assertions: list[dict] = []
+    completed = 0
+    errors = 0
+    total_mention_retries = 0
+    total_proposition_retries = 0
+
+    logger.info(
+        "Starting validated extraction: %d chunks, concurrency=%d, code_location=%s",
+        len(chunks),
+        max_concurrency,
+        code_location,
+    )
+
+    def _run_chunk(idx: int, chunk) -> tuple[int, dict]:
+        """Run one chunk through the extraction graph (sync wrapper for async)."""
+        loop = asyncio.new_event_loop()
+        try:
+            start = time.monotonic()
+            result = loop.run_until_complete(_extract_chunk(graph, chunk.text, chunk.document_id, chunk.chunk_id))
+            duration = time.monotonic() - start
+            LLM_REQUEST_DURATION.labels(model="gpt-4o-mini", operation="validated_extraction").observe(duration)
+            LLM_REQUESTS.labels(model="gpt-4o-mini", operation="validated_extraction", status="success").inc()
+            return idx, result
+        except Exception as e:
+            LLM_REQUESTS.labels(model="gpt-4o-mini", operation="validated_extraction", status="error").inc()
+            logger.error("Extraction failed for chunk %d: %s", idx, e)
+            raise
+        finally:
+            loop.close()
+
+    from concurrent.futures import as_completed
+
+    with ThreadPoolExecutor(max_workers=max_concurrency) as pool:
+        futures = {pool.submit(_run_chunk, i, chunk): i for i, chunk in enumerate(chunks)}
+        for future in as_completed(futures):
+            idx, result = future.result()  # raises on permanent failure
+            all_mentions.extend(result["mentions"])
+            all_assertions.extend(result["propositions"])
+            total_mention_retries += result["mention_retries"]
+            total_proposition_retries += result["proposition_retries"]
+
+            if result["status"] == "failed":
+                errors += 1
+
+            completed += 1
+            if completed % 50 == 0 or completed == len(chunks):
+                logger.info(
+                    "Validated extraction progress: %d/%d (%.0f%%)%s",
+                    completed,
+                    len(chunks),
+                    completed / len(chunks) * 100,
+                    f" ({errors} failures)" if errors else "",
+                )
+
+    # Convert raw dicts to domain models
+    mention_models = []
+    for m in all_mentions:
+        mention_type_str = m.get("mention_type", "OTHER")
+        try:
+            mention_type = MentionType(mention_type_str)
+        except ValueError:
+            mention_type = MentionType.OTHER
+
+        ENTITIES_EXTRACTED.labels(
+            code_location=code_location,
+            entity_type=mention_type.value,
+            method="langgraph_validated",
+        ).inc()
+
+        mention_models.append(
+            Mention(
+                document_id=m.get("document_id", ""),
+                chunk_id=m.get("chunk_id", ""),
+                text=m.get("text", ""),
+                mention_type=mention_type,
+                span_start=m.get("span_start"),
+                span_end=m.get("span_end"),
+                context=m.get("context", ""),
+            )
+        )
+
+    assertion_models = []
+    for a in all_assertions:
+        assertion_models.append(
+            Assertion(
+                subject_text=a.get("subject", a.get("subject_text", "")),
+                predicate=a.get("predicate", ""),
+                object_text=a.get("object", a.get("object_text", "")),
+                confidence=a.get("confidence", 1.0),
+                negated=a.get("negated", False),
+                hedged=a.get("hedged", False),
+                qualifiers=a.get("qualifiers", {}),
+            )
+        )
+
+    logger.info(
+        "Validated extraction complete: %d mentions, %d assertions from %d chunks "
+        "(%d mention retries, %d proposition retries, %d failures)",
+        len(mention_models),
+        len(assertion_models),
+        len(chunks),
+        total_mention_retries,
+        total_proposition_retries,
+        errors,
+    )
+
+    return mention_models, assertion_models

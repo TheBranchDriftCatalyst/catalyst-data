@@ -4,16 +4,13 @@ Partitioned by document_id — each run extracts assertions from one document's 
 """
 
 from dagster import AssetExecutionContext, Output, asset
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from dagster_io import (
     LLM_ASSET_K8S_CONFIG,
     Assertion,
-    AssertionExtractionResult,
-    LLMResource,
     TextChunk,
-    build_assertions,
 )
+from dagster_io.extraction import extract_validated
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -131,7 +128,6 @@ MEDIA_PREDICATE_MAPPINGS = {
 )
 def media_assertions(
     context: AssetExecutionContext,
-    llm: LLMResource,
     media_chunks: list[TextChunk],
 ) -> Output[list[Assertion]]:
     partition_key = context.partition_key
@@ -163,23 +159,10 @@ def media_assertions(
                 },
             )
 
-        chain = llm.with_structured_output(AssertionExtractionResult)
-        results = llm.invoke_batch(
-            chain,
-            lambda chunk: [
-                SystemMessage(content=ASSERTION_SYSTEM_PROMPT),
-                HumanMessage(content=f"Extract qualified assertions from this text:\n\n{chunk.text}"),
-            ],
+        _, all_assertions = extract_validated(
             media_chunks,
-            operation="assertion_extract",
-        )
-
-        all_assertions = build_assertions(
-            media_chunks,
-            results,
-            llm_model=llm.model,
             code_location="media_ingest",
-            predicate_mappings=MEDIA_PREDICATE_MAPPINGS,
+            max_concurrency=5,
         )
 
         negated_count = sum(1 for a in all_assertions if a.negated)
@@ -187,16 +170,8 @@ def media_assertions(
         ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_assertions", layer="gold").inc(
             len(all_assertions)
         )
-        logger.info(
-            "media_assertions complete for partition=%s: %d assertions from %d chunks (negated=%d, hedged=%d)",
-            partition_key,
-            len(all_assertions),
-            len(media_chunks),
-            negated_count,
-            hedged_count,
-        )
         context.log.info(
-            f"Extracted {len(all_assertions)} assertions from {len(media_chunks)} chunks "
+            f"Extracted {len(all_assertions)} validated assertions from {len(media_chunks)} chunks "
             f"({negated_count} negated, {hedged_count} hedged)"
         )
         return Output(
