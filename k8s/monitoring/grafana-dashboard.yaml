@@ -7,6 +7,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: dagster
 spec:
+  allowCrossNamespaceImport: true
   instanceSelector:
     matchLabels:
       dashboards: grafana
