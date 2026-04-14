@@ -6,6 +6,7 @@ using multi-pass resolution (exact match, substring, Jaccard, embedding cosine).
 
 from dagster import AssetExecutionContext, Output, asset
 
+import dagster_io.concordance as _concordance_mod
 from dagster_io import (
     ConcordanceEngine,
     EmbeddingResource,
@@ -15,6 +16,9 @@ from dagster_io import (
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED, ENTITY_REDUCTION_RATIO
 from dagster_io.observability import get_tracer, trace_operation
+from dagster_io.versioning import code_version_from_modules
+
+_CODE_VERSION = code_version_from_modules(_concordance_mod)
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -24,6 +28,7 @@ tracer = get_tracer(__name__)
     group_name="congress",
     description="Resolve congress mentions into entity candidates via concordance engine",
     compute_kind="python",
+    code_version=_CODE_VERSION,
     metadata={"layer": "gold"},
     op_tags={
         "dagster-k8s/config": {

@@ -5,13 +5,18 @@ runs CrossSourceAligner, and produces CanonicalEntity objects.
 Dual-writes to PostgreSQL + Neo4j.
 """
 
-from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, Output, asset
+from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, AutoMaterializePolicy, Output, asset
 
+import dagster_io.concordance as _concordance_mod
+import knowledge_graph.resources as _resources_mod
 from dagster_io import (
     CanonicalEntity,
     CrossSourceAligner,
     EntityCandidate,
 )
+from dagster_io.versioning import code_version_from_modules
+
+_CODE_VERSION = code_version_from_modules(_concordance_mod, _resources_mod)
 
 
 def _flatten_partition_fanin(value, model_cls=None) -> list:
@@ -63,6 +68,8 @@ tracer = get_tracer(__name__)
     group_name="knowledge_graph",
     description="Cross-source canonical entity resolution (platinum layer)",
     compute_kind="python",
+    code_version=_CODE_VERSION,
+    auto_materialize_policy=AutoMaterializePolicy.eager(),
     metadata={"layer": "platinum"},
     ins={
         # media_entity_candidates is partitioned by document_id in media_ingest;

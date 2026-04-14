@@ -5,6 +5,7 @@ Partitioned by document_id — each run extracts mentions from one document's ch
 
 from dagster import AssetExecutionContext, Output, asset
 
+import dagster_io.extraction as _extraction_mod
 from dagster_io import (
     LLM_ASSET_K8S_CONFIG,
     Mention,
@@ -14,7 +15,10 @@ from dagster_io.extraction import extract_validated
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
+from dagster_io.versioning import code_version_from_modules
 from media_ingest.partitions import media_partitions
+
+_CODE_VERSION = code_version_from_modules(_extraction_mod)
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -68,6 +72,7 @@ IMPORTANT RULES:
     group_name="media_ingest",
     description="Extract entity mentions from one document's transcription chunks via LLM",
     compute_kind="llm",
+    code_version=_CODE_VERSION,
     metadata={"layer": "gold"},
     partitions_def=media_partitions,
     op_tags=LLM_ASSET_K8S_CONFIG,

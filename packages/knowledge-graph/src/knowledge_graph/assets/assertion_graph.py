@@ -8,14 +8,18 @@ PostgreSQL + Neo4j.
 from collections import defaultdict
 from typing import Any
 
-from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, Output, asset
+from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, AutoMaterializePolicy, Output, asset
 
+import knowledge_graph.resources as _resources_mod
 from dagster_io import Assertion, CanonicalEntity
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
+from dagster_io.versioning import code_version_from_modules
 from knowledge_graph.assets.canonical_entities import _flatten_partition_fanin
 from knowledge_graph.resources import GraphDBResource
+
+_CODE_VERSION = code_version_from_modules(_resources_mod)
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -54,6 +58,8 @@ def _resolve_entity_id(text: str, name_index: dict[str, str]) -> str | None:
     group_name="knowledge_graph",
     description="Link assertions to canonical entities and write to graph stores (platinum layer)",
     compute_kind="python",
+    code_version=_CODE_VERSION,
+    auto_materialize_policy=AutoMaterializePolicy.eager(),
     metadata={"layer": "platinum"},
     ins={
         "media_assertions": AssetIn(
