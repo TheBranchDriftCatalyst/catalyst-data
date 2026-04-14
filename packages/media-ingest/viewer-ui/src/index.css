@@ -17,11 +17,72 @@
   --color-accent: #facc15;
   --color-accent-dim: #854d0e;
 
-  /* Base surface colors for the dark theme */
-  --color-surface-0: #09090b;
-  --color-surface-1: #18181b;
-  --color-surface-2: #27272a;
-  --color-surface-3: #3f3f46;
+  /* Base surface colors — deep navy-charcoal for atmosphere */
+  --color-surface-0: #0a0b0f;
+  --color-surface-1: #12141a;
+  --color-surface-2: #1c1f28;
+  --color-surface-3: #2a2e3a;
+
+  /* Typography */
+  --font-display: "JetBrains Mono", ui-monospace, monospace;
+  --font-body: "DM Sans", system-ui, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, serif;
+}
+
+/* ── Global typography ──────────────────────────────────────────── */
+body {
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+}
+
+/* Monospace headers for that intelligence workstation feel */
+h1, h2, h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+/* Transcript body text uses serif for editorial readability */
+[data-testid="transcript"] {
+  font-family: var(--font-serif);
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  letter-spacing: 0.005em;
+}
+
+/* Monospace for timestamps, counts, metadata */
+.tabular-nums, .font-mono, time,
+[class*="text-zinc-500"][class*="tabular"] {
+  font-family: var(--font-display);
+  font-feature-settings: "tnum";
+}
+
+/* ── Subtle background grain texture ────────────────────────────── */
+#root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ── Refined borders and dividers ───────────────────────────────── */
+[class*="border-white\\/5"] {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Subtle inner glow on cards */
+[data-testid^="document-card-"] > div {
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+[data-testid^="document-card-"]:hover > div {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06),
+              0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
 /* Scrollbar styling */

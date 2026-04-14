@@ -107,7 +107,12 @@ export default function DocumentList() {
       <div data-testid="document-list-page" className="p-6 max-w-[1800px] mx-auto">
         {/* Header */}
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-zinc-100 tracking-tight">Media Library</h1>
+          <h1
+            className="text-2xl font-bold text-zinc-100 tracking-tight"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            Media Library
+          </h1>
           <p className="text-sm text-zinc-500 mt-1 flex items-center gap-3">
             <span data-testid="document-count">{documents.length} documents</span>
             {totalDuration > 0 && (

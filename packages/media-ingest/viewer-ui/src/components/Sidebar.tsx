@@ -145,9 +145,10 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
         <Link
           to="/"
           className="text-sm font-semibold text-zinc-200 hover:text-white transition-colors flex items-center gap-2"
+          style={{ fontFamily: "var(--font-display)" }}
         >
-          <Tv2 className="h-4 w-4 text-blue-400" />
-          Media Viewer
+          <Tv2 className="h-4 w-4 text-cyan-400" />
+          Media Explorer
         </Link>
         <Tooltip>
           <TooltipTrigger asChild>

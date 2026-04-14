@@ -239,7 +239,11 @@ export default function PlayerPage() {
           <Separator orientation="vertical" className="h-5" />
 
           <div className="flex-1 min-w-0">
-            <h1 data-testid="document-title" className="text-sm font-medium text-zinc-200 truncate">
+            <h1
+              data-testid="document-title"
+              className="text-sm font-semibold text-zinc-100 truncate uppercase tracking-wider"
+              style={{ fontFamily: "var(--font-display)", fontSize: "0.75rem" }}
+            >
               {doc.title}
             </h1>
           </div>
