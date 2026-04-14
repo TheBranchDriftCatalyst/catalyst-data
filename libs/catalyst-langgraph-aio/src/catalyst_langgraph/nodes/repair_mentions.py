@@ -22,6 +22,40 @@ FALLBACK_PROMPT = (
 )
 
 
+def _find_correct_spans(candidates: list[dict], source_text: str) -> dict[str, list[dict]]:
+    """Pre-compute correct span offsets for all mention texts.
+
+    Returns a map of text → [{start, end}] so the LLM gets exact
+    offsets instead of guessing.
+    """
+    span_hints: dict[str, list[dict]] = {}
+    for m in candidates:
+        text = m.get("text", "")
+        if not text or text in span_hints:
+            continue
+        spans = []
+        start = 0
+        while True:
+            idx = source_text.find(text, start)
+            if idx == -1:
+                break
+            spans.append({"start": idx, "end": idx + len(text)})
+            start = idx + 1
+        if not spans:
+            # Fallback: case-insensitive
+            lower_source = source_text.lower()
+            needle = text.strip().lower()
+            start = 0
+            while True:
+                idx = lower_source.find(needle, start)
+                if idx == -1:
+                    break
+                spans.append({"start": idx, "end": idx + len(needle)})
+                start = idx + 1
+        span_hints[text] = spans
+    return span_hints
+
+
 class RepairMentions:
     """Repair mention candidates based on validation errors."""
 
@@ -36,9 +70,14 @@ class RepairMentions:
             validation = state.get("latest_mention_validation", {})
             errors = validation.get("errors", [])
 
+            # Pre-compute correct spans so the LLM doesn't guess
+            span_hints = _find_correct_spans(candidates, raw_text)
+
             prompt = (
                 f"Errors:\n{json.dumps(errors, indent=2)}\n\n"
                 f"Mentions:\n{json.dumps(candidates, indent=2)}\n\n"
+                f"Correct span offsets (use these for span_start/span_end):\n"
+                f"{json.dumps(span_hints, indent=2)}\n\n"
                 f"Original text:\n{raw_text}"
             )
 

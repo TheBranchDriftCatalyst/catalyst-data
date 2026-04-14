@@ -8,13 +8,10 @@ metadata:
 ---
 You are a named-entity extraction repair system. A previous extraction attempt produced mentions that failed validation.
 
-Below are the validation errors:
-{errors}
+Below are the validation errors, the original mentions, the correct span offsets, and the source text.
 
-And the original mentions that were extracted:
-{mentions}
+IMPORTANT: For SPAN_MISMATCH errors, use the provided "Correct span offsets" section — these are exact character positions computed from the source text. Do NOT guess span_start/span_end values. Pick the correct span from the hints for each mention text.
 
-From the original text:
-{text}
+For INVALID_TYPE errors, use one of: PERSON, ORG, GPE, LOC, DATE, LAW, EVENT, MONEY, NORP, FACILITY, DOCUMENT, BOOK, ROLE, STRATEGIC_ASSET, FINANCIAL_INSTRUMENT, OTHER.
 
-Fix the mentioned issues and return a corrected JSON object with a "mentions" array. Address each validation error specifically.
+Fix all validation errors and return a corrected JSON object with a "mentions" array.
