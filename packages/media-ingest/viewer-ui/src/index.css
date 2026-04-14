@@ -236,6 +236,127 @@ h1, h2, h3 {
   }
 }
 
+/* ── Polish: refined component styles ───────────────────────────── */
+
+/* Tighter badge styling */
+[class*="inline-flex"][class*="rounded-full"][class*="border"][class*="font-semibold"] {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+}
+
+/* Sidebar active item — refined left accent */
+[data-testid^="sidebar-item-"].border-l-blue-500 {
+  border-left-color: #22d3ee;
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.06) 0%, transparent 60%);
+}
+
+/* Tab bar polish */
+[role="tablist"] {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+[role="tab"] {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: all 0.15s ease;
+}
+
+[role="tab"][data-state="active"] {
+  color: #e4e4e7;
+}
+
+/* Section headers (TRANSCRIPT, SPEAKER BREAKDOWN, etc.) */
+.text-xs.font-semibold.uppercase.tracking-wider {
+  font-family: var(--font-display);
+  letter-spacing: 0.1em;
+  font-size: 0.625rem;
+  color: #71717a;
+}
+
+/* Mention card — subtle left-to-right gradient on hover */
+[data-testid^="mention-card-"]:hover {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.03) 0%, transparent 70%);
+}
+
+/* Assertion card hover */
+[data-testid^="assertion-card-"]:hover {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.03) 0%, transparent 70%);
+}
+
+/* Annotation filter pills — monospace counts */
+[data-testid^="annotation-filter-"] {
+  font-family: var(--font-display);
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+}
+
+/* Input field refinement */
+input[type="text"],
+input[type="search"] {
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+}
+
+input::placeholder {
+  color: #3f3f46;
+  font-style: italic;
+}
+
+/* Speaker breakdown header */
+[data-testid="speaker-breakdown"] {
+  font-family: var(--font-display);
+}
+
+/* Confidence badge polish */
+[data-testid="confidence-badge"] {
+  font-family: var(--font-display);
+  font-size: 0.5625rem;
+  letter-spacing: 0.04em;
+}
+
+/* Video player area — subtle vignette on the container */
+[data-testid="media-player"] {
+  position: relative;
+}
+
+[data-testid="media-player"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(10, 11, 15, 0.4) 100%);
+  z-index: 1;
+}
+
+/* Resizable panel handle — refined with dots pattern */
+.resizable-panel-handle {
+  background: linear-gradient(180deg, var(--color-surface-2) 0%, var(--color-surface-1) 100%);
+}
+
+/* Bottom dock panel tab content */
+[data-testid="entity-panel"],
+[data-testid="assertion-panel"] {
+  font-family: var(--font-body);
+}
+
+/* Document card title — display font */
+[data-testid^="document-card-"] h3 {
+  font-family: var(--font-body);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* Highlight bar — refined gradient */
+[data-testid="highlight-bar"] {
+  background: linear-gradient(90deg, rgba(120, 53, 15, 0.3) 0%, rgba(120, 53, 15, 0.1) 100%);
+}
+
+[data-testid="highlight-reel-bar"] {
+  background: linear-gradient(90deg, rgba(49, 46, 129, 0.3) 0%, rgba(49, 46, 129, 0.1) 100%);
+}
+
 /* Loading skeleton shimmer */
 @keyframes shimmer {
   0% {

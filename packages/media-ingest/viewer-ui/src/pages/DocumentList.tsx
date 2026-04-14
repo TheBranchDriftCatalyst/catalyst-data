@@ -306,19 +306,30 @@ function DocumentCard({ doc }: { doc: MediaDocument }) {
       data-testid={`document-card-${doc.id}`}
       className="group block"
     >
-      <Card className="overflow-hidden h-full transition-all group-hover:border-white/15">
+      <Card className="overflow-hidden h-full transition-all group-hover:border-white/15 group-hover:shadow-lg group-hover:shadow-black/20">
         {/* Thumbnail area */}
-        <div className="relative h-32 bg-surface-2 flex items-center justify-center">
+        <div className="relative h-36 bg-gradient-to-br from-surface-2 to-surface-0 flex items-center justify-center overflow-hidden">
+          {/* Subtle grid pattern */}
+          <div
+            className="absolute inset-0 opacity-[0.04]"
+            style={{
+              backgroundImage:
+                "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)",
+              backgroundSize: "24px 24px",
+            }}
+          />
           {hasVideo ? (
-            <Video className="h-10 w-10 text-zinc-600 group-hover:text-zinc-500 transition-colors" />
+            <Video className="h-8 w-8 text-zinc-700 group-hover:text-zinc-500 transition-colors relative z-10" />
           ) : (
-            <AudioLines className="h-10 w-10 text-zinc-600 group-hover:text-zinc-500 transition-colors" />
+            <AudioLines className="h-8 w-8 text-zinc-700 group-hover:text-zinc-500 transition-colors relative z-10" />
           )}
+          {/* Bottom gradient fade */}
+          <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-surface-0/80 to-transparent" />
           {/* Duration badge */}
           {duration != null && duration > 0 && (
             <Badge
               variant="secondary"
-              className="absolute bottom-2 right-2 text-[10px] px-1.5 py-0 font-mono tabular-nums"
+              className="absolute bottom-2 right-2 text-[10px] px-1.5 py-0 font-mono tabular-nums bg-black/60 backdrop-blur-sm border-white/10 z-10"
             >
               {formatTime(duration)}
             </Badge>
@@ -326,7 +337,7 @@ function DocumentCard({ doc }: { doc: MediaDocument }) {
           {/* Format badge */}
           <Badge
             variant="outline"
-            className="absolute top-2 left-2 text-[10px] px-1.5 py-0 uppercase"
+            className="absolute top-2 left-2 text-[10px] px-1.5 py-0 uppercase bg-black/40 backdrop-blur-sm border-white/10 z-10"
           >
             {ext}
           </Badge>
@@ -334,18 +345,20 @@ function DocumentCard({ doc }: { doc: MediaDocument }) {
 
         {/* Info */}
         <CardContent className="p-3">
-          <h3 className="text-sm font-medium text-zinc-200 truncate group-hover:text-white transition-colors">
+          <h3 className="text-sm font-medium text-zinc-200 truncate group-hover:text-white transition-colors leading-snug">
             {doc.title}
           </h3>
-          <div className="flex items-center gap-2 mt-1.5">
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 uppercase">
+          <div className="flex items-center gap-2 mt-2">
+            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 uppercase tracking-wider">
               {doc.source}
             </Badge>
             {doc.metadata.video_codec && (
-              <span className="text-[10px] text-zinc-600">{doc.metadata.video_codec}</span>
+              <span className="text-[10px] text-zinc-600 font-mono">
+                {doc.metadata.video_codec}
+              </span>
             )}
             {sizeBytes > 0 && (
-              <span className="text-[10px] text-zinc-600">{formatBytes(sizeBytes)}</span>
+              <span className="text-[10px] text-zinc-600 font-mono">{formatBytes(sizeBytes)}</span>
             )}
           </div>
         </CardContent>
