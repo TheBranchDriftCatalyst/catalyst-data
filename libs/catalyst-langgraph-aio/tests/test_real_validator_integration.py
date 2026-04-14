@@ -459,6 +459,17 @@ class TestRealValidatorIntegration:
         assert result["mention_retry_count"] >= 1
         assert len(result["accepted_mentions"]) > 0
 
+        # Verify the REPAIRED mentions have correct spans — not just that they exist
+        for m in result["accepted_mentions"]:
+            span_s = m.get("span_start")
+            span_e = m.get("span_end")
+            text = m.get("text", "")
+            if span_s is not None and span_e is not None:
+                actual = SOURCE_TEXT[span_s:span_e]
+                assert actual == text, (
+                    f"Repaired mention span still wrong: text={text!r}, source[{span_s}:{span_e}]={actual!r}"
+                )
+
     @pytest.mark.asyncio
     async def test_max_retries_respected_with_real_validators(self, tmp_path):
         """Permanently bad data should exhaust retries and NOT loop forever."""
@@ -489,8 +500,19 @@ class TestRealValidatorIntegration:
 
         # Should have hit max retries, not infinite loop
         assert result["mention_retry_count"] >= 2
-        # Validate it failed or was handled — not "completed" with bad data
-        assert result["status"] != "completed" or len(result.get("accepted_mentions", [])) == 0
+        # Must fail — never "completed" with bad spans
+        assert result["status"] == "failed", (
+            f"Expected 'failed' but got {result['status']!r} — bad data should never pass validation"
+        )
+        # No accepted mentions with bad spans should exist
+        for m in result.get("accepted_mentions", []):
+            span_s = m.get("span_start")
+            span_e = m.get("span_end")
+            if span_s is not None and span_e is not None:
+                assert SOURCE_TEXT[span_s:span_e] == m.get("text", ""), (
+                    f"Bad mention leaked through: text={m.get('text')!r} "
+                    f"but source[{span_s}:{span_e}]={SOURCE_TEXT[span_s:span_e]!r}"
+                )
 
     @pytest.mark.asyncio
     async def test_empty_mentions_fails_real_validation(self, tmp_path):
