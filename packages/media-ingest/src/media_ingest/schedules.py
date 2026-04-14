@@ -10,8 +10,12 @@ from dagster import AssetSelection, DefaultScheduleStatus, ScheduleDefinition, d
 
 media_discovery_job = define_asset_job(
     name="media_discovery_job",
-    selection=AssetSelection.assets("media_files", "media_documents"),
-    description="Scan NFS for new media files and register documents.",
+    selection=AssetSelection.assets(
+        "media_files",
+        "media_metadata",
+        "media_documents",
+    ),
+    description="Scan NFS → ffprobe metadata → register documents. Transcode runs independently.",
 )
 
 media_discovery_schedule = ScheduleDefinition(
