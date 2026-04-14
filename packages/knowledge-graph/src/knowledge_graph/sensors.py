@@ -7,6 +7,7 @@ so the knowledge graph stays up-to-date as new documents flow through.
 
 from dagster import (
     AssetKey,
+    DefaultSensorStatus,
     EventLogEntry,
     RunRequest,
     SensorEvaluationContext,
@@ -27,7 +28,7 @@ logger = get_logger(__name__)
         "knowledge graph up-to-date as new documents are processed."
     ),
     minimum_interval_seconds=300,
-    default_status="RUNNING",
+    default_status=DefaultSensorStatus.RUNNING,
 )
 def platinum_resolution_sensor(context: SensorEvaluationContext, asset_event: EventLogEntry):
     """Trigger platinum resolution after gold entity candidates land."""

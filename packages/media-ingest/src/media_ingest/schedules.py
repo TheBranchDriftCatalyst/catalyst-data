@@ -6,25 +6,22 @@ Without this, new videos on NFS sit unprocessed until someone manually
 materializes the discovery assets.
 """
 
-from dagster import AssetKey, RunRequest, schedule
+from dagster import AssetSelection, DefaultScheduleStatus, ScheduleDefinition, define_asset_job
 
+media_discovery_job = define_asset_job(
+    name="media_discovery_job",
+    selection=AssetSelection.assets("media_files", "media_documents"),
+    description="Scan NFS for new media files and register documents.",
+)
 
-@schedule(
-    cron_schedule="*/5 * * * *",
+media_discovery_schedule = ScheduleDefinition(
     name="media_discovery_schedule",
+    job=media_discovery_job,
+    cron_schedule="*/5 * * * *",
     description=(
         "Scan NFS for new media files every 5 minutes. "
         "Materializes media_files → media_documents so the "
         "media_document_sensor can detect and process new videos."
     ),
-    default_status="RUNNING",
+    default_status=DefaultScheduleStatus.RUNNING,
 )
-def media_discovery_schedule(_context):
-    """Trigger media_files + media_documents materialization."""
-    yield RunRequest(
-        run_key=None,  # always run (idempotent — media_documents returns content_unchanged if nothing new)
-        asset_selection=[
-            AssetKey("media_files"),
-            AssetKey("media_documents"),
-        ],
-    )
