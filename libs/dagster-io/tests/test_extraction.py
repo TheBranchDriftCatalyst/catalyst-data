@@ -32,7 +32,14 @@ def test_extract_validated_returns_domain_models():
     """Results are Mention and Assertion domain model instances."""
     mock_result = {
         "accepted_mentions": [
-            {"text": "Biden", "mention_type": "PERSON", "span_start": 0, "span_end": 5, "document_id": "doc-1", "chunk_id": "c0"},
+            {
+                "text": "Biden",
+                "mention_type": "PERSON",
+                "span_start": 0,
+                "span_end": 5,
+                "document_id": "doc-1",
+                "chunk_id": "c0",
+            },
         ],
         "accepted_propositions": [
             {"subject": "Biden", "predicate": "visited", "object": "Israel", "confidence": 0.9},
