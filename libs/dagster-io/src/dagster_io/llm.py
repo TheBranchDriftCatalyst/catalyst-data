@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import time
+import unicodedata
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -68,6 +69,31 @@ def _extract_cached_tokens(usage: object) -> int:
 
 logger = get_logger(__name__)
 
+
+def _normalize_text(text: str) -> str:
+    """Normalize text for LLM APIs — NFKC normalization + control char removal.
+
+    NFKC converts fullwidth characters to ASCII equivalents (e.g., ： → :, ｜ → |),
+    decomposes ligatures, and normalizes compatible forms. This prevents JSON
+    serialization issues with litellm/OpenAI APIs that choke on fullwidth Unicode.
+    """
+    # NFKC: fullwidth → ASCII, ligatures decomposed, compatible forms normalized
+    text = unicodedata.normalize("NFKC", text)
+    # Strip null bytes and other control chars (except newline/tab)
+    text = "".join(c for c in text if c >= " " or c in "\n\r\t")
+    return text
+
+
+def _normalize_messages(messages: list) -> list:
+    """Normalize all text content in a message list before sending to LLM."""
+    normalized = []
+    for msg in messages:
+        if hasattr(msg, "content") and isinstance(msg.content, str):
+            normalized.append(msg.__class__(content=_normalize_text(msg.content)))
+        else:
+            normalized.append(msg)
+    return normalized
+
 T = TypeVar("T")
 
 
@@ -117,10 +143,10 @@ class LLMResource(ConfigurableResource):
     def complete(self, prompt: str, *, system: str = "") -> str:
         """Send a chat completion and return the text response."""
         logger.debug("LLM complete model=%s prompt_len=%d", self.model, len(prompt))
-        messages = []
-        if system:
-            messages.append(SystemMessage(content=system))
-        messages.append(HumanMessage(content=prompt))
+        messages = _normalize_messages([
+            *([SystemMessage(content=system)] if system else []),
+            HumanMessage(content=prompt),
+        ])
         # Note: LLM_REQUESTS is only incremented on terminal states (success or
         # error). A previous in-flight status increment at request start was
         # never paired with a decrement, so it grew monotonically and the
@@ -241,7 +267,7 @@ class LLMResource(ConfigurableResource):
         results = []
         for i, item in enumerate(items):
             with track_duration(LLM_REQUEST_DURATION, {"model": self.model, "operation": operation}):
-                result = chain.invoke(messages_fn(item))
+                result = chain.invoke(_normalize_messages(messages_fn(item)))
             results.append(result)
             LLM_REQUESTS.labels(model=self.model, operation=operation, status="success").inc()
 
