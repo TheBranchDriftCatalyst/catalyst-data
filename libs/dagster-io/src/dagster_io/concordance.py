@@ -27,6 +27,7 @@ logger = get_logger(__name__)
 # scorer.
 _SIGNAL_WEIGHTS: dict[str, float] = {
     "exact_name": 0.95,
+    "speaker_profile": 0.92,
     "substring": 0.80,
     "embedding": 0.75,
     "jaccard": 0.70,
@@ -501,6 +502,13 @@ class CrossSourceAligner:
             if cos > 0.80:
                 signals.append((cos, "embedding"))
 
+        # Signal 5: Speaker profile match — same voice across documents.
+        # Weight 0.92 sits just under exact_name (0.95) but above substring.
+        # Voice identity is a strong same-person signal but noisier than an
+        # exact string match on a well-known name.
+        if a.profile_id and b.profile_id and a.profile_id == b.profile_id:
+            signals.append((0.92, "speaker_profile"))
+
         if not signals:
             return None
 
@@ -525,9 +533,10 @@ class CrossSourceAligner:
         # Splink (weighted comparison), cognitive council Sprint 2.
         _SIGNAL_IMPORTANCE: dict[str, float] = {
             "exact_name": 1.0,
+            "speaker_profile": 0.9,
             "substring": 0.7,
-            "jaccard": 0.5,
             "embedding": 0.6,
+            "jaccard": 0.5,
         }
 
         weighted_sum = 0.0
@@ -542,10 +551,11 @@ class CrossSourceAligner:
 
         evidence = [s[1] for s in signals]
         has_exact = "exact_name" in evidence
+        has_speaker_profile = "speaker_profile" in evidence
         has_corroboration = len(signals) >= 2
 
-        # Decision: sameAs requires exact_name OR multi-signal corroboration
-        if has_exact or (has_corroboration and combined >= self.same_as_threshold):
+        # Decision: sameAs requires exact_name, speaker_profile, OR multi-signal corroboration
+        if has_exact or has_speaker_profile or (has_corroboration and combined >= self.same_as_threshold):
             alignment_type = AlignmentType.SAME_AS
         elif combined >= self.possible_same_as_threshold:
             alignment_type = AlignmentType.POSSIBLE_SAME_AS

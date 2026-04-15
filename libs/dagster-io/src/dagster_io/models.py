@@ -76,6 +76,7 @@ class EntityCandidate(BaseModel):
     mention_count: int = 0
     external_ids: dict[str, str] = Field(default_factory=dict)
     embedding: list[float] | None = None
+    profile_id: str | None = Field(default=None, description="Speaker profile ID from voice clustering")
     source_documents: list[str] = Field(default_factory=list)
     code_location: str = ""
     content_hash: str = Field(default="", description="For dedup")
