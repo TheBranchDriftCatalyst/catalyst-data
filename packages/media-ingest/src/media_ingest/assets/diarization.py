@@ -326,7 +326,7 @@ def media_diarization(
             diarization, resolved_device = _run_diarization(source_path, hf_token, WHISPER_MODEL_CACHE)
             segments = _assign_speakers(t["segments"], diarization)
             pre_merge = len(segments)
-            segments = _merge_same_speaker_segments(segments, gap_threshold_s=1.5)
+            segments = _merge_same_speaker_segments(segments, gap_threshold_s=7.0)
             context.log.info(f"Merged {pre_merge} segments → {len(segments)} ({pre_merge - len(segments)} collapsed)")
             unique_speakers = {s.get("speaker") for s in segments if s.get("speaker")}
             speaker_text = _build_speaker_text(segments) if unique_speakers else None
