@@ -4,7 +4,7 @@ Materializes AlignmentEdge objects produced by the CrossSourceAligner,
 writes to PostgreSQL + Neo4j for graph traversal.
 """
 
-from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, AutoMaterializePolicy, Output, asset
+from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, AutomationCondition, Output, asset
 
 import dagster_io.concordance as _concordance_mod
 import knowledge_graph.resources as _resources_mod
@@ -31,7 +31,7 @@ tracer = get_tracer(__name__)
     description="Cross-source entity alignment edges (platinum layer)",
     compute_kind="python",
     code_version=_CODE_VERSION,
-    auto_materialize_policy=AutoMaterializePolicy.eager(),
+    automation_condition=AutomationCondition.eager(),
     metadata={"layer": "platinum"},
     ins={
         "media_entity_candidates": AssetIn(

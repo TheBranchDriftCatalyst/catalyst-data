@@ -8,7 +8,7 @@ PostgreSQL + Neo4j.
 from collections import defaultdict
 from typing import Any
 
-from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, AutoMaterializePolicy, Output, asset
+from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, AutomationCondition, Output, asset
 
 import knowledge_graph.resources as _resources_mod
 from dagster_io import Assertion, CanonicalEntity
@@ -59,7 +59,7 @@ def _resolve_entity_id(text: str, name_index: dict[str, str]) -> str | None:
     description="Link assertions to canonical entities and write to graph stores (platinum layer)",
     compute_kind="python",
     code_version=_CODE_VERSION,
-    auto_materialize_policy=AutoMaterializePolicy.eager(),
+    automation_condition=AutomationCondition.eager(),
     metadata={"layer": "platinum"},
     ins={
         "media_assertions": AssetIn(

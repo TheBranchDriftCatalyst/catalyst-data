@@ -19,6 +19,7 @@ from dagster import AssetExecutionContext, AssetIn, MetadataValue, Output, asset
 from dagster_io.logging import get_logger
 from dagster_io.metrics import (
     ASSET_RECORDS_PROCESSED,
+    ASSET_SOFT_FAILURES,
     MODEL_LOAD_DURATION,
     TRANSCRIPTION_DURATION,
     TRANSCRIPTION_REALTIME_FACTOR,
@@ -396,6 +397,10 @@ def _transcribe_openvino(pipe, audio_path: str) -> dict:
     compute_kind="ml",
     metadata={"layer": "gold"},
     partitions_def=media_partitions,
+    # media_documents is unpartitioned → Dagster loads the full list into each
+    # partition run, then we filter by partition_key. O(N_docs) per run but
+    # negligible at current scale (<100 docs). If the corpus grows past ~1000,
+    # switch to reading the single document from S3 directly in the asset body.
     ins={"media_documents": AssetIn(partition_mapping=None)},
     op_tags=WHISPER_K8S_CONFIG,
 )
@@ -503,8 +508,13 @@ def media_transcriptions(
                 "source_path": doc.source_path,
             }
         except Exception as e:
-            context.log.warning(f"Transcription failed for {doc.title}: {e}")
+            context.log.error(f"Transcription SOFT FAILURE for {doc.title}: {e}")
             logger.error("Transcription failed file=%s error=%s", doc.title, str(e))
+            ASSET_SOFT_FAILURES.labels(
+                code_location="media_ingest",
+                asset_key="media_transcriptions",
+                reason=type(e).__name__,
+            ).inc()
             output = {
                 "document_id": doc.id,
                 "title": doc.title,

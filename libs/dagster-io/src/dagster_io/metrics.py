@@ -281,6 +281,12 @@ ACTIVE_ASSET_MATERIALIZATIONS = Gauge(
     ["code_location"],
 )
 
+ASSET_SOFT_FAILURES = Counter(
+    "catalyst_asset_soft_failures",
+    "Asset materializations that completed with errors (partial/empty output)",
+    ["code_location", "asset_key", "reason"],
+)
+
 # LLM metrics
 LLM_REQUEST_DURATION = Histogram(
     "catalyst_llm_request_duration_seconds",

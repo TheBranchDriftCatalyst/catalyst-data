@@ -5,7 +5,7 @@ runs CrossSourceAligner, and produces CanonicalEntity objects.
 Dual-writes to PostgreSQL + Neo4j.
 """
 
-from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, AutoMaterializePolicy, Output, asset
+from dagster import AllPartitionMapping, AssetExecutionContext, AssetIn, AutomationCondition, Failure, Output, asset
 
 import dagster_io.concordance as _concordance_mod
 import knowledge_graph.resources as _resources_mod
@@ -69,7 +69,7 @@ tracer = get_tracer(__name__)
     description="Cross-source canonical entity resolution (platinum layer)",
     compute_kind="python",
     code_version=_CODE_VERSION,
-    auto_materialize_policy=AutoMaterializePolicy.eager(),
+    automation_condition=AutomationCondition.eager(),
     metadata={"layer": "platinum"},
     ins={
         # media_entity_candidates is partitioned by document_id in media_ingest;
@@ -327,6 +327,18 @@ def canonical_entities(
 
         pg_count = graph_db.upsert_canonical_entities(entity_dicts)
         context.log.info(f"Wrote {pg_count} entities to PostgreSQL")
+
+        # Zero-run guard: if we had candidates but wrote nothing, something
+        # is broken (e.g. path_builder misconfiguration, PG schema drift).
+        # Fail loudly rather than silently producing empty outputs.
+        if pg_count == 0 and len(all_candidates) > 0:
+            raise Failure(
+                description=(
+                    f"Zero entities written to PostgreSQL despite {len(all_candidates)} source candidates. "
+                    "Likely a path_builder or PG schema issue — check DAGSTER_CODE_LOCATION and postgres-knowledge."
+                ),
+                metadata={"source_candidates": len(all_candidates), "canonical_list": len(canonical_list)},
+            )
 
         neo4j_count = graph_db.sync_entities_to_neo4j(entity_dicts)
         context.log.info(f"Wrote {neo4j_count} entities to Neo4j")

@@ -14,7 +14,12 @@ from typing import Any
 from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
 from dagster_io.logging import get_logger
-from dagster_io.metrics import ASSET_RECORDS_PROCESSED, DIARIZATION_DURATION, DIARIZATION_REALTIME_FACTOR
+from dagster_io.metrics import (
+    ASSET_RECORDS_PROCESSED,
+    ASSET_SOFT_FAILURES,
+    DIARIZATION_DURATION,
+    DIARIZATION_REALTIME_FACTOR,
+)
 from dagster_io.observability import get_tracer, trace_operation
 from media_ingest.assets.discovery import NFS_VOLUMES_CONFIG
 from media_ingest.assets.transcription import extract_audio_to_wav
@@ -281,8 +286,13 @@ def media_diarization(
 
             context.log.info(f"Diarization complete: {len(unique_speakers)} speakers detected in {diarization_time}s")
         except Exception as e:
-            context.log.warning(f"Diarization failed: {e}")
+            context.log.error(f"Diarization SOFT FAILURE: {e}")
             logger.error("Diarization failed partition=%s error=%s", partition_key, str(e))
+            ASSET_SOFT_FAILURES.labels(
+                code_location="media_ingest",
+                asset_key="media_diarization",
+                reason=type(e).__name__,
+            ).inc()
             output = {
                 **t,
                 "speaker_text": None,
