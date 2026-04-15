@@ -27,15 +27,38 @@ class MediaDocument(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-def _make_document_id(source: str, path: str) -> str:
-    """Create a deterministic, filesystem/S3-safe document ID from the file path.
+def _slugify(text: str, max_len: int = 80) -> str:
+    """Convert text to a URL/filesystem-safe kebab-case slug.
 
-    Uses a short SHA-256 hash of the full path, prefixed with source for readability.
-    This avoids Unicode, emoji, fullwidth chars, slashes, and other characters
-    that break S3 keys, Dagster partition names, and LLM JSON payloads.
+    Strips accents, removes non-alphanumeric chars, collapses hyphens.
+    Appends a short hash suffix for uniqueness when titles collide.
     """
-    digest = hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
-    return f"media-{source}-{digest}"
+    import re
+    import unicodedata
+
+    # NFKD decompose + strip accents
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    # Lowercase, replace non-alnum with hyphen
+    text = re.sub(r"[^a-z0-9]+", "-", text.lower())
+    # Collapse multiple hyphens, strip leading/trailing
+    text = re.sub(r"-+", "-", text).strip("-")
+    # Truncate
+    if len(text) > max_len:
+        text = text[:max_len].rsplit("-", 1)[0]
+    return text
+
+
+def _make_document_id(source: str, path: str) -> str:
+    """Create a human-readable, deterministic document ID from the filename.
+
+    Format: media-{source}-{slugified-title}-{hash4}
+    The short hash suffix prevents collisions when titles are similar.
+    """
+    filename = os.path.splitext(os.path.basename(path))[0]
+    slug = _slugify(filename, max_len=60)
+    # Short hash for uniqueness (titles can be similar after slugification)
+    digest = hashlib.sha256(path.encode("utf-8")).hexdigest()[:4]
+    return f"media-{source}-{slug}-{digest}" if slug else f"media-{source}-{digest}"
 
 
 def _file_to_document(file_info: dict[str, Any]) -> MediaDocument:
