@@ -6,19 +6,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
-# 1. Install shared libs — changes infrequently, cached aggressively
-COPY libs/catalyst-contracts-core/  /tmp/catalyst-contracts-core/
-COPY libs/catalyst-llm-contract-mcp/ /tmp/catalyst-llm-contract-mcp/
-COPY libs/catalyst-langgraph-aio/  /tmp/catalyst-langgraph-aio/
-COPY libs/dagster-io/              /tmp/dagster-io/
+COPY libs/ /app/libs/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system \
-        /tmp/catalyst-contracts-core/ \
-        /tmp/catalyst-llm-contract-mcp/ \
-        /tmp/catalyst-langgraph-aio/ \
-        /tmp/dagster-io/
+        /app/libs/catalyst-contracts-core/ \
+        /app/libs/catalyst-llm-contract-mcp/ \
+        /app/libs/catalyst-langgraph-aio/ \
+        /app/libs/dagster-io/
 
-# 2. Install package dependencies — only re-runs when pyproject.toml changes
 COPY packages/data-explorer/pyproject.toml .
 RUN --mount=type=cache,target=/root/.cache/uv \
     mkdir -p src/data_explorer && \
@@ -26,7 +21,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system . && \
     rm -rf src/data_explorer
 
-# 3. Copy real source + config — changes most often, deps already cached
 COPY packages/data-explorer/src/ src/
 COPY packages/data-explorer/.streamlit/ .streamlit/
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -35,7 +29,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---------- stage 2: runtime ----------
 FROM python:3.12-slim
 
-# Install curl for healthcheck
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/*
@@ -44,10 +37,12 @@ WORKDIR /app
 
 COPY --from=builder /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
+COPY --from=builder /app/libs/ /app/libs/
 
-# Copy source + streamlit config for runtime (Streamlit needs source files)
 COPY --from=builder /app/src/ src/
 COPY --from=builder /app/.streamlit/ .streamlit/
+
+ENV PYTHONPATH=/app/libs/catalyst-contracts-core/src:/app/libs/catalyst-llm-contract-mcp/src:/app/libs/catalyst-langgraph-aio/src:/app/libs/dagster-io/src
 
 EXPOSE 8501
 

@@ -6,17 +6,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
-# 1. Install shared libs — changes infrequently, cached aggressively
-COPY libs/catalyst-contracts-core/  /tmp/catalyst-contracts-core/
-COPY libs/catalyst-llm-contract-mcp/ /tmp/catalyst-llm-contract-mcp/
-COPY libs/catalyst-langgraph-aio/  /tmp/catalyst-langgraph-aio/
-COPY libs/dagster-io/              /tmp/dagster-io/
+# 1. Shared libs — COPY to /app/libs, install their third-party deps
+COPY libs/ /app/libs/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system \
-        /tmp/catalyst-contracts-core/ \
-        /tmp/catalyst-llm-contract-mcp/ \
-        /tmp/catalyst-langgraph-aio/ \
-        /tmp/dagster-io/
+        /app/libs/catalyst-contracts-core/ \
+        /app/libs/catalyst-llm-contract-mcp/ \
+        /app/libs/catalyst-langgraph-aio/ \
+        /app/libs/dagster-io/
 
 # 2. Install package dependencies — only re-runs when pyproject.toml changes
 COPY packages/congress-data/pyproject.toml .
@@ -38,8 +35,10 @@ WORKDIR /app
 
 COPY --from=builder /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
+COPY --from=builder /app/libs/ /app/libs/
 
 ENV DAGSTER_HOME=/opt/dagster/dagster_home
+ENV PYTHONPATH=/app/libs/catalyst-contracts-core/src:/app/libs/catalyst-llm-contract-mcp/src:/app/libs/catalyst-langgraph-aio/src:/app/libs/dagster-io/src
 RUN mkdir -p $DAGSTER_HOME
 
 EXPOSE 4000

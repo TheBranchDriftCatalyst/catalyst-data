@@ -41,22 +41,15 @@ ENV UV_PYTHON=/usr/bin/python3.12
 
 WORKDIR /app
 
-# 1. Install shared libs — copy pyproject.toml first for dep caching,
-#    then full source. Changes to tests/docs won't bust this layer
-#    thanks to .dockerignore excluding tests/ and docs/.
-COPY libs/catalyst-contracts-core/  /tmp/catalyst-contracts-core/
-COPY libs/catalyst-llm-contract-mcp/ /tmp/catalyst-llm-contract-mcp/
-COPY libs/catalyst-langgraph-aio/  /tmp/catalyst-langgraph-aio/
-COPY libs/dagster-io/              /tmp/dagster-io/
-# Install ALL shared libs in one shot so uv resolves cross-dependencies
-# correctly. Sequential installs can cause uv to overwrite local path
-# installs when resolving transitive deps from PyPI.
+# 1. Install shared libs — COPY source to /app/libs, add to PYTHONPATH,
+#    then pip install only their third-party deps (not the libs themselves).
+COPY libs/ /app/libs/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --python /usr/bin/python3.12 \
-        /tmp/catalyst-contracts-core/ \
-        /tmp/catalyst-llm-contract-mcp/ \
-        /tmp/catalyst-langgraph-aio/ \
-        /tmp/dagster-io/
+        /app/libs/catalyst-contracts-core/ \
+        /app/libs/catalyst-llm-contract-mcp/ \
+        /app/libs/catalyst-langgraph-aio/ \
+        /app/libs/dagster-io/
 
 # 2. Install PyTorch XPU + package deps
 #
@@ -125,6 +118,7 @@ WORKDIR /app
 COPY --from=builder /usr/lib/python3/dist-packages/ /usr/lib/python3/dist-packages/
 COPY --from=builder /usr/local/lib/ /usr/local/lib/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
+COPY --from=builder /app/libs/ /app/libs/
 
 # CRITICAL: uv copies a standalone Python to /usr/local/bin/python3.12 which
 # uses site-packages (source-build convention). The apt-installed Python at
@@ -136,7 +130,7 @@ RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.12 /usr/bin/python
 
 ENV DAGSTER_HOME=/opt/dagster/dagster_home
-ENV PYTHONPATH=/usr/local/lib/python3.12/dist-packages:/usr/lib/python3/dist-packages
+ENV PYTHONPATH=/app/libs/catalyst-contracts-core/src:/app/libs/catalyst-llm-contract-mcp/src:/app/libs/catalyst-langgraph-aio/src:/app/libs/dagster-io/src:/usr/local/lib/python3.12/dist-packages:/usr/lib/python3/dist-packages
 # CRITICAL: Intel pip runtime libs (.so files) install to {prefix}/lib/
 # which is NOT on LD_LIBRARY_PATH by default. Without this, torch fails
 # with "libpti_view.so.0.10: cannot open shared object file".
