@@ -7,11 +7,16 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 WORKDIR /app
 
 # 1. Install shared libs — changes infrequently, cached aggressively
-COPY libs/catalyst-contracts-core/ /tmp/catalyst-contracts-core/
+COPY libs/catalyst-contracts-core/  /tmp/catalyst-contracts-core/
+COPY libs/catalyst-llm-contract-mcp/ /tmp/catalyst-llm-contract-mcp/
+COPY libs/catalyst-langgraph-aio/  /tmp/catalyst-langgraph-aio/
 COPY libs/dagster-io/              /tmp/dagster-io/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system /tmp/catalyst-contracts-core/ && \
-    uv pip install --system /tmp/dagster-io/
+    uv pip install --system \
+        /tmp/catalyst-contracts-core/ \
+        /tmp/catalyst-llm-contract-mcp/ \
+        /tmp/catalyst-langgraph-aio/ \
+        /tmp/dagster-io/
 
 # 2. Install package dependencies — only re-runs when pyproject.toml changes
 COPY packages/knowledge-graph/pyproject.toml .
