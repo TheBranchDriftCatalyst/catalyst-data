@@ -80,8 +80,6 @@ spec:
               value: "http://prometheus-pushgateway.monitoring.svc.cluster.local:9091"
             - name: DAGSTER_CODE_LOCATION
               value: media_ingest
-            - name: SPEAKER_PROFILE_ENABLED
-              value: "true"
             - name: DAGSTER_CURRENT_IMAGE
               value: ghcr.io/thebranchdriftcatalyst/media-ingest:latest
             - name: DAGSTER_S3_ENDPOINT_URL

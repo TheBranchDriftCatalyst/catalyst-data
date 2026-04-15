@@ -4,11 +4,9 @@ Partitioned by document_id. Reads media_diarization segments + source
 audio, then computes a 192-d centroid for each SPEAKER_XX by mean-pooling
 per-segment embeddings from ``pyannote/embedding``.
 
-Gated behind ``SPEAKER_PROFILE_ENABLED`` env var (default off) so the
-asset is safe to deploy before GPU nodes are provisioned.
-
 All pyannote imports are lazy (inside functions) so the module loads
-without the GPU dependency installed.
+without the GPU dependency installed. Degrades gracefully when
+diarization produces no speakers (returns empty list).
 """
 
 import os
@@ -158,18 +156,6 @@ def media_speaker_embeddings(
     media_documents: Any,
 ) -> Output[list[SpeakerEmbedding]]:
     partition_key = context.partition_key
-
-    # Gate behind env var — skip if not enabled
-    if os.environ.get("SPEAKER_PROFILE_ENABLED", "").lower() not in ("1", "true"):
-        context.log.info("SPEAKER_PROFILE_ENABLED not set — skipping speaker embedding extraction")
-        return Output(
-            [],
-            metadata={
-                "document_id": partition_key,
-                "skipped": True,
-                "reason": "SPEAKER_PROFILE_ENABLED not set",
-            },
-        )
 
     with trace_operation(
         "media_speaker_embeddings",

@@ -12,17 +12,8 @@ requirements grow (e.g. adding more env vars, tweaking pod spec).
 
 from __future__ import annotations
 
-import os
-
 from dagster import ExecutorDefinition
 from dagster_k8s import k8s_job_executor
-
-# Env vars to propagate from code-server → step pods (beyond DAGSTER_CODE_LOCATION).
-# These are read from the code-server's os.environ at import time and injected into
-# every step pod the executor spawns.
-_PROPAGATE_ENV_VARS = [
-    "SPEAKER_PROFILE_ENABLED",
-]
 
 
 def make_k8s_executor(code_location: str) -> ExecutorDefinition:
@@ -58,18 +49,13 @@ def make_k8s_executor(code_location: str) -> ExecutorDefinition:
         A configured ``ExecutorDefinition`` ready to pass as
         ``Definitions(executor=...)``.
     """
-    env = [{"name": "DAGSTER_CODE_LOCATION", "value": code_location}]
-    # Propagate optional feature flags from the code-server environment
-    for var in _PROPAGATE_ENV_VARS:
-        val = os.environ.get(var)
-        if val:
-            env.append({"name": var, "value": val})
-
     return k8s_job_executor.configured(
         {
             "step_k8s_config": {
                 "container_config": {
-                    "env": env,
+                    "env": [
+                        {"name": "DAGSTER_CODE_LOCATION", "value": code_location},
+                    ],
                 },
             },
         },

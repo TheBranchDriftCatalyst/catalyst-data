@@ -9,11 +9,10 @@ The clustering logic is extracted into a pure function
 ``cluster_embeddings()`` that can be unit-tested without Dagster,
 pyannote, or postgres.
 
-Gated behind ``SPEAKER_PROFILE_ENABLED`` env var (default off).
+Degrades gracefully when no embeddings exist (returns empty list).
 """
 
 import hashlib
-import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -194,17 +193,6 @@ def media_speaker_profiles(
     context: AssetExecutionContext,
     media_speaker_embeddings: Any,
 ) -> Output[list[SpeakerProfile]]:
-    # Gate behind env var — skip if not enabled
-    if os.environ.get("SPEAKER_PROFILE_ENABLED", "").lower() not in ("1", "true"):
-        context.log.info("SPEAKER_PROFILE_ENABLED not set — skipping speaker profile clustering")
-        return Output(
-            [],
-            metadata={
-                "skipped": True,
-                "reason": "SPEAKER_PROFILE_ENABLED not set",
-            },
-        )
-
     with trace_operation(
         "media_speaker_profiles",
         tracer,

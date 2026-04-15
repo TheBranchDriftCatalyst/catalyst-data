@@ -4,8 +4,6 @@ Groups mentions into EntityCandidates within the media_ingest code location
 using multi-pass resolution (exact match, substring, Jaccard, embedding cosine).
 """
 
-import os
-
 from dagster import AssetExecutionContext, AssetIn, Output, asset
 
 import dagster_io.concordance as _concordance_mod
@@ -109,10 +107,9 @@ def media_entity_candidates(
         # Tag candidates with speaker profile_id if available.
         # Build a lookup: (document_id, speaker_label) → profile_id
         # from the speaker_profiles membership log.
-        speaker_profiles_enabled = os.environ.get("SPEAKER_PROFILE_ENABLED", "").lower() in ("1", "true")
         profiles = media_speaker_profiles or []
         tagged_count = 0
-        if speaker_profiles_enabled and profiles:
+        if profiles:
             member_to_profile: dict[tuple[str, str], str] = {}
             for profile in profiles:
                 if isinstance(profile, dict):
