@@ -1,11 +1,16 @@
-"""Gold: Text chunking for downstream embedding stage.
+"""Gold: Speaker-aware text chunking for embedding + extraction.
 
-Uses 800/150 chunk sizes optimized for speech transcriptions — shorter chunks
-improve retrieval quality for conversational audio content.
+Uses merged speaker turns as natural chunk boundaries. Each turn becomes
+a chunk if it's under the size limit. Oversized turns (long monologues)
+are split with RecursiveCharacterTextSplitter as fallback.
+
+This preserves semantic coherence — each chunk is one person saying one
+thing, not an arbitrary 800-char window that breaks mid-sentence.
 
 Partitioned by document_id — each run chunks a single transcription.
 """
 
+import hashlib
 from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
@@ -19,13 +24,12 @@ from media_ingest.partitions import media_partitions
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
-# Speech transcriptions benefit from smaller chunks since spoken language
-# is less information-dense than written text.
-TRANSCRIPTION_CHUNK_SIZE = 800
-TRANSCRIPTION_CHUNK_OVERLAP = 150
+# Max chars per chunk. Speaker turns under this limit are kept whole.
+# Turns over this get split by RecursiveCharacterTextSplitter.
+MAX_CHUNK_CHARS = 1500
+SPLIT_CHUNK_SIZE = 800
+SPLIT_CHUNK_OVERLAP = 150
 
-# CPU-only text chunking. Small footprint but we set explicit requests/limits
-# so the scheduler doesn't co-locate too many of these on a single node.
 CHUNKS_K8S_CONFIG = {
     "dagster-k8s/config": {
         "container_config": {
@@ -38,9 +42,87 @@ CHUNKS_K8S_CONFIG = {
 }
 
 
+def _speaker_turn_chunks(
+    segments: list[dict],
+    document_id: str,
+    title: str,
+    chunking: ChunkingResource,
+    metadata: dict,
+) -> list[TextChunk]:
+    """Build chunks from speaker turns, splitting oversized turns.
+
+    Each merged segment is a speaker turn. If the turn text is under
+    MAX_CHUNK_CHARS, it becomes one chunk with the speaker label preserved.
+    If over, it's split with the text splitter.
+    """
+    chunks: list[TextChunk] = []
+    chunk_index = 0
+
+    for seg in segments:
+        text = seg.get("text", "").strip()
+        if not text:
+            continue
+
+        speaker = seg.get("speaker", "UNKNOWN")
+        start_s = seg.get("start", 0)
+        end_s = seg.get("end", 0)
+
+        turn_meta = {
+            **metadata,
+            "speaker": speaker,
+            "start_s": start_s,
+            "end_s": end_s,
+        }
+
+        if len(text) <= MAX_CHUNK_CHARS:
+            # Natural turn fits in one chunk — use as-is
+            full_text = f"[{speaker}] {text}" if speaker else text
+            if title:
+                full_text = f"{title}\n\n{full_text}"
+            chunks.append(
+                TextChunk(
+                    chunk_id=f"{document_id}:chunk-{chunk_index}",
+                    document_id=document_id,
+                    text=full_text,
+                    index=chunk_index,
+                    total_chunks=0,  # set after loop
+                    metadata={**turn_meta, "strategy": "speaker_turn"},
+                )
+            )
+            chunk_index += 1
+        else:
+            # Oversized turn — split with text splitter
+            prefixed = f"[{speaker}] {text}" if speaker else text
+            sub_chunks = chunking.split_text(
+                prefixed,
+                chunk_size=SPLIT_CHUNK_SIZE,
+                chunk_overlap=SPLIT_CHUNK_OVERLAP,
+            )
+            for sub_text in sub_chunks:
+                full_text = f"{title}\n\n{sub_text}" if title else sub_text
+                chunks.append(
+                    TextChunk(
+                        chunk_id=f"{document_id}:chunk-{chunk_index}",
+                        document_id=document_id,
+                        text=full_text,
+                        index=chunk_index,
+                        total_chunks=0,
+                        metadata={**turn_meta, "strategy": "speaker_turn_split"},
+                    )
+                )
+                chunk_index += 1
+
+    # Backfill total_chunks
+    for c in chunks:
+        c.total_chunks = len(chunks)
+        c.content_hash = hashlib.sha256(c.text.encode()).hexdigest()
+
+    return chunks
+
+
 @asset(
     group_name="media_ingest",
-    description="Chunk a single media transcription for embedding. One partition = one document.",
+    description="Speaker-aware chunking — preserves turn boundaries, splits only oversized monologues.",
     compute_kind="python",
     metadata={"layer": "gold"},
     partitions_def=media_partitions,
@@ -52,7 +134,6 @@ def media_chunks(
     media_segment_merge: dict[str, Any],
 ) -> Output[list[TextChunk]]:
     partition_key = context.partition_key
-    context.log.info(f"Starting media_chunks for partition={partition_key}")
     with trace_operation(
         "media_chunks",
         tracer,
@@ -63,64 +144,55 @@ def media_chunks(
         },
     ):
         t = media_segment_merge
-        logger.info("Starting media_chunks chunking for partition=%s", partition_key)
+        segments = t.get("segments", [])
+        title = t.get("title", "")
+        doc_id = t.get("document_id", partition_key)
 
-        segment_count = len(t.get("segments", []))
-        has_speaker_text = bool(t.get("speaker_text"))
-        context.log.info(
-            f"Input: segment_count={segment_count}, has_speaker_text={has_speaker_text}, "
-            f"title='{t.get('title', 'unknown')}'"
-        )
+        if not segments:
+            # Fallback: no segments (transcription failed?) — try raw text
+            text = t.get("text", "")
+            if not text:
+                context.log.info(f"No segments or text for partition={partition_key}")
+                return Output([], metadata={"document_id": doc_id, "chunk_count": 0, "skipped": True})
 
-        # Prefer speaker-attributed text for richer chunks
-        text = t.get("speaker_text") or t.get("text", "")
-        if not text:
-            context.log.info(f"No text for partition={partition_key} — returning empty chunks")
-            return Output(
-                [],
-                metadata={
-                    "document_id": t.get("document_id", partition_key),
-                    "chunk_count": 0,
-                    "skipped": True,
-                    "reason": "empty_text",
-                },
+            # Use traditional chunking as last resort
+            chunks = chunking.chunk_document(
+                document_id=doc_id,
+                title=title,
+                content=text,
+                chunk_size=SPLIT_CHUNK_SIZE,
+                chunk_overlap=SPLIT_CHUNK_OVERLAP,
             )
-
-        chunks = chunking.chunk_document(
-            document_id=t["document_id"],
-            title=t.get("title", ""),
-            content=text,
-            metadata={
+        else:
+            meta = {
                 "source": "media_ingest",
                 "language": t.get("language", "unknown"),
                 "speaker_count": t.get("speaker_count", 0),
-                "speakers": t.get("speakers", []),
-            },
-            chunk_size=TRANSCRIPTION_CHUNK_SIZE,
-            chunk_overlap=TRANSCRIPTION_CHUNK_OVERLAP,
-        )
+            }
+            chunks = _speaker_turn_chunks(segments, doc_id, title, chunking, meta)
 
         ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_chunks", layer="gold").inc(
             len(chunks)
         )
-        logger.info(
-            "media_chunks complete for partition=%s: %d chunks",
-            partition_key,
-            len(chunks),
-        )
-        avg_chunk_len = sum(len(c.text) for c in chunks) / max(len(chunks), 1)
+
+        turn_count = len([c for c in chunks if c.metadata.get("strategy") == "speaker_turn"])
+        split_count = len([c for c in chunks if c.metadata.get("strategy") == "speaker_turn_split"])
+        avg_len = sum(len(c.text) for c in chunks) / max(len(chunks), 1)
+
         context.log.info(
-            f"Chunked transcription for '{t.get('title', partition_key)}' into {len(chunks)} chunks "
-            f"(size={TRANSCRIPTION_CHUNK_SIZE}, overlap={TRANSCRIPTION_CHUNK_OVERLAP}, "
-            f"avg_chunk_chars={avg_chunk_len:.0f}, input_chars={len(text)})"
+            f"Chunked '{title}': {len(segments)} turns → {len(chunks)} chunks "
+            f"({turn_count} whole turns, {split_count} split sub-chunks, avg={avg_len:.0f} chars)"
         )
+
         return Output(
             chunks,
             metadata={
-                "document_id": t.get("document_id", partition_key),
-                "title": t.get("title", ""),
+                "document_id": doc_id,
+                "title": title,
                 "chunk_count": len(chunks),
-                "chunk_size": TRANSCRIPTION_CHUNK_SIZE,
-                "chunk_overlap": TRANSCRIPTION_CHUNK_OVERLAP,
+                "whole_turns": turn_count,
+                "split_sub_chunks": split_count,
+                "input_segments": len(segments),
+                "max_chunk_chars": MAX_CHUNK_CHARS,
             },
         )
