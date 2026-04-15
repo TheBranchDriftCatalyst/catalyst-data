@@ -209,11 +209,14 @@ def _merge_chunked_segments(all_chunk_results: list[tuple[dict, float]]) -> dict
 def _load_faster_whisper(config: MediaIngestConfig):
     from faster_whisper import WhisperModel
 
+    from dagster_io.model_cache import cached_model_path
+
+    cache_dir = cached_model_path(WHISPER_MODEL_CACHE)
     return WhisperModel(
         config.whisper_model,
         device=config.whisper_device,
         compute_type=config.whisper_compute_type,
-        download_root=WHISPER_MODEL_CACHE,
+        download_root=cache_dir,
     )
 
 
@@ -256,10 +259,16 @@ def _load_openvino(config: MediaIngestConfig) -> tuple[Any, str]:
     """
     from huggingface_hub import snapshot_download
 
-    model_dir = os.path.join(WHISPER_MODEL_CACHE, config.openvino_model_id.replace("/", "--"))
-    if not os.path.isdir(model_dir):
-        logger.info("Downloading OpenVINO model %s to %s", config.openvino_model_id, model_dir)
-        snapshot_download(config.openvino_model_id, local_dir=model_dir)
+    from dagster_io.model_cache import cached_model_path
+
+    model_name = config.openvino_model_id.replace("/", "--")
+    nfs_model_dir = os.path.join(WHISPER_MODEL_CACHE, model_name)
+    if not os.path.isdir(nfs_model_dir):
+        logger.info("Downloading OpenVINO model %s to %s", config.openvino_model_id, nfs_model_dir)
+        snapshot_download(config.openvino_model_id, local_dir=nfs_model_dir)
+
+    # Use node-local cache if available (avoids NFS read on subsequent runs)
+    model_dir = cached_model_path(nfs_model_dir)
 
     import openvino_genai
 

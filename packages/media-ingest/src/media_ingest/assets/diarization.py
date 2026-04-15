@@ -104,11 +104,14 @@ def _run_diarization(audio_path: str, hf_token: str, cache_dir: str) -> tuple:
     torch.load = _patched_load
     from pyannote.audio import Pipeline
 
+    from dagster_io.model_cache import cached_model_path
+
+    local_cache = cached_model_path(cache_dir)
     os.environ["HF_TOKEN"] = hf_token
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
         use_auth_token=hf_token,
-        cache_dir=cache_dir,
+        cache_dir=local_cache,
     )
     if pipeline is None:
         raise RuntimeError(

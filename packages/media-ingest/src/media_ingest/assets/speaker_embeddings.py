@@ -41,6 +41,12 @@ def _load_embedding_model():
     from pyannote.audio import Inference as SpeakerInference
     from pyannote.audio import Model
 
+    from dagster_io.model_cache import cached_model_path
+
+    # Use node-local cache for HuggingFace model downloads
+    local_cache = cached_model_path("/data/whisper-models")
+    os.environ.setdefault("HF_HOME", local_cache)
+
     t0 = time.monotonic()
     model = Model.from_pretrained("pyannote/embedding", use_auth_token=os.environ.get("HF_TOKEN", ""))
     inference = SpeakerInference(model, window="whole")
