@@ -4,9 +4,6 @@ Uses merged speaker turns as natural chunk boundaries. Each turn becomes
 a chunk if it's under the size limit. Oversized turns (long monologues)
 are split with RecursiveCharacterTextSplitter as fallback.
 
-This preserves semantic coherence — each chunk is one person saying one
-thing, not an arbitrary 800-char window that breaks mid-sentence.
-
 Partitioned by document_id — each run chunks a single transcription.
 """
 
@@ -24,11 +21,9 @@ from media_ingest.partitions import media_partitions
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
-# Max chars per chunk. Speaker turns under this limit are kept whole.
-# Turns over this get split by RecursiveCharacterTextSplitter.
 MAX_CHUNK_CHARS = 1500
 SPLIT_CHUNK_SIZE = 800
-SPLIT_CHUNK_OVERLAP = 150
+SPLIT_CHUNK_OVERLAP = 0
 
 CHUNKS_K8S_CONFIG = {
     "dagster-k8s/config": {
@@ -42,42 +37,31 @@ CHUNKS_K8S_CONFIG = {
 }
 
 
-def _resolve_sub_chunk_timestamps(
-    sub_text: str, words: list[dict], seg_start: float, seg_end: float
+def _word_timestamps_for_char_range(
+    words: list[dict], char_start: int, char_end: int, fallback_start: float, fallback_end: float
 ) -> tuple[float, float]:
-    """Find the precise start/end timestamps for a sub-chunk using word-level data.
+    """Map a character range in the turn text to word-level timestamps.
 
-    Walks the word list and finds which words overlap with the sub-chunk text.
-    Returns (start_s, end_s) for the sub-chunk. Falls back to segment
-    boundaries if word matching fails.
+    Walks the word list accumulating character positions. Words whose
+    position falls within [char_start, char_end) contribute their timestamps.
     """
     if not words:
-        return seg_start, seg_end
+        return fallback_start, fallback_end
 
-    # Strip speaker prefix for matching
-    clean = sub_text
-    if clean.startswith("["):
-        bracket_end = clean.find("] ")
-        if bracket_end > 0:
-            clean = clean[bracket_end + 2 :]
-
-    # Find first and last word that appears in the sub-chunk text
     first_ts = None
     last_ts = None
-    search_pos = 0
+    pos = 0
 
     for w in words:
-        word_text = w.get("word", "").strip()
-        if not word_text:
-            continue
-        idx = clean.find(word_text, search_pos)
-        if idx >= 0:
+        wlen = len(w.get("word", ""))
+        wend = pos + wlen
+        if wend > char_start and pos < char_end:
             if first_ts is None:
-                first_ts = w.get("start", seg_start)
-            last_ts = w.get("end", seg_end)
-            search_pos = idx + len(word_text)
+                first_ts = w.get("start", fallback_start)
+            last_ts = w.get("end", fallback_end)
+        pos = wend
 
-    return (first_ts or seg_start, last_ts or seg_end)
+    return (first_ts or fallback_start, last_ts or fallback_end)
 
 
 def _speaker_turn_chunks(
@@ -87,13 +71,7 @@ def _speaker_turn_chunks(
     chunking: ChunkingResource,
     metadata: dict,
 ) -> list[TextChunk]:
-    """Build chunks from speaker turns, splitting oversized turns.
-
-    Each merged segment is a speaker turn. If the turn text is under
-    MAX_CHUNK_CHARS, it becomes one chunk with the speaker label preserved.
-    If over, it's split with the text splitter and each sub-chunk gets
-    word-level timestamp resolution for precise provenance.
-    """
+    """Build chunks from speaker turns, splitting oversized turns."""
     chunks: list[TextChunk] = []
     chunk_index = 0
 
@@ -107,37 +85,42 @@ def _speaker_turn_chunks(
         end_s = seg.get("end", 0)
         words = seg.get("words", [])
 
-        base_meta = {
-            **metadata,
-            "speaker": speaker,
-        }
+        base_meta = {**metadata, "speaker": speaker}
 
         if len(text) <= MAX_CHUNK_CHARS:
-            # Natural turn fits in one chunk — use as-is
-            full_text = f"[{speaker}] {text}" if speaker else text
-            if title:
-                full_text = f"{title}\n\n{full_text}"
+            full_text = f"{title}\n\n{text}" if title else text
             chunks.append(
                 TextChunk(
                     chunk_id=f"{document_id}:chunk-{chunk_index}",
                     document_id=document_id,
                     text=full_text,
                     index=chunk_index,
-                    total_chunks=0,  # set after loop
+                    total_chunks=0,
                     metadata={**base_meta, "start_s": start_s, "end_s": end_s, "strategy": "speaker_turn"},
                 )
             )
             chunk_index += 1
         else:
-            # Oversized turn — split with text splitter, resolve timestamps per sub-chunk
-            prefixed = f"[{speaker}] {text}" if speaker else text
-            sub_chunks = chunking.split_text(
-                prefixed,
-                chunk_size=SPLIT_CHUNK_SIZE,
-                chunk_overlap=SPLIT_CHUNK_OVERLAP,
-            )
-            for sub_text in sub_chunks:
-                sub_start, sub_end = _resolve_sub_chunk_timestamps(sub_text, words, start_s, end_s)
+            # Split the raw text (no prefix).
+            sub_texts = chunking.split_text(text, chunk_size=SPLIT_CHUNK_SIZE, chunk_overlap=SPLIT_CHUNK_OVERLAP)
+            n = len(sub_texts)
+
+            # Proportional timestamp assignment: divide the turn's time range
+            # evenly across sub-chunks, then refine with word-level data.
+            turn_duration = end_s - start_s
+            for i_sub, sub_text in enumerate(sub_texts):
+                # Proportional time range for this sub-chunk
+                frac_start = i_sub / n
+                frac_end = (i_sub + 1) / n
+                prop_start = start_s + turn_duration * frac_start
+                prop_end = start_s + turn_duration * frac_end
+
+                # Refine with word-level data if available
+                text_len = len(text) if len(text) > 0 else 1
+                char_start = int(text_len * frac_start)
+                char_end = int(text_len * frac_end)
+                sub_start, sub_end = _word_timestamps_for_char_range(words, char_start, char_end, prop_start, prop_end)
+
                 full_text = f"{title}\n\n{sub_text}" if title else sub_text
                 chunks.append(
                     TextChunk(
@@ -156,7 +139,6 @@ def _speaker_turn_chunks(
                 )
                 chunk_index += 1
 
-    # Backfill total_chunks
     for c in chunks:
         c.total_chunks = len(chunks)
         c.content_hash = hashlib.sha256(c.text.encode()).hexdigest()
@@ -193,13 +175,10 @@ def media_chunks(
         doc_id = t.get("document_id", partition_key)
 
         if not segments:
-            # Fallback: no segments (transcription failed?) — try raw text
             text = t.get("text", "")
             if not text:
                 context.log.info(f"No segments or text for partition={partition_key}")
                 return Output([], metadata={"document_id": doc_id, "chunk_count": 0, "skipped": True})
-
-            # Use traditional chunking as last resort
             chunks = chunking.chunk_document(
                 document_id=doc_id,
                 title=title,
