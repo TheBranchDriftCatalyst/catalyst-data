@@ -245,6 +245,16 @@ class AnnotationStore:
                     "ON CONFLICT (document_id, speaker_label) DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = NOW()",
                     (document_id, label, name),
                 )
+                # Propagate display_name to the matching speaker_profile.
+                # speaker_profile_members links (profile_id, document_id, local_label).
+                conn.execute(
+                    "UPDATE speaker_profiles SET display_name = %s "
+                    "WHERE profile_id IN ("
+                    "  SELECT profile_id FROM speaker_profile_members "
+                    "  WHERE document_id = %s AND local_label = %s"
+                    ")",
+                    (name, document_id, label),
+                )
             return True
 
         return self._safe(_upsert, False)
