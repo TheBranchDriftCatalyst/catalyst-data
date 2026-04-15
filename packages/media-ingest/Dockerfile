@@ -44,11 +44,17 @@ WORKDIR /app
 # 1. Install shared libs — copy pyproject.toml first for dep caching,
 #    then full source. Changes to tests/docs won't bust this layer
 #    thanks to .dockerignore excluding tests/ and docs/.
-COPY libs/catalyst-contracts-core/ /tmp/catalyst-contracts-core/
+COPY libs/catalyst-contracts-core/  /tmp/catalyst-contracts-core/
+COPY libs/catalyst-llm-contract-mcp/ /tmp/catalyst-llm-contract-mcp/
+COPY libs/catalyst-langgraph-aio/  /tmp/catalyst-langgraph-aio/
 COPY libs/dagster-io/              /tmp/dagster-io/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --python /usr/bin/python3.12 \
         /tmp/catalyst-contracts-core/ && \
+    uv pip install --system --python /usr/bin/python3.12 \
+        /tmp/catalyst-llm-contract-mcp/ && \
+    uv pip install --system --python /usr/bin/python3.12 \
+        /tmp/catalyst-langgraph-aio/ && \
     uv pip install --system --python /usr/bin/python3.12 \
         /tmp/dagster-io/
 
