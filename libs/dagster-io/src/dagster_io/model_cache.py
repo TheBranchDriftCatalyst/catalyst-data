@@ -41,34 +41,52 @@ def cached_model_path(nfs_path: str, cache_dir: str | None = None) -> str:
         Path to the model directory (local cache or NFS fallback).
     """
     if not os.path.isdir(nfs_path):
-        return nfs_path  # NFS path doesn't exist — let caller handle the error
+        logger.warning("Model path does not exist: %s — returning as-is", nfs_path)
+        return nfs_path
 
     cache_root = cache_dir or LOCAL_CACHE_DIR
-    # Mirror the NFS path structure under the cache root
     model_name = os.path.basename(nfs_path)
     local_path = os.path.join(cache_root, model_name)
 
+    # Check if cache root is even available (volume mounted?)
+    if not os.path.isdir(cache_root):
+        logger.info(
+            "Model cache directory %s not mounted (PodSecurity may block hostPath). Loading from NFS: %s",
+            cache_root,
+            nfs_path,
+        )
+        return nfs_path
+
     # Already cached — use it
     if os.path.isdir(local_path):
-        logger.debug("Model cache hit: %s", local_path)
+        logger.info("Model cache HIT: loading from local %s (skipping NFS)", local_path)
         return local_path
 
-    # Try to create cache and copy from NFS
+    # Cache miss — copy from NFS to local
     try:
         os.makedirs(cache_root, exist_ok=True)
         start = time.monotonic()
-        logger.info("Caching model from NFS: %s → %s", nfs_path, local_path)
+        logger.info("Model cache MISS: copying from NFS %s → local %s", nfs_path, local_path)
         shutil.copytree(nfs_path, local_path)
         duration = time.monotonic() - start
         size_mb = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fns in os.walk(local_path) for f in fns) / (
             1024 * 1024
         )
-        logger.info("Model cached: %.0f MB in %.1fs (%.0f MB/s)", size_mb, duration, size_mb / max(duration, 0.01))
+        logger.info(
+            "Model cache POPULATED: %.0f MB in %.1fs (%.0f MB/s) — subsequent runs will use local",
+            size_mb,
+            duration,
+            size_mb / max(duration, 0.01),
+        )
         return local_path
     except (OSError, shutil.Error) as e:
-        # Cache unavailable (read-only fs, disk full, etc) — fall back to NFS
-        logger.warning("Model cache failed, using NFS directly: %s", e)
-        # Clean up partial copy
+        logger.warning(
+            "Model cache FAILED (falling back to NFS): %s. "
+            "This is expected if the cache volume is not mounted. "
+            "To enable: mount a local-path PVC at %s",
+            e,
+            cache_root,
+        )
         if os.path.isdir(local_path):
             shutil.rmtree(local_path, ignore_errors=True)
         return nfs_path

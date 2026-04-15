@@ -15,6 +15,7 @@ resources:
   # Storage
   - storage/nfs-media-volumes.yaml
   - storage/whisper-models-pvc.yaml
+  - storage/model-cache-pvc.yaml
   # Platform (webserver, daemon, postgres)
   - platform/rbac.yaml
   - platform/pvc.yaml

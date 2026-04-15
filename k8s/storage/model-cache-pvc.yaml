@@ -1,0 +1,15 @@
+---
+# Node-local model cache using local-path provisioner.
+# PodSecurity baseline allows local-path PVCs (unlike hostPath).
+# Models are copied from NFS on first use, then served from local SSD.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
