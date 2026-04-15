@@ -50,58 +50,14 @@ DIARIZATION_K8S_CONFIG = {
 }
 
 
-# ── pyannote compat patches ──────────────────────────────────────────────────
-
-
-def _patch_pyannote_auth():
-    """Monkey-patch huggingface_hub for pyannote 3.4 compat with hf_hub >=1.0."""
-    import functools
-    import sys
-
-    import huggingface_hub
-    import huggingface_hub.file_download as _fd
-
-    def _wrap(fn):
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            if "use_auth_token" in kwargs:
-                kwargs.setdefault("token", kwargs.pop("use_auth_token"))
-            return fn(*args, **kwargs)
-
-        return wrapper
-
-    for target in ("hf_hub_download", "cached_download"):
-        for mod in (huggingface_hub, _fd):
-            orig = getattr(mod, target, None)
-            if orig and not getattr(orig, "_patched", False):
-                patched = _wrap(orig)
-                patched._patched = True
-                setattr(mod, target, patched)
-
-    for name, mod in sys.modules.items():
-        if "pyannote" in name and mod is not None:
-            for attr in ("hf_hub_download", "cached_download"):
-                fn = getattr(mod, attr, None)
-                if fn and not getattr(fn, "_patched", False):
-                    setattr(mod, attr, _wrap(fn))
-
-
 def _run_diarization(audio_path: str, hf_token: str, cache_dir: str) -> tuple:
-    """Run pyannote speaker diarization pipeline.
+    """Run pyannote speaker diarization pipeline (requires pyannote.audio >=4.0).
 
-    Returns (diarization_output, resolved_device) where resolved_device
-    is 'xpu', 'cuda', or 'cpu' depending on what was actually available.
+    Returns (annotation, resolved_device) where annotation is a pyannote
+    Annotation object with itertracks(), and resolved_device is 'xpu',
+    'cuda', 'mps', or 'cpu'.
     """
     import torch
-
-    _patch_pyannote_auth()
-    _orig_load = torch.load
-
-    def _patched_load(*a, **kw):
-        kw["weights_only"] = False
-        return _orig_load(*a, **kw)
-
-    torch.load = _patched_load
     from pyannote.audio import Pipeline
 
     from dagster_io.model_cache import cached_model_path
@@ -110,7 +66,7 @@ def _run_diarization(audio_path: str, hf_token: str, cache_dir: str) -> tuple:
     os.environ["HF_TOKEN"] = hf_token
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
-        use_auth_token=hf_token,
+        token=hf_token,
         cache_dir=local_cache,
     )
     if pipeline is None:
@@ -118,36 +74,32 @@ def _run_diarization(audio_path: str, hf_token: str, cache_dir: str) -> tuple:
             "Failed to load pyannote pipeline — accept license at https://hf.co/pyannote/speaker-diarization-3.1"
         )
 
-    # Try XPU (Intel GPU) first, fall back to CUDA then CPU
+    # Try best available accelerator: XPU → CUDA → MPS → CPU
     resolved_device = "cpu"
-    if hasattr(torch, "xpu") and torch.xpu.is_available():
-        try:
-            pipeline.to(torch.device("xpu"))
-            resolved_device = "xpu"
-            logger.info("pyannote pipeline moved to XPU (Intel GPU)")
-        except RuntimeError as e:
-            logger.warning("XPU not available, falling back to CPU: %s", e)
-    elif torch.cuda.is_available():
-        try:
-            pipeline.to(torch.device("cuda"))
-            resolved_device = "cuda"
-            logger.info("pyannote pipeline moved to CUDA")
-        except RuntimeError as e:
-            logger.warning("CUDA not available, falling back to CPU: %s", e)
-    else:
-        logger.warning(
-            "No GPU available (torch.xpu=%s, torch.cuda=%s), running diarization "
-            "on CPU — this will be slow for long audio. Install intel-extension-for-pytorch "
-            "in Dockerfile.gpu to enable XPU acceleration (see CD-844).",
-            hasattr(torch, "xpu"),
-            torch.cuda.is_available(),
-        )
+    for device_name, check in [
+        ("xpu", lambda: hasattr(torch, "xpu") and torch.xpu.is_available()),
+        ("cuda", lambda: torch.cuda.is_available()),
+        ("mps", lambda: hasattr(torch.backends, "mps") and torch.backends.mps.is_available()),
+    ]:
+        if check():
+            try:
+                pipeline.to(torch.device(device_name))
+                resolved_device = device_name
+                logger.info("pyannote pipeline moved to %s", device_name)
+                break
+            except RuntimeError as e:
+                logger.warning("%s not usable, trying next: %s", device_name, e)
+
+    if resolved_device == "cpu":
+        logger.warning("Running diarization on CPU — this will be slow for long audio")
 
     # pyannote can't read MP4/MKV — extract audio first
     wav_path = extract_audio_to_wav(audio_path)
     try:
         result = pipeline(wav_path)
-        return result, resolved_device
+        # pyannote 4.x returns DiarizeOutput; extract the Annotation
+        annotation = getattr(result, "speaker_diarization", result)
+        return annotation, resolved_device
     finally:
         if os.path.exists(wav_path):
             os.unlink(wav_path)

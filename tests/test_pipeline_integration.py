@@ -1,0 +1,256 @@
+"""Integration tests against a real demo video.
+
+Each test runs ACTUAL pipeline code against tests/demo_video.mp4 and saves
+the output to tests/fixtures/ for downstream tests to consume. Tests are
+ordered — transcription first, then diarization, then merge, etc.
+
+Run with: pytest tests/test_pipeline_integration.py -v -s
+(use -s to see progress logs since transcription/diarization take time)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+from pathlib import Path
+
+import pytest
+
+DEMO_VIDEO = Path(__file__).parent / "demo_video.mp4"
+FIXTURES = Path(__file__).parent / "fixtures"
+LOCAL_MODEL_CACHE = str(Path(__file__).parent / "fixtures" / "model_cache")
+
+pytestmark = pytest.mark.skipif(not DEMO_VIDEO.exists(), reason="demo_video.mp4 not found")
+
+# Override model cache to local dir (not /data/whisper-models which is NFS in k8s)
+os.environ.setdefault("MODEL_CACHE_DIR", LOCAL_MODEL_CACHE)
+
+
+def _load_fixture(name: str) -> dict | list | None:
+    f = FIXTURES / f"{name}.json"
+    return json.loads(f.read_text()) if f.exists() else None
+
+
+def _save_fixture(name: str, data):
+    FIXTURES.mkdir(exist_ok=True)
+    (FIXTURES / f"{name}.json").write_text(json.dumps(data, indent=2, default=str))
+
+
+# ── Step 1: Transcription ────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="session")
+def transcription_result():
+    """Transcribe using our actual _transcribe_faster_whisper pipeline code."""
+    cached = _load_fixture("transcription")
+    if cached:
+        return cached
+
+    from media_ingest.assets.transcription import _transcribe_faster_whisper
+    from media_ingest.config import MediaIngestConfig
+
+    config = MediaIngestConfig(whisper_model="base", whisper_device="cpu", whisper_compute_type="int8")
+
+    print("\n  Loading faster-whisper model (base)...")
+    from faster_whisper import WhisperModel
+
+    model = WhisperModel(config.whisper_model, device=config.whisper_device, compute_type=config.whisper_compute_type)
+
+    print(f"  Transcribing {DEMO_VIDEO.name}...")
+    start = time.monotonic()
+    result = _transcribe_faster_whisper(model, str(DEMO_VIDEO))
+    duration = time.monotonic() - start
+
+    # Wrap in the same dict shape the asset produces
+    output = {
+        "document_id": "test-demo-video",
+        "title": "Demo Video",
+        "text": " ".join(s["text"] for s in result["segments"]),
+        "language": result["language"],
+        "language_probability": result["language_probability"],
+        "duration_s": result["duration_s"],
+        "segments": result["segments"],
+        "segment_count": len(result["segments"]),
+        "source_path": str(DEMO_VIDEO),
+    }
+
+    print(f"  Transcription complete: {len(result['segments'])} segments in {duration:.1f}s")
+    _save_fixture("transcription", output)
+    return output
+
+
+def test_transcription_produces_segments(transcription_result):
+    assert len(transcription_result["segments"]) > 0
+    assert transcription_result["duration_s"] > 0
+
+
+def test_transcription_segments_have_timestamps(transcription_result):
+    for seg in transcription_result["segments"]:
+        assert seg["end"] > seg["start"]
+
+
+def test_transcription_segments_have_words(transcription_result):
+    with_words = sum(1 for s in transcription_result["segments"] if s.get("words"))
+    total = len(transcription_result["segments"])
+    assert with_words / total > 0.8
+
+
+def test_transcription_words_have_timestamps(transcription_result):
+    for seg in transcription_result["segments"]:
+        for w in seg.get("words", []):
+            assert "start" in w and "end" in w and "word" in w
+
+
+# ── Step 2: Diarization ──────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="session")
+def diarization_result(transcription_result):
+    """Run our actual _run_diarization + _assign_speakers pipeline code."""
+    cached = _load_fixture("diarization")
+    if cached:
+        return cached
+
+    hf_token = os.environ.get("HF_TOKEN", "")
+    if not hf_token:
+        pytest.skip("HF_TOKEN not set — required for pyannote diarization")
+
+    from media_ingest.assets.diarization import _assign_speakers, _run_diarization
+
+    # Use local cache dir instead of /data/whisper-models (NFS in k8s)
+    local_cache = str(FIXTURES / "model_cache")
+    os.makedirs(local_cache, exist_ok=True)
+
+    print("\n  Running pyannote diarization (actual pipeline code)...")
+    start = time.monotonic()
+
+    diarization, device = _run_diarization(str(DEMO_VIDEO), hf_token, local_cache)
+    segments = _assign_speakers(transcription_result["segments"], diarization)
+    unique_speakers = {s.get("speaker") for s in segments if s.get("speaker")}
+
+    output = {
+        **transcription_result,
+        "segments": segments,
+        "speaker_count": len(unique_speakers),
+        "speakers": sorted(unique_speakers) if unique_speakers else [],
+        "speaker_text": None,
+        "diarization_time_s": round(time.monotonic() - start, 1),
+        "diarization_device": device,
+    }
+
+    print(f"  Diarization complete: {len(unique_speakers)} speakers on {device} in {output['diarization_time_s']}s")
+    _save_fixture("diarization", output)
+    return output
+
+
+def test_diarization_finds_speakers(diarization_result):
+    assert diarization_result["speaker_count"] >= 1
+
+
+def test_diarization_segments_have_speaker(diarization_result):
+    segs = diarization_result["segments"]
+    with_speaker = sum(1 for s in segs if s.get("speaker"))
+    assert with_speaker / len(segs) > 0.7
+
+
+def test_diarization_preserves_words(diarization_result):
+    with_words = sum(1 for s in diarization_result["segments"] if s.get("words"))
+    assert with_words > 0
+
+
+# ── Step 3: Segment Merge ────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="session")
+def segment_merge_result(diarization_result):
+    """Run our actual _merge_same_speaker_segments + _build_speaker_text."""
+    cached = _load_fixture("segment_merge")
+    if cached:
+        return cached
+
+    from media_ingest.assets.diarization import _build_speaker_text, _merge_same_speaker_segments
+
+    pre_merge = len(diarization_result["segments"])
+    merged = _merge_same_speaker_segments(diarization_result["segments"], gap_threshold_s=7.0)
+    speaker_text = _build_speaker_text(merged)
+
+    output = {
+        **diarization_result,
+        "segments": merged,
+        "speaker_text": speaker_text,
+        "pre_merge_segments": pre_merge,
+        "post_merge_segments": len(merged),
+    }
+
+    print(f"\n  Segment merge: {pre_merge} → {len(merged)} segments")
+    _save_fixture("segment_merge", output)
+    return output
+
+
+def test_merge_reduces_segments(segment_merge_result):
+    assert segment_merge_result["post_merge_segments"] < segment_merge_result["pre_merge_segments"]
+
+
+def test_merge_produces_speaker_text(segment_merge_result):
+    assert "[SPEAKER_" in segment_merge_result["speaker_text"]
+
+
+def test_merge_preserves_words(segment_merge_result):
+    with_words = sum(1 for s in segment_merge_result["segments"] if s.get("words"))
+    assert with_words > 0
+
+
+# ── Step 4: Speaker-Aware Chunking ───────────────────────────────────────
+
+
+@pytest.fixture(scope="session")
+def chunks_result(segment_merge_result):
+    """Run our actual _speaker_turn_chunks."""
+    cached = _load_fixture("chunks")
+    if cached:
+        from dagster_io import TextChunk
+
+        return [TextChunk(**c) for c in cached]
+
+    from media_ingest.assets.chunks import _speaker_turn_chunks
+
+    from dagster_io import ChunkingResource
+
+    chunks = _speaker_turn_chunks(
+        segment_merge_result["segments"],
+        segment_merge_result["document_id"],
+        segment_merge_result["title"],
+        ChunkingResource(),
+        {"source": "media_ingest", "language": segment_merge_result.get("language", "unknown")},
+    )
+
+    print(f"\n  Chunking: {len(segment_merge_result['segments'])} turns → {len(chunks)} chunks")
+    _save_fixture("chunks", [c.model_dump() for c in chunks])
+    return chunks
+
+
+def test_chunks_produced(chunks_result):
+    assert len(chunks_result) > 0
+
+
+def test_chunks_have_speaker(chunks_result):
+    for c in chunks_result:
+        assert "speaker" in c.metadata
+
+
+def test_chunks_have_timestamps(chunks_result):
+    for c in chunks_result:
+        assert c.metadata["end_s"] >= c.metadata["start_s"]
+
+
+def test_chunks_have_strategy(chunks_result):
+    for c in chunks_result:
+        assert c.metadata["strategy"] in ("speaker_turn", "speaker_turn_split")
+
+
+def test_split_chunks_have_precise_timestamps(chunks_result):
+    split = [c for c in chunks_result if c.metadata["strategy"] == "speaker_turn_split"]
+    if len(split) > 1:
+        starts = {c.metadata["start_s"] for c in split}
+        assert len(starts) > 1, "All split chunks have the same start_s"

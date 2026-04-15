@@ -69,7 +69,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     mkdir -p src/media_ingest && \
     touch src/media_ingest/__init__.py && \
     python3.12 -m pip install \
-        "torch>=2.6,<2.8" "torchaudio>=2.6,<2.8" \
+        "torch>=2.6" "torchaudio>=2.6" \
         --index-url https://download.pytorch.org/whl/xpu && \
     uv pip install --system --python /usr/bin/python3.12 \
         ".[openvino]" && \
