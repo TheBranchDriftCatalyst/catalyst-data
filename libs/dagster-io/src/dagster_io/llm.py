@@ -400,11 +400,26 @@ class EmbeddingResource(ConfigurableResource):
         all_vectors: list[list[float]] = []
         for batch_start in range(0, len(texts), self.batch_size):
             batch = texts[batch_start : batch_start + self.batch_size]
-            with track_duration(
-                EMBEDDING_BATCH_DURATION,
-                {"provider": self.provider, "model": self.model},
-            ):
-                vectors = self._embeddings.embed_documents(batch)
+            # Retry with exponential backoff for rate limits (429)
+            for attempt in range(4):
+                try:
+                    with track_duration(
+                        EMBEDDING_BATCH_DURATION,
+                        {"provider": self.provider, "model": self.model},
+                    ):
+                        vectors = self._embeddings.embed_documents(batch)
+                    break
+                except Exception as e:
+                    if "429" in str(e) and attempt < 3:
+                        wait = 2 ** (attempt + 1)
+                        logger.warning(
+                            "Embedding rate limited (attempt %d/4), retrying in %ds: %s", attempt + 1, wait, e
+                        )
+                        import time
+
+                        time.sleep(wait)
+                    else:
+                        raise
             all_vectors.extend(vectors)
             EMBEDDING_VECTORS_CREATED.labels(provider=self.provider, model=self.model).inc(len(vectors))
             processed = min(batch_start + self.batch_size, len(texts))
