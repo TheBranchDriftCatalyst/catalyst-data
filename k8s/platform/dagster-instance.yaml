@@ -87,8 +87,6 @@ data:
                 readOnly: true
               - name: whisper-models
                 mountPath: /data/whisper-models
-              - name: model-cache
-                mountPath: /cache/models
           pod_spec_config:
             service_account_name: dagster
             image_pull_secrets:
@@ -103,10 +101,6 @@ data:
               - name: whisper-models
                 persistentVolumeClaim:
                   claimName: whisper-models
-              - name: model-cache
-                hostPath:
-                  path: /var/lib/catalyst-model-cache
-                  type: DirectoryOrCreate
           job_spec_config:
             ttl_seconds_after_finished: 3600
 
