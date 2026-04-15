@@ -43,6 +43,8 @@ jobs:
           cache: pip
       - run: |
           pip install -e libs/catalyst-contracts-core
+          pip install -e libs/catalyst-llm-contract-mcp
+          pip install -e libs/catalyst-langgraph-aio
           pip install -e libs/dagster-io
           pip install -e packages/congress-data
           pip install -e packages/media-ingest
