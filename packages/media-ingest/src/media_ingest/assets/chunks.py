@@ -42,6 +42,44 @@ CHUNKS_K8S_CONFIG = {
 }
 
 
+def _resolve_sub_chunk_timestamps(
+    sub_text: str, words: list[dict], seg_start: float, seg_end: float
+) -> tuple[float, float]:
+    """Find the precise start/end timestamps for a sub-chunk using word-level data.
+
+    Walks the word list and finds which words overlap with the sub-chunk text.
+    Returns (start_s, end_s) for the sub-chunk. Falls back to segment
+    boundaries if word matching fails.
+    """
+    if not words:
+        return seg_start, seg_end
+
+    # Strip speaker prefix for matching
+    clean = sub_text
+    if clean.startswith("["):
+        bracket_end = clean.find("] ")
+        if bracket_end > 0:
+            clean = clean[bracket_end + 2 :]
+
+    # Find first and last word that appears in the sub-chunk text
+    first_ts = None
+    last_ts = None
+    search_pos = 0
+
+    for w in words:
+        word_text = w.get("word", "").strip()
+        if not word_text:
+            continue
+        idx = clean.find(word_text, search_pos)
+        if idx >= 0:
+            if first_ts is None:
+                first_ts = w.get("start", seg_start)
+            last_ts = w.get("end", seg_end)
+            search_pos = idx + len(word_text)
+
+    return (first_ts or seg_start, last_ts or seg_end)
+
+
 def _speaker_turn_chunks(
     segments: list[dict],
     document_id: str,
@@ -53,7 +91,8 @@ def _speaker_turn_chunks(
 
     Each merged segment is a speaker turn. If the turn text is under
     MAX_CHUNK_CHARS, it becomes one chunk with the speaker label preserved.
-    If over, it's split with the text splitter.
+    If over, it's split with the text splitter and each sub-chunk gets
+    word-level timestamp resolution for precise provenance.
     """
     chunks: list[TextChunk] = []
     chunk_index = 0
@@ -66,12 +105,11 @@ def _speaker_turn_chunks(
         speaker = seg.get("speaker", "UNKNOWN")
         start_s = seg.get("start", 0)
         end_s = seg.get("end", 0)
+        words = seg.get("words", [])
 
-        turn_meta = {
+        base_meta = {
             **metadata,
             "speaker": speaker,
-            "start_s": start_s,
-            "end_s": end_s,
         }
 
         if len(text) <= MAX_CHUNK_CHARS:
@@ -86,12 +124,12 @@ def _speaker_turn_chunks(
                     text=full_text,
                     index=chunk_index,
                     total_chunks=0,  # set after loop
-                    metadata={**turn_meta, "strategy": "speaker_turn"},
+                    metadata={**base_meta, "start_s": start_s, "end_s": end_s, "strategy": "speaker_turn"},
                 )
             )
             chunk_index += 1
         else:
-            # Oversized turn — split with text splitter
+            # Oversized turn — split with text splitter, resolve timestamps per sub-chunk
             prefixed = f"[{speaker}] {text}" if speaker else text
             sub_chunks = chunking.split_text(
                 prefixed,
@@ -99,6 +137,7 @@ def _speaker_turn_chunks(
                 chunk_overlap=SPLIT_CHUNK_OVERLAP,
             )
             for sub_text in sub_chunks:
+                sub_start, sub_end = _resolve_sub_chunk_timestamps(sub_text, words, start_s, end_s)
                 full_text = f"{title}\n\n{sub_text}" if title else sub_text
                 chunks.append(
                     TextChunk(
@@ -107,7 +146,12 @@ def _speaker_turn_chunks(
                         text=full_text,
                         index=chunk_index,
                         total_chunks=0,
-                        metadata={**turn_meta, "strategy": "speaker_turn_split"},
+                        metadata={
+                            **base_meta,
+                            "start_s": sub_start,
+                            "end_s": sub_end,
+                            "strategy": "speaker_turn_split",
+                        },
                     )
                 )
                 chunk_index += 1

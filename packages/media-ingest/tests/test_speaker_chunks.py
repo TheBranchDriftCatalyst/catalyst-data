@@ -1,12 +1,12 @@
 """Tests for speaker-aware chunking."""
 
-from media_ingest.assets.chunks import MAX_CHUNK_CHARS, _speaker_turn_chunks
+from media_ingest.assets.chunks import MAX_CHUNK_CHARS, _resolve_sub_chunk_timestamps, _speaker_turn_chunks
 
 from dagster_io import ChunkingResource
 
 
-def _seg(text: str, speaker: str = "SPEAKER_01", start: float = 0, end: float = 10) -> dict:
-    return {"text": text, "speaker": speaker, "start": start, "end": end}
+def _seg(text: str, speaker: str = "SPEAKER_01", start: float = 0, end: float = 10, words: list | None = None) -> dict:
+    return {"text": text, "speaker": speaker, "start": start, "end": end, "words": words or []}
 
 
 def test_short_turns_kept_whole():
@@ -77,3 +77,59 @@ def test_total_chunks_backfilled():
     ]
     chunks = _speaker_turn_chunks(segments, "doc-1", "", ChunkingResource(), {})
     assert all(c.total_chunks == 3 for c in chunks)
+
+
+def test_sub_chunk_word_level_timestamps():
+    """Split sub-chunks get precise timestamps from word-level data."""
+    words = [
+        {"word": "First", "start": 0.0, "end": 0.5},
+        {"word": "sentence", "start": 0.5, "end": 1.0},
+        {"word": "here.", "start": 1.0, "end": 1.5},
+        {"word": "Second", "start": 2.0, "end": 2.5},
+        {"word": "sentence", "start": 2.5, "end": 3.0},
+        {"word": "there.", "start": 3.0, "end": 3.5},
+    ]
+    start, end = _resolve_sub_chunk_timestamps("First sentence here.", words, 0.0, 10.0)
+    assert start == 0.0
+    assert end == 1.5
+
+
+def test_sub_chunk_timestamps_with_speaker_prefix():
+    """Speaker prefix is stripped before matching words."""
+    words = [
+        {"word": "Hello", "start": 5.0, "end": 5.5},
+        {"word": "world.", "start": 5.5, "end": 6.0},
+    ]
+    start, end = _resolve_sub_chunk_timestamps("[SPEAKER_01] Hello world.", words, 0.0, 100.0)
+    assert start == 5.0
+    assert end == 6.0
+
+
+def test_sub_chunk_timestamps_fallback():
+    """Falls back to segment boundaries when no words available."""
+    start, end = _resolve_sub_chunk_timestamps("some text", [], 10.0, 20.0)
+    assert start == 10.0
+    assert end == 20.0
+
+
+def test_oversized_turn_has_word_timestamps():
+    """Split monologue sub-chunks carry word-level start_s/end_s."""
+    # Build a long turn with word timestamps
+    word_list = []
+    text_parts = []
+    for i in range(200):
+        w = f"word{i}"
+        text_parts.append(w)
+        word_list.append({"word": w, "start": float(i), "end": float(i) + 0.5})
+    long_text = " ".join(text_parts)
+
+    segments = [_seg(long_text, "SPEAKER_01", 0, 200, words=word_list)]
+    chunks = _speaker_turn_chunks(segments, "doc-1", "", ChunkingResource(), {})
+
+    # First chunk should start near 0
+    assert chunks[0].metadata["start_s"] < 5.0
+    # Last chunk should end near 200
+    assert chunks[-1].metadata["end_s"] > 100.0
+    # Each sub-chunk has its own timestamp range, not the parent's full range
+    if len(chunks) > 1:
+        assert chunks[0].metadata["end_s"] < chunks[-1].metadata["end_s"]
