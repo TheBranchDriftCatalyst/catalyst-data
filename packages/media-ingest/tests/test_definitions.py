@@ -4,9 +4,9 @@ from media_ingest import defs
 
 
 def test_definitions_load():
-    """Verify all 13 assets are registered."""
+    """Verify all 14 assets are registered."""
     assets = list(defs.resolve_asset_graph().get_all_asset_keys())
-    assert len(assets) == 13
+    assert len(assets) == 14
 
 
 def test_definitions_has_io_manager():

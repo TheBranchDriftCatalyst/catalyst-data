@@ -325,11 +325,8 @@ def media_diarization(
         try:
             diarization, resolved_device = _run_diarization(source_path, hf_token, WHISPER_MODEL_CACHE)
             segments = _assign_speakers(t["segments"], diarization)
-            pre_merge = len(segments)
-            segments = _merge_same_speaker_segments(segments, gap_threshold_s=7.0)
-            context.log.info(f"Merged {pre_merge} segments → {len(segments)} ({pre_merge - len(segments)} collapsed)")
+            # Raw segments with speaker labels — merging is done by media_segment_merge
             unique_speakers = {s.get("speaker") for s in segments if s.get("speaker")}
-            speaker_text = _build_speaker_text(segments) if unique_speakers else None
             diarization_time = round(time.monotonic() - start, 1)
 
             # Record diarization duration + realtime factor metrics
@@ -344,7 +341,7 @@ def media_diarization(
             output = {
                 **t,
                 "segments": segments,
-                "speaker_text": speaker_text,
+                "speaker_text": None,  # built by media_segment_merge
                 "speaker_count": len(unique_speakers),
                 "speakers": sorted(unique_speakers) if unique_speakers else [],
                 "diarization_time_s": diarization_time,
@@ -374,6 +371,7 @@ def media_diarization(
             output,
             metadata={
                 "document_id": partition_key,
+                "segment_count": len(output.get("segments", [])),
                 "speaker_count": output.get("speaker_count", 0),
                 "speakers": MetadataValue.json(output.get("speakers", [])),
                 "diarization_time_s": MetadataValue.float(output.get("diarization_time_s", 0.0)),
@@ -381,3 +379,57 @@ def media_diarization(
                 "error": output.get("diarization_error"),
             },
         )
+
+
+# ── Segment merge asset (CPU, instant) ──────────────────────────────────
+
+
+MERGE_GAP_THRESHOLD_S = float(os.environ.get("SPEAKER_MERGE_GAP_S", "7.0"))
+
+
+@asset(
+    group_name="media_ingest",
+    description="Merge consecutive same-speaker segments into natural turns. CPU-only, instant. Re-run to tweak gap threshold without re-running diarization.",
+    compute_kind="python",
+    metadata={"layer": "gold"},
+    partitions_def=media_partitions,
+)
+def media_segment_merge(
+    context: AssetExecutionContext,
+    media_diarization: dict[str, Any],
+) -> Output[dict[str, Any]]:
+    partition_key = context.partition_key
+    t = media_diarization
+
+    if t.get("diarization_error") or not t.get("segments"):
+        return Output(
+            t,
+            metadata={"document_id": partition_key, "skipped": True},
+        )
+
+    segments = t["segments"]
+    pre_merge = len(segments)
+    merged = _merge_same_speaker_segments(segments, gap_threshold_s=MERGE_GAP_THRESHOLD_S)
+    speaker_text = _build_speaker_text(merged)
+
+    output = {
+        **t,
+        "segments": merged,
+        "speaker_text": speaker_text,
+    }
+
+    context.log.info(
+        f"Segment merge: {pre_merge} → {len(merged)} segments "
+        f"({pre_merge - len(merged)} collapsed, gap_threshold={MERGE_GAP_THRESHOLD_S}s)"
+    )
+
+    return Output(
+        output,
+        metadata={
+            "document_id": partition_key,
+            "pre_merge_segments": pre_merge,
+            "post_merge_segments": len(merged),
+            "collapsed": pre_merge - len(merged),
+            "gap_threshold_s": MetadataValue.float(MERGE_GAP_THRESHOLD_S),
+        },
+    )

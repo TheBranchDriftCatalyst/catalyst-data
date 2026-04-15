@@ -1,6 +1,6 @@
 from media_ingest.assets.assertions import media_assertions
 from media_ingest.assets.chunks import media_chunks
-from media_ingest.assets.diarization import media_diarization
+from media_ingest.assets.diarization import media_diarization, media_segment_merge
 from media_ingest.assets.discovery import media_files
 from media_ingest.assets.documents import media_documents
 from media_ingest.assets.embeddings import media_embeddings
@@ -21,6 +21,7 @@ __all__ = [
     # Partitioned per-document
     "media_transcriptions",
     "media_diarization",
+    "media_segment_merge",
     "media_chunks",
     "media_mentions",
     "media_assertions",

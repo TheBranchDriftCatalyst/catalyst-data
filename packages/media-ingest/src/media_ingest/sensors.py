@@ -77,6 +77,7 @@ def _load_document_ids(client: S3Client) -> list[str]:
     asset_selection=[
         AssetKey("media_transcriptions"),
         AssetKey("media_diarization"),
+        AssetKey("media_segment_merge"),
         AssetKey("media_chunks"),
         AssetKey("media_mentions"),
         AssetKey("media_assertions"),

@@ -49,7 +49,7 @@ CHUNKS_K8S_CONFIG = {
 def media_chunks(
     context: AssetExecutionContext,
     chunking: ChunkingResource,
-    media_diarization: dict[str, Any],
+    media_segment_merge: dict[str, Any],
 ) -> Output[list[TextChunk]]:
     partition_key = context.partition_key
     context.log.info(f"Starting media_chunks for partition={partition_key}")
@@ -62,7 +62,7 @@ def media_chunks(
             "partition_key": partition_key,
         },
     ):
-        t = media_diarization
+        t = media_segment_merge
         logger.info("Starting media_chunks chunking for partition=%s", partition_key)
 
         segment_count = len(t.get("segments", []))

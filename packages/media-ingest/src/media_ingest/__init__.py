@@ -50,6 +50,7 @@ from media_ingest.assets import (
     media_files,
     media_mentions,
     media_metadata,
+    media_segment_merge,
     media_speaker_embeddings,
     media_speaker_profiles,
     media_transcode,
@@ -68,6 +69,7 @@ defs = Definitions(
         # Partitioned per-document
         media_transcriptions,
         media_diarization,
+        media_segment_merge,
         media_chunks,
         media_mentions,
         media_assertions,

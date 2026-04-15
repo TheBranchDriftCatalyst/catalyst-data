@@ -38,7 +38,7 @@ DOCUMENTS_KEY = f"silver/{_CODE_LOCATION}/{_GROUP}/media_documents/data.jsonl"
 # gold layer — partitioned by document_id
 _GOLD_PREFIX = f"gold/{_CODE_LOCATION}/{_GROUP}"
 TRANSCRIPTIONS_PREFIX = f"{_GOLD_PREFIX}/media_transcriptions"
-DIARIZATIONS_PREFIX = f"{_GOLD_PREFIX}/media_diarization"
+DIARIZATIONS_PREFIX = f"{_GOLD_PREFIX}/media_segment_merge"
 MENTIONS_PREFIX = f"{_GOLD_PREFIX}/media_mentions"
 ASSERTIONS_PREFIX = f"{_GOLD_PREFIX}/media_assertions"
 
