@@ -28,6 +28,9 @@ tests/
 **/*.pyo
 **/*.egg-info/
 **/.ruff_cache/
+**/.venv/
+**/.coverage
+**/.pytest_cache/
 
 # Node caches
 **/node_modules/

@@ -48,14 +48,14 @@ COPY libs/catalyst-contracts-core/  /tmp/catalyst-contracts-core/
 COPY libs/catalyst-llm-contract-mcp/ /tmp/catalyst-llm-contract-mcp/
 COPY libs/catalyst-langgraph-aio/  /tmp/catalyst-langgraph-aio/
 COPY libs/dagster-io/              /tmp/dagster-io/
+# Install ALL shared libs in one shot so uv resolves cross-dependencies
+# correctly. Sequential installs can cause uv to overwrite local path
+# installs when resolving transitive deps from PyPI.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --python /usr/bin/python3.12 \
-        /tmp/catalyst-contracts-core/ && \
-    uv pip install --system --python /usr/bin/python3.12 \
-        /tmp/catalyst-llm-contract-mcp/ && \
-    uv pip install --system --python /usr/bin/python3.12 \
-        /tmp/catalyst-langgraph-aio/ && \
-    uv pip install --system --python /usr/bin/python3.12 \
+        /tmp/catalyst-contracts-core/ \
+        /tmp/catalyst-llm-contract-mcp/ \
+        /tmp/catalyst-langgraph-aio/ \
         /tmp/dagster-io/
 
 # 2. Install PyTorch XPU + package deps
