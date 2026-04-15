@@ -178,6 +178,64 @@ def _assign_speakers(segments: list[dict], diarization) -> list[dict]:
     return segments
 
 
+def _merge_same_speaker_segments(
+    segments: list[dict],
+    gap_threshold_s: float = 1.5,
+    min_merge_length: int = 0,
+) -> list[dict]:
+    """Merge consecutive segments from the same speaker with small gaps.
+
+    Whisper produces very short segments (2-4 words each) aligned to pauses.
+    After diarization assigns speakers, consecutive same-speaker segments with
+    small gaps should be collapsed into natural sentence-length units for
+    better downstream processing (chunking, viewer display, LLM extraction).
+
+    Args:
+        segments: Speaker-annotated segment dicts.
+        gap_threshold_s: Max silence gap (seconds) between segments to merge.
+        min_merge_length: Unused — reserved for future minimum-char filtering.
+
+    Returns:
+        New list of merged segment dicts.
+    """
+    if not segments:
+        return []
+
+    merged: list[dict] = []
+    current = {**segments[0]}
+    if current.get("words"):
+        current["words"] = list(current["words"])
+
+    for next_seg in segments[1:]:
+        same_speaker = (current.get("speaker") or None) == (next_seg.get("speaker") or None)
+        gap = next_seg.get("start", 0) - current.get("end", 0)
+
+        if same_speaker and 0 <= gap <= gap_threshold_s:
+            # Extend current segment
+            current["end"] = next_seg["end"]
+            # Concatenate text — add space if current doesn't end with whitespace
+            cur_text = current.get("text", "")
+            nxt_text = next_seg.get("text", "")
+            if cur_text and not cur_text.endswith(" "):
+                current["text"] = cur_text + " " + nxt_text
+            else:
+                current["text"] = cur_text + nxt_text
+
+            # Merge word arrays
+            if current.get("words") is not None and next_seg.get("words"):
+                current["words"].extend(next_seg["words"])
+            elif next_seg.get("words"):
+                current["words"] = list(next_seg["words"])
+        else:
+            merged.append(current)
+            current = {**next_seg}
+            if current.get("words"):
+                current["words"] = list(current["words"])
+
+    merged.append(current)
+    return merged
+
+
 def _build_speaker_text(segments: list[dict]) -> str:
     """Build speaker-attributed transcript from segments."""
     speaker_text = ""
@@ -261,6 +319,9 @@ def media_diarization(
         try:
             diarization, resolved_device = _run_diarization(source_path, hf_token, WHISPER_MODEL_CACHE)
             segments = _assign_speakers(t["segments"], diarization)
+            pre_merge = len(segments)
+            segments = _merge_same_speaker_segments(segments, gap_threshold_s=1.5)
+            context.log.info(f"Merged {pre_merge} segments → {len(segments)} ({pre_merge - len(segments)} collapsed)")
             unique_speakers = {s.get("speaker") for s in segments if s.get("speaker")}
             speaker_text = _build_speaker_text(segments) if unique_speakers else None
             diarization_time = round(time.monotonic() - start, 1)
