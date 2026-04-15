@@ -202,32 +202,97 @@ time,
   font-family: var(--font-serif);
 }
 
-.entity-highlight-PERSON { background: rgba(59, 130, 246, 0.15); color: #93c5fd; }
-.entity-highlight-PERSON:hover { background: rgba(59, 130, 246, 0.25); }
-.entity-highlight-ORG { background: rgba(168, 85, 247, 0.15); color: #c4b5fd; }
-.entity-highlight-ORG:hover { background: rgba(168, 85, 247, 0.25); }
-.entity-highlight-GPE { background: rgba(34, 197, 94, 0.15); color: #86efac; }
-.entity-highlight-GPE:hover { background: rgba(34, 197, 94, 0.25); }
-.entity-highlight-LOC { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; }
-.entity-highlight-LOC:hover { background: rgba(16, 185, 129, 0.25); }
-.entity-highlight-DATE { background: rgba(245, 158, 11, 0.15); color: #fcd34d; }
-.entity-highlight-DATE:hover { background: rgba(245, 158, 11, 0.25); }
-.entity-highlight-EVENT { background: rgba(244, 63, 94, 0.15); color: #fda4af; }
-.entity-highlight-EVENT:hover { background: rgba(244, 63, 94, 0.25); }
-.entity-highlight-NORP { background: rgba(217, 70, 239, 0.15); color: #e879f9; }
-.entity-highlight-NORP:hover { background: rgba(217, 70, 239, 0.25); }
-.entity-highlight-MONEY { background: rgba(234, 179, 8, 0.15); color: #fde047; }
-.entity-highlight-MONEY:hover { background: rgba(234, 179, 8, 0.25); }
-.entity-highlight-PRODUCT { background: rgba(6, 182, 212, 0.15); color: #67e8f9; }
-.entity-highlight-PRODUCT:hover { background: rgba(6, 182, 212, 0.25); }
-.entity-highlight-WORK_OF_ART { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
-.entity-highlight-WORK_OF_ART:hover { background: rgba(99, 102, 241, 0.25); }
-.entity-highlight-LAW { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
-.entity-highlight-LAW:hover { background: rgba(239, 68, 68, 0.25); }
-.entity-highlight-QUANTITY { background: rgba(20, 184, 166, 0.15); color: #5eead4; }
-.entity-highlight-QUANTITY:hover { background: rgba(20, 184, 166, 0.25); }
-.entity-highlight-OTHER { background: rgba(161, 161, 170, 0.10); color: #a1a1aa; }
-.entity-highlight-OTHER:hover { background: rgba(161, 161, 170, 0.20); }
+.entity-highlight-PERSON {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}
+.entity-highlight-PERSON:hover {
+  background: rgba(59, 130, 246, 0.25);
+}
+.entity-highlight-ORG {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c4b5fd;
+}
+.entity-highlight-ORG:hover {
+  background: rgba(168, 85, 247, 0.25);
+}
+.entity-highlight-GPE {
+  background: rgba(34, 197, 94, 0.15);
+  color: #86efac;
+}
+.entity-highlight-GPE:hover {
+  background: rgba(34, 197, 94, 0.25);
+}
+.entity-highlight-LOC {
+  background: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+}
+.entity-highlight-LOC:hover {
+  background: rgba(16, 185, 129, 0.25);
+}
+.entity-highlight-DATE {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fcd34d;
+}
+.entity-highlight-DATE:hover {
+  background: rgba(245, 158, 11, 0.25);
+}
+.entity-highlight-EVENT {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fda4af;
+}
+.entity-highlight-EVENT:hover {
+  background: rgba(244, 63, 94, 0.25);
+}
+.entity-highlight-NORP {
+  background: rgba(217, 70, 239, 0.15);
+  color: #e879f9;
+}
+.entity-highlight-NORP:hover {
+  background: rgba(217, 70, 239, 0.25);
+}
+.entity-highlight-MONEY {
+  background: rgba(234, 179, 8, 0.15);
+  color: #fde047;
+}
+.entity-highlight-MONEY:hover {
+  background: rgba(234, 179, 8, 0.25);
+}
+.entity-highlight-PRODUCT {
+  background: rgba(6, 182, 212, 0.15);
+  color: #67e8f9;
+}
+.entity-highlight-PRODUCT:hover {
+  background: rgba(6, 182, 212, 0.25);
+}
+.entity-highlight-WORK_OF_ART {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+}
+.entity-highlight-WORK_OF_ART:hover {
+  background: rgba(99, 102, 241, 0.25);
+}
+.entity-highlight-LAW {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+.entity-highlight-LAW:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+.entity-highlight-QUANTITY {
+  background: rgba(20, 184, 166, 0.15);
+  color: #5eead4;
+}
+.entity-highlight-QUANTITY:hover {
+  background: rgba(20, 184, 166, 0.25);
+}
+.entity-highlight-OTHER {
+  background: rgba(161, 161, 170, 0.1);
+  color: #a1a1aa;
+}
+.entity-highlight-OTHER:hover {
+  background: rgba(161, 161, 170, 0.2);
+}
 
 /* ── Collapsed segment divider (filter mode) ─────────────────────── */
 .collapsed-segment-divider {
