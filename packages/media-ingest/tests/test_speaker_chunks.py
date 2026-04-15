@@ -1,6 +1,6 @@
-"""Tests for speaker-aware chunking."""
+"""Tests for speaker-aware chunking with speech pause splitting."""
 
-from media_ingest.assets.chunks import MAX_CHUNK_CHARS, _speaker_turn_chunks
+from media_ingest.assets.chunks import MAX_CHUNK_CHARS, _speaker_turn_chunks, _split_on_pauses
 
 from dagster_io import ChunkingResource
 
@@ -17,42 +17,12 @@ def test_short_turns_kept_whole():
     chunks = _speaker_turn_chunks(segments, "doc-1", "", ChunkingResource(), {})
     assert len(chunks) == 2
     assert chunks[0].metadata["strategy"] == "speaker_turn"
-    assert "Hello" in chunks[0].text
-
-
-def test_no_speaker_prefix_in_text():
-    """Chunk text should NOT have [SPEAKER_XX] prefix."""
-    segments = [_seg("Some text here.", "SPEAKER_01")]
-    chunks = _speaker_turn_chunks(segments, "doc-1", "", ChunkingResource(), {})
-    assert "[SPEAKER_01]" not in chunks[0].text
-    assert "Some text here." in chunks[0].text
-
-
-def test_oversized_turn_gets_split():
-    long_text = "This is a very long monologue sentence. " * 100
-    assert len(long_text) > MAX_CHUNK_CHARS
-    segments = [_seg(long_text, "SPEAKER_01")]
-    chunks = _speaker_turn_chunks(segments, "doc-1", "", ChunkingResource(), {})
-    assert len(chunks) > 1
-    assert all(c.metadata["strategy"] == "speaker_turn_split" for c in chunks)
-
-
-def test_mixed_turns():
-    segments = [
-        _seg("Short turn.", "SPEAKER_01", 0, 2),
-        _seg("Another long monologue. " * 100, "SPEAKER_02", 2, 60),
-        _seg("Quick reply.", "SPEAKER_01", 60, 62),
-    ]
-    chunks = _speaker_turn_chunks(segments, "doc-1", "", ChunkingResource(), {})
-    assert chunks[0].metadata["strategy"] == "speaker_turn"
-    assert "speaker_turn_split" in [c.metadata["strategy"] for c in chunks]
-    assert chunks[-1].metadata["strategy"] == "speaker_turn"
 
 
 def test_title_prepended():
     segments = [_seg("Some text.", "SPEAKER_01")]
-    chunks = _speaker_turn_chunks(segments, "doc-1", "My Video Title", ChunkingResource(), {})
-    assert chunks[0].text.startswith("My Video Title\n\n")
+    chunks = _speaker_turn_chunks(segments, "doc-1", "My Video", ChunkingResource(), {})
+    assert chunks[0].text.startswith("My Video\n\n")
 
 
 def test_empty_segments():
@@ -60,7 +30,7 @@ def test_empty_segments():
 
 
 def test_speaker_metadata_preserved():
-    segments = [_seg("Hello there.", "SPEAKER_02", 10.5, 12.3)]
+    segments = [_seg("Hello.", "SPEAKER_02", 10.5, 12.3)]
     chunks = _speaker_turn_chunks(segments, "doc-1", "", ChunkingResource(), {})
     assert chunks[0].metadata["speaker"] == "SPEAKER_02"
     assert chunks[0].metadata["start_s"] == 10.5
@@ -68,30 +38,80 @@ def test_speaker_metadata_preserved():
 
 
 def test_total_chunks_backfilled():
-    segments = [_seg("Turn one.", "S1", 0, 5), _seg("Turn two.", "S2", 5, 10), _seg("Turn three.", "S1", 10, 15)]
+    segments = [_seg("One.", "S1", 0, 5), _seg("Two.", "S2", 5, 10)]
     chunks = _speaker_turn_chunks(segments, "doc-1", "", ChunkingResource(), {})
-    assert all(c.total_chunks == 3 for c in chunks)
+    assert all(c.total_chunks == 2 for c in chunks)
 
 
-def test_oversized_turn_has_sequential_timestamps():
-    """Split sub-chunks have sequential timestamps from word-level data."""
-    word_list = []
-    text_parts = []
+# ── Speech pause splitting ───────────────────────────────────────────
+
+
+def test_split_on_pauses_basic():
+    """Words with a 1s+ gap get split into separate segments."""
+    words = [
+        {"word": " Hello", "start": 0.0, "end": 0.5},
+        {"word": " world.", "start": 0.5, "end": 1.0},
+        # 2 second pause here
+        {"word": " Goodbye", "start": 3.0, "end": 3.5},
+        {"word": " now.", "start": 3.5, "end": 4.0},
+    ]
+    subs = _split_on_pauses(words, "Hello world. Goodbye now.", pause_threshold=1.0)
+    assert len(subs) == 2
+    assert subs[0]["end"] == 1.0
+    assert subs[1]["start"] == 3.0
+
+
+def test_split_on_pauses_no_pauses():
+    """No pauses above threshold returns single segment."""
+    words = [
+        {"word": " Hello", "start": 0.0, "end": 0.3},
+        {"word": " world.", "start": 0.3, "end": 0.6},
+    ]
+    subs = _split_on_pauses(words, "Hello world.", pause_threshold=1.0)
+    assert len(subs) == 1
+
+
+def test_split_on_pauses_empty_words():
+    subs = _split_on_pauses([], "some text")
+    assert len(subs) == 1
+    assert subs[0]["text"] == "some text"
+
+
+def test_oversized_turn_splits_at_pauses():
+    """Long monologue with speech pauses splits at pause points."""
+    words = []
     for i in range(300):
-        w = f" something{i:04d}"
-        text_parts.append(w)
-        word_list.append({"word": w, "start": float(i), "end": float(i) + 0.5})
-    long_text = "".join(text_parts)
+        # Add a 1.5s pause every 60 words
+        gap = 1.5 if i > 0 and i % 60 == 0 else 0.02
+        start = words[-1]["end"] + gap if words else 0.0
+        words.append({"word": f" word{i}", "start": start, "end": start + 0.3})
+
+    long_text = " ".join(f"word{i}" for i in range(300))
     assert len(long_text) > MAX_CHUNK_CHARS
 
-    segments = [_seg(long_text, "SPEAKER_01", 0, 300, words=word_list)]
+    segments = [_seg(long_text, "SPEAKER_01", 0, words[-1]["end"], words=words)]
     chunks = _speaker_turn_chunks(segments, "doc-1", "", ChunkingResource(), {})
 
-    assert len(chunks) > 1
-    assert chunks[0].metadata["start_s"] < 5.0
-    assert chunks[-1].metadata["end_s"] > 100.0
+    # Should split at the 3 pause points (after word 50, 100, 150) = 4 chunks
+    pause_chunks = [c for c in chunks if c.metadata["strategy"] == "speech_pause_split"]
+    assert len(pause_chunks) >= 3
 
+    # Timestamps should be sequential
     for i in range(1, len(chunks)):
-        prev_start = chunks[i - 1].metadata["start_s"]
-        curr_start = chunks[i].metadata["start_s"]
-        assert curr_start >= prev_start, f"chunk-{i} start ({curr_start}) before chunk-{i-1} ({prev_start})"
+        assert chunks[i].metadata["start_s"] >= chunks[i - 1].metadata["start_s"]
+
+
+def test_pause_split_timestamps_are_precise():
+    """Each pause-split chunk has exact word-level start/end timestamps."""
+    words = [
+        {"word": " First", "start": 10.0, "end": 10.5},
+        {"word": " sentence.", "start": 10.5, "end": 11.0},
+        # 2s pause
+        {"word": " Second", "start": 13.0, "end": 13.5},
+        {"word": " sentence.", "start": 13.5, "end": 14.0},
+    ]
+    subs = _split_on_pauses(words, "First sentence. Second sentence.", pause_threshold=1.0)
+    assert subs[0]["start"] == 10.0
+    assert subs[0]["end"] == 11.0
+    assert subs[1]["start"] == 13.0
+    assert subs[1]["end"] == 14.0

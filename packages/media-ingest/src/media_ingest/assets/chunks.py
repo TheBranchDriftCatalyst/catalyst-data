@@ -2,7 +2,7 @@
 
 Uses merged speaker turns as natural chunk boundaries. Each turn becomes
 a chunk if it's under the size limit. Oversized turns (long monologues)
-are split with RecursiveCharacterTextSplitter as fallback.
+are split at natural speech pauses detected from word-level timestamps.
 
 Partitioned by document_id — each run chunks a single transcription.
 """
@@ -22,8 +22,8 @@ logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
 MAX_CHUNK_CHARS = 1500
-SPLIT_CHUNK_SIZE = 800
-SPLIT_CHUNK_OVERLAP = 0
+# Minimum pause between words (seconds) to consider as a split point
+PAUSE_THRESHOLD_S = 1.0
 
 CHUNKS_K8S_CONFIG = {
     "dagster-k8s/config": {
@@ -37,31 +37,64 @@ CHUNKS_K8S_CONFIG = {
 }
 
 
-def _word_timestamps_for_char_range(
-    words: list[dict], char_start: int, char_end: int, fallback_start: float, fallback_end: float
-) -> tuple[float, float]:
-    """Map a character range in the turn text to word-level timestamps.
+def _split_on_pauses(words: list[dict], text: str, pause_threshold: float = PAUSE_THRESHOLD_S) -> list[dict]:
+    """Split a word list at natural speech pauses.
 
-    Walks the word list accumulating character positions. Words whose
-    position falls within [char_start, char_end) contribute their timestamps.
+    Returns a list of sub-segments, each with text, start_s, end_s, and words.
+    If no pauses found, returns the whole thing as a single segment.
     """
     if not words:
-        return fallback_start, fallback_end
+        return [{"text": text, "start": 0, "end": 0, "words": []}]
 
-    first_ts = None
-    last_ts = None
-    pos = 0
+    # Find pause points — word boundaries where the gap exceeds threshold
+    split_indices = []
+    for i in range(1, len(words)):
+        gap = words[i].get("start", 0) - words[i - 1].get("end", 0)
+        if gap >= pause_threshold:
+            split_indices.append(i)
 
-    for w in words:
-        wlen = len(w.get("word", ""))
-        wend = pos + wlen
-        if wend > char_start and pos < char_end:
-            if first_ts is None:
-                first_ts = w.get("start", fallback_start)
-            last_ts = w.get("end", fallback_end)
-        pos = wend
+    if not split_indices:
+        # No pauses found — return as single segment
+        return [
+            {
+                "text": text,
+                "start": words[0].get("start", 0),
+                "end": words[-1].get("end", 0),
+                "words": words,
+            }
+        ]
 
-    return (first_ts or fallback_start, last_ts or fallback_end)
+    # Split at pause points
+    sub_segments = []
+    prev = 0
+    for split_at in split_indices:
+        chunk_words = words[prev:split_at]
+        if chunk_words:
+            chunk_text = "".join(w.get("word", "") for w in chunk_words).strip()
+            sub_segments.append(
+                {
+                    "text": chunk_text,
+                    "start": chunk_words[0].get("start", 0),
+                    "end": chunk_words[-1].get("end", 0),
+                    "words": chunk_words,
+                }
+            )
+        prev = split_at
+
+    # Last segment
+    chunk_words = words[prev:]
+    if chunk_words:
+        chunk_text = "".join(w.get("word", "") for w in chunk_words).strip()
+        sub_segments.append(
+            {
+                "text": chunk_text,
+                "start": chunk_words[0].get("start", 0),
+                "end": chunk_words[-1].get("end", 0),
+                "words": chunk_words,
+            }
+        )
+
+    return sub_segments
 
 
 def _speaker_turn_chunks(
@@ -71,7 +104,7 @@ def _speaker_turn_chunks(
     chunking: ChunkingResource,
     metadata: dict,
 ) -> list[TextChunk]:
-    """Build chunks from speaker turns, splitting oversized turns."""
+    """Build chunks from speaker turns, splitting oversized turns at speech pauses."""
     chunks: list[TextChunk] = []
     chunk_index = 0
 
@@ -101,26 +134,13 @@ def _speaker_turn_chunks(
             )
             chunk_index += 1
         else:
-            # Split the raw text (no prefix).
-            sub_texts = chunking.split_text(text, chunk_size=SPLIT_CHUNK_SIZE, chunk_overlap=SPLIT_CHUNK_OVERLAP)
-            n = len(sub_texts)
+            # Oversized turn — split at natural speech pauses
+            sub_segs = _split_on_pauses(words, text)
 
-            # Proportional timestamp assignment: divide the turn's time range
-            # evenly across sub-chunks, then refine with word-level data.
-            turn_duration = end_s - start_s
-            for i_sub, sub_text in enumerate(sub_texts):
-                # Proportional time range for this sub-chunk
-                frac_start = i_sub / n
-                frac_end = (i_sub + 1) / n
-                prop_start = start_s + turn_duration * frac_start
-                prop_end = start_s + turn_duration * frac_end
-
-                # Refine with word-level data if available
-                text_len = len(text) if len(text) > 0 else 1
-                char_start = int(text_len * frac_start)
-                char_end = int(text_len * frac_end)
-                sub_start, sub_end = _word_timestamps_for_char_range(words, char_start, char_end, prop_start, prop_end)
-
+            for sub in sub_segs:
+                sub_text = sub["text"]
+                if not sub_text:
+                    continue
                 full_text = f"{title}\n\n{sub_text}" if title else sub_text
                 chunks.append(
                     TextChunk(
@@ -131,9 +151,9 @@ def _speaker_turn_chunks(
                         total_chunks=0,
                         metadata={
                             **base_meta,
-                            "start_s": sub_start,
-                            "end_s": sub_end,
-                            "strategy": "speaker_turn_split",
+                            "start_s": sub["start"],
+                            "end_s": sub["end"],
+                            "strategy": "speech_pause_split",
                         },
                     )
                 )
@@ -148,7 +168,7 @@ def _speaker_turn_chunks(
 
 @asset(
     group_name="media_ingest",
-    description="Speaker-aware chunking — preserves turn boundaries, splits only oversized monologues.",
+    description="Speaker-aware chunking — preserves turn boundaries, splits monologues at speech pauses.",
     compute_kind="python",
     metadata={"layer": "gold"},
     partitions_def=media_partitions,
@@ -163,11 +183,7 @@ def media_chunks(
     with trace_operation(
         "media_chunks",
         tracer,
-        {
-            "code_location": "media_ingest",
-            "layer": "gold",
-            "partition_key": partition_key,
-        },
+        {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key},
     ):
         t = media_segment_merge
         segments = t.get("segments", [])
@@ -180,11 +196,7 @@ def media_chunks(
                 context.log.info(f"No segments or text for partition={partition_key}")
                 return Output([], metadata={"document_id": doc_id, "chunk_count": 0, "skipped": True})
             chunks = chunking.chunk_document(
-                document_id=doc_id,
-                title=title,
-                content=text,
-                chunk_size=SPLIT_CHUNK_SIZE,
-                chunk_overlap=SPLIT_CHUNK_OVERLAP,
+                document_id=doc_id, title=title, content=text, chunk_size=800, chunk_overlap=0
             )
         else:
             meta = {
@@ -199,12 +211,12 @@ def media_chunks(
         )
 
         turn_count = len([c for c in chunks if c.metadata.get("strategy") == "speaker_turn"])
-        split_count = len([c for c in chunks if c.metadata.get("strategy") == "speaker_turn_split"])
+        pause_count = len([c for c in chunks if c.metadata.get("strategy") == "speech_pause_split"])
         avg_len = sum(len(c.text) for c in chunks) / max(len(chunks), 1)
 
         context.log.info(
             f"Chunked '{title}': {len(segments)} turns → {len(chunks)} chunks "
-            f"({turn_count} whole turns, {split_count} split sub-chunks, avg={avg_len:.0f} chars)"
+            f"({turn_count} whole turns, {pause_count} pause-split, avg={avg_len:.0f} chars)"
         )
 
         return Output(
@@ -214,8 +226,7 @@ def media_chunks(
                 "title": title,
                 "chunk_count": len(chunks),
                 "whole_turns": turn_count,
-                "split_sub_chunks": split_count,
+                "pause_split": pause_count,
                 "input_segments": len(segments),
-                "max_chunk_chars": MAX_CHUNK_CHARS,
             },
         )

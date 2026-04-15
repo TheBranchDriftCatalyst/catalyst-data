@@ -246,11 +246,11 @@ def test_chunks_have_timestamps(chunks_result):
 
 def test_chunks_have_strategy(chunks_result):
     for c in chunks_result:
-        assert c.metadata["strategy"] in ("speaker_turn", "speaker_turn_split")
+        assert c.metadata["strategy"] in ("speaker_turn", "speech_pause_split")
 
 
 def test_split_chunks_have_precise_timestamps(chunks_result):
-    split = [c for c in chunks_result if c.metadata["strategy"] == "speaker_turn_split"]
+    split = [c for c in chunks_result if c.metadata["strategy"] == "speech_pause_split"]
     if len(split) > 1:
         starts = {c.metadata["start_s"] for c in split}
         assert len(starts) > 1, "All split chunks have the same start_s"
