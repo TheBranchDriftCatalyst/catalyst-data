@@ -51,24 +51,41 @@ DIARIZATION_K8S_CONFIG = {
 
 
 def _run_diarization(audio_path: str, hf_token: str, cache_dir: str) -> tuple:
-    """Run pyannote speaker diarization pipeline (requires pyannote.audio >=4.0).
+    """Run pyannote speaker diarization pipeline.
 
-    Returns (annotation, resolved_device) where annotation is a pyannote
-    Annotation object with itertracks(), and resolved_device is 'xpu',
-    'cuda', 'mps', or 'cpu'.
+    Works with pyannote.audio 3.x and 4.x. Returns (annotation, resolved_device)
+    where annotation is a pyannote Annotation with itertracks().
     """
     import torch
+
+    # pyannote 3.x needs weights_only=False for torch.load
+    _orig_load = torch.load
+
+    def _patched_load(*a, **kw):
+        kw["weights_only"] = False
+        return _orig_load(*a, **kw)
+
+    torch.load = _patched_load
+
     from pyannote.audio import Pipeline
 
     from dagster_io.model_cache import cached_model_path
 
     local_cache = cached_model_path(cache_dir)
     os.environ["HF_TOKEN"] = hf_token
-    pipeline = Pipeline.from_pretrained(
-        "pyannote/speaker-diarization-3.1",
-        token=hf_token,
-        cache_dir=local_cache,
-    )
+    # pyannote 4.x: token=, pyannote 3.x: use_auth_token=
+    try:
+        pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            token=hf_token,
+            cache_dir=local_cache,
+        )
+    except TypeError:
+        pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            use_auth_token=hf_token,
+            cache_dir=local_cache,
+        )
     if pipeline is None:
         raise RuntimeError(
             "Failed to load pyannote pipeline — accept license at https://hf.co/pyannote/speaker-diarization-3.1"
