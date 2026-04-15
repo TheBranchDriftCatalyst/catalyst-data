@@ -16,8 +16,6 @@ Usage in Dagster assets:
     )
 """
 
-from __future__ import annotations
-
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
