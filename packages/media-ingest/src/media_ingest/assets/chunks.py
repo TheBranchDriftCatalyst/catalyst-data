@@ -141,23 +141,52 @@ def _speaker_turn_chunks(
                 sub_text = sub["text"]
                 if not sub_text:
                     continue
-                full_text = f"{title}\n\n{sub_text}" if title else sub_text
-                chunks.append(
-                    TextChunk(
-                        chunk_id=f"{document_id}:chunk-{chunk_index}",
-                        document_id=document_id,
-                        text=full_text,
-                        index=chunk_index,
-                        total_chunks=0,
-                        metadata={
-                            **base_meta,
-                            "start_s": sub["start"],
-                            "end_s": sub["end"],
-                            "strategy": "speech_pause_split",
-                        },
+
+                if len(sub_text) <= MAX_CHUNK_CHARS:
+                    # Pause-split chunk fits — use as-is
+                    full_text = f"{title}\n\n{sub_text}" if title else sub_text
+                    chunks.append(
+                        TextChunk(
+                            chunk_id=f"{document_id}:chunk-{chunk_index}",
+                            document_id=document_id,
+                            text=full_text,
+                            index=chunk_index,
+                            total_chunks=0,
+                            metadata={
+                                **base_meta,
+                                "start_s": sub["start"],
+                                "end_s": sub["end"],
+                                "strategy": "speech_pause_split",
+                            },
+                        )
                     )
-                )
-                chunk_index += 1
+                    chunk_index += 1
+                else:
+                    # Still too big after pause split (or no pauses found) —
+                    # fall back to text splitter with proportional timestamps
+                    fallback_texts = chunking.split_text(sub_text, chunk_size=800, chunk_overlap=0)
+                    n = len(fallback_texts)
+                    sub_dur = sub["end"] - sub["start"]
+                    for i_fb, fb_text in enumerate(fallback_texts):
+                        fb_start = sub["start"] + sub_dur * (i_fb / n)
+                        fb_end = sub["start"] + sub_dur * ((i_fb + 1) / n)
+                        full_text = f"{title}\n\n{fb_text}" if title else fb_text
+                        chunks.append(
+                            TextChunk(
+                                chunk_id=f"{document_id}:chunk-{chunk_index}",
+                                document_id=document_id,
+                                text=full_text,
+                                index=chunk_index,
+                                total_chunks=0,
+                                metadata={
+                                    **base_meta,
+                                    "start_s": fb_start,
+                                    "end_s": fb_end,
+                                    "strategy": "text_split_fallback",
+                                },
+                            )
+                        )
+                        chunk_index += 1
 
     for c in chunks:
         c.total_chunks = len(chunks)
