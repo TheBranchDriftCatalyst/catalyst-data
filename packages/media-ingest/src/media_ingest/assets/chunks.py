@@ -52,6 +52,7 @@ def media_chunks(
     media_diarization: dict[str, Any],
 ) -> Output[list[TextChunk]]:
     partition_key = context.partition_key
+    context.log.info(f"Starting media_chunks for partition={partition_key}")
     with trace_operation(
         "media_chunks",
         tracer,
@@ -63,6 +64,13 @@ def media_chunks(
     ):
         t = media_diarization
         logger.info("Starting media_chunks chunking for partition=%s", partition_key)
+
+        segment_count = len(t.get("segments", []))
+        has_speaker_text = bool(t.get("speaker_text"))
+        context.log.info(
+            f"Input: segment_count={segment_count}, has_speaker_text={has_speaker_text}, "
+            f"title='{t.get('title', 'unknown')}'"
+        )
 
         # Prefer speaker-attributed text for richer chunks
         text = t.get("speaker_text") or t.get("text", "")
@@ -100,9 +108,11 @@ def media_chunks(
             partition_key,
             len(chunks),
         )
+        avg_chunk_len = sum(len(c.text) for c in chunks) / max(len(chunks), 1)
         context.log.info(
             f"Chunked transcription for '{t.get('title', partition_key)}' into {len(chunks)} chunks "
-            f"(size={TRANSCRIPTION_CHUNK_SIZE}, overlap={TRANSCRIPTION_CHUNK_OVERLAP})"
+            f"(size={TRANSCRIPTION_CHUNK_SIZE}, overlap={TRANSCRIPTION_CHUNK_OVERLAP}, "
+            f"avg_chunk_chars={avg_chunk_len:.0f}, input_chars={len(text)})"
         )
         return Output(
             chunks,

@@ -316,7 +316,10 @@ def media_diarization(
                 },
             )
 
-        context.log.info(f"Running speaker diarization for: {t.get('title', partition_key)}")
+        context.log.info(
+            f"Running speaker diarization for: {t.get('title', partition_key)}, "
+            f"segment_count={len(t.get('segments', []))}, duration={t.get('duration_s', 0):.0f}s"
+        )
         start = time.monotonic()
 
         try:

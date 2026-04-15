@@ -433,11 +433,16 @@ def media_transcriptions(
             "partition_key": partition_key,
         },
     ):
+        context.log.info(f"Starting media_transcriptions for partition={partition_key}")
+        context.log.info(f"Searching {len(media_documents)} documents for partition={partition_key}")
         doc = next((d for d in media_documents if d.id == partition_key), None)
         if doc is None:
+            context.log.error(f"Document '{partition_key}' not found in {len(media_documents)} media_documents")
             raise ValueError(f"Document '{partition_key}' not found in media_documents")
 
+        context.log.info(f"Found document: title='{doc.title}', source={doc.source}")
         if not doc.metadata.get("has_audio"):
+            context.log.warning(f"Document '{doc.title}' has no audio — skipping transcription")
             return Output(
                 {
                     "document_id": doc.id,
@@ -488,6 +493,11 @@ def media_transcriptions(
             duration = time.monotonic() - start
             transcribe_time = time.monotonic() - transcribe_start
             full_text = " ".join(s["text"] for s in result["segments"])
+            context.log.info(
+                f"Transcription complete: {len(result['segments'])} segments, "
+                f"language={result.get('language', 'unknown')}, "
+                f"duration={result.get('duration_s', 0):.0f}s audio in {transcribe_time:.1f}s"
+            )
 
             # Record transcription duration metric
             TRANSCRIPTION_DURATION.labels(backend=backend, model=config.whisper_model).observe(transcribe_time)

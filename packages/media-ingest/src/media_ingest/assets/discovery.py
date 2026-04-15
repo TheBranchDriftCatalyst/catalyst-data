@@ -78,9 +78,11 @@ def _scan_directory(root: str, extensions: set[str]) -> list[dict[str, Any]]:
     op_tags=NFS_VOLUMES_CONFIG,
 )
 def media_files(context: AssetExecutionContext, config: MediaIngestConfig) -> Output[list[dict[str, Any]]]:
+    context.log.info("Starting media_files discovery scan")
     with trace_operation("media_files", tracer, {"code_location": "media_ingest", "layer": "bronze"}):
         logger.info("Starting media_files discovery scan")
         extensions = {e.strip() for e in config.extensions.split(",")}
+        context.log.info(f"Scanning for extensions: {sorted(extensions)}")
 
         all_files: list[dict[str, Any]] = []
         for scan_path in [config.metube_path, config.tubesync_path]:
@@ -95,12 +97,20 @@ def media_files(context: AssetExecutionContext, config: MediaIngestConfig) -> Ou
         ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_files", layer="bronze").inc(
             len(all_files)
         )
+
+        by_ext = {}
+        for f in all_files:
+            by_ext[f["extension"]] = by_ext.get(f["extension"], 0) + 1
+
         logger.info(
             "media_files discovery complete: %d files, %.2f GiB",
             len(all_files),
             total_size / (1024**3),
         )
-        context.log.info(f"Total: {len(all_files)} files, {total_size / (1024**3):.2f} GiB")
+        context.log.info(
+            f"Discovery complete: {len(all_files)} files, {total_size / (1024**3):.2f} GiB "
+            f"(by_ext: {', '.join(f'{k}={v}' for k, v in sorted(by_ext.items()))})"
+        )
 
         return Output(
             all_files,

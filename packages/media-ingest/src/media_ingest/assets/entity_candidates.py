@@ -4,6 +4,8 @@ Groups mentions into EntityCandidates within the media_ingest code location
 using multi-pass resolution (exact match, substring, Jaccard, embedding cosine).
 """
 
+import time
+
 from dagster import AssetExecutionContext, AssetIn, Output, asset
 
 import dagster_io.concordance as _concordance_mod
@@ -87,21 +89,32 @@ def media_entity_candidates(
 
         # Collect unique surface forms for embedding
         unique_texts = sorted({m.text.lower().strip() for m in media_mentions})
-        context.log.info(f"Embedding {len(unique_texts)} unique surface forms")
+        context.log.info(f"Embedding {len(unique_texts)} unique surface forms from {len(media_mentions)} mentions")
 
         # Embed all unique surface forms
         if unique_texts:
+            embed_start = time.monotonic()
             vectors = embeddings.embed(unique_texts)
+            embed_elapsed = time.monotonic() - embed_start
             embedding_map = dict(zip(unique_texts, vectors, strict=False))
+            context.log.info(f"Embedded {len(unique_texts)} surface forms in {embed_elapsed:.1f}s")
         else:
             embedding_map = {}
 
         # Run concordance engine
+        context.log.info("Running concordance engine (exact, substring, Jaccard, cosine passes)")
+        concordance_start = time.monotonic()
         engine = ConcordanceEngine()
         candidates = engine.resolve(
             mentions=media_mentions,
             code_location="media_ingest",
             embeddings=embedding_map,
+        )
+
+        concordance_elapsed = time.monotonic() - concordance_start
+        context.log.info(
+            f"Concordance resolved {len(media_mentions)} mentions -> {len(candidates)} candidates "
+            f"in {concordance_elapsed:.1f}s"
         )
 
         # Tag candidates with speaker profile_id if available.

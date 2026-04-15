@@ -168,11 +168,13 @@ def media_transcode(
 
         total_saved_mb = 0.0
         errors = 0
+        transcode_start = time.monotonic()
 
-        for file_info in to_transcode:
+        for i, file_info in enumerate(to_transcode):
             path = file_info["path"]
             fname = file_info["filename"]
-            context.log.info(f"Transcoding: {fname}")
+            size_mb = file_info.get("size_bytes", 0) / (1024 * 1024)
+            context.log.info(f"Transcoding [{i + 1}/{len(to_transcode)}]: {fname} ({size_mb:.1f} MiB)")
             logger.info("Transcoding file=%s path=%s", fname, path)
 
             result = _transcode_to_av1(path, context)
@@ -207,6 +209,7 @@ def media_transcode(
         ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_transcode", layer="silver").inc(
             len(to_transcode)
         )
+        total_transcode_time = time.monotonic() - transcode_start
         logger.info(
             "media_transcode complete: %d transcoded (%d errors), saved %.1f MB total",
             len(to_transcode) - errors,
@@ -214,7 +217,8 @@ def media_transcode(
             total_saved_mb,
         )
         context.log.info(
-            f"Transcode complete: {len(to_transcode) - errors} encoded, {errors} errors, saved {total_saved_mb:.0f} MB"
+            f"Transcode complete: {len(to_transcode) - errors}/{len(to_transcode)} encoded in {total_transcode_time:.0f}s, "
+            f"{errors} errors, saved {total_saved_mb:.0f} MiB"
         )
 
         return Output(

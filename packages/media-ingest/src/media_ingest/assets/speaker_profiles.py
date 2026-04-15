@@ -13,6 +13,7 @@ Degrades gracefully when no embeddings exist (returns empty list).
 """
 
 import hashlib
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -193,6 +194,7 @@ def media_speaker_profiles(
     context: AssetExecutionContext,
     media_speaker_embeddings: Any,
 ) -> Output[list[SpeakerProfile]]:
+    context.log.info("Starting media_speaker_profiles clustering (unpartitioned fan-in)")
     with trace_operation(
         "media_speaker_profiles",
         tracer,
@@ -206,6 +208,7 @@ def media_speaker_profiles(
         context.log.info(f"Received {len(all_embeddings)} speaker embeddings from all partitions")
 
         if not all_embeddings:
+            context.log.info("No embeddings available — returning empty profiles")
             return Output(
                 [],
                 metadata={
@@ -223,11 +226,18 @@ def media_speaker_profiles(
         # the canonical output is the asset return value (S3 via MinioIOManager).
         existing_profiles: list[SpeakerProfile] = []
 
+        context.log.info(
+            f"Running agglomerative clustering: {len(all_embeddings)} embeddings, "
+            f"threshold={DEFAULT_MERGE_THRESHOLD}, existing_profiles={len(existing_profiles)}"
+        )
+        cluster_start = time.monotonic()
         profiles, merge_distances = cluster_embeddings(
             all_embeddings,
             existing_profiles,
             threshold=DEFAULT_MERGE_THRESHOLD,
         )
+        cluster_elapsed = time.monotonic() - cluster_start
+        context.log.info(f"Clustering complete in {cluster_elapsed:.1f}s")
 
         # Emit metrics
         SPEAKER_PROFILES_TOTAL.set(len(profiles))
@@ -240,9 +250,11 @@ def media_speaker_profiles(
             layer="gold",
         ).inc(len(profiles))
 
+        avg_merge_dist = sum(merge_distances) / len(merge_distances) if merge_distances else 0.0
         context.log.info(
             f"Produced {len(profiles)} speaker profiles from {len(all_embeddings)} embeddings "
-            f"({len(merge_distances)} merges, {len(all_embeddings) - len(merge_distances)} new)"
+            f"({len(merge_distances)} merges, {len(all_embeddings) - len(merge_distances)} new, "
+            f"avg_merge_distance={avg_merge_dist:.4f})"
         )
 
         # TODO (CD-34j.1 follow-up): Best-effort pgvector dual-write.

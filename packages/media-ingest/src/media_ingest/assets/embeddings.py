@@ -3,6 +3,7 @@
 Partitioned by document_id — each run embeds one document's chunks.
 """
 
+import time
 from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
@@ -68,8 +69,14 @@ def media_embeddings(
 
         texts = [chunk.text for chunk in media_chunks]
 
-        context.log.info(f"Embedding {len(texts)} chunks with model={embeddings.model}")
+        total_chars = sum(len(t) for t in texts)
+        context.log.info(f"Embedding {len(texts)} chunks ({total_chars} total chars) with model={embeddings.model}")
+        embed_start = time.monotonic()
         vectors = embeddings.embed(texts)
+        embed_elapsed = time.monotonic() - embed_start
+        context.log.info(
+            f"Embedding complete in {embed_elapsed:.1f}s ({len(texts) / max(embed_elapsed, 0.001):.1f} chunks/s)"
+        )
         ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_embeddings", layer="gold").inc(
             len(vectors)
         )

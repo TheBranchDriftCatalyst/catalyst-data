@@ -3,6 +3,8 @@
 Partitioned by document_id — each run extracts assertions from one document's chunks.
 """
 
+import time
+
 from dagster import AssetExecutionContext, Output, asset
 
 import dagster_io.extraction as _extraction_mod
@@ -136,6 +138,9 @@ def media_assertions(
     media_chunks: list[TextChunk],
 ) -> Output[list[Assertion]]:
     partition_key = context.partition_key
+    context.log.info(
+        f"Starting media_assertions extraction for partition={partition_key}, chunk_count={len(media_chunks)}"
+    )
     with trace_operation(
         "media_assertions",
         tracer,
@@ -164,11 +169,14 @@ def media_assertions(
                 },
             )
 
+        context.log.info(f"Received {len(media_chunks)} chunks from upstream for LLM extraction")
+        llm_start = time.monotonic()
         _, all_assertions = extract_validated(
             media_chunks,
             code_location="media_ingest",
             max_concurrency=5,
         )
+        llm_elapsed = time.monotonic() - llm_start
 
         negated_count = sum(1 for a in all_assertions if a.negated)
         hedged_count = sum(1 for a in all_assertions if a.hedged)
@@ -176,8 +184,12 @@ def media_assertions(
             len(all_assertions)
         )
         context.log.info(
-            f"Extracted {len(all_assertions)} validated assertions from {len(media_chunks)} chunks "
-            f"({negated_count} negated, {hedged_count} hedged)"
+            f"LLM extraction complete in {llm_elapsed:.1f}s: {len(all_assertions)} assertions "
+            f"from {len(media_chunks)} chunks ({len(all_assertions) / max(len(media_chunks), 1):.1f} assertions/chunk)"
+        )
+        context.log.info(
+            f"Assertion breakdown: negated={negated_count}, hedged={hedged_count}, "
+            f"straightforward={len(all_assertions) - negated_count - hedged_count}"
         )
         return Output(
             all_assertions,

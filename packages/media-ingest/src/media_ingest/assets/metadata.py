@@ -82,6 +82,7 @@ def media_metadata(
     context: AssetExecutionContext,
     media_files: list[dict[str, Any]],
 ) -> Output[list[dict[str, Any]]]:
+    context.log.info(f"Starting media_metadata extraction for {len(media_files)} files")
     with trace_operation(
         "media_metadata",
         tracer,
@@ -92,6 +93,13 @@ def media_metadata(
         },
     ):
         logger.info("Starting media_metadata extraction for %d files", len(media_files))
+
+        if not media_files:
+            context.log.warning("No files received — returning empty metadata")
+
+        total_size_bytes = sum(f.get("size_bytes", 0) for f in media_files)
+        context.log.info(f"Input: {len(media_files)} files, total_size={total_size_bytes / (1024**2):.1f} MiB")
+
         enriched = []
         errors = 0
 
@@ -108,12 +116,19 @@ def media_metadata(
         ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_metadata", layer="silver").inc(
             len(enriched)
         )
+
+        total_duration_h = sum(f.get("metadata", {}).get("duration_seconds", 0) for f in enriched) / 3600
+        video_count = sum(1 for f in enriched if f.get("metadata", {}).get("has_video"))
+        audio_count = sum(1 for f in enriched if f.get("metadata", {}).get("has_audio"))
         logger.info(
             "media_metadata complete: %d files probed (%d errors)",
             len(enriched),
             errors,
         )
-        context.log.info(f"Probed {len(enriched)} files ({errors} errors)")
+        context.log.info(
+            f"Probed {len(enriched)} files: {errors} errors, "
+            f"video={video_count}, audio={audio_count}, total_duration={total_duration_h:.1f}h"
+        )
 
         return Output(
             enriched,

@@ -3,6 +3,8 @@
 Partitioned by document_id — each run extracts mentions from one document's chunks.
 """
 
+import time
+
 from dagster import AssetExecutionContext, Output, asset
 
 import dagster_io.extraction as _extraction_mod
@@ -82,6 +84,9 @@ def media_mentions(
     media_chunks: list[TextChunk],
 ) -> Output[list[Mention]]:
     partition_key = context.partition_key
+    context.log.info(
+        f"Starting media_mentions extraction for partition={partition_key}, chunk_count={len(media_chunks)}"
+    )
     with trace_operation(
         "media_mentions",
         tracer,
@@ -96,16 +101,22 @@ def media_mentions(
             context.log.info(f"No chunks for partition={partition_key} — returning empty mentions")
             return Output([], metadata={"mention_count": 0, "document_id": partition_key})
 
+        context.log.info(f"Received {len(media_chunks)} chunks from upstream for LLM extraction")
+        llm_start = time.monotonic()
         all_mentions, _ = extract_validated(
             media_chunks,
             code_location="media_ingest",
             max_concurrency=5,
         )
+        llm_elapsed = time.monotonic() - llm_start
 
         ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_mentions", layer="gold").inc(
             len(all_mentions)
         )
-        context.log.info(f"Extracted {len(all_mentions)} validated mentions from {len(media_chunks)} chunks")
+        context.log.info(
+            f"LLM extraction complete: {len(all_mentions)} mentions from {len(media_chunks)} chunks "
+            f"in {llm_elapsed:.1f}s ({len(all_mentions) / max(len(media_chunks), 1):.1f} mentions/chunk)"
+        )
         return Output(
             all_mentions,
             metadata={

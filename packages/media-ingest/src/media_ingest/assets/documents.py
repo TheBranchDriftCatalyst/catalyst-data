@@ -67,6 +67,7 @@ def media_documents(
     context: AssetExecutionContext,
     media_metadata: list[dict[str, Any]],
 ) -> Output[list[MediaDocument]]:
+    context.log.info(f"Starting media_documents transformation for {len(media_metadata)} files")
     with trace_operation(
         "media_documents",
         tracer,
@@ -77,6 +78,11 @@ def media_documents(
         },
     ):
         logger.info("Starting media_documents transformation for %d files", len(media_metadata))
+
+        if not media_metadata:
+            context.log.warning("No metadata records received — returning empty documents")
+            return Output([], metadata={"total_documents": 0, "by_source": {}})
+
         documents = [_file_to_document(f) for f in media_metadata]
 
         by_source: dict[str, int] = {}
@@ -87,7 +93,11 @@ def media_documents(
             len(documents)
         )
         logger.info("media_documents complete: %d documents", len(documents))
-        context.log.info(f"Produced {len(documents)} documents")
+        context.log.info(
+            f"Produced {len(documents)} documents (by_source: "
+            + ", ".join(f"{k}={v}" for k, v in sorted(by_source.items()))
+            + ")"
+        )
 
         return Output(
             documents,

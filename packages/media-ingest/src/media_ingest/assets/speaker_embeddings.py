@@ -172,8 +172,10 @@ def media_speaker_embeddings(
             "partition_key": partition_key,
         },
     ):
+        context.log.info(f"Starting media_speaker_embeddings for partition={partition_key}")
         # Skip if diarization had no speakers
         speakers = media_diarization.get("speakers", [])
+        context.log.info(f"Diarization input: {len(speakers)} speakers detected")
         if not speakers:
             context.log.info(f"No speakers in diarization for partition={partition_key}")
             return Output(
@@ -201,11 +203,20 @@ def media_speaker_embeddings(
         # Add document_id to diarization dict for _extract_speaker_centroids
         diarization_with_id = {**media_diarization, "document_id": partition_key}
 
+        segment_count = len(media_diarization.get("segments", []))
+        context.log.info(
+            f"Extracting speaker centroids: {len(speakers)} speakers, "
+            f"{segment_count} segments, min_duration={_MIN_SEGMENT_DURATION_S}s"
+        )
+
         try:
+            embed_start = time.monotonic()
             embeddings = _extract_speaker_centroids(diarization_with_id, source_path)
+            embed_elapsed = time.monotonic() - embed_start
             context.log.info(
                 f"Extracted {len(embeddings)} speaker embeddings "
-                f"from {len(speakers)} speakers in partition={partition_key}"
+                f"from {len(speakers)} speakers in {embed_elapsed:.1f}s "
+                f"(partition={partition_key})"
             )
         except Exception as e:
             context.log.warning(f"Speaker embedding extraction failed: {e}")
