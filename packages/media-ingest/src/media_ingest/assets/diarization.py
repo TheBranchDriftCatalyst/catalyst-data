@@ -39,8 +39,8 @@ DIARIZATION_K8S_CONFIG = {
         "container_config": {
             **NFS_VOLUMES_CONFIG["dagster-k8s/config"]["container_config"],
             "resources": {
-                "requests": {"cpu": "2", "memory": "8Gi", "gpu.intel.com/i915": "1"},
-                "limits": {"cpu": "4", "memory": "16Gi", "gpu.intel.com/i915": "1"},
+                "requests": {"cpu": "2", "memory": "4Gi", "gpu.intel.com/i915": "1"},
+                "limits": {"cpu": "4", "memory": "12Gi", "gpu.intel.com/i915": "1"},
             },
             "env_from": [
                 {"secret_ref": {"name": "hf-credentials"}},
