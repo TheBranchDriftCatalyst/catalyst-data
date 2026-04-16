@@ -95,7 +95,16 @@ def _run_diarization(audio_path: str, hf_token: str, cache_dir: str) -> tuple:
     # pyannote can't read MP4/MKV — extract audio first
     wav_path = extract_audio_to_wav(audio_path)
     try:
-        result = pipeline(wav_path)
+        # Load WAV via soundfile and pass as pre-loaded waveform dict.
+        # This bypasses torchcodec entirely (which has fragile FFmpeg/libpython
+        # deps and incomplete XPU support). pyannote 4.x accepts either a
+        # file path (→ uses torchcodec) or a {waveform, sample_rate} dict.
+        import soundfile as sf
+
+        waveform, sample_rate = sf.read(wav_path, dtype="float32", always_2d=True)
+        # soundfile shape is (time, channel); pyannote wants (channel, time)
+        waveform_tensor = torch.from_numpy(waveform.T)
+        result = pipeline({"waveform": waveform_tensor, "sample_rate": sample_rate})
         # pyannote 4.x returns DiarizeOutput; extract the Annotation
         annotation = getattr(result, "speaker_diarization", result)
         return annotation, resolved_device
