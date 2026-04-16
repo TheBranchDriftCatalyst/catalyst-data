@@ -93,7 +93,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # auto-installed as torch XPU dependencies — no apt oneAPI packages needed.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3.13 python3.13-venv \
+        python3.13 python3.13-venv python3.13-dev libpython3.13 \
         ffmpeg libsndfile1 libgomp1 \
         gnupg ca-certificates wget && \
     wget -qO- https://repositories.intel.com/gpu/intel-graphics.key | \
