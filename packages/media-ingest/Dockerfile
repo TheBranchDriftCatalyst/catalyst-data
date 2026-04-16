@@ -29,15 +29,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3.12 python3.12-dev python3.12-venv \
+        python3.13 python3.13-dev python3.13-venv \
         python3-pip curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # Allow uv to install into system Python (Ubuntu marks it EXTERNALLY-MANAGED)
-RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
-ENV UV_PYTHON=/usr/bin/python3.12
+RUN rm -f /usr/lib/python3.13/EXTERNALLY-MANAGED
+ENV UV_PYTHON=/usr/bin/python3.13
 
 WORKDIR /app
 
@@ -45,7 +45,7 @@ WORKDIR /app
 #    then pip install only their third-party deps (not the libs themselves).
 COPY libs/ /app/libs/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --python /usr/bin/python3.12 \
+    uv pip install --system --python /usr/bin/python3.13 \
         /app/libs/catalyst-contracts-core/ \
         /app/libs/catalyst-llm-contract-mcp/ \
         /app/libs/catalyst-langgraph-aio/ \
@@ -68,10 +68,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
     mkdir -p src/media_ingest && \
     touch src/media_ingest/__init__.py && \
-    python3.12 -m pip install \
+    python3.13 -m pip install \
         "torch>=2.6" "torchaudio>=2.6" \
         --index-url https://download.pytorch.org/whl/xpu && \
-    uv pip install --system --python /usr/bin/python3.12 \
+    uv pip install --system --python /usr/bin/python3.13 \
         ".[openvino]" && \
     rm -rf src/media_ingest
 
@@ -80,7 +80,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 #    only reinstalls the local package (fast, no network).
 COPY packages/media-ingest/src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --python /usr/bin/python3.12 \
+    uv pip install --system --python /usr/bin/python3.13 \
         --no-deps --reinstall-package media-ingest .
 
 # ---------- stage 2: runtime (Ubuntu + Intel GPU) ----------
@@ -93,7 +93,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # auto-installed as torch XPU dependencies — no apt oneAPI packages needed.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3.12 python3.12-venv \
+        python3.13 python3.13-venv \
         ffmpeg libsndfile1 libgomp1 \
         gnupg ca-certificates wget && \
     wget -qO- https://repositories.intel.com/gpu/intel-graphics.key | \
@@ -120,17 +120,17 @@ COPY --from=builder /usr/local/lib/ /usr/local/lib/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
 COPY --from=builder /app/libs/ /app/libs/
 
-# CRITICAL: uv copies a standalone Python to /usr/local/bin/python3.12 which
+# CRITICAL: uv copies a standalone Python to /usr/local/bin/python3.13 which
 # uses site-packages (source-build convention). The apt-installed Python at
-# /usr/bin/python3.12 uses dist-packages (Debian convention). pip/uv install
+# /usr/bin/python3.13 uses dist-packages (Debian convention). pip/uv install
 # packages to dist-packages, so we MUST use the apt Python. Remove the uv
-# shadow so PATH resolves to /usr/bin/python3.12.
-RUN rm -f /usr/local/bin/python3.12 /usr/local/bin/python3 /usr/local/bin/python
-RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
-    ln -sf /usr/bin/python3.12 /usr/bin/python
+# shadow so PATH resolves to /usr/bin/python3.13.
+RUN rm -f /usr/local/bin/python3.13 /usr/local/bin/python3 /usr/local/bin/python
+RUN ln -sf /usr/bin/python3.13 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.13 /usr/bin/python
 
 ENV DAGSTER_HOME=/opt/dagster/dagster_home
-ENV PYTHONPATH=/app/libs/catalyst-contracts-core/src:/app/libs/catalyst-llm-contract-mcp/src:/app/libs/catalyst-langgraph-aio/src:/app/libs/dagster-io/src:/usr/local/lib/python3.12/dist-packages:/usr/lib/python3/dist-packages
+ENV PYTHONPATH=/app/libs/catalyst-contracts-core/src:/app/libs/catalyst-llm-contract-mcp/src:/app/libs/catalyst-langgraph-aio/src:/app/libs/dagster-io/src:/usr/local/lib/python3.13/dist-packages:/usr/lib/python3/dist-packages
 # CRITICAL: Intel pip runtime libs (.so files) install to {prefix}/lib/
 # which is NOT on LD_LIBRARY_PATH by default. Without this, torch fails
 # with "libpti_view.so.0.10: cannot open shared object file".
