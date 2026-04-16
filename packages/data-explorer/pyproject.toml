@@ -9,11 +9,11 @@ description = "Streamlit data asset viewer for catalyst-data pipelines"
 requires-python = ">=3.12"
 dependencies = [
     "dagster-io",
-    "streamlit>=1.40",
+    "streamlit>=1.50",
     "pandas>=2.0",
     "plotly>=5.0",
     "numpy>=1.26",
-    "openai>=1.0",
+    "openai>=1.70",
     "scikit-learn>=1.4",
     "scipy>=1.12",
     "streamlit-agraph>=0.0.45",
@@ -21,8 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "ruff>=0.8",
+    "pytest>=8.3",
+    "ruff>=0.9",
 ]
 umap = ["umap-learn>=0.5"]
 

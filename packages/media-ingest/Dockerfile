@@ -23,7 +23,7 @@ COPY packages/media-ingest/viewer-ui/ .
 RUN npm run build
 
 # ---------- stage 1: build Python (Ubuntu + Python 3.12) ----------
-FROM ubuntu:24.04 AS builder
+FROM ubuntu:25.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -84,7 +84,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --no-deps --reinstall-package media-ingest .
 
 # ---------- stage 2: runtime (Ubuntu + Intel GPU) ----------
-FROM ubuntu:24.04
+FROM ubuntu:25.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -98,7 +98,7 @@ RUN apt-get update && \
         gnupg ca-certificates wget && \
     wget -qO- https://repositories.intel.com/gpu/intel-graphics.key | \
         gpg --dearmor -o /usr/share/keyrings/intel-graphics.gpg && \
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu noble unified" \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu plucky unified" \
         > /etc/apt/sources.list.d/intel-gpu.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \

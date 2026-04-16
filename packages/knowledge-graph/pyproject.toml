@@ -8,20 +8,20 @@ version = "0.1.0"
 description = "Knowledge graph platinum layer — cross-source entity resolution and assertion graph"
 requires-python = ">=3.12"
 dependencies = [
-    "dagster>=1.9",
-    "dagster-k8s>=0.25",
-    "dagster-postgres>=0.25",
+    "dagster>=1.13",
+    "dagster-k8s>=0.29",
+    "dagster-postgres>=0.29",
     "dagster-io",
-    "pydantic>=2.0",
-    "neo4j>=5.0",
-    "psycopg[binary]>=3.1",
+    "pydantic>=2.9",
+    "neo4j>=5.28",
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "dagster-webserver>=1.9",
-    "pytest>=8.0",
-    "ruff>=0.8",
+    "dagster-webserver>=1.13",
+    "pytest>=8.3",
+    "ruff>=0.9",
 ]
 
 [tool.hatch.build.targets.wheel]

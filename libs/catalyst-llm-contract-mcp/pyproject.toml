@@ -9,7 +9,7 @@ description = "MCP server enforcing LLM output contracts for knowledge graph pip
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.26",
-    "pydantic>=2.0",
+    "pydantic>=2.9",
     "catalyst-contracts-core",
 ]
 
@@ -18,9 +18,9 @@ catalyst-contracts-core = { path = "../catalyst-contracts-core", editable = true
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
+    "pytest>=8.3",
     "pytest-cov>=6.0",
-    "ruff>=0.8",
+    "ruff>=0.9",
 ]
 
 [project.scripts]

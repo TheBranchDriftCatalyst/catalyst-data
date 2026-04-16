@@ -8,14 +8,14 @@ version = "0.1.0"
 description = "Shared enums and base types for catalyst KG contracts"
 requires-python = ">=3.12"
 dependencies = [
-    "pydantic>=2.0",
+    "pydantic>=2.9",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
+    "pytest>=8.3",
     "pytest-cov>=6.0",
-    "ruff>=0.8",
+    "ruff>=0.9",
 ]
 
 [tool.hatch.build.targets.wheel]
