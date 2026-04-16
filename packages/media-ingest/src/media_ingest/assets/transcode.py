@@ -1,8 +1,8 @@
 """Stage 2.5: Transcode media to AV1 using Intel QSV hardware encoding.
 
 Sits between media_metadata and media_documents. Replaces original files
-in-place with ultra-compressed AV1 versions. Skips files already in AV1.
-Audio streams are copied without re-encoding to preserve transcription quality.
+in-place with ultra-compressed AV1 versions. Recompresses even AV1 files
+that are still over the target bitrate. Audio streams copied losslessly.
 """
 
 import os
@@ -26,6 +26,10 @@ from media_ingest.config import MediaIngestConfig
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
+# Target: any video over 1.5 Mbps gets re-encoded (even if already AV1).
+# YouTube AV1 typically 1-2 Mbps for 1080p talking-head content.
+TARGET_MAX_BITRATE = 1_500_000
+
 # QSV transcode needs GPU + NFS write access
 TRANSCODE_K8S_CONFIG = {
     **NFS_VOLUMES_CONFIG,
@@ -46,6 +50,24 @@ def _is_already_av1(file_info: dict) -> bool:
     """Check if file is already AV1 encoded."""
     meta = file_info.get("metadata", {})
     return meta.get("video_codec", "").lower() in ("av1", "av1_qsv")
+
+
+def _needs_transcode(file_info: dict, target_bitrate: int = TARGET_MAX_BITRATE) -> tuple[bool, str]:
+    """Decide if a video file needs re-encoding.
+
+    Returns (needs_transcode, reason). Always transcodes non-AV1. Re-encodes
+    AV1 files whose bitrate exceeds the target.
+    """
+    meta = file_info.get("metadata", {})
+    if not _is_already_av1(file_info):
+        return True, f"non-AV1 codec ({meta.get('video_codec', 'unknown')})"
+
+    bitrate = int(meta.get("bit_rate", 0))
+    if bitrate > target_bitrate:
+        mbps = bitrate / 1_000_000
+        return True, f"AV1 but {mbps:.1f} Mbps > {target_bitrate / 1_000_000:.1f} Mbps target"
+
+    return False, "AV1 already at target bitrate"
 
 
 def _transcode_to_av1(
@@ -149,21 +171,29 @@ def media_transcode(
         },
     ):
         video_files = [f for f in media_metadata if f.get("metadata", {}).get("has_video")]
-        already_av1 = [f for f in video_files if _is_already_av1(f)]
-        to_transcode = [f for f in video_files if not _is_already_av1(f)]
         audio_only = [f for f in media_metadata if not f.get("metadata", {}).get("has_video")]
 
+        to_transcode = []
+        already_compressed = []
+        for f in video_files:
+            needs, reason = _needs_transcode(f)
+            if needs:
+                to_transcode.append(f)
+                logger.info("Will transcode %s — %s", f["filename"], reason)
+            else:
+                already_compressed.append(f)
+
         logger.info(
-            "media_transcode: %d total files (%d video, %d already AV1, %d to transcode, %d audio-only)",
+            "media_transcode: %d total files (%d video, %d already compressed, %d to transcode, %d audio-only)",
             len(media_metadata),
             len(video_files),
-            len(already_av1),
+            len(already_compressed),
             len(to_transcode),
             len(audio_only),
         )
         context.log.info(
-            f"Transcode: {len(to_transcode)} files to encode, "
-            f"{len(already_av1)} already AV1, {len(audio_only)} audio-only (skipped)"
+            f"Transcode: {len(to_transcode)} to encode, "
+            f"{len(already_compressed)} already at target bitrate, {len(audio_only)} audio-only"
         )
 
         total_saved_mb = 0.0
@@ -226,9 +256,10 @@ def media_transcode(
             metadata={
                 "total_files": len(all_files),
                 "transcoded": len(to_transcode) - errors,
-                "already_av1": len(already_av1),
+                "already_compressed": len(already_compressed),
                 "audio_only": len(audio_only),
                 "errors": errors,
+                "target_max_mbps": MetadataValue.float(TARGET_MAX_BITRATE / 1_000_000),
                 "total_saved_mb": MetadataValue.float(total_saved_mb),
             },
         )
