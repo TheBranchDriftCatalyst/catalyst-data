@@ -34,7 +34,9 @@ class TestSpeakerTurns:
         assert chunks[0].metadata["end_s"] == 12.3
 
     def test_total_chunks_backfilled(self):
-        chunks = _speaker_turn_chunks([_seg("A.", "S1", 0, 5), _seg("B.", "S2", 5, 10)], "d", "", ChunkingResource(), {})
+        chunks = _speaker_turn_chunks(
+            [_seg("A.", "S1", 0, 5), _seg("B.", "S2", 5, 10)], "d", "", ChunkingResource(), {}
+        )
         assert all(c.total_chunks == 2 for c in chunks)
 
     def test_no_speaker_prefix_in_text(self):
@@ -95,7 +97,9 @@ class TestEndToEnd:
         long_text = " ".join(f"word{i}" for i in range(300))
         assert len(long_text) > MAX_CHUNK_CHARS
 
-        chunks = _speaker_turn_chunks([_seg(long_text, "S1", 0, words[-1]["end"], words)], "d", "", ChunkingResource(), {})
+        chunks = _speaker_turn_chunks(
+            [_seg(long_text, "S1", 0, words[-1]["end"], words)], "d", "", ChunkingResource(), {}
+        )
         pause_chunks = [c for c in chunks if c.metadata["strategy"] == "speech_pause_split"]
         assert len(pause_chunks) >= 3
 

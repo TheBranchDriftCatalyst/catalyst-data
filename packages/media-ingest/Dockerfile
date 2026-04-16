@@ -98,7 +98,7 @@ RUN apt-get update && \
         gnupg ca-certificates wget && \
     wget -qO- https://repositories.intel.com/gpu/intel-graphics.key | \
         gpg --dearmor -o /usr/share/keyrings/intel-graphics.gpg && \
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu plucky unified" \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu noble unified" \
         > /etc/apt/sources.list.d/intel-gpu.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
