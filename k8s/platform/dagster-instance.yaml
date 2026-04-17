@@ -67,10 +67,16 @@ data:
                   secretKeyRef:
                     name: dagster-s3-credentials
                     key: DAGSTER_S3_SECRET_KEY
+              - name: LLM_MODEL
+                value: "runpod/qwen3:30b-a3b"
               - name: LLM_BASE_URL
                 value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+              - name: EMBEDDING_MODEL
+                value: "ollama-mac/nomic-embed-text"
               - name: EMBEDDING_BASE_URL
                 value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+              - name: EMBEDDING_DIMENSIONS
+                value: "768"
               - name: OPENAI_API_KEY
                 valueFrom:
                   secretKeyRef:
