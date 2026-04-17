@@ -6,6 +6,15 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
+# 1. Third-party deps first
+COPY packages/data-explorer/pyproject.toml .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    mkdir -p src/data_explorer && \
+    touch src/data_explorer/__init__.py && \
+    uv pip install --system . && \
+    rm -rf src/data_explorer
+
+# 2. Shared libs
 COPY libs/ /app/libs/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system \
@@ -14,13 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         /app/libs/catalyst-langgraph-aio/ \
         /app/libs/dagster-io/
 
-COPY packages/data-explorer/pyproject.toml .
-RUN --mount=type=cache,target=/root/.cache/uv \
-    mkdir -p src/data_explorer && \
-    touch src/data_explorer/__init__.py && \
-    uv pip install --system . && \
-    rm -rf src/data_explorer
-
+# 3. Source code + config
 COPY packages/data-explorer/src/ src/
 COPY packages/data-explorer/.streamlit/ .streamlit/
 RUN --mount=type=cache,target=/root/.cache/uv \

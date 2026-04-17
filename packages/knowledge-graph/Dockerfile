@@ -6,6 +6,15 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
+# 1. Third-party deps first — stays cached when libs/ or src/ change
+COPY packages/knowledge-graph/pyproject.toml .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    mkdir -p src/knowledge_graph && \
+    touch src/knowledge_graph/__init__.py && \
+    uv pip install --system . && \
+    rm -rf src/knowledge_graph
+
+# 2. Shared libs
 COPY libs/ /app/libs/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system \
@@ -14,13 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         /app/libs/catalyst-langgraph-aio/ \
         /app/libs/dagster-io/
 
-COPY packages/knowledge-graph/pyproject.toml .
-RUN --mount=type=cache,target=/root/.cache/uv \
-    mkdir -p src/knowledge_graph && \
-    touch src/knowledge_graph/__init__.py && \
-    uv pip install --system . && \
-    rm -rf src/knowledge_graph
-
+# 3. Source code
 COPY packages/knowledge-graph/src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --no-deps --reinstall-package knowledge-graph .

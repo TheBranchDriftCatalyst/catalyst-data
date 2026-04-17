@@ -41,28 +41,16 @@ ENV UV_PYTHON=/usr/bin/python3.13
 
 WORKDIR /app
 
-# 1. Install shared libs — COPY source to /app/libs, add to PYTHONPATH,
-#    then pip install only their third-party deps (not the libs themselves).
-COPY libs/ /app/libs/
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --python /usr/bin/python3.13 \
-        /app/libs/catalyst-contracts-core/ \
-        /app/libs/catalyst-llm-contract-mcp/ \
-        /app/libs/catalyst-langgraph-aio/ \
-        /app/libs/dagster-io/
-
-# 2. Install PyTorch XPU + package deps
+# 1. Install ML-heavy deps FIRST — these change ~never and take 3-5 min.
+#    Layer ordering: heaviest+most-stable deps first so they stay cached
+#    when shared libs or source code change.
 #
 # Step A: Install torch+torchaudio from the XPU index. This auto-pulls
 # intel-sycl-rt (libsycl.so), intel-pti (libpti_view.so), and other
 # Intel runtime pip packages as declared dependencies of the XPU wheel.
-# Pin to >=2.6,<2.8 matching pyproject.toml constraints.
 # Uses --mount=type=cache for pip downloads (~2GB torch wheel).
 #
 # Step B: Install the package with OpenVINO extras from PyPI.
-# --extra-index-url ensures torch XPU wheel is found when resolving
-# the torch>=2.6 constraint from pyproject.toml (otherwise uv would
-# try to downgrade to the PyPI CPU wheel).
 COPY packages/media-ingest/pyproject.toml .
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
@@ -75,9 +63,19 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         ".[openvino]" && \
     rm -rf src/media_ingest
 
+# 2. Install shared libs — changes more often than ML deps but less than src.
+#    Placed AFTER torch so libs/ changes don't bust the 2GB torch cache.
+COPY libs/ /app/libs/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --python /usr/bin/python3.13 \
+        /app/libs/catalyst-contracts-core/ \
+        /app/libs/catalyst-llm-contract-mcp/ \
+        /app/libs/catalyst-langgraph-aio/ \
+        /app/libs/dagster-io/
+
 # 3. Copy real source — only the src/ dir changes on code updates.
-#    Dependencies are already installed from step 2, so this layer
-#    only reinstalls the local package (fast, no network).
+#    Dependencies are already installed, so this layer only reinstalls
+#    the local package (fast, no network).
 COPY packages/media-ingest/src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --python /usr/bin/python3.13 \

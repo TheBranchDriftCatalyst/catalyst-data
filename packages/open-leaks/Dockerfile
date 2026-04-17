@@ -6,6 +6,15 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
+# 1. Third-party deps first
+COPY packages/open-leaks/pyproject.toml .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    mkdir -p src/open_leaks && \
+    touch src/open_leaks/__init__.py && \
+    uv pip install --system . && \
+    rm -rf src/open_leaks
+
+# 2. Shared libs
 COPY libs/ /app/libs/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system \
@@ -14,13 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         /app/libs/catalyst-langgraph-aio/ \
         /app/libs/dagster-io/
 
-COPY packages/open-leaks/pyproject.toml .
-RUN --mount=type=cache,target=/root/.cache/uv \
-    mkdir -p src/open_leaks && \
-    touch src/open_leaks/__init__.py && \
-    uv pip install --system . && \
-    rm -rf src/open_leaks
-
+# 3. Source code
 COPY packages/open-leaks/src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --no-deps --reinstall-package open-leaks .
