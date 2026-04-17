@@ -10,6 +10,7 @@ Gold: member_mentions, member_embeddings
 
 from dagster import (
     AssetExecutionContext,
+    AssetIn,
     Output,
     RetryPolicy,
     asset,
@@ -218,15 +219,23 @@ def member_cosponsored(
     compute_kind="transform",
     metadata={"layer": "silver"},
     partitions_def=member_partitions,
+    ins={
+        "member_committee_assignments": AssetIn(input_manager_key="optional_io_manager"),
+    },
 )
 def member_document(
     context: AssetExecutionContext,
     member_detail: dict,
-    member_committee_assignments: list[dict],
+    member_committee_assignments: list[dict] | None,
 ) -> Output[Document]:
     bioguide_id = context.partition_key
-    member_data = member_detail.get("member", {})
-    terms_data = member_detail.get("terms", [])
+    # Handle both direct dict and nested {"member": ..., "terms": ...} formats
+    if "member" in member_detail:
+        member_data = member_detail["member"]
+        terms_data = member_detail.get("terms", [])
+    else:
+        member_data = member_detail
+        terms_data = []
 
     name = member_data.get("name", bioguide_id)
 
@@ -244,7 +253,7 @@ def member_document(
         parts.append(f"Terms served: {len(terms_data)}")
 
     if member_committee_assignments:
-        committee_names = list({c["name"] for c in member_committee_assignments if c.get("name")})[:5]
+        committee_names = list({c.get("name", "") for c in member_committee_assignments if c.get("name")})[:5]
         if committee_names:
             parts.append(f"Committees: {', '.join(committee_names)}")
 

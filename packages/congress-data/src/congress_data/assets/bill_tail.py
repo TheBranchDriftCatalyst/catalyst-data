@@ -329,11 +329,16 @@ def bill_full_text(
 )
 def bill_document(
     context: AssetExecutionContext,
-    bill_detail: BillDetail,
+    bill_detail: dict,
     bill_full_text: list[dict],
 ) -> Output[Document]:
+    # Rehydrate from dict if IO manager deserialized to dict
+    if isinstance(bill_detail, dict):
+        bill_detail = BillDetail(**bill_detail)
+
     # Build header from structured detail
-    content_parts = [f"Bill {bill_detail.display_number} ({bill_detail.origin_chamber})"]
+    display = f"{bill_detail.bill_type.upper()}.{bill_detail.number}"
+    content_parts = [f"Bill {display} ({bill_detail.origin_chamber})"]
     content_parts.append(bill_detail.title)
     if bill_detail.short_title:
         content_parts.append(f"Short title: {bill_detail.short_title}")

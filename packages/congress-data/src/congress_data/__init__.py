@@ -24,6 +24,7 @@ from dagster_io import (
     EmbeddingResource,
     LLMResource,
     MinioIOManager,
+    OptionalMinioIOManager,
     make_run_status_sensor,
 )
 from dagster_io.executor import make_k8s_executor
@@ -122,6 +123,7 @@ defs = Definitions(
     executor=_k8s_executor,
     resources={
         "io_manager": MinioIOManager(),
+        "optional_io_manager": OptionalMinioIOManager(),
         "append_io_manager": AppendIOManager(),
         "chunking": ChunkingResource(),
         "llm": LLMResource(),
