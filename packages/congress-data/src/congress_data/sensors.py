@@ -81,6 +81,7 @@ def _save_cursor(client: S3Client, key: str, cursor: dict[str, str]) -> None:
         AssetKey("bill_cosponsors"),
         AssetKey("bill_text_versions"),
         AssetKey("bill_amendments"),
+        AssetKey("bill_full_text"),
         AssetKey("bill_document"),
         AssetKey("bill_chunks"),
         AssetKey("bill_mentions"),

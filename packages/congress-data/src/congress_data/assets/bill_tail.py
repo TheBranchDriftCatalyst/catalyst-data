@@ -208,13 +208,121 @@ def bill_amendments(context: AssetExecutionContext, config: CongressionalConfig)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# BRONZE — Full text download (no API key, direct congress.gov CDN)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _strip_html(html: str) -> str:
+    """Strip HTML tags and normalize whitespace to plain text."""
+    import re
+
+    # Remove script/style blocks
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    # Replace block elements with newlines
+    text = re.sub(r"<(br|p|div|h\d|li|tr)[^>]*>", "\n", text, flags=re.IGNORECASE)
+    # Strip remaining tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Decode HTML entities
+    import html as html_mod
+
+    text = html_mod.unescape(text)
+    # Normalize whitespace
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _download_text(url: str) -> str | None:
+    """Download bill text from congress.gov with polite rate limiting."""
+    import time
+
+    import requests
+
+    time.sleep(1.0)  # polite 1 req/sec to congress.gov CDN
+    try:
+        resp = requests.get(url, timeout=30, headers={"User-Agent": "catalyst-data/1.0 (research)"})
+        resp.raise_for_status()
+        return resp.text
+    except Exception as e:
+        logger.warning("Failed to download %s: %s", url, e)
+        return None
+
+
+@asset(
+    group_name="congress",
+    description="Download full bill text (HTM + plain text) for each version",
+    compute_kind="download",
+    metadata={"layer": "bronze"},
+    partitions_def=bill_partitions,
+    retry_policy=CONGRESS_API_RETRY,
+)
+def bill_full_text(
+    context: AssetExecutionContext,
+    bill_text_versions: list[BillVersion],
+) -> Output[list[dict]]:
+    """Download HTM from congress.gov for each text version.
+
+    Stores both raw HTML (for display) and stripped plain text (for NER/chunking).
+    No API key needed — these are public static files on the CDN.
+    """
+    results: list[dict] = []
+    total_chars = 0
+
+    for version in bill_text_versions:
+        # Find the HTM format URL
+        htm_url = None
+        for fmt in version.formats:
+            if fmt.get("type") == "Formatted Text" and fmt.get("url", "").endswith(".htm"):
+                htm_url = fmt["url"]
+                break
+
+        if not htm_url:
+            context.log.warning(f"No HTM URL for version {version.version_code}")
+            continue
+
+        context.log.info(f"Downloading {version.version_code}: {htm_url}")
+        html_content = _download_text(htm_url)
+
+        if html_content is None:
+            continue
+
+        plain_text = _strip_html(html_content)
+        total_chars += len(plain_text)
+
+        results.append(
+            {
+                "version_id": version.id,
+                "bill_id": version.bill_id,
+                "version_code": version.version_code,
+                "version_name": version.version_name,
+                "publish_date": str(version.publish_date) if version.publish_date else None,
+                "source_url": htm_url,
+                "html": html_content,
+                "text": plain_text,
+                "text_length": len(plain_text),
+                "html_length": len(html_content),
+            }
+        )
+
+    context.log.info(f"Bill full text: {len(results)} versions, {total_chars:,} chars total")
+    return Output(
+        results,
+        metadata={
+            "versions_downloaded": len(results),
+            "versions_available": len(bill_text_versions),
+            "total_text_chars": total_chars,
+        },
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SILVER — Document + Chunks
 # ══════════════════════════════════════════════════════════════════════════════
 
 
 @asset(
     group_name="congress",
-    description="Transform bill detail + text versions into rich Document",
+    description="Transform bill detail + full text into rich Document for chunking",
     compute_kind="transform",
     metadata={"layer": "silver"},
     partitions_def=bill_partitions,
@@ -222,9 +330,9 @@ def bill_amendments(context: AssetExecutionContext, config: CongressionalConfig)
 def bill_document(
     context: AssetExecutionContext,
     bill_detail: BillDetail,
-    bill_text_versions: list[BillVersion],
+    bill_full_text: list[dict],
 ) -> Output[Document]:
-    # Build rich content from detail + versions
+    # Build header from structured detail
     content_parts = [f"Bill {bill_detail.display_number} ({bill_detail.origin_chamber})"]
     content_parts.append(bill_detail.title)
     if bill_detail.short_title:
@@ -240,10 +348,34 @@ def bill_document(
     if bill_detail.subjects:
         content_parts.append(f"Subjects: {', '.join(bill_detail.subjects[:10])}")
 
+    header = ". ".join(content_parts)
+
+    # Use the most recent text version as primary content
+    # Priority: enrolled (enr) > engrossed (eh/eas) > reported (rh) > introduced (ih)
+    version_priority = ["enr", "eas", "eh", "pcs", "rh", "rs", "ih", "is"]
+    best_text = ""
+    best_version = ""
+    for code in version_priority:
+        for ft in bill_full_text:
+            if ft.get("version_code") == code and ft.get("text"):
+                best_text = ft["text"]
+                best_version = code
+                break
+        if best_text:
+            break
+
+    # Fallback: just use whatever we have
+    if not best_text and bill_full_text:
+        best_text = bill_full_text[0].get("text", "")
+        best_version = bill_full_text[0].get("version_code", "unknown")
+
+    # Combine header + full legislative text
+    content = f"{header}\n\n--- FULL TEXT ({best_version.upper()}) ---\n\n{best_text}" if best_text else header
+
     doc = Document(
         id=f"congress-bill-{bill_detail.id}",
         title=bill_detail.title,
-        content=". ".join(content_parts),
+        content=content,
         source="congress.gov",
         source_url=bill_detail.api_url,
         document_type="bill",
@@ -257,7 +389,8 @@ def bill_document(
             "introduced_date": str(bill_detail.introduced_date) if bill_detail.introduced_date else None,
             "sponsor_bioguide": bill_detail.sponsor_bioguide_id,
             "cosponsor_count": bill_detail.cosponsor_count,
-            "text_version_count": len(bill_text_versions),
+            "text_version_count": len(bill_full_text),
+            "text_version_used": best_version or None,
             "became_law": bill_detail.became_law,
         },
         sections={
@@ -265,8 +398,16 @@ def bill_document(
         },
     )
 
-    context.log.info(f"Bill document: {doc.id}")
-    return Output(doc, metadata={"doc_id": doc.id, "content_length": len(doc.content)})
+    context.log.info(f"Bill document: {doc.id} ({len(content):,} chars, text version: {best_version or 'none'})")
+    return Output(
+        doc,
+        metadata={
+            "doc_id": doc.id,
+            "content_length": len(doc.content),
+            "text_version": best_version or "none",
+            "has_full_text": bool(best_text),
+        },
+    )
 
 
 @asset(

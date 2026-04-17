@@ -14,6 +14,7 @@ from congress_data.assets.bill_tail import (
     bill_detail,
     bill_document,
     bill_embeddings,
+    bill_full_text,
     bill_mentions,
     bill_text_versions,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "bill_cosponsors",
     "bill_text_versions",
     "bill_amendments",
+    "bill_full_text",
     "bill_document",
     "bill_chunks",
     "bill_mentions",
