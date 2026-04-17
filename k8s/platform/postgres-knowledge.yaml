@@ -16,7 +16,7 @@ data:
         entity_type TEXT NOT NULL,
         aliases TEXT[] DEFAULT '{}',
         external_ids JSONB DEFAULT '{}',
-        embedding vector(1536),
+        embedding vector(768),
         mention_count INTEGER DEFAULT 0,
         source_code_locations TEXT[] NOT NULL DEFAULT '{}',
         first_seen TIMESTAMPTZ DEFAULT NOW(),

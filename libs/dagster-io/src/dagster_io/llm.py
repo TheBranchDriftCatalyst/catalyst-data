@@ -360,7 +360,7 @@ class EmbeddingResource(ConfigurableResource):
         os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", "")),
     )
     model: str = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
-    dimensions: int = int(os.environ.get("EMBEDDING_DIMENSIONS", "1536"))
+    dimensions: int = int(os.environ.get("EMBEDDING_DIMENSIONS", "768"))
     batch_size: int = int(os.environ.get("EMBEDDING_BATCH_SIZE", "100"))
 
     _embeddings: Any = PrivateAttr()
