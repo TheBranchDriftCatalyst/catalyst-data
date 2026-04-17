@@ -42,6 +42,10 @@ regexTarget = "match"
 # allowlist) lets us keep the rules active for any *other* string in those
 # files while whitelisting just these three well-known values.
 regexes = [
+  # Dagster compute_kind="extract" falsely matched as API key when preceded
+  # by "API" in asset description strings (congress-data head assets).
+  '''extract''',
+
   # k8s/platform/dagster-instance.yaml, k8s/platform/postgres.yaml,
   # k8s/platform/deployment.yaml, k8s/media-ingest/deployment.yaml
   '''dagster-homelab''',

@@ -1,32 +1,63 @@
-from congress_data.assets.assertions import congress_assertions
-from congress_data.assets.chunks import congress_chunks
-from congress_data.assets.documents import congress_documents
-from congress_data.assets.embeddings import congress_embeddings
-from congress_data.assets.entities_ner import congress_entities
-from congress_data.assets.entity_candidates import congress_entity_candidates
-from congress_data.assets.extraction import (
-    congress_bills,
-    congress_committees,
-    congress_members,
+"""Congress-data asset modules.
+
+Head: head.py — unpartitioned discovery + manifests
+Bill tail: bill_tail.py — partitioned per-bill pipeline
+Member tail: member_tail.py — partitioned per-member pipeline
+"""
+
+from congress_data.assets.bill_tail import (
+    bill_actions,
+    bill_amendments,
+    bill_assertions,
+    bill_chunks,
+    bill_cosponsors,
+    bill_detail,
+    bill_document,
+    bill_embeddings,
+    bill_mentions,
+    bill_text_versions,
 )
-from congress_data.assets.graph import congress_graph
-from congress_data.assets.mentions import congress_mentions
-from congress_data.assets.propositions import congress_propositions
+from congress_data.assets.head import (
+    bills_list_incremental,
+    bills_manifest,
+    members_list_incremental,
+    members_manifest,
+)
+from congress_data.assets.member_tail import (
+    member_chunks,
+    member_committee_assignments,
+    member_cosponsored,
+    member_detail,
+    member_document,
+    member_embeddings,
+    member_mentions,
+    member_sponsored,
+)
 
 __all__ = [
-    "congress_bills",
-    "congress_members",
-    "congress_committees",
-    "congress_documents",
-    "congress_chunks",
-    # Legacy (backward compat)
-    "congress_entities",
-    "congress_propositions",
-    # EDC gold layer
-    "congress_mentions",
-    "congress_entity_candidates",
-    "congress_assertions",
-    # Unchanged
-    "congress_embeddings",
-    "congress_graph",
+    # Head
+    "bills_list_incremental",
+    "bills_manifest",
+    "members_list_incremental",
+    "members_manifest",
+    # Bill tail
+    "bill_detail",
+    "bill_actions",
+    "bill_cosponsors",
+    "bill_text_versions",
+    "bill_amendments",
+    "bill_document",
+    "bill_chunks",
+    "bill_mentions",
+    "bill_assertions",
+    "bill_embeddings",
+    # Member tail
+    "member_detail",
+    "member_committee_assignments",
+    "member_sponsored",
+    "member_cosponsored",
+    "member_document",
+    "member_chunks",
+    "member_mentions",
+    "member_embeddings",
 ]

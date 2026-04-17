@@ -1,5 +1,6 @@
 """Shared IO manager, resources, and utilities for Dagster pipelines."""
 
+from dagster_io.append_io_manager import AppendIOManager
 from dagster_io.asset_factories import (
     LLM_ASSET_K8S_CONFIG,
     build_assertions,
@@ -84,6 +85,7 @@ __all__ = [
     # IO
     "MinioIOManager",
     "OptionalMinioIOManager",
+    "AppendIOManager",
     # Run-status sensor factory
     "make_run_status_sensor",
     # Resources

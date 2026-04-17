@@ -1,4 +1,12 @@
-"""Congress.gov data pipeline — Dagster code location."""
+"""Congress.gov data pipeline — Dagster code location.
+
+Re-architected: unpartitioned HEAD (discovery + manifests) →
+sensors → partitioned TAIL (per-bill, per-member).
+
+Pattern mirrors media_ingest with two partition sets:
+  congress_bill  (key = {congress}-{bill_type}-{number})
+  congress_member (key = bioguide_id)
+"""
 
 from dagster_io.logging import configure_logging
 from dagster_io.metrics import start_metrics_server
@@ -11,6 +19,7 @@ start_metrics_server()
 from dagster import Definitions
 
 from dagster_io import (
+    AppendIOManager,
     ChunkingResource,
     EmbeddingResource,
     LLMResource,
@@ -22,47 +31,96 @@ from dagster_io.executor import make_k8s_executor
 _k8s_executor = make_k8s_executor("congress_data")
 _run_status_sensors = make_run_status_sensor("congress_data")
 
-from congress_data.assets import (
-    congress_assertions,
-    congress_bills,
-    congress_chunks,
-    congress_committees,
-    congress_documents,
-    congress_embeddings,
-    congress_entities,
-    congress_entity_candidates,
-    congress_graph,
-    congress_members,
-    congress_mentions,
-    congress_propositions,
+# ── Head assets (unpartitioned) ──────────────────────────────────────────────
+
+# ── Bill tail assets (partitioned on congress_bill) ──────────────────────────
+from congress_data.assets.bill_tail import (
+    bill_actions,
+    bill_amendments,
+    bill_assertions,
+    bill_chunks,
+    bill_cosponsors,
+    bill_detail,
+    bill_document,
+    bill_embeddings,
+    bill_mentions,
+    bill_text_versions,
 )
+from congress_data.assets.head import (
+    bills_list_incremental,
+    bills_manifest,
+    members_list_incremental,
+    members_manifest,
+)
+
+# ── Member tail assets (partitioned on congress_member) ──────────────────────
+from congress_data.assets.member_tail import (
+    member_chunks,
+    member_committee_assignments,
+    member_cosponsored,
+    member_detail,
+    member_document,
+    member_embeddings,
+    member_mentions,
+    member_sponsored,
+)
+
+# ── Schedules ────────────────────────────────────────────────────────────────
+from congress_data.schedules import (
+    bills_discovery_job,
+    bills_discovery_schedule,
+    members_discovery_job,
+    members_discovery_schedule,
+)
+
+# ── Sensors ──────────────────────────────────────────────────────────────────
+from congress_data.sensors import congress_bill_sensor, congress_member_sensor
 
 defs = Definitions(
     assets=[
-        # Bronze
-        congress_bills,
-        congress_members,
-        congress_committees,
-        # Silver
-        congress_documents,
-        congress_chunks,
-        # Gold (legacy — backward compat)
-        congress_entities,
-        congress_propositions,
-        # Gold (EDC)
-        congress_mentions,
-        congress_entity_candidates,
-        congress_assertions,
-        # Gold (unchanged)
-        congress_embeddings,
-        congress_graph,
+        # HEAD (unpartitioned — discovery + manifests)
+        bills_list_incremental,
+        bills_manifest,
+        members_list_incremental,
+        members_manifest,
+        # TAIL per-bill (partitioned on congress_bill)
+        bill_detail,
+        bill_actions,
+        bill_cosponsors,
+        bill_text_versions,
+        bill_amendments,
+        bill_document,
+        bill_chunks,
+        bill_mentions,
+        bill_assertions,
+        bill_embeddings,
+        # TAIL per-member (partitioned on congress_member)
+        member_detail,
+        member_committee_assignments,
+        member_sponsored,
+        member_cosponsored,
+        member_document,
+        member_chunks,
+        member_mentions,
+        member_embeddings,
     ],
     sensors=[
+        congress_bill_sensor,
+        congress_member_sensor,
         *_run_status_sensors,
+    ],
+    jobs=[
+        bills_discovery_job,
+        members_discovery_job,
+    ],
+    schedules=[
+        bills_discovery_schedule,
+        members_discovery_schedule,
     ],
     executor=_k8s_executor,
     resources={
         "io_manager": MinioIOManager(),
+        "append_io_manager": AppendIOManager(),
         "chunking": ChunkingResource(),
         "llm": LLMResource(),
         "embeddings": EmbeddingResource(),
