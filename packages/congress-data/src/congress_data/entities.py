@@ -68,8 +68,8 @@ class Bill(BaseModel):
         """Parse from a list-endpoint item (/bill/{congress})."""
         bill_type = data.get("type", "").lower()
         number = int(data.get("number", 0))
-        latest_action = data.get("latestAction", {})
-        policy_area = data.get("policyArea", {})
+        latest_action = data.get("latestAction") or {}
+        policy_area = data.get("policyArea") or {}
 
         return cls(
             id=f"{bill_type}{number}-{congress}",
@@ -138,8 +138,8 @@ class BillDetail(BaseModel):
         sponsors = bill.get("sponsors", [])
         sponsor = sponsors[0] if sponsors else {}
 
-        latest_action = bill.get("latestAction", {})
-        policy_area = bill.get("policyArea", {})
+        latest_action = bill.get("latestAction") or {}
+        policy_area = bill.get("policyArea") or {}
 
         # Law info
         laws = bill.get("laws", [])
@@ -351,7 +351,7 @@ class Amendment(BaseModel):
         amdt_type = data.get("type", "").lower()
         number = int(data.get("number", 0))
         congress = int(data.get("congress", 0))
-        latest_action = data.get("latestAction", {})
+        latest_action = data.get("latestAction") or {}
 
         # Sponsor (may be nested)
         sponsors = data.get("sponsors", [])
