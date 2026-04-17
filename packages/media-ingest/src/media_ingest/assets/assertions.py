@@ -17,6 +17,7 @@ from dagster_io.extraction import extract_validated
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
+from dagster_io.prompts import load_prompt
 from dagster_io.versioning import code_version_from_modules
 from media_ingest.partitions import media_partitions
 
@@ -25,7 +26,9 @@ _CODE_VERSION = code_version_from_modules(_extraction_mod)
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
-ASSERTION_SYSTEM_PROMPT = """\
+ASSERTION_SYSTEM_PROMPT = load_prompt(
+    "assertions/media",
+    fallback="""\
 You are a knowledge-graph extraction system specialized in transcribed audio/video content.
 Given a text chunk from a media transcription (which may include speaker labels),
 extract qualified Subject-Predicate-Object assertions.
@@ -59,7 +62,8 @@ IMPORTANT RULES:
 - Use SPEAKER_XX labels exactly as they appear (e.g., SPEAKER_00, SPEAKER_01), not 'Speaker' or 'the speaker'
 - Skip meta-commentary about the conversation itself (e.g., 'this is just guessing', 'I want to get someone on the show')
 - Only extract factual claims, allegations, and substantive speech acts — not conversational filler
-- Each assertion should be independently meaningful without needing surrounding context"""
+- Each assertion should be independently meaningful without needing surrounding context""",
+)
 
 # Speech-act predicates for media content, with bridges to congress/leaks vocabularies
 MEDIA_PREDICATE_MAPPINGS = {

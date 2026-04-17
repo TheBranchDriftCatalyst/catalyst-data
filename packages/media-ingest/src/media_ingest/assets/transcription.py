@@ -9,6 +9,7 @@ Diarization is a separate downstream asset (media_diarization).
 """
 
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -49,6 +50,35 @@ WHISPER_K8S_CONFIG = {
         },
     },
 }
+
+
+def _normalize_text(text: str) -> str:
+    """Post-process transcription text: fix ALL CAPS, missing spaces, punctuation.
+
+    Whisper/OpenVINO sometimes outputs uppercase for emphatic speech or
+    on-screen text (CNN chyrons), and drops spaces between words at chunk
+    boundaries.
+    """
+    if not text or len(text) < 2:
+        return text
+
+    # Fix missing space after sentence-ending punctuation followed by a letter
+    text = re.sub(r"([.!?])([A-Za-z])", r"\1 \2", text)
+    # Fix missing space after comma followed by a letter (not in numbers)
+    text = re.sub(r",([A-Za-z])", r", \1", text)
+    # Split camelCase-like joins: "NickFuentes" → "Nick Fuentes"
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+
+    # Detect ALL CAPS blocks (>70% uppercase, >30 alpha chars) and sentence-case them
+    alpha_chars = [c for c in text if c.isalpha()]
+    if len(alpha_chars) > 30:
+        upper_ratio = sum(1 for c in alpha_chars if c.isupper()) / len(alpha_chars)
+        if upper_ratio > 0.7:
+            # Split on sentence boundaries, capitalize first letter of each
+            sentences = re.split(r"(?<=[.!?])\s+", text)
+            text = " ".join(s[0].upper() + s[1:].lower() if len(s) > 1 else s for s in sentences if s)
+
+    return text.strip()
 
 
 def extract_audio_to_wav(audio_path: str) -> str:
@@ -224,7 +254,7 @@ def _transcribe_faster_whisper(model, audio_path: str) -> dict:
     segments, info = model.transcribe(audio_path, word_timestamps=True)
     segments_list = []
     for s in segments:
-        seg = {"start": s.start, "end": s.end, "text": s.text.strip()}
+        seg = {"start": s.start, "end": s.end, "text": _normalize_text(s.text.strip())}
         if s.words:
             seg["words"] = [
                 {
@@ -340,7 +370,7 @@ def _transcribe_openvino_chunk(pipe, wav_path: str) -> dict:
     segments_list = []
     if hasattr(result, "chunks") and result.chunks:
         for chunk in result.chunks:
-            text = chunk.text.strip()
+            text = _normalize_text(chunk.text.strip())
             seg = {
                 "start": chunk.start_ts,
                 "end": chunk.end_ts,
@@ -351,7 +381,7 @@ def _transcribe_openvino_chunk(pipe, wav_path: str) -> dict:
                 seg["words"] = words
             segments_list.append(seg)
     else:
-        text = str(result).strip()
+        text = _normalize_text(str(result).strip())
         seg = {"start": 0.0, "end": duration_s, "text": text}
         words = _estimate_word_timestamps(text, 0.0, duration_s)
         if words:

@@ -39,6 +39,7 @@ DOCUMENTS_KEY = f"silver/{_CODE_LOCATION}/{_GROUP}/media_documents/data.jsonl"
 _GOLD_PREFIX = f"gold/{_CODE_LOCATION}/{_GROUP}"
 TRANSCRIPTIONS_PREFIX = f"{_GOLD_PREFIX}/media_transcriptions"
 DIARIZATIONS_PREFIX = f"{_GOLD_PREFIX}/media_segment_merge"
+CHUNKS_PREFIX = f"{_GOLD_PREFIX}/media_chunks"
 MENTIONS_PREFIX = f"{_GOLD_PREFIX}/media_mentions"
 ASSERTIONS_PREFIX = f"{_GOLD_PREFIX}/media_assertions"
 
@@ -144,6 +145,11 @@ class S3DataService:
         """Load diarization (speaker-attributed transcript) for a document."""
         key = f"{DIARIZATIONS_PREFIX}/{document_id}/data.json"
         return self._load_json(key)
+
+    def load_chunks(self, document_id: str) -> list[dict]:
+        """Load text chunks with metadata (strategy, timestamps) for a document."""
+        key = f"{CHUNKS_PREFIX}/{document_id}/data.jsonl"
+        return self._load_jsonl(key)
 
     def load_mentions(self, document_id: str) -> list[dict]:
         """Load NER mentions for a document from the gold layer."""

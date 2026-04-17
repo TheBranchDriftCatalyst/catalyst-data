@@ -176,13 +176,10 @@ def _merge_same_speaker_segments(
         if same_speaker and 0 <= gap <= gap_threshold_s:
             # Extend current segment
             current["end"] = next_seg["end"]
-            # Concatenate text — add space if current doesn't end with whitespace
-            cur_text = current.get("text", "")
-            nxt_text = next_seg.get("text", "")
-            if cur_text and not cur_text.endswith(" "):
-                current["text"] = cur_text + " " + nxt_text
-            else:
-                current["text"] = cur_text + nxt_text
+            # Concatenate text — always ensure exactly one space between segments
+            cur_text = current.get("text", "").rstrip()
+            nxt_text = next_seg.get("text", "").lstrip()
+            current["text"] = f"{cur_text} {nxt_text}" if cur_text else nxt_text
 
             # Merge word arrays
             if current.get("words") is not None and next_seg.get("words"):

@@ -55,6 +55,24 @@ export interface Diarization extends Transcription {
   diarization_error?: string;
 }
 
+export interface ChunkInfo {
+  chunk_id: string;
+  document_id: string;
+  text: string;
+  index: number;
+  total_chunks: number;
+  metadata: {
+    speaker?: string;
+    start_s?: number;
+    end_s?: number;
+    strategy?: string;
+    source?: string;
+    language?: string;
+    speaker_count?: number;
+    [k: string]: unknown;
+  };
+}
+
 export interface Mention {
   text: string;
   mention_type: string;

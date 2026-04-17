@@ -15,6 +15,7 @@ media_discovery_job = define_asset_job(
         "media_metadata",
         "media_documents",
     ),
+    tags={"dagster/priority": "10"},
     description="Scan NFS → ffprobe metadata → register documents. Transcode runs independently.",
 )
 

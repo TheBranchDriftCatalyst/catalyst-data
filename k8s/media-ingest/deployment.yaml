@@ -116,12 +116,17 @@ spec:
               value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
             - name: EMBEDDING_BASE_URL
               value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
+            - name: PROMPT_REGISTRY_DIR
+              value: /app/prompts
           volumeMounts:
             - name: metube-downloads
               mountPath: /data/metube
               readOnly: true
             - name: tubesync-downloads
               mountPath: /data/tubesync
+              readOnly: true
+            - name: prompts
+              mountPath: /app/prompts
               readOnly: true
           resources:
             requests:
@@ -147,3 +152,11 @@ spec:
         - name: tubesync-downloads
           persistentVolumeClaim:
             claimName: tubesync-downloads
+        - name: prompts
+          configMap:
+            name: media-ingest-prompts
+            items:
+              - key: mentions.prompt
+                path: mentions/media.prompt
+              - key: assertions.prompt
+                path: assertions/media.prompt

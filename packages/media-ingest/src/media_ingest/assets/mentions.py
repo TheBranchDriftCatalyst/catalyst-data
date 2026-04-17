@@ -17,6 +17,7 @@ from dagster_io.extraction import extract_validated
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
+from dagster_io.prompts import load_prompt
 from dagster_io.versioning import code_version_from_modules
 from media_ingest.partitions import media_partitions
 
@@ -25,7 +26,9 @@ _CODE_VERSION = code_version_from_modules(_extraction_mod)
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
-MENTION_SYSTEM_PROMPT = """\
+MENTION_SYSTEM_PROMPT = load_prompt(
+    "mentions/media",
+    fallback="""\
 You are a named-entity extraction system specialized in transcribed audio/video content.
 Given a text chunk from a media transcription (which may include speaker labels like [SPEAKER_00]),
 extract all named entity mentions with precise information.
@@ -67,7 +70,8 @@ IMPORTANT RULES:
 - White House is ORG (institution), not GPE. Government buildings are FACILITY or ORG.
 - Political parties and national groups (Republicans, Democrats, Cubans, Iranians) are NORP, not OTHER
 - Use the most complete form of names (Fidel Castro, not just Fidel)
-- If the same entity appears with different surface forms, prefer the most specific one"""
+- If the same entity appears with different surface forms, prefer the most specific one""",
+)
 
 
 @asset(

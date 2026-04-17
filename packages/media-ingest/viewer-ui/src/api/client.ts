@@ -2,6 +2,7 @@ import type {
   MediaDocument,
   Transcription,
   Diarization,
+  ChunkInfo,
   Mention,
   Assertion,
   Annotation,
@@ -32,6 +33,10 @@ export function fetchTranscription(id: string): Promise<Transcription> {
 
 export function fetchDiarization(id: string): Promise<Diarization> {
   return apiFetch<Diarization>(`/documents/${encodeURIComponent(id)}/diarization`);
+}
+
+export function fetchChunks(id: string): Promise<ChunkInfo[]> {
+  return apiFetch<ChunkInfo[]>(`/documents/${encodeURIComponent(id)}/chunks`);
 }
 
 export function fetchMentions(id: string): Promise<Mention[]> {

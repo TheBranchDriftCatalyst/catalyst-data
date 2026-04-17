@@ -146,6 +146,7 @@ def media_document_sensor(context: SensorEvaluationContext):
         yield RunRequest(
             run_key=f"media_document_{doc_id}",
             partition_key=doc_id,
+            tags={"gpu": "true"},
         )
 
     DAGSTER_SENSOR_TICK_TOTAL.labels(

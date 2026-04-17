@@ -1,7 +1,8 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { Input, ScrollArea } from "@thebranchdriftcatalyst/catalyst-ui";
 import { MessageSquare, Search, X, ChevronUp, ChevronDown, Eye, EyeOff } from "lucide-react";
-import type { Segment, Word, Mention } from "@/types/media";
+import { useMemo } from "react";
+import type { Segment, Word, Mention, ChunkInfo } from "@/types/media";
 import { useTranscriptSearch, type TranscriptMatch } from "@/hooks/useTranscriptSearch";
 import { useInlineAnnotations } from "@/hooks/useInlineAnnotations";
 import AnnotatedText from "@/components/AnnotatedText";
@@ -31,6 +32,8 @@ interface TranscriptProps {
   filteredIndices?: number[];
   /** Entity mentions to render as inline highlights in the transcript. */
   mentions?: Mention[];
+  /** Chunk metadata — used to show split strategy per segment. */
+  chunks?: ChunkInfo[];
   /** Called when a user clicks an entity highlight in the transcript text. */
   onEntityClick?: (text: string) => void;
 }
@@ -71,10 +74,30 @@ export default function Transcript({
   isFiltered = false,
   filteredIndices,
   mentions,
+  chunks,
   onEntityClick,
 }: TranscriptProps) {
   const displayName = (label: string | undefined) =>
     resolveSpeaker ? resolveSpeaker(label) : (label ?? "Unknown");
+
+  // Map each segment to the chunk strategies that overlap its time range
+  const strategyBySegment = useMemo(() => {
+    if (!chunks || chunks.length === 0) return new Map<number, string[]>();
+    const map = new Map<number, string[]>();
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]!;
+      const strategies = new Set<string>();
+      for (const c of chunks) {
+        const cs = c.metadata.start_s ?? 0;
+        const ce = c.metadata.end_s ?? 0;
+        if (cs < seg.end && ce > seg.start && c.metadata.strategy) {
+          strategies.add(c.metadata.strategy);
+        }
+      }
+      if (strategies.size > 0) map.set(i, [...strategies]);
+    }
+    return map;
+  }, [segments, chunks]);
   const internalContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = transcriptContainerRef ?? internalContainerRef;
   const activeSegRef = useRef<HTMLDivElement>(null);
@@ -361,12 +384,36 @@ export default function Transcript({
                     </p>
                   )}
 
-                  {/* Timestamp (subtle, on hover) */}
-                  {!showSpeakerLabel && (
-                    <span className="text-[10px] text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity font-mono tabular-nums">
-                      {formatTime(seg.start)}
+                  {/* Segment metadata (subtle, bottom-right) */}
+                  <div className="flex items-center gap-2 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {!showSpeakerLabel && (
+                      <span className="text-[10px] text-zinc-600 font-mono tabular-nums">
+                        {formatTime(seg.start)}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-zinc-600 font-mono tabular-nums">
+                      {Math.round(seg.end - seg.start)}s
                     </span>
-                  )}
+                    <span className="text-[10px] text-zinc-600 font-mono">
+                      {seg.words?.length ?? seg.text.split(/\s+/).length}w
+                    </span>
+                    <span className="text-[10px] text-zinc-600 font-mono">{seg.text.length}c</span>
+                    {strategyBySegment.get(origIdx)?.map((s) => (
+                      <span
+                        key={s}
+                        className={cn(
+                          "text-[9px] px-1.5 py-0.5 rounded-full font-mono",
+                          s === "speaker_turn"
+                            ? "bg-emerald-500/15 text-emerald-400"
+                            : s === "speech_pause_split"
+                              ? "bg-amber-500/15 text-amber-400"
+                              : "bg-rose-500/15 text-rose-400",
+                        )}
+                      >
+                        {s.replace(/_/g, " ")}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             );

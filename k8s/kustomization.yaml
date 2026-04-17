@@ -71,6 +71,10 @@ configMapGenerator:
       - propositions-spo.prompt=congress-data/prompts/propositions-spo.prompt
       - mentions.prompt=congress-data/prompts/mentions.prompt
       - assertions.prompt=congress-data/prompts/assertions.prompt
+  - name: media-ingest-prompts
+    files:
+      - mentions.prompt=media-ingest/prompts/mentions.prompt
+      - assertions.prompt=media-ingest/prompts/assertions.prompt
   - name: data-explorer-prompts
     files:
       - rag-research-assistant.prompt=data-explorer/prompts/rag-research-assistant.prompt

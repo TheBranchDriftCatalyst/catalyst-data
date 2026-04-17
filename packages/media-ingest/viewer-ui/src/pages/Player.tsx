@@ -38,6 +38,7 @@ export default function PlayerPage() {
     document: doc,
     transcription,
     diarization,
+    chunks,
     mentions,
     assertions,
     isLoading,
@@ -399,6 +400,7 @@ export default function PlayerPage() {
                 scrollHighlightIndex={scrollHighlightIndex}
                 className="flex-1 min-h-0"
                 mentions={mentions}
+                chunks={chunks}
                 onEntityClick={handleEntityClick}
               />
             </div>

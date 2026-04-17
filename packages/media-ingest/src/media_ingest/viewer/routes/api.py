@@ -4,6 +4,7 @@ GET /viewer/api/documents                          — list all media documents
 GET /viewer/api/documents/{document_id}            — single document metadata
 GET /viewer/api/documents/{document_id}/transcription — transcription data
 GET /viewer/api/documents/{document_id}/diarization   — speaker-attributed segments
+GET /viewer/api/documents/{document_id}/chunks            — text chunks with strategy metadata
 GET /viewer/api/documents/{document_id}/mentions       — NER entity mentions
 GET /viewer/api/documents/{document_id}/assertions     — S-P-O triples
 """
@@ -101,6 +102,16 @@ def get_diarization(document_id: str) -> dict:
             detail=f"Diarization not found for document '{document_id}'",
         )
     return data
+
+
+# ── Chunks ───────────────────────────────────────────────────────────────────
+
+
+@router.get("/documents/{document_id}/chunks")
+def get_chunks(document_id: str) -> list[dict]:
+    """Get text chunks with strategy metadata for a document."""
+    svc = _svc()
+    return svc.load_chunks(document_id)
 
 
 # ── Mentions ─────────────────────────────────────────────────────────────────

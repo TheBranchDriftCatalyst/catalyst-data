@@ -26,7 +26,10 @@ data:
       module: dagster.core.run_coordinator
       class: QueuedRunCoordinator
       config:
-        max_concurrent_runs: 5
+        max_concurrent_runs: 10
+        tag_concurrency_limits:
+          - key: "gpu"
+            limit: 5
 
     run_launcher:
       module: dagster_k8s
