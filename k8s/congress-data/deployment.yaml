@@ -101,7 +101,7 @@ spec:
             - name: LLM_BASE_URL
               value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
             - name: LLM_MODEL
-              value: "ollama-mac/qwen3:30b-a3b"
+              value: "runpod/qwen3:30b-a3b"
             - name: EMBEDDING_BASE_URL
               value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
             - name: EMBEDDING_MODEL
