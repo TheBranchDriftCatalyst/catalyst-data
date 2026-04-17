@@ -6,15 +6,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
-# 1. Install third-party deps FIRST — changes rarely, stays cached
-COPY packages/congress-data/pyproject.toml .
-RUN --mount=type=cache,target=/root/.cache/uv \
-    mkdir -p src/congress_data && \
-    touch src/congress_data/__init__.py && \
-    uv pip install --system . && \
-    rm -rf src/congress_data
-
-# 2. Shared libs — changes more often than deps, but less than src
+# 1. Shared libs (includes dagster-io which isn't on PyPI)
 COPY libs/ /app/libs/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system \
@@ -23,7 +15,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         /app/libs/catalyst-langgraph-aio/ \
         /app/libs/dagster-io/
 
-# 3. Copy real source — changes most often, deps already cached
+# 2. Package deps
+COPY packages/congress-data/pyproject.toml .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    mkdir -p src/congress_data && \
+    touch src/congress_data/__init__.py && \
+    uv pip install --system . && \
+    rm -rf src/congress_data
+
+# 3. Source code
 COPY packages/congress-data/src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --no-deps --reinstall-package congress-data .
