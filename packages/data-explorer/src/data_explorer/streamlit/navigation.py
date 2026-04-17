@@ -22,6 +22,7 @@ PAGE_LABELS: dict[str, str] = {
     "pages/10_Prompt_Catalog.py": "Prompt Catalog",
     "pages/11_Entity_Candidates.py": "Entity Candidates",
     "pages/12_Assertion_Graph.py": "Assertion Graph",
+    "pages/13_S3_File_Explorer.py": "S3 File Explorer",
 }
 
 ENTITY_COLORS: dict[str, str] = {
