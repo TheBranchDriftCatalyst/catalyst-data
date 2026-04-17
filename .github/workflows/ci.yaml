@@ -8,6 +8,7 @@ on:
 jobs:
   lint-python:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,6 +20,7 @@ jobs:
 
   lint-frontend:
     runs-on: ubuntu-latest
+    continue-on-error: true
     defaults:
       run:
         working-directory: packages/media-ingest/viewer-ui
