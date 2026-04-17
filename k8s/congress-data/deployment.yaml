@@ -54,6 +54,16 @@ spec:
                 secretKeyRef:
                   name: congress-data-secrets
                   key: CONGRESS_API_KEY
+            - name: DAGSTER_POSTGRES_HOST
+              value: "dagster-postgres.catalyst-data.svc.cluster.local"
+            - name: DAGSTER_POSTGRES_PORT
+              value: "5432"
+            - name: DAGSTER_POSTGRES_USER
+              value: "dagster"
+            - name: DAGSTER_POSTGRES_PASSWORD
+              value: "dagster-homelab"
+            - name: DAGSTER_POSTGRES_DB
+              value: "dagster"
             - name: DAGSTER_CODE_LOCATION
               value: congress_data
             - name: DAGSTER_CURRENT_IMAGE
