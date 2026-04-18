@@ -310,6 +310,24 @@ class LLMResource(ConfigurableResource):
                     last_err = e
                     duration = time.monotonic() - start
                     LLM_REQUESTS.labels(model=self.model, operation=operation, status="error").inc()
+
+                    # Don't retry length errors — same input will always exceed the limit
+                    err_str = str(e)
+                    is_length_error = "LengthFinishReason" in type(e).__name__ or "length limit" in err_str.lower()
+                    if is_length_error:
+                        logger.warning(
+                            "LLM %s item %d/%d SKIPPED — output exceeded max_tokens "
+                            "[%s] (after %.1fs, model=%s, prompt=%d chars)",
+                            operation,
+                            idx + 1,
+                            len(items),
+                            e,
+                            duration,
+                            self.model,
+                            prompt_chars,
+                        )
+                        return idx, None  # return None — caller handles missing results
+
                     if attempt < max_retries:
                         delay = retry_delay * (2**attempt)
                         logger.warning(
