@@ -57,16 +57,19 @@ def _build_graph():
     class _NullRepository(ArtifactRepository):
         """No-op repository — Dagster's IO manager handles persistence."""
 
-        async def save_mentions(self, document_id, chunk_id, mentions):
+        async def save_mentions(self, document_id, mentions):
             pass
 
-        async def save_propositions(self, document_id, chunk_id, propositions):
+        async def save_propositions(self, document_id, propositions):
             pass
 
-        async def load_mentions(self, document_id, chunk_id):
+        async def save_audit_trail(self, document_id, audit_events):
+            pass
+
+        async def load_mentions(self, document_id):
             return []
 
-        async def load_propositions(self, document_id, chunk_id):
+        async def load_propositions(self, document_id):
             return []
 
     llm_client = LLMClient()
