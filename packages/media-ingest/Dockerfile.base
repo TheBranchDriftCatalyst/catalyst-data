@@ -66,7 +66,10 @@ RUN apt-get update && \
         libze-intel-gpu1 libze1 && \
     apt-get purge -y gnupg wget && \
     apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    rm -f /usr/lib/python3.13/EXTERNALLY-MANAGED
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 

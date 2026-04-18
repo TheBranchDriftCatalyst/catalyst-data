@@ -23,6 +23,9 @@ FROM ghcr.io/thebranchdriftcatalyst/media-ingest-base:latest
 
 WORKDIR /app
 
+# Remove EXTERNALLY-MANAGED marker (base image runtime stage has it)
+RUN rm -f /usr/lib/python3.13/EXTERNALLY-MANAGED
+
 # 1. Shared libs
 COPY libs/ /app/libs/
 RUN --mount=type=cache,target=/root/.cache/uv \
