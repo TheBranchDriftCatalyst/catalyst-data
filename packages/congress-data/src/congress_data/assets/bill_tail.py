@@ -566,7 +566,7 @@ def bill_embeddings(
 ) -> Output[list[dict]]:
     with trace_operation("bill_embeddings", tracer, {"partition": context.partition_key, "layer": "gold"}):
         texts = [chunk.text for chunk in bill_chunks]
-        vectors = embeddings.embed_documents(texts) if texts else []
+        vectors = embeddings.embed(texts) if texts else []
 
         embedded = [
             {

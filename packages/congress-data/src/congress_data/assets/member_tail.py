@@ -346,7 +346,7 @@ def member_embeddings(
 ) -> Output[list[dict]]:
     with trace_operation("member_embeddings", tracer, {"partition": context.partition_key, "layer": "gold"}):
         texts = [chunk.text for chunk in member_chunks]
-        vectors = embeddings.embed_documents(texts) if texts else []
+        vectors = embeddings.embed(texts) if texts else []
 
         embedded = [
             {
