@@ -153,3 +153,23 @@ tasks:
       DAGSTER_CODE_LOCATION: media_ingest
     cmds:
       - dagster dev -m media_ingest
+
+  dev:viewer:
+    desc: Run media viewer locally against cluster MinIO data
+    env:
+      DAGSTER_CODE_LOCATION: media_ingest
+      DAGSTER_S3_ENDPOINT_URL: http://minio.talos00
+      DAGSTER_S3_ACCESS_KEY: minio
+      DAGSTER_S3_SECRET_KEY: minio123
+      DAGSTER_S3_BUCKET: catalyst-data
+    cmds:
+      - |
+        cd packages/media-ingest/viewer-ui && npm run dev &
+        VIEWER_PID=$!
+        echo "Viewer UI: http://localhost:5173/viewer/"
+        python -c "
+        import uvicorn
+        from media_ingest.viewer.app import create_viewer_app
+        uvicorn.run(create_viewer_app(), host='0.0.0.0', port=8080)
+        "
+        kill $VIEWER_PID 2>/dev/null
