@@ -308,28 +308,39 @@ class LLMResource(ConfigurableResource):
                     return idx, result
                 except Exception as e:
                     last_err = e
+                    duration = time.monotonic() - start
                     LLM_REQUESTS.labels(model=self.model, operation=operation, status="error").inc()
                     if attempt < max_retries:
                         delay = retry_delay * (2**attempt)
                         logger.warning(
-                            "LLM %s item %d/%d failed (attempt %d/%d), retrying in %.1fs: %s",
+                            "LLM %s item %d/%d failed (attempt %d/%d), retrying in %.1fs "
+                            "[%s: %s] (after %.1fs, model=%s, prompt=%d chars)",
                             operation,
                             idx + 1,
                             len(items),
                             attempt + 1,
                             max_retries + 1,
                             delay,
+                            type(e).__name__,
                             e,
+                            duration,
+                            self.model,
+                            prompt_chars,
                         )
                         time.sleep(delay)
                     else:
                         logger.error(
-                            "LLM %s item %d/%d failed after %d attempts: %s",
+                            "LLM %s item %d/%d PERMANENT FAILURE after %d attempts "
+                            "[%s: %s] (model=%s, prompt=%d chars)",
                             operation,
                             idx + 1,
                             len(items),
                             max_retries + 1,
+                            type(e).__name__,
                             e,
+                            self.model,
+                            prompt_chars,
+                            exc_info=True,
                         )
             raise last_err  # type: ignore[misc]
 
