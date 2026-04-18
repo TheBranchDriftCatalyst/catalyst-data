@@ -35,6 +35,8 @@ spec:
               containerPort: 9090
               protocol: TCP
           env:
+            - name: DAGSTER_CONTAINER_CONTEXT
+              value: '{"k8s": {"env_vars": ["DAGSTER_CODE_LOCATION=congress_data"], "env_secrets": ["congress-data-secrets", "llm-credentials", "dagster-s3-credentials"]}}'
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://alloy.monitoring.svc.cluster.local:4317"
             - name: OTEL_SERVICE_NAME
