@@ -269,7 +269,7 @@ def member_document(
         metadata={
             "bioguide_id": bioguide_id,
             "terms_served": len(terms_data),
-            "committee_count": len(member_committee_assignments),
+            "committee_count": len(member_committee_assignments or []),
         },
     )
 
