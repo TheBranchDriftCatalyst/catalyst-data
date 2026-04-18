@@ -252,7 +252,7 @@ class LLMResource(ConfigurableResource):
         *,
         log_every: int = 50,
         operation: str = "batch",
-        max_concurrency: int = 10,
+        max_concurrency: int = 5,
         max_retries: int = 3,
         retry_delay: float = 2.0,
     ) -> list[Any]:
