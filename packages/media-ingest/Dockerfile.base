@@ -1,0 +1,95 @@
+# syntax=docker/dockerfile:1
+# ---------- media-ingest BASE: OpenVINO + Intel XPU (Arc/Flex) ----------
+# This is the HEAVY base image with all system + pip dependencies pre-installed.
+# It rarely changes and is built separately to speed up CI (~16 min -> ~2 min).
+#
+# Build: docker build --platform linux/amd64 -f packages/media-ingest/Dockerfile.base -t media-ingest-base .
+# Push:  docker push ghcr.io/thebranchdriftcatalyst/media-ingest-base:latest
+#
+# The app Dockerfile (Dockerfile) layers libs/ and src/ on top of this image.
+
+# ---------- stage 0: install all pip packages ----------
+FROM ubuntu:25.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3.13 python3.13-dev python3.13-venv \
+        python3-pip curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# Allow uv to install into system Python (Ubuntu marks it EXTERNALLY-MANAGED)
+RUN rm -f /usr/lib/python3.13/EXTERNALLY-MANAGED
+ENV UV_PYTHON=/usr/bin/python3.13
+
+WORKDIR /app
+
+# Install PyTorch XPU + package deps from pyproject.toml
+COPY packages/media-ingest/pyproject.toml .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
+    mkdir -p src/media_ingest && \
+    touch src/media_ingest/__init__.py && \
+    python3.13 -m pip install \
+        "torch>=2.6" "torchaudio>=2.6" \
+        --index-url https://download.pytorch.org/whl/xpu && \
+    uv pip install --system --python /usr/bin/python3.13 \
+        ".[openvino]" && \
+    rm -rf src/media_ingest
+
+# ---------- stage 1: runtime (Ubuntu + Intel GPU) ----------
+FROM ubuntu:25.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System deps + Intel GPU kernel-mode driver userspace (OpenCL + Level Zero)
+# The heavy Intel runtime libs (SYCL, PTI, compiler-rt) come from pip packages
+# auto-installed as torch XPU dependencies — no apt oneAPI packages needed.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3.13 python3.13-venv python3.13-dev libpython3.13 \
+        ffmpeg libsndfile1 libgomp1 \
+        gnupg ca-certificates wget && \
+    wget -qO- https://repositories.intel.com/gpu/intel-graphics.key | \
+        gpg --dearmor -o /usr/share/keyrings/intel-graphics.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu noble unified" \
+        > /etc/apt/sources.list.d/intel-gpu.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ocl-icd-libopencl1 intel-opencl-icd \
+        libze-intel-gpu1 libze1 && \
+    apt-get purge -y gnupg wget && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy Python site-packages + binaries + Intel runtime libs from builder.
+# Intel pip packages (intel-pti, intel-sycl-rt, intel-cmplr-lib-rt, etc.)
+# install .so files into {prefix}/lib/ via pip's data-files mechanism, so
+# we copy the entire /usr/local/lib/ tree to get them all (libpti_view.so,
+# libsycl.so, libsvml.so, libumf.so, libtcm.so, etc.).
+COPY --from=builder /usr/lib/python3/dist-packages/ /usr/lib/python3/dist-packages/
+COPY --from=builder /usr/local/lib/ /usr/local/lib/
+COPY --from=builder /usr/local/bin/ /usr/local/bin/
+
+# CRITICAL: uv copies a standalone Python to /usr/local/bin/python3.13 which
+# uses site-packages (source-build convention). The apt-installed Python at
+# /usr/bin/python3.13 uses dist-packages (Debian convention). pip/uv install
+# packages to dist-packages, so we MUST use the apt Python. Remove the uv
+# shadow so PATH resolves to /usr/bin/python3.13.
+RUN rm -f /usr/local/bin/python3.13 /usr/local/bin/python3 /usr/local/bin/python
+RUN ln -sf /usr/bin/python3.13 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.13 /usr/bin/python
+
+ENV DAGSTER_HOME=/opt/dagster/dagster_home
+ENV PYTHONPATH=/app/libs/catalyst-contracts-core/src:/app/libs/catalyst-llm-contract-mcp/src:/app/libs/catalyst-langgraph-aio/src:/app/libs/dagster-io/src:/usr/local/lib/python3.13/dist-packages:/usr/lib/python3/dist-packages
+# CRITICAL: Intel pip runtime libs (.so files) install to {prefix}/lib/
+# which is NOT on LD_LIBRARY_PATH by default. Without this, torch fails
+# with "libpti_view.so.0.10: cannot open shared object file".
+ENV LD_LIBRARY_PATH=/usr/local/lib:${LD_LIBRARY_PATH}
+ENV SYCL_CACHE_DIR=/tmp/sycl_cache
+RUN mkdir -p $DAGSTER_HOME

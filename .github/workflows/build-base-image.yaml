@@ -1,0 +1,35 @@
+name: Build media-ingest base image
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/media-ingest/pyproject.toml'
+      - 'packages/media-ingest/Dockerfile.base'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set lowercase owner
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./packages/media-ingest/Dockerfile.base
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/media-ingest-base:latest
+            ghcr.io/${{ env.OWNER_LC }}/media-ingest-base:${{ github.sha }}
+          cache-from: type=gha,scope=media-ingest-base
+          cache-to: type=gha,scope=media-ingest-base,mode=max
