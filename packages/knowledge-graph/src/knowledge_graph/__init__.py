@@ -20,10 +20,10 @@ from dagster_io import (
     OptionalMinioIOManager,
     make_run_status_sensor,
 )
-from dagster_io.executor import make_k8s_executor
+from dagster_io.executor import make_in_process_executor
 from knowledge_graph.resources import GraphDBResource
 
-_k8s_executor = make_k8s_executor("knowledge_graph")
+_executor = make_in_process_executor("knowledge_graph")
 _run_status_sensors = make_run_status_sensor("knowledge_graph")
 
 # Import assets AFTER SourceAsset definitions to avoid circular issues
@@ -102,7 +102,7 @@ defs = Definitions(
         platinum_resolution_sensor,
         *_run_status_sensors,
     ],
-    executor=_k8s_executor,
+    executor=_executor,
     resources={
         "io_manager": MinioIOManager(),
         # Used via AssetIn(input_manager_key="optional_io_manager") for

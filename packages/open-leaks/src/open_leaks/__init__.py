@@ -17,9 +17,9 @@ from dagster_io import (
     MinioIOManager,
     make_run_status_sensor,
 )
-from dagster_io.executor import make_k8s_executor
+from dagster_io.executor import make_in_process_executor
 
-_k8s_executor = make_k8s_executor("open_leaks")
+_executor = make_in_process_executor("open_leaks")
 _run_status_sensors = make_run_status_sensor("open_leaks")
 
 from open_leaks.assets import (
@@ -62,7 +62,7 @@ defs = Definitions(
     sensors=[
         *_run_status_sensors,
     ],
-    executor=_k8s_executor,
+    executor=_executor,
     resources={
         "io_manager": MinioIOManager(),
         "chunking": ChunkingResource(),

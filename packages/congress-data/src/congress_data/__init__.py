@@ -27,9 +27,9 @@ from dagster_io import (
     OptionalMinioIOManager,
     make_run_status_sensor,
 )
-from dagster_io.executor import make_k8s_executor
+from dagster_io.executor import make_in_process_executor
 
-_k8s_executor = make_k8s_executor("congress_data")
+_executor = make_in_process_executor("congress_data")
 _run_status_sensors = make_run_status_sensor("congress_data")
 
 # ── Head assets (unpartitioned) ──────────────────────────────────────────────
@@ -120,7 +120,7 @@ defs = Definitions(
         bills_discovery_schedule,
         members_discovery_schedule,
     ],
-    executor=_k8s_executor,
+    executor=_executor,
     resources={
         "io_manager": MinioIOManager(),
         "optional_io_manager": OptionalMinioIOManager(),
