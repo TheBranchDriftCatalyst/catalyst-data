@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 from pathlib import Path
@@ -27,19 +28,28 @@ DEFAULT_OUTPUT_DIR = TEST_OUTPUT_ROOT / "congress-data"
 os.environ.setdefault("DAGSTER_CODE_LOCATION", "congress_data")
 
 
+def _safe_addoption(parser, *args, **kwargs):
+    """Add a pytest option, silently skipping if already registered."""
+    with contextlib.suppress(ValueError):
+        parser.addoption(*args, **kwargs)
+
+
 def pytest_addoption(parser):
-    parser.addoption(
+    _safe_addoption(
+        parser,
         "--output-dir",
         default=str(DEFAULT_OUTPUT_DIR),
         help=f"Directory for pipeline output (default: {DEFAULT_OUTPUT_DIR})",
     )
-    parser.addoption(
+    _safe_addoption(
+        parser,
         "--keep-output",
         action="store_true",
         default=True,
         help="Don't clean output directory before run",
     )
-    parser.addoption(
+    _safe_addoption(
+        parser,
         "--partition",
         default="119-hres-1",
         help="Bill partition key to test (default: 119-hres-1)",

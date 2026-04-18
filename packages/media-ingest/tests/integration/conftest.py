@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 from pathlib import Path
@@ -26,13 +27,21 @@ DEMO_VIDEO = REPO_ROOT / "tests" / "demo_video.mp4"
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures"
 
 
+def _safe_addoption(parser, *args, **kwargs):
+    """Add a pytest option, silently skipping if already registered."""
+    with contextlib.suppress(ValueError):
+        parser.addoption(*args, **kwargs)
+
+
 def pytest_addoption(parser):
-    parser.addoption(
+    _safe_addoption(
+        parser,
         "--output-dir",
         default=str(DEFAULT_OUTPUT_DIR),
         help=f"Directory for pipeline output (default: {DEFAULT_OUTPUT_DIR})",
     )
-    parser.addoption(
+    _safe_addoption(
+        parser,
         "--keep-output",
         action="store_true",
         default=True,

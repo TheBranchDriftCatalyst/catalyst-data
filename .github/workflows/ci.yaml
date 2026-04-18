@@ -54,7 +54,11 @@ jobs:
           pip install -e packages/knowledge-graph
           pip install -e packages/data-explorer
           pip install pytest pytest-cov
-      - run: pytest --tb=short --ignore=packages/media-ingest/tests/test_transcription_qa.py
+      - run: >-
+          pytest --tb=short
+          --ignore=packages/media-ingest/tests/test_transcription_qa.py
+          --ignore=packages/media-ingest/tests/integration
+          --ignore=packages/congress-data/tests/integration
 
   build:
     needs: [test]

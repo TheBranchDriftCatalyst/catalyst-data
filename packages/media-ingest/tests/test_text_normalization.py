@@ -4,7 +4,6 @@ Covers: ALL CAPS → sentence case, missing punctuation spacing,
 camelCase word splits, and passthrough of normal text.
 """
 
-
 from media_ingest.assets.transcription import _normalize_text
 
 
@@ -39,7 +38,9 @@ class TestNormalizeText:
 
     def test_mixed_case_not_converted(self):
         """Text with normal mixed case should not be sentence-cased."""
-        text = "Nick Fuentes really passed that test with flying colors. That fragmentation is being caused purposefully."
+        text = (
+            "Nick Fuentes really passed that test with flying colors. That fragmentation is being caused purposefully."
+        )
         assert _normalize_text(text) == text
 
     def test_short_caps_not_converted(self):

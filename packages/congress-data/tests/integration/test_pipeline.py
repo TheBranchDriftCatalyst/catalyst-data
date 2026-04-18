@@ -238,8 +238,7 @@ class TestGold:
         _needs_api_key()
         _needs_llm()
         result = materialize(
-            [bill_detail, bill_text_versions, bill_full_text,
-             bill_document, bill_chunks, bill_mentions],
+            [bill_detail, bill_text_versions, bill_full_text, bill_document, bill_chunks, bill_mentions],
             resources=test_resources,
             partition_key=partition_key,
             instance=dagster_instance,
@@ -261,8 +260,7 @@ class TestGold:
         _needs_api_key()
         _needs_llm()
         result = materialize(
-            [bill_detail, bill_text_versions, bill_full_text,
-             bill_document, bill_chunks, bill_embeddings],
+            [bill_detail, bill_text_versions, bill_full_text, bill_document, bill_chunks, bill_embeddings],
             resources=test_resources,
             partition_key=partition_key,
             instance=dagster_instance,
@@ -292,10 +290,17 @@ class TestFullChain:
         _needs_llm()
 
         all_assets = [
-            bill_detail, bill_actions, bill_cosponsors,
-            bill_text_versions, bill_amendments, bill_full_text,
-            bill_document, bill_chunks,
-            bill_mentions, bill_assertions, bill_embeddings,
+            bill_detail,
+            bill_actions,
+            bill_cosponsors,
+            bill_text_versions,
+            bill_amendments,
+            bill_full_text,
+            bill_document,
+            bill_chunks,
+            bill_mentions,
+            bill_assertions,
+            bill_embeddings,
         ]
 
         result = materialize(
