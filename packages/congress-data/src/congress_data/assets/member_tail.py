@@ -350,7 +350,7 @@ def member_embeddings(
 
         embedded = [
             {
-                "chunk_id": chunk.id,
+                "chunk_id": chunk.chunk_id,
                 "document_id": chunk.document_id,
                 "text": chunk.text,
                 "embedding": vec,
