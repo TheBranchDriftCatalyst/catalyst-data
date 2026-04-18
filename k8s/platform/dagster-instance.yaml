@@ -67,6 +67,11 @@ data:
                   secretKeyRef:
                     name: dagster-s3-credentials
                     key: DAGSTER_S3_SECRET_KEY
+              - name: CONGRESS_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: congress-data-secrets
+                    key: CONGRESS_API_KEY
               - name: LLM_MODEL
                 value: "runpod/qwen3:30b-a3b"
               - name: LLM_BASE_URL

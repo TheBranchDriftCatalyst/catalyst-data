@@ -1,0 +1,155 @@
+version: "3"
+
+dotenv: [".env"]
+
+vars:
+  CONGRESS_PARTITION: '{{.CONGRESS_PARTITION | default "119-hres-1"}}'
+
+tasks:
+  # ── Testing ──────────────────────────────────────────────────────────────
+
+  test:
+    desc: Run all unit tests
+    cmds:
+      - pytest --tb=short --ignore=packages/media-ingest/tests/test_transcription_qa.py
+
+  test:congress:
+    desc: Run congress-data unit tests
+    cmds:
+      - pytest packages/congress-data/tests/test_definitions.py -v
+
+  test:media:
+    desc: Run media-ingest unit tests
+    cmds:
+      - pytest packages/media-ingest/tests/ -v --ignore=packages/media-ingest/tests/integration --ignore=packages/media-ingest/tests/test_transcription_qa.py
+
+  # ── Integration Tests ────────────────────────────────────────────────────
+
+  integration:
+    desc: Run ALL integration tests (congress bronze+silver + media discovery)
+    cmds:
+      - task: integration:congress:bronze
+      - task: integration:congress:silver
+
+  integration:congress:
+    desc: Run full congress integration chain (requires CONGRESS_API_KEY + LLM_API_KEY)
+    env:
+      DAGSTER_CODE_LOCATION: congress_data
+    cmds:
+      - pytest packages/congress-data/tests/integration/ -v -s --partition {{.CONGRESS_PARTITION}}
+
+  integration:congress:bronze:
+    desc: Run congress bronze tests only (API calls, no LLM)
+    env:
+      DAGSTER_CODE_LOCATION: congress_data
+    cmds:
+      - pytest packages/congress-data/tests/integration/ -v -s -k "bronze" --partition {{.CONGRESS_PARTITION}}
+
+  integration:congress:silver:
+    desc: Run congress bronze + silver tests (API + transforms, no LLM)
+    env:
+      DAGSTER_CODE_LOCATION: congress_data
+    cmds:
+      - pytest packages/congress-data/tests/integration/ -v -s -k "bronze or silver" --partition {{.CONGRESS_PARTITION}}
+
+  integration:congress:full:
+    desc: Run full congress pipeline including LLM (requires LLM_API_KEY)
+    env:
+      DAGSTER_CODE_LOCATION: congress_data
+    cmds:
+      - pytest packages/congress-data/tests/integration/ -v -s --partition {{.CONGRESS_PARTITION}}
+
+  integration:media:
+    desc: Run media-ingest integration tests
+    env:
+      DAGSTER_CODE_LOCATION: media_ingest
+    cmds:
+      - pytest packages/media-ingest/tests/integration/ -v -s
+
+  # ── Linting ──────────────────────────────────────────────────────────────
+
+  lint:
+    desc: Run all linters
+    cmds:
+      - task: lint:python
+      - task: lint:frontend
+
+  lint:python:
+    desc: Run ruff check + format
+    cmds:
+      - ruff check .
+      - ruff format --check .
+
+  lint:fix:
+    desc: Auto-fix lint issues
+    cmds:
+      - ruff check --fix .
+      - ruff format .
+
+  lint:frontend:
+    desc: Run frontend linters (viewer-ui)
+    dir: packages/media-ingest/viewer-ui
+    cmds:
+      - npm run lint
+      - npm run format:check
+
+  # ── Pipeline Operations ──────────────────────────────────────────────────
+
+  dagster:materialize:congress:
+    desc: Kick off congress discovery + sensor pipeline
+    cmds:
+      - |
+        curl -s "http://dagster.talos00/graphql" -X POST -H "Content-Type: application/json" \
+          -d '{"query":"mutation { launchRun(executionParams: { selector: { repositoryLocationName: \"congress_data\", repositoryName: \"__repository__\", jobName: \"bills_discovery_job\" }, runConfigData: {} }) { __typename ... on LaunchRunSuccess { run { runId } } } }"}' | python3 -c "import json,sys; print('Bills:', json.load(sys.stdin)['data']['launchRun']['run']['runId'][:12])"
+      - |
+        curl -s "http://dagster.talos00/graphql" -X POST -H "Content-Type: application/json" \
+          -d '{"query":"mutation { launchRun(executionParams: { selector: { repositoryLocationName: \"congress_data\", repositoryName: \"__repository__\", jobName: \"members_discovery_job\" }, runConfigData: {} }) { __typename ... on LaunchRunSuccess { run { runId } } } }"}' | python3 -c "import json,sys; print('Members:', json.load(sys.stdin)['data']['launchRun']['run']['runId'][:12])"
+
+  dagster:status:
+    desc: Show current Dagster run status
+    cmds:
+      - |
+        curl -s "http://dagster.talos00/graphql" -X POST -H "Content-Type: application/json" \
+          -d '{"query":"{ runsOrError(filter:{statuses:[SUCCESS,FAILURE,STARTED,QUEUED]}, limit:20) { __typename ... on Runs { results { status tags { key value } } } } }"}' | python3 -c "
+        import json,sys
+        from collections import Counter
+        runs = json.load(sys.stdin)['data']['runsOrError']['results']
+        bill = [r for r in runs if any(t['value']=='congress_bill_sensor' for t in r['tags'] if t['key']=='dagster/sensor_name')]
+        member = [r for r in runs if any(t['value']=='congress_member_sensor' for t in r['tags'] if t['key']=='dagster/sensor_name')]
+        print(f'Bills:   {dict(Counter(r[\"status\"] for r in bill))}')
+        print(f'Members: {dict(Counter(r[\"status\"] for r in member))}')
+        "
+
+  dagster:kill:
+    desc: Cancel all active Dagster runs
+    cmds:
+      - |
+        curl -s "http://dagster.talos00/graphql" -X POST -H "Content-Type: application/json" \
+          -d '{"query":"{ runsOrError(filter:{statuses:[QUEUED,STARTED,STARTING]}, limit:500) { __typename ... on Runs { results { runId } } } }"}' | python3 -c "
+        import json,sys,urllib.request
+        runs = json.load(sys.stdin)['data']['runsOrError']['results']
+        for r in runs:
+            try:
+                req = urllib.request.Request('http://dagster.talos00/graphql',
+                    data=json.dumps({'query':'mutation{terminateRun(runId:\"'+r['runId']+'\"){__typename}}'}).encode(),
+                    headers={'Content-Type':'application/json'})
+                urllib.request.urlopen(req)
+            except: pass
+        print(f'Killed {len(runs)} runs')
+        "
+
+  # ── Dev ──────────────────────────────────────────────────────────────────
+
+  dev:congress:
+    desc: Run congress-data code server locally
+    env:
+      DAGSTER_CODE_LOCATION: congress_data
+    cmds:
+      - dagster dev -m congress_data
+
+  dev:media:
+    desc: Run media-ingest code server locally
+    env:
+      DAGSTER_CODE_LOCATION: media_ingest
+    cmds:
+      - dagster dev -m media_ingest
