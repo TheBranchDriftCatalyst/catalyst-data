@@ -9,8 +9,12 @@ build/
 *.egg
 .pytest_cache/
 
-# Test output scratch — media-ingest QA tests write WAVs, transcripts,
-# diarization JSONs here. Should not be committed.
+# Test output — all integration test outputs go here
+.test-output/
+tests/pipeline-output/
+tests/congress-pipeline-output/
+
+# Legacy test scratch
 packages/media-ingest/tests/.output/
 
 .env

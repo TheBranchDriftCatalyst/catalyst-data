@@ -1,18 +1,11 @@
 """Fixtures for congress-data pipeline integration tests.
 
-Runs real assets against a local filesystem IO manager, writing
-human-readable JSON/JSONL so you can inspect intermediate results.
+All outputs go to TEST_OUTPUT_ROOT/congress-data/ (default: .test-output/congress-data/).
 
 Usage:
-    CONGRESS_API_KEY=xxx DAGSTER_CODE_LOCATION=congress_data \
-        pytest packages/congress-data/tests/integration/ -v -s
-
-    # Just bronze (no LLM):
-    pytest packages/congress-data/tests/integration/ -v -s -k "bronze"
-
-    # Full chain including LLM:
-    LLM_BASE_URL=http://litellm.talos00:4000/v1 LLM_MODEL=runpod/qwen3:30b-a3b \
-        pytest packages/congress-data/tests/integration/ -v -s -k "full_chain"
+    CONGRESS_API_KEY=xxx pytest packages/congress-data/tests/integration/ -v -s
+    pytest ... -k "bronze"                    # API only, no LLM
+    pytest ... --partition 119-hr-1           # test a bigger bill
 """
 
 from __future__ import annotations
@@ -28,7 +21,8 @@ from tests.shared.local_io_manager import LocalJsonIOManager
 from dagster_io import ChunkingResource
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "tests" / "congress-pipeline-output"
+TEST_OUTPUT_ROOT = Path(os.environ.get("TEST_OUTPUT_ROOT", str(REPO_ROOT / ".test-output")))
+DEFAULT_OUTPUT_DIR = TEST_OUTPUT_ROOT / "congress-data"
 
 os.environ.setdefault("DAGSTER_CODE_LOCATION", "congress_data")
 
@@ -37,7 +31,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--output-dir",
         default=str(DEFAULT_OUTPUT_DIR),
-        help="Directory for pipeline output",
+        help=f"Directory for pipeline output (default: {DEFAULT_OUTPUT_DIR})",
     )
     parser.addoption(
         "--keep-output",
@@ -48,7 +42,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--partition",
         default="119-hres-1",
-        help="Bill partition key to test (default: 119-hres-1, a small resolution)",
+        help="Bill partition key to test (default: 119-hres-1)",
     )
 
 
@@ -84,14 +78,11 @@ def test_resources(local_io_manager) -> dict:
 
 @pytest.fixture(scope="session")
 def dagster_instance(output_dir) -> DagsterInstance:
-    """Ephemeral Dagster instance for dynamic partition registration."""
-    instance = DagsterInstance.ephemeral()
-    return instance
+    return DagsterInstance.ephemeral()
 
 
 @pytest.fixture(scope="session")
 def partition_key(request, dagster_instance) -> str:
-    """Register the test partition key in the ephemeral instance."""
     pk = request.config.getoption("--partition")
     dagster_instance.add_dynamic_partitions("congress_bill", [pk])
     dagster_instance.add_dynamic_partitions("congress_member", [pk])
