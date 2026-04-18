@@ -282,11 +282,29 @@ class LLMResource(ConfigurableResource):
             last_err = None
             for attempt in range(max_retries + 1):
                 try:
+                    msgs = _normalize_messages(messages_fn(item))
+                    prompt_chars = sum(len(m.content) for m in msgs if hasattr(m, "content"))
+                    logger.debug(
+                        "LLM %s item %d/%d → model=%s prompt=%d chars",
+                        operation,
+                        idx + 1,
+                        len(items),
+                        self.model,
+                        prompt_chars,
+                    )
                     start = time.monotonic()
-                    result = chain.invoke(_normalize_messages(messages_fn(item)))
+                    result = chain.invoke(msgs)
                     duration = time.monotonic() - start
                     LLM_REQUEST_DURATION.labels(model=self.model, operation=operation).observe(duration)
                     LLM_REQUESTS.labels(model=self.model, operation=operation, status="success").inc()
+                    logger.info(
+                        "LLM %s item %d/%d ✓ model=%s %.1fs",
+                        operation,
+                        idx + 1,
+                        len(items),
+                        self.model,
+                        duration,
+                    )
                     return idx, result
                 except Exception as e:
                     last_err = e
