@@ -138,6 +138,8 @@ data:
     python_logs:
       managed_python_loggers:
         - dagster_io
+        - catalyst_langgraph
+        - catalyst_llm_contract_mcp
         - media_ingest
         - congress_data
         - open_leaks
