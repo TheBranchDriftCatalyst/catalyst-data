@@ -8,6 +8,8 @@ Silver: bill_document, bill_chunks
 Gold: bill_mentions, bill_assertions, bill_embeddings
 """
 
+from collections import Counter
+
 from dagster import (
     AssetExecutionContext,
     Output,
@@ -16,6 +18,7 @@ from dagster import (
 )
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from congress_data.bill_chunker import chunk_bill_text
 from congress_data.client import CongressAPIClient
 from congress_data.config import CongressionalConfig
 from congress_data.core.document import Document
@@ -29,7 +32,6 @@ from congress_data.entities import (
 from congress_data.partitions import bill_partitions, parse_bill_partition_key
 from dagster_io import (
     LLM_ASSET_K8S_CONFIG,
-    ChunkingResource,
     EmbeddingResource,
     LLMResource,
     MentionExtractionResult,
@@ -271,10 +273,13 @@ def bill_full_text(
     for version in bill_text_versions:
         # Find the HTM format URL
         htm_url = None
+        xml_url = None
         for fmt in version.formats:
-            if fmt.get("type") == "Formatted Text" and fmt.get("url", "").endswith(".htm"):
-                htm_url = fmt["url"]
-                break
+            url = fmt.get("url", "")
+            if fmt.get("type") == "Formatted Text" and url.endswith(".htm"):
+                htm_url = url
+            elif fmt.get("type") == "Formatted XML" and url.endswith(".xml"):
+                xml_url = url
 
         if not htm_url:
             context.log.warning(f"No HTM URL for version {version.version_code}")
@@ -289,6 +294,14 @@ def bill_full_text(
         plain_text = _strip_html(html_content)
         total_chars += len(plain_text)
 
+        # Download XML if available (for section-aware chunking)
+        xml_content = None
+        if xml_url:
+            context.log.info(f"Downloading XML {version.version_code}: {xml_url}")
+            xml_content = _download_text(xml_url)
+            if xml_content:
+                context.log.info(f"XML downloaded: {len(xml_content):,} chars")
+
         results.append(
             {
                 "version_id": version.id,
@@ -297,19 +310,24 @@ def bill_full_text(
                 "version_name": version.version_name,
                 "publish_date": str(version.publish_date) if version.publish_date else None,
                 "source_url": htm_url,
+                "xml_url": xml_url,
                 "html": html_content,
                 "text": plain_text,
+                "xml": xml_content,
                 "text_length": len(plain_text),
                 "html_length": len(html_content),
+                "xml_length": len(xml_content) if xml_content else 0,
             }
         )
 
-    context.log.info(f"Bill full text: {len(results)} versions, {total_chars:,} chars total")
+    xml_count = sum(1 for r in results if r.get("xml"))
+    context.log.info(f"Bill full text: {len(results)} versions, {total_chars:,} chars total, {xml_count} with XML")
     return Output(
         results,
         metadata={
             "versions_downloaded": len(results),
             "versions_available": len(bill_text_versions),
+            "versions_with_xml": xml_count,
             "total_text_chars": total_chars,
         },
     )
@@ -417,32 +435,67 @@ def bill_document(
 
 @asset(
     group_name="congress",
-    description="Chunk bill document for embedding and LLM extraction",
+    description="Section-aware chunking — preserves legislative structure, splits at subsection boundaries.",
     compute_kind="python",
     metadata={"layer": "silver"},
     partitions_def=bill_partitions,
 )
 def bill_chunks(
     context: AssetExecutionContext,
-    chunking: ChunkingResource,
     bill_document: Document,
+    bill_full_text: list[dict],
 ) -> Output[list[TextChunk]]:
-    meta = {
+    # Find XML content matching the version used in bill_document
+    xml_content = None
+    text_version_used = bill_document.metadata.get("text_version_used")
+    if text_version_used and bill_full_text:
+        for ft in bill_full_text:
+            if ft.get("version_code") == text_version_used and ft.get("xml"):
+                xml_content = ft["xml"]
+                break
+        # Fallback: use any version that has XML
+        if not xml_content:
+            for ft in bill_full_text:
+                if ft.get("xml"):
+                    xml_content = ft["xml"]
+                    break
+
+    bill_meta = {
         "source": bill_document.source,
         "document_type": bill_document.document_type,
         "domain": bill_document.domain,
+        **(bill_document.metadata or {}),
     }
-    chunks = chunking.chunk_document(
-        bill_document.id,
-        bill_document.title,
-        bill_document.content,
-        metadata=meta,
-        chunk_size=2000,
-        chunk_overlap=200,
+
+    chunks = chunk_bill_text(
+        document_id=bill_document.id,
+        title=bill_document.title,
+        text=bill_document.content,
+        bill_metadata=bill_meta,
+        xml_content=xml_content,
     )
 
-    context.log.info(f"Bill chunks: {bill_document.id} → {len(chunks)} chunks")
-    return Output(chunks, metadata={"chunk_count": len(chunks)})
+    strategies = Counter(c.metadata.get("strategy") for c in chunks)
+    parse_mode = chunks[0].metadata.get("parse_mode", "unknown") if chunks else "none"
+    avg_len = sum(len(c.text) for c in chunks) / max(len(chunks), 1)
+    context.log.info(
+        f"Bill chunks: {bill_document.id} -> {len(chunks)} chunks "
+        f"(mode={parse_mode}, strategies={dict(strategies)}, avg={avg_len:.0f} chars)"
+    )
+
+    ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="bill_chunks", layer="silver").inc(
+        len(chunks)
+    )
+
+    return Output(
+        chunks,
+        metadata={
+            "chunk_count": len(chunks),
+            "parse_mode": parse_mode,
+            "has_xml": xml_content is not None,
+            **{f"strategy_{k}": v for k, v in strategies.items()},
+        },
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
