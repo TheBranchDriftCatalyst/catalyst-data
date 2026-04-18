@@ -546,7 +546,36 @@ def bill_assertions(
             operation="assertion_extract",
         )
 
-        all_assertions = _build(bill_chunks, results, llm_model=llm.model, code_location="congress_data")
+        all_assertions = _build(
+            bill_chunks,
+            results,
+            llm_model=llm.model,
+            code_location="congress_data",
+            predicate_mappings={
+                "sponsored": "sponsors",
+                "co-sponsored": "co_sponsors",
+                "cosponsored": "co_sponsors",
+                "introduced": "introduces",
+                "voted for": "votes_for",
+                "voted against": "votes_against",
+                "is a member of": "member_of",
+                "is member of": "member_of",
+                "belongs to": "member_of",
+                "chairs": "chairs",
+                "opposes": "opposes",
+                "supports": "supports",
+                "referred to": "referred_to",
+                "amended by": "amended_by",
+                "signed by": "signed_by",
+                "vetoed by": "vetoed_by",
+                "passed": "passed",
+                "failed": "failed",
+                "enacted": "enacted",
+                "appropriates": "appropriates",
+                "funds": "funds",
+                "regulates": "regulates",
+            },
+        )
 
         context.log.info(f"Bill assertions: {len(all_assertions)} from {len(bill_chunks)} chunks")
         return Output(all_assertions, metadata={"assertion_count": len(all_assertions)})
