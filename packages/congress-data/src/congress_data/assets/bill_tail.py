@@ -437,8 +437,8 @@ def bill_chunks(
         bill_document.title,
         bill_document.content,
         metadata=meta,
-        chunk_size=400,
-        chunk_overlap=100,
+        chunk_size=2000,
+        chunk_overlap=200,
     )
 
     context.log.info(f"Bill chunks: {bill_document.id} → {len(chunks)} chunks")
