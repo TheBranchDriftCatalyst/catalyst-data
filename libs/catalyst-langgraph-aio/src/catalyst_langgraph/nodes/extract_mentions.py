@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from catalyst_contracts.models.extraction_output import MentionExtractionResult
@@ -29,9 +30,11 @@ class ExtractMentions:
         self.llm_client = llm_client
 
     async def __call__(self, state: ExtractionState) -> dict[str, Any]:
+        raw_text = state.get("raw_text", "")
+        logger.info("extract_mentions: start, input_len=%d", len(raw_text))
+        t0 = time.perf_counter()
         try:
             system = load_prompt("mention_extraction", FALLBACK_PROMPT)
-            raw_text = state.get("raw_text", "")
 
             result = await self.llm_client.structured_output(
                 MentionExtractionResult,
@@ -39,7 +42,10 @@ class ExtractMentions:
             )
 
             candidates = [m.model_dump() for m in result.mentions]
+            logger.debug("extract_mentions: candidates=%d", len(candidates))
 
+            elapsed = time.perf_counter() - t0
+            logger.info("extract_mentions: done, candidates=%d, duration=%.3fs", len(candidates), elapsed)
             return {
                 "current_mention_candidates": candidates,
                 "status": WorkflowStatus.VALIDATING_MENTIONS.value,

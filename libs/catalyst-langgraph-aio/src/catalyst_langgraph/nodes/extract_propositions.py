@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 from catalyst_contracts.models.extraction_output import PropositionExtractionResult
@@ -30,10 +31,12 @@ class ExtractPropositions:
         self.llm_client = llm_client
 
     async def __call__(self, state: ExtractionState) -> dict[str, Any]:
+        raw_text = state.get("raw_text", "")
+        accepted_mentions = state.get("accepted_mentions", [])
+        logger.info("extract_propositions: start, input_len=%d, mentions=%d", len(raw_text), len(accepted_mentions))
+        t0 = time.perf_counter()
         try:
             system = load_prompt("proposition_extraction", FALLBACK_PROMPT)
-            raw_text = state.get("raw_text", "")
-            accepted_mentions = state.get("accepted_mentions", [])
 
             prompt = f"Accepted mentions:\n{json.dumps(accepted_mentions, indent=2)}\n\nText:\n{raw_text}"
 
@@ -43,7 +46,10 @@ class ExtractPropositions:
             )
 
             candidates = [p.model_dump() for p in result.propositions]
+            logger.debug("extract_propositions: candidates=%d", len(candidates))
 
+            elapsed = time.perf_counter() - t0
+            logger.info("extract_propositions: done, candidates=%d, duration=%.3fs", len(candidates), elapsed)
             return {
                 "current_proposition_candidates": candidates,
                 "status": WorkflowStatus.VALIDATING_PROPOSITIONS.value,

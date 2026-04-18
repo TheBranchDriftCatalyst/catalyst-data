@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 
 from catalyst_contracts.models.evidence import IssueCode
@@ -8,6 +9,8 @@ from catalyst_contracts.models.validation import (
     ValidationResult,
     ValidationVerdict,
 )
+
+logger = logging.getLogger(__name__)
 
 SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$")
 
@@ -122,6 +125,17 @@ def validate_propositions(
         verdict = ValidationVerdict.INVALID
     else:
         verdict = ValidationVerdict.AMBIGUOUS
+
+    logger.info(
+        "proposition_validator: verdict=%s, valid=%d, invalid=%d, errors=%d, warnings=%d",
+        verdict.value,
+        valid_count,
+        invalid_count,
+        len(errors),
+        len(warnings),
+    )
+    for err in errors:
+        logger.debug("proposition_validator: error path=%s code=%s", err.path, err.code)
 
     return ValidationResult(
         verdict=verdict,

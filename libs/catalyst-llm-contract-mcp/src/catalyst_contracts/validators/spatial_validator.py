@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 
 from catalyst_contracts.models.evidence import IssueCode
@@ -8,6 +9,8 @@ from catalyst_contracts.models.validation import (
     ValidationResult,
     ValidationVerdict,
 )
+
+logger = logging.getLogger(__name__)
 
 WKT_PATTERN = re.compile(
     r"^(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\s*\(.*\)$",
@@ -111,6 +114,17 @@ def validate_spatial(
         verdict = ValidationVerdict.INVALID
     else:
         verdict = ValidationVerdict.AMBIGUOUS
+
+    logger.info(
+        "spatial_validator: verdict=%s, valid=%d, invalid=%d, errors=%d, warnings=%d",
+        verdict.value,
+        valid_count,
+        invalid_count,
+        len(errors),
+        len(warnings),
+    )
+    for err in errors:
+        logger.debug("spatial_validator: error path=%s code=%s", err.path, err.code)
 
     return ValidationResult(
         verdict=verdict,

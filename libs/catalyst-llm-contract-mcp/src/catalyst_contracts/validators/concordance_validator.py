@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from catalyst_contracts.models.evidence import IssueCode
 from catalyst_contracts.models.validation import (
     ValidationErrorItem,
     ValidationResult,
     ValidationVerdict,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def validate_concordance(
@@ -82,6 +86,17 @@ def validate_concordance(
         verdict = ValidationVerdict.INVALID
     else:
         verdict = ValidationVerdict.AMBIGUOUS
+
+    logger.info(
+        "concordance_validator: verdict=%s, valid=%d, invalid=%d, errors=%d, warnings=%d",
+        verdict.value,
+        valid_count,
+        invalid_count,
+        len(errors),
+        len(warnings),
+    )
+    for err in errors:
+        logger.debug("concordance_validator: error path=%s code=%s", err.path, err.code)
 
     return ValidationResult(
         verdict=verdict,

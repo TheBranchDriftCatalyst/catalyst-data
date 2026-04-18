@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from catalyst_contracts.models.repair import RepairAction, RepairInstruction, RepairPlan
 from catalyst_contracts.models.validation import ValidationResult
+
+logger = logging.getLogger(__name__)
 
 
 def generate_repair_plan(
@@ -16,7 +19,11 @@ def generate_repair_plan(
         instruction = _error_to_instruction(err, original_payload)
         if instruction:
             instructions.append(instruction)
+            logger.debug("repair_generator: instruction path=%s action=%s", instruction.path, instruction.action.value)
 
+    logger.info(
+        "repair_generator: generated %d instructions from %d errors", len(instructions), len(validation_result.errors)
+    )
     return RepairPlan(
         instructions=instructions,
         preserves_valid_fields=True,

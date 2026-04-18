@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 from catalyst_contracts.models.extraction_output import PropositionExtractionResult
@@ -30,13 +31,17 @@ class RepairPropositions:
         self.llm_client = llm_client
 
     async def __call__(self, state: ExtractionState) -> dict[str, Any]:
+        candidates = state.get("current_proposition_candidates", [])
+        retry_count = state.get("proposition_retry_count", 0) + 1
+        logger.info("repair_propositions: start, candidates=%d, retry=%d", len(candidates), retry_count)
+        t0 = time.perf_counter()
         try:
             system = load_prompt("proposition_repair", FALLBACK_PROMPT)
             raw_text = state.get("raw_text", "")
-            candidates = state.get("current_proposition_candidates", [])
             accepted_mentions = state.get("accepted_mentions", [])
             validation = state.get("latest_proposition_validation", {})
             errors = validation.get("errors", [])
+            logger.debug("repair_propositions: errors_to_fix=%d", len(errors))
 
             prompt = (
                 f"Errors:\n{json.dumps(errors, indent=2)}\n\n"
@@ -52,8 +57,10 @@ class RepairPropositions:
 
             repaired = [p.model_dump() for p in result.propositions]
 
-            retry_count = state.get("proposition_retry_count", 0) + 1
-
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                "repair_propositions: done, repaired=%d, retry=%d, duration=%.3fs", len(repaired), retry_count, elapsed
+            )
             return {
                 "current_proposition_candidates": repaired,
                 "proposition_retry_count": retry_count,

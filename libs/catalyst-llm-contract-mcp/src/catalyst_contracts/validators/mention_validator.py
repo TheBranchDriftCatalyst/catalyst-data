@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from catalyst_contracts.models.evidence import IssueCode
 from catalyst_contracts.models.validation import (
     ValidationErrorItem,
@@ -7,6 +9,8 @@ from catalyst_contracts.models.validation import (
     ValidationVerdict,
 )
 from catalyst_contracts_core.enums import MentionType
+
+logger = logging.getLogger(__name__)
 
 # Alias map for common LLM entity type variations
 ENTITY_TYPE_ALIASES = {
@@ -181,6 +185,17 @@ def validate_mentions(
         verdict = ValidationVerdict.INVALID
     else:
         verdict = ValidationVerdict.AMBIGUOUS
+
+    logger.info(
+        "mention_validator: verdict=%s, valid=%d, invalid=%d, errors=%d, warnings=%d",
+        verdict.value,
+        valid_count,
+        invalid_count,
+        len(errors),
+        len(warnings),
+    )
+    for err in errors:
+        logger.debug("mention_validator: error path=%s code=%s", err.path, err.code)
 
     return ValidationResult(
         verdict=verdict,

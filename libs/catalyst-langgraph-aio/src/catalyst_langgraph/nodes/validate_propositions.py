@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from catalyst_langgraph.clients.mcp import MCPClient
@@ -19,8 +20,10 @@ class ValidatePropositions:
         self.mcp_client = mcp_client
 
     async def __call__(self, state: ExtractionState) -> dict[str, Any]:
+        candidates = state.get("current_proposition_candidates", [])
+        logger.info("validate_propositions: start, candidates=%d", len(candidates))
+        t0 = time.perf_counter()
         try:
-            candidates = state.get("current_proposition_candidates", [])
             accepted_mentions = state.get("accepted_mentions", [])
 
             raw_text = state.get("raw_text", "")
@@ -34,6 +37,7 @@ class ValidatePropositions:
             )
 
             verdict = result.get("verdict", "invalid")
+            logger.debug("validate_propositions: verdict=%s, errors=%d", verdict, len(result.get("errors", [])))
 
             update: dict[str, Any] = {
                 "latest_proposition_validation": result,
@@ -53,6 +57,13 @@ class ValidatePropositions:
             else:
                 update["status"] = WorkflowStatus.REPAIRING_PROPOSITIONS.value
 
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                "validate_propositions: done, verdict=%s, accepted=%d, duration=%.3fs",
+                verdict,
+                len(update.get("accepted_propositions", [])),
+                elapsed,
+            )
             return update
         except Exception as e:
             logger.exception("validate_propositions failed")

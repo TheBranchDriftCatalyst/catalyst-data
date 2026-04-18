@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from catalyst_langgraph.nodes._audit import make_audit_event
@@ -19,18 +20,31 @@ class PersistArtifacts:
         self.repository = repository
 
     async def __call__(self, state: ExtractionState) -> dict[str, Any]:
+        metadata = state.get("source_metadata", {})
+        document_id = metadata.get("document_id", "unknown")
+        mentions = state.get("accepted_mentions", [])
+        propositions = state.get("accepted_propositions", [])
+        logger.info(
+            "persist_artifacts: start, doc=%s, mentions=%d, propositions=%d",
+            document_id,
+            len(mentions),
+            len(propositions),
+        )
+        t0 = time.perf_counter()
         try:
-            metadata = state.get("source_metadata", {})
-            document_id = metadata.get("document_id", "unknown")
-
-            mentions = state.get("accepted_mentions", [])
-            propositions = state.get("accepted_propositions", [])
             audit_events = state.get("audit_events", [])
 
             await self.repository.save_mentions(document_id, mentions)
             await self.repository.save_propositions(document_id, propositions)
             await self.repository.save_audit_trail(document_id, audit_events)
 
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                "persist_artifacts: done, mentions_saved=%d, propositions_saved=%d, duration=%.3fs",
+                len(mentions),
+                len(propositions),
+                elapsed,
+            )
             return {
                 "status": WorkflowStatus.COMPLETED.value,
                 "audit_events": audit_events

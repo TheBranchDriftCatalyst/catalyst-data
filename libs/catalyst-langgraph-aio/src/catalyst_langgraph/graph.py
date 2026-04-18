@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -19,6 +20,8 @@ from catalyst_langgraph.nodes.validate_mentions import ValidateMentions
 from catalyst_langgraph.nodes.validate_propositions import ValidatePropositions
 from catalyst_langgraph.repository.base import ArtifactRepository
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
+
+logger = logging.getLogger(__name__)
 
 # --- Stratified error handling: RetryPolicy for transient errors ---
 
@@ -42,13 +45,20 @@ def _route_after_mention_validation(state: ExtractionState) -> str:
     verdict = validation.get("verdict", "invalid")
 
     if verdict == "valid":
+        logger.debug("route_after_mention_validation: verdict=valid -> extract_propositions")
         return "extract_propositions"
 
     max_retries = state.get("max_retries", 3)
     retry_count = state.get("mention_retry_count", 0)
     if retry_count >= max_retries:
+        logger.debug(
+            "route_after_mention_validation: max_retries reached (%d/%d) -> failure_handler", retry_count, max_retries
+        )
         return "failure_handler"
 
+    logger.debug(
+        "route_after_mention_validation: verdict=%s, retry=%d/%d -> repair_mentions", verdict, retry_count, max_retries
+    )
     return "repair_mentions"
 
 
@@ -57,13 +67,25 @@ def _route_after_proposition_validation(state: ExtractionState) -> str:
     verdict = validation.get("verdict", "invalid")
 
     if verdict == "valid":
+        logger.debug("route_after_proposition_validation: verdict=valid -> persist_artifacts")
         return "persist_artifacts"
 
     max_retries = state.get("max_retries", 3)
     retry_count = state.get("proposition_retry_count", 0)
     if retry_count >= max_retries:
+        logger.debug(
+            "route_after_proposition_validation: max_retries reached (%d/%d) -> failure_handler",
+            retry_count,
+            max_retries,
+        )
         return "failure_handler"
 
+    logger.debug(
+        "route_after_proposition_validation: verdict=%s, retry=%d/%d -> repair_propositions",
+        verdict,
+        retry_count,
+        max_retries,
+    )
     return "repair_propositions"
 
 

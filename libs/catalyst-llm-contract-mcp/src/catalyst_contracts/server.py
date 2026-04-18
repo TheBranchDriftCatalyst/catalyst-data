@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -16,6 +18,8 @@ from catalyst_contracts.validators.proposition_validator import (
 )
 from catalyst_contracts.validators.repair_generator import generate_repair_plan
 from catalyst_contracts.validators.spatial_validator import validate_spatial
+
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP("catalyst-llm-contracts")
 audit = AuditRepository()
@@ -36,6 +40,8 @@ def _result_to_dict(result: ValidationResult, tool_name: str) -> dict[str, Any]:
 @mcp.tool()
 def get_contract_schemas() -> dict[str, Any]:
     """Return JSON schemas for all contract models."""
+    logger.info("get_contract_schemas: start")
+    t0 = time.perf_counter()
     from catalyst_contracts.models.concordance import (
         ConcordanceCandidateScore,
         ConcordanceCandidateSet,
@@ -69,7 +75,10 @@ def get_contract_schemas() -> dict[str, Any]:
         ValidationResult,
     ]
 
-    return {m.__name__: m.model_json_schema() for m in models}
+    result = {m.__name__: m.model_json_schema() for m in models}
+    elapsed = time.perf_counter() - t0
+    logger.info("get_contract_schemas: done, schemas=%d, duration=%.3fs", len(result), elapsed)
+    return result
 
 
 @mcp.tool()
@@ -79,8 +88,19 @@ def validate_mentions(
     document_id: str,
 ) -> dict[str, Any]:
     """Validate a list of mention extractions against the source text."""
+    logger.info("validate_mentions: start, mentions=%d, source_len=%d", len(mentions), len(source_text))
+    t0 = time.perf_counter()
     result = _validate_mentions(mentions, source_text, document_id)
-    return _result_to_dict(result, "validate_mentions")
+    d = _result_to_dict(result, "validate_mentions")
+    elapsed = time.perf_counter() - t0
+    logger.info(
+        "validate_mentions: done, verdict=%s, valid=%d, invalid=%d, duration=%.3fs",
+        result.verdict.value,
+        result.valid_count,
+        result.invalid_count,
+        elapsed,
+    )
+    return d
 
 
 @mcp.tool()
@@ -90,8 +110,21 @@ def validate_propositions(
     source_text: str,
 ) -> dict[str, Any]:
     """Validate a list of propositions against known mention IDs."""
+    logger.info(
+        "validate_propositions: start, propositions=%d, known_ids=%d", len(propositions), len(known_mention_ids)
+    )
+    t0 = time.perf_counter()
     result = _validate_propositions(propositions, set(known_mention_ids), source_text)
-    return _result_to_dict(result, "validate_propositions")
+    d = _result_to_dict(result, "validate_propositions")
+    elapsed = time.perf_counter() - t0
+    logger.info(
+        "validate_propositions: done, verdict=%s, valid=%d, invalid=%d, duration=%.3fs",
+        result.verdict.value,
+        result.valid_count,
+        result.invalid_count,
+        elapsed,
+    )
+    return d
 
 
 @mcp.tool()
@@ -100,8 +133,19 @@ def validate_spatial_grounding(
     source_text: str,
 ) -> dict[str, Any]:
     """Validate spatial grounding candidates."""
+    logger.info("validate_spatial_grounding: start, candidates=%d", len(candidates))
+    t0 = time.perf_counter()
     result = validate_spatial(candidates, source_text)
-    return _result_to_dict(result, "validate_spatial_grounding")
+    d = _result_to_dict(result, "validate_spatial_grounding")
+    elapsed = time.perf_counter() - t0
+    logger.info(
+        "validate_spatial_grounding: done, verdict=%s, valid=%d, invalid=%d, duration=%.3fs",
+        result.verdict.value,
+        result.valid_count,
+        result.invalid_count,
+        elapsed,
+    )
+    return d
 
 
 @mcp.tool()
@@ -109,8 +153,19 @@ def validate_math_propositions(
     propositions: list[dict],
 ) -> dict[str, Any]:
     """Validate math propositions."""
+    logger.info("validate_math_propositions: start, propositions=%d", len(propositions))
+    t0 = time.perf_counter()
     result = validate_math(propositions)
-    return _result_to_dict(result, "validate_math_propositions")
+    d = _result_to_dict(result, "validate_math_propositions")
+    elapsed = time.perf_counter() - t0
+    logger.info(
+        "validate_math_propositions: done, verdict=%s, valid=%d, invalid=%d, duration=%.3fs",
+        result.verdict.value,
+        result.valid_count,
+        result.invalid_count,
+        elapsed,
+    )
+    return d
 
 
 @mcp.tool()
@@ -119,8 +174,21 @@ def validate_concordance_candidates(
     known_entity_ids: list[str],
 ) -> dict[str, Any]:
     """Validate concordance candidate sets against known entity IDs."""
+    logger.info(
+        "validate_concordance_candidates: start, sets=%d, known_ids=%d", len(candidate_sets), len(known_entity_ids)
+    )
+    t0 = time.perf_counter()
     result = validate_concordance(candidate_sets, set(known_entity_ids))
-    return _result_to_dict(result, "validate_concordance_candidates")
+    d = _result_to_dict(result, "validate_concordance_candidates")
+    elapsed = time.perf_counter() - t0
+    logger.info(
+        "validate_concordance_candidates: done, verdict=%s, valid=%d, invalid=%d, duration=%.3fs",
+        result.verdict.value,
+        result.valid_count,
+        result.invalid_count,
+        elapsed,
+    )
+    return d
 
 
 @mcp.tool()
@@ -141,6 +209,8 @@ def find_spans(
         List of {text, spans: [{start, end}]} for each input text.
         If a text is not found, spans will be empty.
     """
+    logger.info("find_spans: start, texts=%d, source_len=%d", len(texts), len(source_text))
+    t0 = time.perf_counter()
     results = []
     for text in texts:
         spans = []
@@ -152,6 +222,8 @@ def find_spans(
             spans.append({"start": idx, "end": idx + len(text)})
             start = idx + 1
         results.append({"text": text, "spans": spans})
+    elapsed = time.perf_counter() - t0
+    logger.info("find_spans: done, texts=%d, duration=%.3fs", len(texts), elapsed)
     return results
 
 
@@ -172,6 +244,8 @@ def find_spans_fuzzy(
     Returns:
         List of {text, spans: [{start, end, match}]} for each input text.
     """
+    logger.info("find_spans_fuzzy: start, texts=%d, source_len=%d", len(texts), len(source_text))
+    t0 = time.perf_counter()
     source_lower = source_text.lower()
     results = []
     for text in texts:
@@ -186,6 +260,8 @@ def find_spans_fuzzy(
             spans.append({"start": idx, "end": idx + len(needle), "match": matched})
             start = idx + 1
         results.append({"text": text, "spans": spans})
+    elapsed = time.perf_counter() - t0
+    logger.info("find_spans_fuzzy: done, texts=%d, duration=%.3fs", len(texts), elapsed)
     return results
 
 
@@ -195,9 +271,14 @@ def generate_repair_instructions(
     original_payload: dict,
 ) -> dict[str, Any]:
     """Generate a repair plan from a validation result."""
+    logger.info("generate_repair_instructions: start, errors=%d", len(validation_result.get("errors", [])))
+    t0 = time.perf_counter()
     vr = ValidationResult.model_validate(validation_result)
     plan = generate_repair_plan(vr, original_payload)
-    return plan.model_dump(mode="json")
+    d = plan.model_dump(mode="json")
+    elapsed = time.perf_counter() - t0
+    logger.info("generate_repair_instructions: done, instructions=%d, duration=%.3fs", len(plan.instructions), elapsed)
+    return d
 
 
 def main():

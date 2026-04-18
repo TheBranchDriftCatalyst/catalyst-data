@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -62,10 +63,23 @@ class LLMClient:
             messages.append(SystemMessage(content=system))
         messages.append(HumanMessage(content=prompt))
 
+        prompt_chars = sum(len(str(m.content)) for m in messages)
+        logger.info("llm.complete: model=%s, prompt_chars=%d", self.model, prompt_chars)
+        t0 = time.perf_counter()
         response = await self._chat_model.ainvoke(messages)
+        elapsed = time.perf_counter() - t0
+        logger.info("llm.complete: done, response_len=%d, duration=%.3fs", len(str(response.content)), elapsed)
         return str(response.content)
 
     async def structured_output(self, schema: type[BaseModel], messages: list[Any]) -> BaseModel:
         """Invoke with structured output, returning a Pydantic model instance."""
+        prompt_chars = sum(len(str(getattr(m, "content", m))) for m in messages)
+        logger.info(
+            "llm.structured_output: model=%s, schema=%s, prompt_chars=%d", self.model, schema.__name__, prompt_chars
+        )
+        t0 = time.perf_counter()
         chain = self._chat_model.with_structured_output(schema)
-        return await chain.ainvoke(messages)
+        result = await chain.ainvoke(messages)
+        elapsed = time.perf_counter() - t0
+        logger.info("llm.structured_output: done, schema=%s, duration=%.3fs", schema.__name__, elapsed)
+        return result

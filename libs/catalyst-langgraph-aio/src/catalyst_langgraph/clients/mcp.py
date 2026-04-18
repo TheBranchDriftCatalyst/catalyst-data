@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -45,6 +46,10 @@ class StdioMCPClient(MCPClient):
         if not self._process or not self._process.stdin or not self._process.stdout:
             raise RuntimeError("StdioMCPClient not started; call start() first")
 
+        arg_keys = list(arguments.keys())
+        logger.info("mcp.stdio.call_tool: tool=%s, params=%s", name, arg_keys)
+        t0 = time.perf_counter()
+
         request = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -70,7 +75,12 @@ class StdioMCPClient(MCPClient):
         if "content" in result and isinstance(result["content"], list):
             for item in result["content"]:
                 if item.get("type") == "text":
-                    return json.loads(item["text"])
+                    parsed = json.loads(item["text"])
+                    elapsed = time.perf_counter() - t0
+                    logger.info("mcp.stdio.call_tool: done, tool=%s, duration=%.3fs", name, elapsed)
+                    return parsed
+        elapsed = time.perf_counter() - t0
+        logger.info("mcp.stdio.call_tool: done, tool=%s, duration=%.3fs", name, elapsed)
         return result
 
 
@@ -85,9 +95,14 @@ class DirectMCPClient(MCPClient):
         if method is None:
             raise AttributeError(f"Handler has no tool method: {name}")
 
+        arg_keys = list(arguments.keys())
+        logger.info("mcp.direct.call_tool: tool=%s, params=%s", name, arg_keys)
+        t0 = time.perf_counter()
         result = method(**arguments)
         if asyncio.iscoroutine(result):
             result = await result
+        elapsed = time.perf_counter() - t0
+        logger.info("mcp.direct.call_tool: done, tool=%s, duration=%.3fs", name, elapsed)
         return result
 
 

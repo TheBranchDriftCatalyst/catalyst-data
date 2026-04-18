@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from catalyst_contracts.models.evidence import IssueCode
 from catalyst_contracts.models.math import MathObjectKind, MathPropositionKind
 from catalyst_contracts.models.validation import (
@@ -7,6 +9,8 @@ from catalyst_contracts.models.validation import (
     ValidationResult,
     ValidationVerdict,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def validate_math(
@@ -83,6 +87,17 @@ def validate_math(
         verdict = ValidationVerdict.INVALID
     else:
         verdict = ValidationVerdict.AMBIGUOUS
+
+    logger.info(
+        "math_validator: verdict=%s, valid=%d, invalid=%d, errors=%d, warnings=%d",
+        verdict.value,
+        valid_count,
+        invalid_count,
+        len(errors),
+        len(warnings),
+    )
+    for err in errors:
+        logger.debug("math_validator: error path=%s code=%s", err.path, err.code)
 
     return ValidationResult(
         verdict=verdict,

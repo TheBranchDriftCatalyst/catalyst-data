@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 from catalyst_contracts.models.extraction_output import MentionExtractionResult
@@ -63,12 +64,16 @@ class RepairMentions:
         self.llm_client = llm_client
 
     async def __call__(self, state: ExtractionState) -> dict[str, Any]:
+        candidates = state.get("current_mention_candidates", [])
+        retry_count = state.get("mention_retry_count", 0) + 1
+        logger.info("repair_mentions: start, candidates=%d, retry=%d", len(candidates), retry_count)
+        t0 = time.perf_counter()
         try:
             system = load_prompt("mention_repair", FALLBACK_PROMPT)
             raw_text = state.get("raw_text", "")
-            candidates = state.get("current_mention_candidates", [])
             validation = state.get("latest_mention_validation", {})
             errors = validation.get("errors", [])
+            logger.debug("repair_mentions: errors_to_fix=%d", len(errors))
 
             # Pre-compute correct spans so the LLM doesn't guess
             span_hints = _find_correct_spans(candidates, raw_text)
@@ -88,8 +93,10 @@ class RepairMentions:
 
             repaired = [m.model_dump() for m in result.mentions]
 
-            retry_count = state.get("mention_retry_count", 0) + 1
-
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                "repair_mentions: done, repaired=%d, retry=%d, duration=%.3fs", len(repaired), retry_count, elapsed
+            )
             return {
                 "current_mention_candidates": repaired,
                 "mention_retry_count": retry_count,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from catalyst_langgraph.clients.mcp import MCPClient
@@ -19,9 +20,10 @@ class ValidateMentions:
         self.mcp_client = mcp_client
 
     async def __call__(self, state: ExtractionState) -> dict[str, Any]:
+        candidates = state.get("current_mention_candidates", [])
+        logger.info("validate_mentions: start, candidates=%d", len(candidates))
+        t0 = time.perf_counter()
         try:
-            candidates = state.get("current_mention_candidates", [])
-
             raw_text = state.get("raw_text", "")
             document_id = state.get("source_metadata", {}).get("document_id", "")
             result = await self.mcp_client.call_tool(
@@ -34,6 +36,7 @@ class ValidateMentions:
             )
 
             verdict = result.get("verdict", "invalid")
+            logger.debug("validate_mentions: verdict=%s, errors=%d", verdict, len(result.get("errors", [])))
 
             update: dict[str, Any] = {
                 "latest_mention_validation": result,
@@ -54,6 +57,13 @@ class ValidateMentions:
             else:
                 update["status"] = WorkflowStatus.REPAIRING_MENTIONS.value
 
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                "validate_mentions: done, verdict=%s, accepted=%d, duration=%.3fs",
+                verdict,
+                len(update.get("accepted_mentions", [])),
+                elapsed,
+            )
             return update
         except Exception as e:
             logger.exception("validate_mentions failed")
