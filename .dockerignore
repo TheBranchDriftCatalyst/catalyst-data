@@ -56,5 +56,6 @@ scripts/
 uv.lock
 **/uv.lock
 
-# Prompts (not needed at runtime)
-**/prompts/
+# Prompts ARE needed at runtime — baked into images
+# (was excluded when they were ConfigMap-mounted, now they're COPY'd)
+!packages/*/prompts/
