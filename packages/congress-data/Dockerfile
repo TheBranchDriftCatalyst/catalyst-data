@@ -39,7 +39,11 @@ COPY --from=builder /app/libs/ /app/libs/
 
 ENV DAGSTER_HOME=/opt/dagster/dagster_home
 ENV PYTHONPATH=/app/libs/catalyst-contracts-core/src:/app/libs/catalyst-llm-contract-mcp/src:/app/libs/catalyst-langgraph-aio/src:/app/libs/dagster-io/src
+ENV PROMPT_REGISTRY_DIR=/app/prompts
 RUN mkdir -p $DAGSTER_HOME
+
+# Prompts baked into image — no ConfigMap mount needed
+COPY packages/congress-data/prompts/ /app/prompts/
 
 EXPOSE 4000
 

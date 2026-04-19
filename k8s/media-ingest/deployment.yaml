@@ -39,7 +39,7 @@ spec:
               protocol: TCP
           env:
             - name: DAGSTER_CONTAINER_CONTEXT
-              value: '{"k8s": {"env_vars": ["DAGSTER_CODE_LOCATION=media_ingest"], "env_secrets": ["llm-credentials", "dagster-s3-credentials"]}}'
+              value: '{"k8s": {"env_vars": ["DAGSTER_CODE_LOCATION=media_ingest", "PROMPT_REGISTRY_DIR=/app/prompts"], "env_secrets": ["llm-credentials", "dagster-s3-credentials"]}}'
             # Signal to media_ingest __init__ that this is the code-server pod
             # (enables the viewer daemon thread; run/step pods skip it)
             - name: DAGSTER_IS_CODE_SERVER
