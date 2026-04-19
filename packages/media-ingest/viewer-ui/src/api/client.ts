@@ -221,6 +221,49 @@ export async function toggleEntityOverride(
   return res.json();
 }
 
+// ── S3 Explorer endpoints ─────────────────────────────────────────────────
+
+export interface S3Folder {
+  prefix: string;
+  name: string;
+}
+
+export interface S3File {
+  key: string;
+  name: string;
+  size: number;
+  last_modified: string;
+}
+
+export interface S3ListResult {
+  prefix: string;
+  folders: S3Folder[];
+  files: S3File[];
+  truncated: boolean;
+}
+
+export interface S3ReadResult {
+  key: string;
+  size: number;
+  content_type: string;
+  format: string;
+  data: unknown;
+  total_lines?: number;
+  truncated?: boolean;
+  error?: string;
+  preview?: string;
+}
+
+export function fetchS3List(prefix = "", delimiter = "/"): Promise<S3ListResult> {
+  return apiFetch<S3ListResult>(
+    `/s3/list?prefix=${encodeURIComponent(prefix)}&delimiter=${encodeURIComponent(delimiter)}`,
+  );
+}
+
+export function fetchS3Read(key: string, maxLines = 500): Promise<S3ReadResult> {
+  return apiFetch<S3ReadResult>(`/s3/read?key=${encodeURIComponent(key)}&max_lines=${maxLines}`);
+}
+
 /** File extensions that should render as video */
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv"]);
 

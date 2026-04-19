@@ -24,6 +24,7 @@ import {
   AudioLines,
   Tv2,
   ArrowRightLeft,
+  Database,
 } from "lucide-react";
 import { fetchDocuments } from "@/api/client";
 import type { MediaDocument } from "@/types/media";
@@ -131,6 +132,17 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
           </TooltipTrigger>
           <TooltipContent side="right">Entity Overrides</TooltipContent>
         </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" asChild>
+              <Link to="/s3">
+                <Database className="h-4 w-4" />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">S3 Explorer</TooltipContent>
+        </Tooltip>
       </div>
     );
   }
@@ -166,6 +178,12 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
           <Link to="/overrides">
             <ArrowRightLeft className="h-3.5 w-3.5 mr-1.5" />
             Entity Overrides
+          </Link>
+        </Button>
+        <Button variant="ghost" size="sm" className="text-xs h-7" asChild>
+          <Link to="/s3">
+            <Database className="h-3.5 w-3.5 mr-1.5" />
+            S3 Explorer
           </Link>
         </Button>
       </div>

@@ -6,6 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import DocumentList from "@/pages/DocumentList";
 import PlayerPage from "@/pages/Player";
 import EntityOverrides from "@/pages/EntityOverrides";
+import S3Explorer from "@/pages/S3Explorer";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +39,7 @@ export default function App() {
                   <Route path="/" element={<DocumentList />} />
                   <Route path="/player/:documentId" element={<PlayerPage />} />
                   <Route path="/overrides" element={<EntityOverrides />} />
+                  <Route path="/s3" element={<S3Explorer />} />
                 </Routes>
               </main>
             </div>
