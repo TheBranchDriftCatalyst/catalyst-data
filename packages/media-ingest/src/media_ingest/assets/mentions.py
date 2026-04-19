@@ -31,46 +31,67 @@ MENTION_SYSTEM_PROMPT = load_prompt(
     fallback="""\
 You are a named-entity extraction system specialized in transcribed audio/video content.
 Given a text chunk from a media transcription (which may include speaker labels like [SPEAKER_00]),
-extract all named entity mentions with precise information.
+extract all named entity mentions with precise character offsets.
 
-Entity types to extract:
-- PERSON: speakers, interviewees, people mentioned by name
-- ORG: companies, agencies, institutions, media outlets, PACs, think tanks
-- GPE: countries, states, cities
-- LOC: geographic regions, landmarks, bodies of water
-- DATE: specific dates, time periods, years
-- EVENT: conferences, hearings, incidents, elections, wars, summits
-- MONEY: financial figures, amounts, valuations
-- LAW: legislation, regulations, court cases, executive orders
-- NORP: political parties, ethnic groups, national groups (Republicans, Iranians, Sunni)
-- FACILITY: buildings, military bases, embassies, airports
-- DOCUMENT: reports, studies, publications referenced ("the Mueller Report", "the 9/11 Commission Report")
-- BOOK: books, authored works ("The Art of the Deal", "Mein Kampf", "Capital")
-- ROLE: job titles, positions ("Secretary of State", "CEO", "Chairman of the Joint Chiefs")
-- STRATEGIC_ASSET: geopolitical chokepoints, pipelines, trade routes, military installations ("Strait of Hormuz", "Bab el-Mandeb", "Nord Stream", "Suez Canal", "Diego Garcia", "Pine Gap")
-- FINANCIAL_INSTRUMENT: stocks, bonds, funds, derivatives, currencies ("S&P 500", "Treasury bonds", "Bitcoin", "petrodollar")
-- OTHER: any other notable entity
+## Output JSON Schema
 
-For each entity, provide:
-- text: the exact mention as it appears (NOT the speaker label)
-- label: entity type from the list above
-- context: the sentence fragment containing the entity
-- span_start: character offset where the mention starts in the input text (0-based)
-- span_end: character offset where the mention ends (exclusive)
+Return a JSON object matching this schema:
+{
+  "mentions": [
+    {
+      "text": "string -- exact surface form as it appears in the input (NOT speaker labels)",
+      "label": "string -- one of: PERSON, ORG, GPE, LOC, DATE, EVENT, MONEY, LAW, NORP, FACILITY, DOCUMENT, BOOK, ROLE, STRATEGIC_ASSET, FINANCIAL_INSTRUMENT, OTHER",
+      "context": "string -- the sentence fragment containing the entity",
+      "span_start": "integer -- character offset where the mention starts (0-based)",
+      "span_end": "integer -- character offset where the mention ends (exclusive)"
+    }
+  ]
+}
 
-Important:
-- Do NOT extract speaker labels (SPEAKER_00, SPEAKER_01) as entities
-- DO extract people mentioned BY NAME within speaker dialogue
-- Preserve speaker context when relevant (who said what about whom)
-- Be exhaustive but avoid duplicates within the same span.
+## Entity Type Definitions
 
-IMPORTANT RULES:
-- Do NOT extract pronoun-only mentions (he, she, they, it, we, you, I, someone, people)
-- Resolve pronouns to the actual entity name when context makes it clear
-- White House is ORG (institution), not GPE. Government buildings are FACILITY or ORG.
-- Political parties and national groups (Republicans, Democrats, Cubans, Iranians) are NORP, not OTHER
-- Use the most complete form of names (Fidel Castro, not just Fidel)
-- If the same entity appears with different surface forms, prefer the most specific one""",
+- PERSON: speakers, interviewees, politicians mentioned by name (e.g. "Fidel Castro", "President Biden")
+- ORG: companies, agencies, media outlets, PACs, think tanks (e.g. "CNN", "CIA", "Brookings Institution")
+- GPE: countries, states, cities (e.g. "Russia", "Texas", "Kabul")
+- EVENT: conferences, hearings, incidents, elections, wars (e.g. "the Iraq War", "G7 Summit")
+- MONEY: financial figures, specific amounts (e.g. "$1.5 trillion", "200 million dollars")
+- LAW: legislation, regulations, court cases, executive orders (e.g. "the Patriot Act", "Roe v. Wade")
+- NORP: political parties, ethnic groups, national groups (e.g. "Republicans", "Iranians", "Sunni")
+- STRATEGIC_ASSET: geopolitical chokepoints, pipelines, trade routes (e.g. "Strait of Hormuz", "Nord Stream")
+- FINANCIAL_INSTRUMENT: stocks, bonds, funds, currencies (e.g. "S&P 500", "Treasury bonds", "Bitcoin")
+
+## Examples
+
+### Example 1 -- Interview transcript
+Input: "[SPEAKER_00] So President Biden met with Xi Jinping in San Francisco last November to discuss Taiwan."
+Output:
+{"mentions": [
+  {"text": "President Biden", "label": "PERSON", "context": "President Biden met with Xi Jinping in San Francisco", "span_start": 14, "span_end": 29},
+  {"text": "Xi Jinping", "label": "PERSON", "context": "met with Xi Jinping in San Francisco", "span_start": 39, "span_end": 49},
+  {"text": "San Francisco", "label": "GPE", "context": "Xi Jinping in San Francisco last November", "span_start": 53, "span_end": 66},
+  {"text": "last November", "label": "DATE", "context": "in San Francisco last November", "span_start": 67, "span_end": 80},
+  {"text": "Taiwan", "label": "GPE", "context": "to discuss Taiwan", "span_start": 92, "span_end": 98}
+]}
+Note: "[SPEAKER_00]" is a speaker label, NOT an entity.
+
+### Example 2 -- Geopolitical discussion
+Input: "The Houthis have been attacking ships near the Bab el-Mandeb strait, disrupting trade through the Suez Canal."
+Output:
+{"mentions": [
+  {"text": "Houthis", "label": "NORP", "context": "The Houthis have been attacking ships", "span_start": 4, "span_end": 11},
+  {"text": "Bab el-Mandeb strait", "label": "STRATEGIC_ASSET", "context": "near the Bab el-Mandeb strait", "span_start": 47, "span_end": 67},
+  {"text": "Suez Canal", "label": "STRATEGIC_ASSET", "context": "trade through the Suez Canal", "span_start": 98, "span_end": 108}
+]}
+
+## Rules
+
+1. No duplicate spans: do not extract the same (span_start, span_end) twice.
+2. Do NOT extract speaker labels (SPEAKER_00, SPEAKER_01) as entities.
+3. Do NOT extract pronouns (he, she, they, it, we, you, I) as entities.
+4. White House is ORG, not GPE. Government buildings are FACILITY or ORG.
+5. Political parties and national groups are NORP, not OTHER.
+6. Use the most complete form of names (Fidel Castro, not just Fidel).
+7. Be exhaustive but precise.""",
 )
 
 

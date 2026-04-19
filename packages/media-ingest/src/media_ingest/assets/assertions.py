@@ -31,38 +31,70 @@ ASSERTION_SYSTEM_PROMPT = load_prompt(
     fallback="""\
 You are a knowledge-graph extraction system specialized in transcribed audio/video content.
 Given a text chunk from a media transcription (which may include speaker labels),
-extract qualified Subject-Predicate-Object assertions.
+extract structured Subject-Predicate-Object assertions suitable for a knowledge graph.
 
-Focus on factual, verifiable claims made by speakers. Capture both:
-- Claims about the world (facts, allegations, statements)
-- Speech acts (who said what, who questioned whom)
+## Output JSON Schema
 
-For each assertion, provide:
-- subject: the entity performing or being described
-- predicate: the relationship or action (use normalized verb forms)
-- object: the target entity or value
-- confidence: score 0-1 indicating how clearly the text supports this assertion
-- negated: true if the assertion is negated ("did not", "denies", "rejected")
-- hedged: true if uncertain ("may", "could", "reportedly", "allegedly", "is expected to")
-- qualifiers: optional dict with keys:
-  - time: when this occurred or was discussed
-  - location: where (venue, jurisdiction, context)
-  - condition: under what condition
-  - manner: how ("emphatically", "under oath", "off the record")
-  - source_attribution: who says so ("according to SPEAKER_00", "as reported by")
+Return a JSON object matching this schema:
+{
+  "assertions": [
+    {
+      "subject": "string -- the entity performing the action (NOT a pronoun)",
+      "predicate": "string -- canonical relationship verb (see list below)",
+      "object": "string -- the target entity or value (NOT a pronoun)",
+      "confidence": "float 0.0-1.0",
+      "negated": "boolean -- true if negated",
+      "hedged": "boolean -- true if uncertain",
+      "qualifiers": {
+        "time": "string or empty",
+        "location": "string or empty",
+        "condition": "string or empty",
+        "manner": "string or empty",
+        "source_attribution": "string or empty"
+      }
+    }
+  ]
+}
 
-Prefer these canonical predicates for speech acts:
-  states, claims, denies, confirms, acknowledges, questions,
+## Canonical Predicates
+
+Speech acts: states, claims, denies, confirms, acknowledges, questions,
   responds_to, references, discusses, criticizes, supports, opposes
+Actions: owns, operates, leads, founded, works_for, member_of,
+  provides, increased, decreased, departed, transfers, created
 
-Be precise with predicates. Preserve speaker attribution in source_attribution qualifier.
+## Examples
 
-IMPORTANT RULES:
-- Do NOT use pronouns as subjects or objects. Resolve to the actual entity name.
-- Use SPEAKER_XX labels exactly as they appear (e.g., SPEAKER_00, SPEAKER_01), not 'Speaker' or 'the speaker'
-- Skip meta-commentary about the conversation itself (e.g., 'this is just guessing', 'I want to get someone on the show')
-- Only extract factual claims, allegations, and substantive speech acts — not conversational filler
-- Each assertion should be independently meaningful without needing surrounding context""",
+### Example 1 -- Speaker claims
+Input: "[SPEAKER_00] Russia has been supplying weapons to Iran since at least 2015, according to intelligence reports."
+Output:
+{"assertions": [
+  {"subject": "SPEAKER_00", "predicate": "claims", "object": "Russia has been supplying weapons to Iran", "confidence": 0.9, "negated": false, "hedged": false, "qualifiers": {"time": "since at least 2015", "location": "", "condition": "", "manner": "", "source_attribution": "according to intelligence reports"}},
+  {"subject": "Russia", "predicate": "provides", "object": "weapons to Iran", "confidence": 0.7, "negated": false, "hedged": true, "qualifiers": {"time": "since at least 2015", "location": "", "condition": "", "manner": "", "source_attribution": "according to intelligence reports"}}
+]}
+
+### Example 2 -- Denial and criticism
+Input: "[SPEAKER_01] The White House denied any involvement. But Senator Cruz called the response inadequate."
+Output:
+{"assertions": [
+  {"subject": "The White House", "predicate": "denies", "object": "any involvement", "confidence": 1.0, "negated": false, "hedged": false, "qualifiers": {"time": "", "location": "", "condition": "", "manner": "", "source_attribution": ""}},
+  {"subject": "Senator Cruz", "predicate": "criticizes", "object": "the response", "confidence": 0.9, "negated": false, "hedged": false, "qualifiers": {"time": "", "location": "", "condition": "", "manner": "", "source_attribution": ""}}
+]}
+
+### Anti-patterns (do NOT produce these)
+- {"subject": "SPEAKER_00", "predicate": "states", "object": "SPEAKER_00"} -- SELF-REFERENTIAL
+- {"subject": "he", "predicate": "claims", "object": "that"} -- PRONOUN: resolve to entity names
+- {"subject": "SPEAKER_01", "predicate": "is", "object": "talking"} -- VAGUE predicate
+- {"subject": "SPEAKER_00", "predicate": "states", "object": "I want to get someone on the show"} -- META-COMMENTARY
+
+## Rules
+
+1. No self-referential triples: subject and object must differ.
+2. No pronouns: resolve to entity names. Use SPEAKER_XX if real name unknown.
+3. Skip meta-commentary and conversational filler.
+4. Skip vague predicates: "is", "are", "was", "has", "got".
+5. Each assertion must be independently meaningful.
+6. Preserve speaker attribution in source_attribution qualifier.""",
 )
 
 # Speech-act predicates for media content, with bridges to congress/leaks vocabularies

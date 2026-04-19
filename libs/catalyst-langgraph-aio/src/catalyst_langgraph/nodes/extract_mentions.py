@@ -17,9 +17,19 @@ from catalyst_langgraph.state import ExtractionState, WorkflowStatus
 logger = logging.getLogger(__name__)
 
 FALLBACK_PROMPT = (
-    "Extract all named entity mentions from the following text. "
-    "Return a JSON object with a 'mentions' array, where each mention has: "
-    "text, mention_type, span_start, span_end."
+    "Extract all named entity mentions from the following text.\n\n"
+    "## Output JSON Schema\n"
+    '{"mentions": [{"text": "string", "mention_type": "PERSON|ORG|GPE|LOC|DATE|LAW|EVENT|MONEY|NORP|'
+    'FACILITY|DOCUMENT|BOOK|ROLE|STRATEGIC_ASSET|FINANCIAL_INSTRUMENT|OTHER", '
+    '"span_start": "int (0-based)", "span_end": "int (exclusive)", "confidence": "float 0-1"}]}\n\n'
+    "## Example\n"
+    'Input: "President Obama signed the Affordable Care Act in March 2010."\n'
+    '{"mentions": [\n'
+    '  {"text": "President Obama", "mention_type": "PERSON", "span_start": 0, "span_end": 15, "confidence": 1.0},\n'
+    '  {"text": "Affordable Care Act", "mention_type": "LAW", "span_start": 27, "span_end": 46, "confidence": 1.0},\n'
+    '  {"text": "March 2010", "mention_type": "DATE", "span_start": 50, "span_end": 60, "confidence": 1.0}\n'
+    "]}\n\n"
+    "Rules: no duplicate spans, no pronouns, committees are ORG not GPE."
 )
 
 

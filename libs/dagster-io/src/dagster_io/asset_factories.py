@@ -59,11 +59,32 @@ def build_mentions(
     llm_model: str,
     code_location: str,
 ) -> list[Mention]:
-    """Convert LLM MentionExtractionResult objects into Mention domain models."""
+    """Convert LLM MentionExtractionResult objects into Mention domain models.
+
+    Applies P-Strategy post-processing filters:
+    - Dedup: skip if same (span_start, span_end, mention_type) already seen per chunk.
+    """
     mentions: list[Mention] = []
+    total_raw = 0
+    dupes_skipped = 0
+
     for chunk, result in zip(chunks, results, strict=False):
+        seen_spans: set[tuple[int, int, str]] = set()
         ext: MentionExtraction
         for ext in result.mentions:
+            total_raw += 1
+
+            # Dedup: skip if same (span_start, span_end, mention_type) already seen
+            span_key = (
+                ext.span_start if ext.span_start >= 0 else -1,
+                ext.span_end if ext.span_end >= 0 else -1,
+                ext.label.upper().strip(),
+            )
+            if span_key in seen_spans:
+                dupes_skipped += 1
+                continue
+            seen_spans.add(span_key)
+
             ENTITIES_EXTRACTED.labels(code_location=code_location, entity_type=ext.label, method="llm").inc()
             mentions.append(
                 Mention(
@@ -84,6 +105,14 @@ def build_mentions(
                     ),
                 )
             )
+
+    if dupes_skipped > 0:
+        logger.info(
+            "Mention post-filter: %d dupes skipped from %d total raw mentions",
+            dupes_skipped,
+            total_raw,
+        )
+
     return mentions
 
 
@@ -98,8 +127,15 @@ def build_assertions(
     code_location: str,
     predicate_mappings: dict[str, str],
 ) -> list[Assertion]:
-    """Convert LLM AssertionExtractionResult objects into Assertion domain models."""
-    # Post-filter: skip low-quality assertions
+    """Convert LLM AssertionExtractionResult objects into Assertion domain models.
+
+    Applies P-Strategy post-processing filters:
+    - Pronoun subjects: skip assertions with pronoun-only subjects.
+    - Low confidence: skip if confidence < 0.5.
+    - Self-referential: skip if subject == object (case-insensitive, stripped).
+    - Filtered predicates: skip if predicate maps to empty string.
+    - Overly long objects: skip if object > 200 chars (likely summaries).
+    """
     PRONOUN_SUBJECTS = {
         "he",
         "she",
@@ -116,21 +152,43 @@ def build_assertions(
     }
 
     assertions: list[Assertion] = []
+    total_raw = 0
+    self_ref_skipped = 0
+    low_conf_skipped = 0
+    pronoun_skipped = 0
+    filtered_pred_skipped = 0
+    long_obj_skipped = 0
+
     for chunk, result in zip(chunks, results, strict=False):
         for ext in result.assertions:
+            total_raw += 1
+
             # Skip pronoun subjects
             subj_lower = ext.subject.lower().strip()
             if subj_lower in PRONOUN_SUBJECTS:
+                pronoun_skipped += 1
                 continue
-            # Skip very low confidence
-            if ext.confidence < 0.3:
+
+            # Skip self-referential triples (subject == object)
+            obj_lower = ext.object.lower().strip()
+            if subj_lower == obj_lower:
+                self_ref_skipped += 1
                 continue
+
+            # Skip low confidence (raised threshold from 0.3 to 0.5 per P-Strategy)
+            if ext.confidence < 0.5:
+                low_conf_skipped += 1
+                continue
+
             # Skip overly long objects (likely summaries)
             if len(ext.object) > 200:
+                long_obj_skipped += 1
                 continue
+
             # Skip filtered predicates (mapped to empty string)
             canonical = normalize_predicate(ext.predicate, predicate_mappings)
             if canonical == "":
+                filtered_pred_skipped += 1
                 continue
 
             quals = {k: v for k, v in ext.qualifiers.model_dump().items() if v}
@@ -154,13 +212,21 @@ def build_assertions(
                 )
             )
             ASSERTIONS_CREATED.labels(code_location=code_location).inc()
-            if ext.confidence < 0.5:
-                logger.warning(
-                    "Low confidence assertion: subject=%s predicate=%s confidence=%.2f",
-                    ext.subject[:50],
-                    ext.predicate[:50],
-                    ext.confidence,
-                )
+
+    total_filtered = self_ref_skipped + low_conf_skipped + pronoun_skipped + filtered_pred_skipped + long_obj_skipped
+    if total_filtered > 0:
+        logger.info(
+            "Assertion post-filter: %d filtered from %d total "
+            "(self_ref=%d, low_conf=%d, pronoun=%d, filtered_pred=%d, long_obj=%d)",
+            total_filtered,
+            total_raw,
+            self_ref_skipped,
+            low_conf_skipped,
+            pronoun_skipped,
+            filtered_pred_skipped,
+            long_obj_skipped,
+        )
+
     return assertions
 
 
@@ -169,9 +235,21 @@ def build_assertions(
 _NER_SYSTEM_PROMPT = load_prompt(
     "ner/basic",
     fallback=(
-        "You are a named-entity extraction system. "
-        "Given a text chunk, extract all named entities. "
-        "Be exhaustive but avoid duplicates."
+        "You are a named-entity extraction system. Given a text chunk, extract all named entities.\n\n"
+        "## Output JSON Schema\n"
+        '{"entities": [{"text": "string", "label": "PERSON|ORG|GPE|LOC|DATE|LAW|EVENT|MONEY|NORP|'
+        'FACILITY|DOCUMENT|BOOK|ROLE|STRATEGIC_ASSET|FINANCIAL_INSTRUMENT|OTHER", "context": "string"}]}\n\n'
+        "## Example\n"
+        'Input: "President Obama signed the Affordable Care Act in March 2010."\n'
+        "Output:\n"
+        '{"entities": [\n'
+        '  {"text": "President Obama", "label": "PERSON", "context": "President Obama signed the Affordable Care Act"},\n'
+        '  {"text": "Affordable Care Act", "label": "LAW", "context": "signed the Affordable Care Act in March 2010"},\n'
+        '  {"text": "March 2010", "label": "DATE", "context": "the Affordable Care Act in March 2010"}\n'
+        "]}\n\n"
+        "## Rules\n"
+        "1. Be exhaustive but avoid duplicates. 2. Committees/agencies are ORG, not GPE. "
+        "3. Countries/states/cities are GPE."
     ),
 )
 
@@ -263,9 +341,25 @@ def make_ner_asset(
 _SPO_SYSTEM_PROMPT = load_prompt(
     "propositions/spo",
     fallback=(
-        "You are a knowledge-graph extraction system. "
-        "Given a text chunk, extract Subject-Predicate-Object triples. "
-        "Focus on factual, verifiable claims. Omit vague or opinion-based statements."
+        "You are a knowledge-graph extraction system. Given a text chunk, extract "
+        "Subject-Predicate-Object triples representing factual, verifiable claims.\n\n"
+        "## Output JSON Schema\n"
+        '{"propositions": [{"subject": "string", "predicate": "string", "object": "string", '
+        '"confidence": "float 0-1"}]}\n\n'
+        "## Example\n"
+        'Input: "Apple acquired Beats Electronics for $3 billion in 2014."\n'
+        "Output:\n"
+        '{"propositions": [\n'
+        '  {"subject": "Apple", "predicate": "acquired", "object": "Beats Electronics", "confidence": 1.0},\n'
+        '  {"subject": "Apple", "predicate": "paid", "object": "$3 billion", "confidence": 1.0}\n'
+        "]}\n\n"
+        "## Anti-patterns\n"
+        "- SELF-REFERENTIAL: subject == object\n"
+        '- PRONOUN: "it" as subject (resolve to name)\n'
+        '- VAGUE: "is", "was", "has" as predicate\n\n'
+        "## Rules\n"
+        "1. No self-referential triples. 2. No pronoun subjects/objects. "
+        "3. Actor is always the subject. 4. Omit vague or opinion-based statements."
     ),
 )
 

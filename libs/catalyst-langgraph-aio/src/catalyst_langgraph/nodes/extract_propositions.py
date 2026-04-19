@@ -19,8 +19,18 @@ logger = logging.getLogger(__name__)
 
 FALLBACK_PROMPT = (
     "Extract Subject-Predicate-Object triples from the following text. "
-    "Use the provided entity mentions as subjects/objects where possible. "
-    "Return a JSON object with a 'propositions' array."
+    "Use the provided entity mentions as subjects/objects where possible.\n\n"
+    "## Output JSON Schema\n"
+    '{"propositions": [{"subject": "string", "predicate": "string", "object": "string", '
+    '"confidence": "float 0-1", "evidence": "string"}]}\n\n'
+    "## Example\n"
+    'Input: "Apple acquired Beats Electronics for $3 billion."\n'
+    '{"propositions": [\n'
+    '  {"subject": "Apple", "predicate": "acquired", "object": "Beats Electronics", "confidence": 1.0, '
+    '"evidence": "Apple acquired Beats Electronics"}\n'
+    "]}\n\n"
+    "Anti-patterns: no self-referential triples (subject==object), no pronoun subjects, "
+    "no vague predicates (is, was, has)."
 )
 
 

@@ -507,26 +507,65 @@ BILL_MENTION_PROMPT = load_prompt(
     "mentions/congress",
     fallback="""\
 You are a named-entity extraction system specialized in U.S. Congressional data.
-Given a text chunk, extract all named entity mentions with precise information.
+Given a text chunk, extract all named entity mentions with precise character offsets.
 
-Entity types to extract:
-- PERSON: legislators, officials, witnesses, nominees
-- ORG: committees, subcommittees, agencies, departments, lobbying groups
-- GPE: countries, states, districts, cities
-- LAW: bill numbers (H.R. XXX, S. XXX), public laws, acts, amendments
+## Output JSON Schema
+
+Return a JSON object matching this schema:
+{
+  "mentions": [
+    {
+      "text": "string -- exact surface form as it appears in the input",
+      "label": "string -- one of: PERSON, ORG, GPE, LOC, DATE, LAW, EVENT, MONEY, NORP, FACILITY, DOCUMENT, BOOK, ROLE, STRATEGIC_ASSET, FINANCIAL_INSTRUMENT, OTHER",
+      "context": "string -- the sentence fragment containing the entity",
+      "span_start": "integer -- character offset where the mention starts (0-based)",
+      "span_end": "integer -- character offset where the mention ends (exclusive)"
+    }
+  ]
+}
+
+## Entity Type Definitions
+
+- PERSON: legislators, officials, witnesses, nominees (e.g. "Rep. Pelosi", "Sen. Schumer")
+- ORG: committees, subcommittees, agencies, departments (e.g. "House Committee on Transportation", "EPA")
+- GPE: countries, states, districts, cities (e.g. "California", "United States")
+- DATE: specific dates, date ranges, congressional sessions (e.g. "March 15, 2025", "119th Congress 1st Session")
+- LAW: bill numbers, public laws, acts, amendments (e.g. "H.R. 1234", "Clean Air Act", "Public Law 91-589")
 - EVENT: hearings, votes, elections, investigations
-- MONEY: appropriations, budget figures, funding amounts
-- NORP: political parties, caucuses, coalitions
-- DATE: specific dates, date ranges, congressional sessions
+- MONEY: specific dollar amounts (e.g. "$1.5 billion", "$200 million")
+- NORP: political parties, caucuses, coalitions (e.g. "Republicans")
 
-For each entity, provide:
-- text: the exact mention as it appears
-- label: entity type from the list above
-- context: the sentence fragment containing the entity
-- span_start: character offset (0-based)
-- span_end: character offset (exclusive)
+## Examples
 
-Be exhaustive but avoid duplicates within the same span.""",
+### Example 1
+Input: "Rep. Nancy Pelosi (D-CA) introduced H.R. 1234, the Clean Energy Innovation Act, on March 15, 2025."
+Output:
+{"mentions": [
+  {"text": "Rep. Nancy Pelosi", "label": "PERSON", "context": "Rep. Nancy Pelosi (D-CA) introduced H.R. 1234", "span_start": 0, "span_end": 17},
+  {"text": "H.R. 1234", "label": "LAW", "context": "introduced H.R. 1234, the Clean Energy Innovation Act", "span_start": 32, "span_end": 41},
+  {"text": "Clean Energy Innovation Act", "label": "LAW", "context": "H.R. 1234, the Clean Energy Innovation Act", "span_start": 47, "span_end": 74},
+  {"text": "March 15, 2025", "label": "DATE", "context": "on March 15, 2025", "span_start": 79, "span_end": 93}
+]}
+Note: "D-CA" is a party-state code, NOT an entity.
+
+### Example 2
+Input: "119th CONGRESS, 1st Session. S. 456. To amend the Social Security Act."
+Output:
+{"mentions": [
+  {"text": "119th CONGRESS, 1st Session", "label": "DATE", "context": "119th CONGRESS, 1st Session", "span_start": 0, "span_end": 27},
+  {"text": "S. 456", "label": "LAW", "context": "S. 456. To amend the Social Security Act", "span_start": 29, "span_end": 35},
+  {"text": "Social Security Act", "label": "LAW", "context": "To amend the Social Security Act", "span_start": 50, "span_end": 69}
+]}
+Note: "119th CONGRESS" is a session identifier (DATE), NOT a PERSON or ORG.
+
+## Rules
+
+1. No duplicate spans: do not extract the same (span_start, span_end) twice.
+2. Do NOT extract party-state codes ("R-TX", "D-CA") as entities.
+3. "1st Session", "119th Congress" are DATE, not PERSON or ORG.
+4. Committees are ORG, not GPE.
+5. Extract MONEY only for specific dollar amounts.
+6. Be exhaustive but precise.""",
 )
 
 
@@ -582,17 +621,43 @@ def bill_assertions(
     from dagster_io.asset_factories import build_assertions as _build
 
     with trace_operation("bill_assertions", tracer, {"partition": context.partition_key, "layer": "gold"}):
+        _ASSERTION_PROMPT = load_prompt(
+            "assertions/congress",
+            fallback=(
+                "You are a knowledge-graph extraction system for U.S. Congressional data.\n"
+                "Extract Subject-Predicate-Object assertions from the text.\n\n"
+                "## Output JSON Schema\n"
+                '{"assertions": [{"subject": "string", "predicate": "string", "object": "string", '
+                '"confidence": "float 0-1", "negated": "boolean", "hedged": "boolean", '
+                '"qualifiers": {"time": "", "location": "", "condition": "", "manner": "", "source_attribution": ""}}]}\n\n'
+                "## Canonical Predicates\n"
+                "sponsors, co_sponsors, introduces, refers_to, amends, votes_for, votes_against,\n"
+                "enacted, signed_by, regulates, appropriates, funds, member_of, chairs, supports, opposes\n\n"
+                "## Example\n"
+                'Input: "Rep. Smith introduced H.R. 5678, which was referred to the Committee on Finance."\n'
+                "Output:\n"
+                '{"assertions": [\n'
+                '  {"subject": "Rep. Smith", "predicate": "introduces", "object": "H.R. 5678", '
+                '"confidence": 1.0, "negated": false, "hedged": false, '
+                '"qualifiers": {"time": "", "location": "", "condition": "", "manner": "", "source_attribution": ""}},\n'
+                '  {"subject": "H.R. 5678", "predicate": "refers_to", "object": "Committee on Finance", '
+                '"confidence": 1.0, "negated": false, "hedged": false, '
+                '"qualifiers": {"time": "", "location": "", "condition": "", "manner": "", "source_attribution": ""}}\n'
+                "]}\n\n"
+                "## Anti-patterns (do NOT produce these)\n"
+                "- Self-referential: subject == object\n"
+                "- Reversed direction: person 'was sponsored by' bill (should be person 'sponsors' bill)\n"
+                '- Metadata noise: "has title", "has policy area"\n\n'
+                "## Rules\n"
+                "1. No self-referential triples. 2. Actor is always the subject. "
+                "3. No pronoun subjects/objects. 4. No metadata noise."
+            ),
+        )
         chain = llm.with_structured_output(AssertionExtractionResult)
         results = llm.invoke_batch(
             chain,
             lambda chunk: [
-                SystemMessage(
-                    content=(
-                        "Extract structured factual assertions from this Congressional text. "
-                        "Focus on: who sponsored/cosponsored what, committee referrals, "
-                        "voting actions, policy positions, funding amounts."
-                    )
-                ),
+                SystemMessage(content=_ASSERTION_PROMPT),
                 HumanMessage(content=f"Extract assertions:\n\n{chunk.text}"),
             ],
             bill_chunks,
