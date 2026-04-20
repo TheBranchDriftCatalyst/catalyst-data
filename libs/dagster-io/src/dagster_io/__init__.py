@@ -1,13 +1,7 @@
 """Shared IO manager, resources, and utilities for Dagster pipelines."""
 
 from dagster_io.append_io_manager import AppendIOManager
-from dagster_io.asset_factories import (
-    LLM_ASSET_K8S_CONFIG,
-    build_assertions,
-    build_mentions,
-    make_ner_asset,
-    make_proposition_asset,
-)
+from dagster_io.asset_factories import LLM_ASSET_K8S_CONFIG
 from dagster_io.chunking import ChunkingResource, TextChunk, chunk_document, chunk_text
 from dagster_io.concordance import ConcordanceEngine, CrossSourceAligner
 from dagster_io.document import Document
@@ -123,12 +117,8 @@ __all__ = [
     "AssertionQualifiers",
     "AssertionExtractionResult",
     "normalize_predicate",
-    # Asset factories & builders
+    # Asset config
     "LLM_ASSET_K8S_CONFIG",
-    "build_mentions",
-    "build_assertions",
-    "make_ner_asset",
-    "make_proposition_asset",
     # Concordance
     "ConcordanceEngine",
     "CrossSourceAligner",

@@ -1,12 +1,13 @@
 """Stage 6: Knowledge graph loading into Neo4j.
 
-Stubbed — requires Neo4j instance and entity extraction output.
+Stubbed — requires Neo4j instance and mention/assertion extraction output.
 """
 
 from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
 
+from dagster_io import Mention
 from dagster_io.logging import get_logger
 from dagster_io.observability import get_tracer, trace_operation
 
@@ -16,7 +17,7 @@ tracer = get_tracer(__name__)
 
 @asset(
     group_name="congress",
-    description="Load Congress entities and relationships into Neo4j knowledge graph",
+    description="Load Congress mentions and relationships into Neo4j knowledge graph",
     compute_kind="graph",
     metadata={"layer": "gold"},
     op_tags={
@@ -32,7 +33,7 @@ tracer = get_tracer(__name__)
 )
 def congress_graph(
     context: AssetExecutionContext,
-    congress_entities: list[dict[str, Any]],
+    bill_mentions: list[Mention],
 ) -> Output[dict[str, Any]]:
     with trace_operation(
         "congress_graph",
@@ -40,7 +41,7 @@ def congress_graph(
         {
             "code_location": "congress_data",
             "layer": "gold",
-            "entity_count": len(congress_entities),
+            "mention_count": len(bill_mentions),
         },
     ):
         raise NotImplementedError(

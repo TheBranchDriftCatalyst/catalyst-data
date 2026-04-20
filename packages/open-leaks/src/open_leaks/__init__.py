@@ -30,11 +30,9 @@ from open_leaks.assets import (
     leak_chunks,
     leak_documents,
     leak_embeddings,
-    leak_entities,
     leak_entity_candidates,
     leak_graph,
     leak_mentions,
-    leak_propositions,
     wikileaks_cables,
 )
 
@@ -48,14 +46,11 @@ defs = Definitions(
         # Silver
         leak_documents,
         leak_chunks,
-        # Gold (legacy — backward compat)
-        leak_entities,
-        leak_propositions,
-        # Gold (EDC)
+        # Gold (LangGraph validated)
         leak_mentions,
         leak_entity_candidates,
         leak_assertions,
-        # Gold (unchanged)
+        # Gold
         leak_embeddings,
         leak_graph,
     ],

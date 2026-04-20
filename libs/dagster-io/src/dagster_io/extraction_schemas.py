@@ -71,38 +71,3 @@ class AssertionExtractionResult(BaseModel):
 def normalize_predicate(predicate: str, mappings: dict[str, str]) -> str:
     """Normalize a predicate string using a domain-specific mapping table."""
     return mappings.get(predicate.lower().strip(), predicate.lower().strip())
-
-
-# ── NER extraction ───────────────────────────────────────────────────
-
-
-class Entity(BaseModel):
-    """A single named entity extracted from text."""
-
-    text: str = Field(description="The entity mention as it appears in the text")
-    label: str = Field(description="Entity type: PERSON, ORG, GPE, DATE, LAW, or EVENT")
-    context: str = Field(description="The sentence fragment where the entity appears")
-
-
-class NERResult(BaseModel):
-    """Structured output from NER extraction."""
-
-    entities: list[Entity] = Field(default_factory=list)
-
-
-# ── Proposition extraction ───────────────────────────────────────────
-
-
-class Proposition(BaseModel):
-    """A single S-P-O triple extracted from text."""
-
-    subject: str = Field(description="The entity performing or being described")
-    predicate: str = Field(description="The relationship or action")
-    object: str = Field(description="The target entity or value")
-    confidence: float = Field(description="Confidence score 0-1", ge=0, le=1)
-
-
-class PropositionResult(BaseModel):
-    """Structured output from proposition extraction."""
-
-    propositions: list[Proposition] = Field(default_factory=list)
