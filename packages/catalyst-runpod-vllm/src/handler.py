@@ -62,16 +62,25 @@ def _build_engine() -> AsyncLLMEngine:
 
     log.info("Initializing vLLM engine for model: %s", model)
 
+    # Parse limit_mm_per_prompt (e.g. "image=0,audio=0" -> {"image": 0, "audio": 0})
+    limit_mm = {}
+    limit_mm_str = os.environ.get("LIMIT_MM_PER_PROMPT", "")
+    if limit_mm_str:
+        for pair in limit_mm_str.split(","):
+            k, v = pair.strip().split("=")
+            limit_mm[k.strip()] = int(v.strip())
+
     engine_args = AsyncEngineArgs(
         model=model,
         tokenizer=os.environ.get("TOKENIZER_NAME") or None,
         dtype=os.environ.get("DTYPE", "auto"),
-        max_model_len=int(os.environ.get("MAX_MODEL_LEN", "8192")),
-        gpu_memory_utilization=float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.95")),
+        max_model_len=int(os.environ.get("MAX_MODEL_LEN", "32768")),
+        gpu_memory_utilization=float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.90")),
         tensor_parallel_size=int(os.environ.get("TENSOR_PARALLEL_SIZE", "1")),
         quantization=os.environ.get("QUANTIZATION") or None,
         trust_remote_code=os.environ.get("TRUST_REMOTE_CODE", "true").lower() == "true",
         enforce_eager=os.environ.get("ENFORCE_EAGER", "false").lower() == "true",
+        limit_mm_per_prompt=limit_mm or None,
     )
 
     log.debug("AsyncEngineArgs: %s", engine_args)
