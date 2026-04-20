@@ -122,19 +122,23 @@ async def handler(job):
     log.info("[%s] Job received | stream=%s", job_id, job_input.get("stream", False))
     log.debug("[%s] Full input: %s", job_id, {k: v for k, v in job_input.items() if k != "messages"})
 
-    # Support OpenAI chat format — apply the model's chat template
+    # Apply chat template — always wrap into proper turn format
     if "messages" in job_input:
         messages = job_input["messages"]
-        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        log.info("[%s] Chat format | %d messages | prompt_len=%d", job_id, len(messages), len(prompt))
+        log.info("[%s] Chat format | %d messages", job_id, len(messages))
     else:
-        prompt = job_input.get("prompt", "")
-        log.info("[%s] Completion format | prompt_len=%d", job_id, len(prompt))
+        # Wrap raw prompt as a user message so the chat template is applied
+        raw_prompt = job_input.get("prompt", "")
+        messages = [{"role": "user", "content": raw_prompt}] if raw_prompt else []
+        log.info("[%s] Completion format (wrapped) | raw_len=%d", job_id, len(raw_prompt))
 
-    if not prompt:
+    if not messages:
         log.warning("[%s] Empty prompt — returning error", job_id)
         yield {"error": "No prompt or messages provided"}
         return
+
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    log.info("[%s] Templated prompt_len=%d", job_id, len(prompt))
 
     sampling_params = SamplingParams(
         temperature=job_input.get("temperature", 0.7),
