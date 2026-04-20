@@ -14,11 +14,12 @@ FROM nvidia/cuda:12.9.1-base-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# System deps
+# System deps (gcc required for Triton JIT kernel compilation)
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
         python3-pip \
         python3-dev \
+        gcc \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -43,7 +44,6 @@ ENV BASE_PATH="/runpod-volume" \
     HF_HOME="/runpod-volume/huggingface-cache/hub" \
     HUGGINGFACE_HUB_CACHE="/runpod-volume/huggingface-cache/hub" \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
-    VLLM_ATTENTION_BACKEND=FLASHINFER \
     MAX_CONCURRENCY=30 \
     GPU_MEMORY_UTILIZATION=0.95 \
     MAX_MODEL_LEN=8192 \
