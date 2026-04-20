@@ -1,8 +1,7 @@
 import { useState, useCallback } from "react";
 import { Badge, Input } from "@thebranchdriftcatalyst/catalyst-ui";
-import { Check, X, Pencil, Clock } from "lucide-react";
+import { Check, X, Clock } from "lucide-react";
 import type { Mention, AnnotationStatus } from "@/types/media";
-import ConfidenceBadge from "./ConfidenceBadge";
 import { cn } from "@/lib/utils";
 import { formatTime } from "@/lib/speakers";
 
@@ -71,7 +70,6 @@ export default function MentionCard({
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(mention.text);
   const typeStyle = getTypeColor(mention.mention_type);
-  const confidence = mention.provenance?.confidence ?? 0;
 
   const handleSaveEdit = useCallback(() => {
     if (editValue.trim() && editValue !== mention.text) {
@@ -104,88 +102,83 @@ export default function MentionCard({
     <div
       data-testid={`mention-card-${targetId}`}
       className={cn(
-        "group px-3 py-2 hover:bg-white/[0.04] transition-colors cursor-pointer",
+        "group flex items-center gap-1.5 px-3 py-1 hover:bg-white/[0.04] transition-colors cursor-pointer min-h-[28px]",
         statusBorder,
         className,
       )}
       onClick={() => {
         onClick?.(mention);
-        // Seek to the mention's temporal position if available
         if (onSeek && mention.provenance?.temporal_start_ms != null) {
           onSeek(mention.provenance.temporal_start_ms / 1000);
         }
       }}
     >
-      {/* Row 1: Entity name + type badge + confidence */}
-      <div className="flex items-center gap-1.5 min-w-0">
-        {isEditing ? (
-          <Input
-            type="text"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={handleSaveEdit}
-            autoFocus
-            className="h-6 text-xs bg-surface-2 border-white/10 flex-1"
-            onClick={(e) => e.stopPropagation()}
-          />
-        ) : (
-          <span
-            className={cn(
-              "text-sm truncate flex-1 min-w-0",
-              status === "rejected" ? "line-through text-zinc-500" : "text-zinc-200",
-            )}
-          >
-            {mention.text}
-          </span>
-        )}
-
-        <Badge
-          variant="secondary"
+      {/* Entity name */}
+      {isEditing ? (
+        <Input
+          type="text"
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleSaveEdit}
+          autoFocus
+          className="h-5 text-xs bg-surface-2 border-white/10 flex-1"
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <span
           className={cn(
-            "text-[9px] px-1 py-0 h-4 uppercase flex-shrink-0",
-            typeStyle.color,
-            typeStyle.bg,
+            "text-xs truncate flex-1 min-w-0",
+            status === "rejected" ? "line-through text-zinc-500" : "text-zinc-200",
           )}
         >
-          {mention.mention_type}
-        </Badge>
+          {mention.text}
+        </span>
+      )}
 
-        {occurrenceCount != null && occurrenceCount > 1 && (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1 py-0 h-4 text-zinc-400 border-zinc-700 flex-shrink-0 tabular-nums"
-          >
-            ×{occurrenceCount}
-          </Badge>
+      {/* Temporal range */}
+      {firstSeenMs != null && lastSeenMs != null ? (
+        <span className="hidden sm:inline-flex items-center gap-0.5 text-[9px] text-zinc-600 font-mono tabular-nums flex-shrink-0">
+          <Clock className="h-2 w-2" />
+          {formatTime(firstSeenMs / 1000)}–{formatTime(lastSeenMs / 1000)}
+        </span>
+      ) : mention.provenance?.temporal_start_ms != null ? (
+        <span className="hidden sm:inline-flex items-center gap-0.5 text-[9px] text-zinc-600 font-mono tabular-nums flex-shrink-0">
+          <Clock className="h-2 w-2" />
+          {formatTime(mention.provenance.temporal_start_ms / 1000)}
+        </span>
+      ) : null}
+
+      {/* Speakers */}
+      {speakers && speakers.length > 0 && (
+        <span className="hidden md:inline text-[9px] text-zinc-600 flex-shrink-0">
+          {speakers.join(", ")}
+        </span>
+      )}
+
+      {/* Type badge */}
+      <Badge
+        variant="secondary"
+        className={cn(
+          "text-[8px] px-1 py-0 h-3.5 uppercase flex-shrink-0",
+          typeStyle.color,
+          typeStyle.bg,
         )}
+      >
+        {mention.mention_type}
+      </Badge>
 
-        {confidence > 0 && <ConfidenceBadge confidence={confidence} className="flex-shrink-0" />}
-      </div>
+      {/* Count badge */}
+      {occurrenceCount != null && occurrenceCount > 1 && (
+        <span className="text-[9px] text-zinc-500 tabular-nums flex-shrink-0">
+          ×{occurrenceCount}
+        </span>
+      )}
 
-      {/* Row 2: Metadata — temporal range + speakers */}
-      <div className="flex items-center gap-2 mt-1 flex-wrap">
-        {firstSeenMs != null && lastSeenMs != null ? (
-          <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500 font-mono tabular-nums">
-            <Clock className="h-2.5 w-2.5" />
-            {formatTime(firstSeenMs / 1000)} → {formatTime(lastSeenMs / 1000)}
-          </span>
-        ) : mention.provenance?.temporal_start_ms != null ? (
-          <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500 font-mono tabular-nums">
-            <Clock className="h-2.5 w-2.5" />
-            {formatTime(mention.provenance.temporal_start_ms / 1000)}
-          </span>
-        ) : null}
-
-        {speakers && speakers.length > 0 && (
-          <span className="text-[9px] text-zinc-600">{speakers.join(", ")}</span>
-        )}
-      </div>
-
-      {/* Row 3: HITL controls — visible on hover or when status is set */}
+      {/* HITL controls — inline, visible on hover */}
       <div
         className={cn(
-          "flex items-center gap-1 mt-1.5 transition-opacity",
+          "flex items-center gap-0.5 flex-shrink-0 transition-opacity",
           status === "pending" ? "opacity-0 group-hover:opacity-100" : "opacity-100",
         )}
       >
@@ -195,7 +188,7 @@ export default function MentionCard({
             "p-0.5 rounded transition-colors",
             status === "approved"
               ? "text-green-400 bg-green-900/30"
-              : "text-zinc-500 hover:text-green-400 hover:bg-green-900/20",
+              : "text-zinc-600 hover:text-green-400",
           )}
           onClick={(e) => {
             e.stopPropagation();
@@ -203,16 +196,15 @@ export default function MentionCard({
           }}
           title="Approve"
         >
-          <Check className="h-3.5 w-3.5" />
+          <Check className="h-3 w-3" />
         </button>
-
         <button
           data-testid="mention-reject"
           className={cn(
             "p-0.5 rounded transition-colors",
             status === "rejected"
               ? "text-red-400 bg-red-900/30"
-              : "text-zinc-500 hover:text-red-400 hover:bg-red-900/20",
+              : "text-zinc-600 hover:text-red-400",
           )}
           onClick={(e) => {
             e.stopPropagation();
@@ -220,19 +212,7 @@ export default function MentionCard({
           }}
           title="Reject"
         >
-          <X className="h-3.5 w-3.5" />
-        </button>
-
-        <button
-          data-testid="mention-edit"
-          className="p-0.5 rounded text-zinc-500 hover:text-blue-400 hover:bg-blue-900/20 transition-colors"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsEditing(true);
-          }}
-          title="Edit"
-        >
-          <Pencil className="h-3.5 w-3.5" />
+          <X className="h-3 w-3" />
         </button>
       </div>
     </div>

@@ -189,8 +189,9 @@ export default function PlayerPage() {
   const handleMarkerClick = useCallback(
     (marker: TimelineMarker) => {
       handleSeek(marker.timestamp);
+      scrollToTimestamp(marker.timestamp);
     },
-    [handleSeek],
+    [handleSeek, scrollToTimestamp],
   );
 
   // Loading state

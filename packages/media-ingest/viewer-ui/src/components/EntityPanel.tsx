@@ -117,7 +117,10 @@ export default function EntityPanel({
   onBulkReject,
   className = "",
 }: EntityPanelProps) {
-  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
+  // Default all groups to expanded
+  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(
+    new Set(Object.keys(TYPE_CONFIG)),
+  );
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
