@@ -15,10 +15,17 @@ from dagster_io.models import Assertion, Mention, MentionType
 class FakeChunk:
     """Minimal TextChunk-like object for testing."""
 
-    def __init__(self, text: str, document_id: str = "doc-1", chunk_id: str = "chunk-0"):
+    def __init__(
+        self,
+        text: str,
+        document_id: str = "doc-1",
+        chunk_id: str = "chunk-0",
+        metadata: dict | None = None,
+    ):
         self.text = text
         self.document_id = document_id
         self.chunk_id = chunk_id
+        self.metadata = metadata or {}
 
 
 def test_extract_validated_empty_chunks():
@@ -158,6 +165,95 @@ def test_extract_validated_multiple_chunks():
         mentions, _ = extract_validated(chunks, "test", max_concurrency=2)
 
     assert len(mentions) == 5
+
+
+def test_extract_validated_provenance_from_chunk_metadata():
+    """Chunk temporal metadata propagates to mention/assertion provenance."""
+    mock_result = {
+        "accepted_mentions": [
+            {
+                "text": "Piers Morgan",
+                "mention_type": "PERSON",
+                "span_start": 0,
+                "span_end": 12,
+                "document_id": "doc-1",
+                "chunk_id": "c0",
+            },
+        ],
+        "accepted_propositions": [
+            {"subject": "Piers Morgan", "predicate": "interviews", "object": "Nick Fuentes", "confidence": 0.95},
+        ],
+        "status": "completed",
+        "mention_retry_count": 0,
+        "proposition_retry_count": 0,
+    }
+
+    with patch("dagster_io.extraction._build_graph") as mock_build:
+        mock_graph = MagicMock()
+
+        async def fake_ainvoke(state):
+            return mock_result
+
+        mock_graph.ainvoke = fake_ainvoke
+        mock_build.return_value = mock_graph
+
+        chunk = FakeChunk(
+            "Piers Morgan interviews Nick Fuentes",
+            document_id="media-video-123",
+            chunk_id="media-video-123:chunk-42",
+            metadata={
+                "start_s": 3600.5,
+                "end_s": 3660.0,
+                "speaker": "SPEAKER_00",
+                "strategy": "speaker_turn",
+            },
+        )
+        mentions, assertions = extract_validated([chunk], "media_ingest")
+
+    # Mention should carry provenance from chunk metadata
+    assert len(mentions) == 1
+    m = mentions[0]
+    assert m.provenance is not None
+    assert m.provenance.temporal_start_ms == 3600500  # 3600.5 * 1000
+    assert m.provenance.temporal_end_ms == 3660000
+    assert m.provenance.speaker_label == "SPEAKER_00"
+    assert m.provenance.extraction_method == "llm"
+    assert m.chunk_id == "media-video-123:chunk-42"
+
+    # Assertion should also carry provenance
+    assert len(assertions) == 1
+    a = assertions[0]
+    assert a.provenance is not None
+    assert a.provenance.temporal_start_ms == 3600500
+    assert a.provenance.speaker_label == "SPEAKER_00"
+
+
+def test_extract_validated_no_metadata_no_provenance():
+    """Chunks without metadata produce mentions with no provenance (backward compat)."""
+    mock_result = {
+        "accepted_mentions": [
+            {"text": "Biden", "mention_type": "PERSON", "document_id": "doc-1", "chunk_id": "c0"},
+        ],
+        "accepted_propositions": [],
+        "status": "completed",
+        "mention_retry_count": 0,
+        "proposition_retry_count": 0,
+    }
+
+    with patch("dagster_io.extraction._build_graph") as mock_build:
+        mock_graph = MagicMock()
+
+        async def fake_ainvoke(state):
+            return mock_result
+
+        mock_graph.ainvoke = fake_ainvoke
+        mock_build.return_value = mock_graph
+
+        chunk = FakeChunk("Biden spoke", metadata={})  # no temporal data
+        mentions, _ = extract_validated([chunk], "test")
+
+    assert len(mentions) == 1
+    assert mentions[0].provenance is None
 
 
 def test_extract_validated_failed_chunk_raises():

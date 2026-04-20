@@ -224,7 +224,7 @@ def extract_validated(
                 temporal_start_ms=int(start_s * 1000) if start_s is not None else None,
                 temporal_end_ms=int(end_s * 1000) if end_s is not None else None,
                 speaker_label=speaker,
-                extraction_method="langgraph_validated",
+                extraction_method="llm",
             )
 
         mention_models.append(
@@ -255,7 +255,7 @@ def extract_validated(
                 temporal_start_ms=int(a_start_s * 1000) if a_start_s is not None else None,
                 temporal_end_ms=int(a_end_s * 1000) if a_end_s is not None else None,
                 speaker_label=a_speaker,
-                extraction_method="langgraph_validated",
+                extraction_method="llm",
             )
 
         assertion_models.append(
