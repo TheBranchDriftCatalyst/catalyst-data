@@ -40,7 +40,6 @@ def _log_env_config():
         "HF_HOME",
         "HUGGINGFACE_HUB_CACHE",
         "HF_HUB_ENABLE_HF_TRANSFER",
-        "VLLM_ATTENTION_BACKEND",
         "BASE_PATH",
     ]
     log.info("=== Startup Configuration ===")

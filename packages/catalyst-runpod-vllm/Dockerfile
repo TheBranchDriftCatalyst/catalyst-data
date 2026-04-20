@@ -11,6 +11,11 @@
 
 FROM vllm/vllm-openai:gemma4
 
+# C compiler required for Triton/torch.compile JIT kernel compilation
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
 # RunPod SDK + HF transfer acceleration
 RUN pip install --no-cache-dir \
         runpod>=1.7.0 \
