@@ -129,6 +129,10 @@ def extract_validated(
     if not chunks:
         return [], []
 
+    import os
+
+    _llm_model = os.environ.get("LLM_MODEL", "unknown")
+
     graph = _build_graph()
     all_mentions: list[dict] = []
     all_assertions: list[dict] = []
@@ -155,11 +159,11 @@ def extract_validated(
             chunk_meta = getattr(chunk, "metadata", {}) or {}
             result["_chunk_metadata"] = chunk_meta
             result["_chunk_id"] = getattr(chunk, "chunk_id", "")
-            LLM_REQUEST_DURATION.labels(model="gpt-4o-mini", operation="validated_extraction").observe(duration)
-            LLM_REQUESTS.labels(model="gpt-4o-mini", operation="validated_extraction", status="success").inc()
+            LLM_REQUEST_DURATION.labels(model=_llm_model, operation="validated_extraction").observe(duration)
+            LLM_REQUESTS.labels(model=_llm_model, operation="validated_extraction", status="success").inc()
             return idx, result
         except Exception as e:
-            LLM_REQUESTS.labels(model="gpt-4o-mini", operation="validated_extraction", status="error").inc()
+            LLM_REQUESTS.labels(model=_llm_model, operation="validated_extraction", status="error").inc()
             logger.error("Extraction failed for chunk %d: %s", idx, e)
             raise
         finally:

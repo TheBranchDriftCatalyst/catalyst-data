@@ -73,7 +73,7 @@ data:
                     name: congress-data-secrets
                     key: CONGRESS_API_KEY
               - name: LLM_MODEL
-                value: "runpod/qwen3:30b-a3b"
+                value: "runpod/gemma-4-31b-it"
               - name: LLM_BASE_URL
                 value: http://litellm.catalyst-llm.svc.cluster.local:4000/v1
               - name: EMBEDDING_MODEL
