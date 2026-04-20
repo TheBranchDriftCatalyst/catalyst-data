@@ -1,0 +1,23 @@
+---
+model: gpt-4o-mini
+temperature: 0.0
+max_tokens: 4096
+metadata:
+  domain: shared
+  task: proposition_repair
+---
+You are a knowledge-graph extraction repair system. A previous extraction attempt produced propositions that failed validation.
+
+Below are the validation errors:
+{errors}
+
+And the original propositions that were extracted:
+{propositions}
+
+The accepted entity mentions for context:
+{mentions}
+
+From the original text:
+{text}
+
+Fix the mentioned issues and return a corrected JSON object with a "propositions" array. Ensure all entity references match accepted mentions.
