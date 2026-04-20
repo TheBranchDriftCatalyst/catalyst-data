@@ -13,6 +13,7 @@ from dagster import Definitions
 from dagster_io import (
     ChunkingResource,
     EmbeddingResource,
+    LLMResource,
     MinioIOManager,
     make_run_status_sensor,
 )
@@ -65,6 +66,7 @@ defs = Definitions(
     resources={
         "io_manager": MinioIOManager(),
         "chunking": ChunkingResource(),
+        "llm": LLMResource(),
         "embeddings": EmbeddingResource(),
     },
 )
