@@ -44,15 +44,29 @@ interface EntityPanelProps {
   className?: string;
 }
 
-interface MentionWithId {
+/** Aggregated entity — collapses duplicate mentions of the same text. */
+interface AggregatedEntity {
+  /** Representative mention (first occurrence). */
   mention: Mention;
+  /** Stable target ID for annotations. */
   targetId: string;
+  /** How many raw mentions reference this entity. */
+  count: number;
+  /** All raw mentions for this entity (for marker generation). */
+  allMentions: Mention[];
+  /** Earliest temporal_start_ms across all mentions. */
+  firstSeenMs: number | null;
+  /** Latest temporal_end_ms across all mentions. */
+  lastSeenMs: number | null;
+  /** Unique speaker labels who mentioned this entity. */
+  speakers: string[];
 }
 
 interface MentionGroup {
   type: string;
-  mentions: MentionWithId[];
-  totalCount: number;
+  entities: AggregatedEntity[];
+  totalUniqueCount: number;
+  totalRawCount: number;
 }
 
 const TYPE_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string }> = {
@@ -107,52 +121,87 @@ export default function EntityPanel({
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
-  // Build mentions with stable IDs
-  const mentionsWithIds = useMemo(
-    () => mentions.map((m, i) => ({ mention: m, targetId: mentionTargetId(m, i) })),
-    [mentions],
-  );
+  // Aggregate mentions: collapse duplicates by (type, text)
+  const aggregated = useMemo(() => {
+    const entityMap = new Map<string, AggregatedEntity>();
 
-  // Group by type
+    mentions.forEach((m, i) => {
+      const key = `${m.mention_type}:${m.text.toLowerCase().trim()}`;
+      const existing = entityMap.get(key);
+
+      if (!existing) {
+        entityMap.set(key, {
+          mention: m,
+          targetId: mentionTargetId(m, i),
+          count: 1,
+          allMentions: [m],
+          firstSeenMs: m.provenance?.temporal_start_ms ?? null,
+          lastSeenMs: m.provenance?.temporal_end_ms ?? null,
+          speakers: m.provenance?.speaker_label ? [m.provenance.speaker_label] : [],
+        });
+      } else {
+        existing.count++;
+        existing.allMentions.push(m);
+        const startMs = m.provenance?.temporal_start_ms;
+        const endMs = m.provenance?.temporal_end_ms;
+        if (startMs != null && (existing.firstSeenMs == null || startMs < existing.firstSeenMs)) {
+          existing.firstSeenMs = startMs;
+        }
+        if (endMs != null && (existing.lastSeenMs == null || endMs > existing.lastSeenMs)) {
+          existing.lastSeenMs = endMs;
+        }
+        const speaker = m.provenance?.speaker_label;
+        if (speaker && !existing.speakers.includes(speaker)) {
+          existing.speakers.push(speaker);
+        }
+      }
+    });
+
+    return Array.from(entityMap.values());
+  }, [mentions]);
+
+  // Group aggregated entities by type
   const groups = useMemo(() => {
-    const typeMap = new Map<string, MentionWithId[]>();
+    const typeMap = new Map<string, AggregatedEntity[]>();
 
-    for (const item of mentionsWithIds) {
-      const type = item.mention.mention_type;
+    for (const entity of aggregated) {
+      const type = entity.mention.mention_type;
       if (!typeMap.has(type)) {
         typeMap.set(type, []);
       }
-      typeMap.get(type)!.push(item);
+      typeMap.get(type)!.push(entity);
     }
 
     const result: MentionGroup[] = [];
-    for (const [type, items] of typeMap) {
-      result.push({ type, mentions: items, totalCount: items.length });
+    for (const [type, entities] of typeMap) {
+      const rawCount = entities.reduce((sum, e) => sum + e.count, 0);
+      result.push({ type, entities, totalUniqueCount: entities.length, totalRawCount: rawCount });
     }
 
-    return result.sort((a, b) => b.totalCount - a.totalCount);
-  }, [mentionsWithIds]);
+    return result.sort((a, b) => b.totalRawCount - a.totalRawCount);
+  }, [aggregated]);
 
   // Apply search + status filters
   const filteredGroups = useMemo(() => {
     const q = searchText.toLowerCase();
     return groups
       .map((g) => {
-        let items = g.mentions;
+        let items = g.entities;
         if (searchText) {
-          items = items.filter((m) => m.mention.text.toLowerCase().includes(q));
+          items = items.filter((e) => e.mention.text.toLowerCase().includes(q));
         }
         if (statusFilter !== "all" && getStatus) {
-          items = items.filter((m) => getStatus(m.targetId) === statusFilter);
+          items = items.filter((e) => getStatus(e.targetId) === statusFilter);
         }
-        return { ...g, mentions: items, totalCount: items.length };
+        const rawCount = items.reduce((sum, e) => sum + e.count, 0);
+        return { ...g, entities: items, totalUniqueCount: items.length, totalRawCount: rawCount };
       })
-      .filter((g) => g.mentions.length > 0);
+      .filter((g) => g.entities.length > 0);
   }, [groups, searchText, statusFilter, getStatus]);
 
   // Flat list of currently visible target IDs (for bulk actions + counts)
   const visibleTargetIds = useMemo(
-    () => filteredGroups.flatMap((g) => g.mentions.map((m) => m.targetId)),
+    () => filteredGroups.flatMap((g) => g.entities.map((e) => e.targetId)),
     [filteredGroups],
   );
 
@@ -274,8 +323,9 @@ export default function EntityPanel({
                       <Badge
                         variant="secondary"
                         className="text-[10px] px-1.5 py-0 h-5 tabular-nums"
+                        title={`${group.totalUniqueCount} unique / ${group.totalRawCount} total mentions`}
                       >
-                        {group.totalCount}
+                        {group.totalUniqueCount}
                       </Badge>
                       <ChevronDown
                         className={cn(
@@ -290,12 +340,16 @@ export default function EntityPanel({
 
                 <CollapsibleContent>
                   <div className="bg-surface-1/50 border-x border-b border-white/5 rounded-b-md overflow-hidden divide-y divide-white/[0.03]">
-                    {group.mentions.map((item) => (
+                    {group.entities.map((entity) => (
                       <MentionCard
-                        key={item.targetId}
-                        mention={item.mention}
-                        targetId={item.targetId}
-                        status={getStatus ? getStatus(item.targetId) : "pending"}
+                        key={entity.targetId}
+                        mention={entity.mention}
+                        targetId={entity.targetId}
+                        status={getStatus ? getStatus(entity.targetId) : "pending"}
+                        occurrenceCount={entity.count}
+                        firstSeenMs={entity.firstSeenMs}
+                        lastSeenMs={entity.lastSeenMs}
+                        speakers={entity.speakers}
                         onApprove={onApprove}
                         onReject={onReject}
                         onEdit={onEdit}

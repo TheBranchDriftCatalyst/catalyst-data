@@ -10,7 +10,7 @@ class TestParsedPrompt:
         p = ParsedPrompt(prompt_id="test", system_content="hello")
         assert p.model == "gpt-4o-mini"
         assert p.temperature == 0.0
-        assert p.max_tokens == 4096
+        assert p.max_tokens == 16384
         assert p.metadata == {}
 
 

@@ -32,7 +32,7 @@ class TestLLMClientConfig:
         assert client.model == "gpt-4o-mini"
         assert client.base_url == "https://api.openai.com/v1"
         assert client.temperature == 0.0
-        assert client.max_tokens == 4096
+        assert client.max_tokens == 16384
 
     @patch("catalyst_langgraph.clients.llm.ChatOpenAI")
     def test_api_key_falls_back_to_openai(self, mock_chat, monkeypatch):

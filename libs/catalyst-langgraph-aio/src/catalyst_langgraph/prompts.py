@@ -25,7 +25,7 @@ class ParsedPrompt:
     system_content: str
     model: str = "gpt-4o-mini"
     temperature: float = 0.0
-    max_tokens: int = 4096
+    max_tokens: int = 16384
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -52,7 +52,7 @@ def parse_prompt_file(path: Path, prompt_id: str | None = None) -> ParsedPrompt:
         system_content=body,
         model=frontmatter.get("model", "gpt-4o-mini"),
         temperature=frontmatter.get("temperature", 0.0),
-        max_tokens=frontmatter.get("max_tokens", 4096),
+        max_tokens=frontmatter.get("max_tokens", 16384),
         metadata=frontmatter.get("metadata", {}),
     )
 

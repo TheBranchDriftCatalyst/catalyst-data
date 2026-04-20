@@ -22,7 +22,7 @@ class LLMClient:
     - LLM_API_KEY / OPENAI_API_KEY
     - LLM_MODEL (default: gpt-4o-mini)
     - LLM_TEMPERATURE (default: 0.0)
-    - LLM_MAX_TOKENS (default: 4096)
+    - LLM_MAX_TOKENS (default: 16384)
     - LLM_MAX_RETRIES (default: 5)
     - LLM_TIMEOUT (default: 300)
     """
@@ -42,7 +42,7 @@ class LLMClient:
         self.api_key = api_key or os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
         self.model = model or os.environ.get("LLM_MODEL", "gpt-4o-mini")
         self.temperature = temperature if temperature is not None else float(os.environ.get("LLM_TEMPERATURE", "0.0"))
-        self.max_tokens = max_tokens if max_tokens is not None else int(os.environ.get("LLM_MAX_TOKENS", "4096"))
+        self.max_tokens = max_tokens if max_tokens is not None else int(os.environ.get("LLM_MAX_TOKENS", "16384"))
         self.max_retries = max_retries if max_retries is not None else int(os.environ.get("LLM_MAX_RETRIES", "5"))
         self.timeout = timeout if timeout is not None else int(os.environ.get("LLM_TIMEOUT", "300"))
 

@@ -476,6 +476,7 @@ export default function PlayerPage() {
                   assertions={assertions}
                   onAssertionSelect={handleAssertionSelect}
                   selectedAssertionId={selectedAssertionId}
+                  onSeek={handleMentionSeek}
                   getStatus={getStatus}
                   onApprove={handleAssertionApprove}
                   onReject={handleAssertionReject}

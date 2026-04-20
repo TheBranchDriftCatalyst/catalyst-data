@@ -1,8 +1,9 @@
 import { Badge } from "@thebranchdriftcatalyst/catalyst-ui";
-import { Check, X, ArrowRight } from "lucide-react";
+import { Check, X, ArrowRight, Clock } from "lucide-react";
 import type { Assertion, AnnotationStatus } from "@/types/media";
 import ConfidenceBadge from "./ConfidenceBadge";
 import { cn } from "@/lib/utils";
+import { formatTime } from "@/lib/speakers";
 
 interface AssertionCardProps {
   assertion: Assertion;
@@ -12,6 +13,8 @@ interface AssertionCardProps {
   onApprove?: (targetId: string) => void;
   onReject?: (targetId: string) => void;
   onClick?: (assertion: Assertion) => void;
+  /** Called to seek the video to this assertion's timestamp (seconds). */
+  onSeek?: (timeInSeconds: number) => void;
   className?: string;
 }
 
@@ -22,6 +25,7 @@ export default function AssertionCard({
   onApprove,
   onReject,
   onClick,
+  onSeek,
   className,
 }: AssertionCardProps) {
   const statusBorder =
@@ -39,7 +43,12 @@ export default function AssertionCard({
         statusBorder,
         className,
       )}
-      onClick={() => onClick?.(assertion)}
+      onClick={() => {
+        onClick?.(assertion);
+        if (onSeek && assertion.provenance?.temporal_start_ms != null) {
+          onSeek(assertion.provenance.temporal_start_ms / 1000);
+        }
+      }}
     >
       {/* SPO triple */}
       <div className="flex items-center gap-1 min-w-0 flex-wrap">
@@ -87,6 +96,14 @@ export default function AssertionCard({
           >
             HEDGED
           </Badge>
+        )}
+
+        {/* Timestamp */}
+        {assertion.provenance?.temporal_start_ms != null && (
+          <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500 font-mono tabular-nums">
+            <Clock className="h-2.5 w-2.5" />
+            {formatTime(assertion.provenance.temporal_start_ms / 1000)}
+          </span>
         )}
 
         {/* Provenance info */}

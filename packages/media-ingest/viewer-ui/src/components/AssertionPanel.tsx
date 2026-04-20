@@ -9,6 +9,8 @@ interface AssertionPanelProps {
   assertions: Assertion[];
   onAssertionSelect?: (assertionId: string | null) => void;
   selectedAssertionId?: string | null;
+  /** Called to seek the video to an assertion's timestamp (seconds). */
+  onSeek?: (timeInSeconds: number) => void;
   /** Annotation helpers — optional; panel works without them. */
   getStatus?: (targetId: string) => AnnotationStatus;
   onApprove?: (targetId: string) => void;
@@ -29,6 +31,7 @@ export default function AssertionPanel({
   assertions,
   onAssertionSelect,
   selectedAssertionId,
+  onSeek,
   getStatus,
   onApprove,
   onReject,
@@ -206,6 +209,7 @@ export default function AssertionPanel({
                 status={getStatus ? getStatus(targetId) : "pending"}
                 onApprove={onApprove}
                 onReject={onReject}
+                onSeek={onSeek}
                 onClick={() => {
                   if (onAssertionSelect) {
                     onAssertionSelect(selectedAssertionId === aid ? null : aid);

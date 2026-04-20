@@ -36,6 +36,14 @@ interface MentionCardProps {
   /** Unique ID used as target_id for annotations. */
   targetId: string;
   status: AnnotationStatus;
+  /** Number of times this entity appears across all chunks. */
+  occurrenceCount?: number;
+  /** Earliest temporal_start_ms across all mentions. */
+  firstSeenMs?: number | null;
+  /** Latest temporal_end_ms across all mentions. */
+  lastSeenMs?: number | null;
+  /** Unique speaker labels who mentioned this entity. */
+  speakers?: string[];
   onApprove?: (targetId: string) => void;
   onReject?: (targetId: string) => void;
   onEdit?: (targetId: string, edits: Record<string, unknown>) => void;
@@ -49,6 +57,10 @@ export default function MentionCard({
   mention,
   targetId,
   status,
+  occurrenceCount,
+  firstSeenMs,
+  lastSeenMs,
+  speakers,
   onApprove,
   onReject,
   onEdit,
@@ -139,23 +151,36 @@ export default function MentionCard({
           {mention.mention_type}
         </Badge>
 
+        {occurrenceCount != null && occurrenceCount > 1 && (
+          <Badge
+            variant="outline"
+            className="text-[9px] px-1 py-0 h-4 text-zinc-400 border-zinc-700 flex-shrink-0 tabular-nums"
+          >
+            ×{occurrenceCount}
+          </Badge>
+        )}
+
         {confidence > 0 && <ConfidenceBadge confidence={confidence} className="flex-shrink-0" />}
       </div>
 
-      {/* Row 2: Context snippet + timestamp */}
-      {mention.context && (
-        <p className="text-[11px] text-zinc-500 mt-1 line-clamp-2 leading-relaxed">
-          ...{mention.context}...
-        </p>
-      )}
+      {/* Row 2: Metadata — temporal range + speakers */}
+      <div className="flex items-center gap-2 mt-1 flex-wrap">
+        {firstSeenMs != null && lastSeenMs != null ? (
+          <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500 font-mono tabular-nums">
+            <Clock className="h-2.5 w-2.5" />
+            {formatTime(firstSeenMs / 1000)} → {formatTime(lastSeenMs / 1000)}
+          </span>
+        ) : mention.provenance?.temporal_start_ms != null ? (
+          <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500 font-mono tabular-nums">
+            <Clock className="h-2.5 w-2.5" />
+            {formatTime(mention.provenance.temporal_start_ms / 1000)}
+          </span>
+        ) : null}
 
-      {/* Timestamp indicator — shown when temporal provenance exists */}
-      {mention.provenance?.temporal_start_ms != null && (
-        <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-zinc-500 font-mono tabular-nums">
-          <Clock className="h-2.5 w-2.5" />
-          {formatTime(mention.provenance.temporal_start_ms / 1000)}
-        </span>
-      )}
+        {speakers && speakers.length > 0 && (
+          <span className="text-[9px] text-zinc-600">{speakers.join(", ")}</span>
+        )}
+      </div>
 
       {/* Row 3: HITL controls — visible on hover or when status is set */}
       <div
