@@ -10,6 +10,7 @@ import sys
 import time
 
 import runpod
+from transformers import AutoTokenizer
 from vllm import AsyncLLMEngine
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.sampling_params import SamplingParams
@@ -102,6 +103,11 @@ t_cold = time.time()
 engine = _build_engine()
 log.info("--- Cold-start complete (%.1fs total) ---", time.time() - t_cold)
 
+# Load tokenizer for chat template application
+_model_name = os.environ.get("MODEL_NAME", "")
+tokenizer = AutoTokenizer.from_pretrained(_model_name, trust_remote_code=True)
+log.info("Tokenizer loaded: %s (chat_template=%s)", _model_name, "yes" if tokenizer.chat_template else "no")
+
 
 async def handler(job):
     """Process a RunPod serverless job.
@@ -116,13 +122,11 @@ async def handler(job):
     log.info("[%s] Job received | stream=%s", job_id, job_input.get("stream", False))
     log.debug("[%s] Full input: %s", job_id, {k: v for k, v in job_input.items() if k != "messages"})
 
-    # Support OpenAI chat format
+    # Support OpenAI chat format — apply the model's chat template
     if "messages" in job_input:
-        prompt = job_input.get("prompt")
-        if not prompt:
-            messages = job_input["messages"]
-            prompt = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages)
-        log.info("[%s] Chat format | %d messages | prompt_len=%d", job_id, len(job_input["messages"]), len(prompt))
+        messages = job_input["messages"]
+        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        log.info("[%s] Chat format | %d messages | prompt_len=%d", job_id, len(messages), len(prompt))
     else:
         prompt = job_input.get("prompt", "")
         log.info("[%s] Completion format | prompt_len=%d", job_id, len(prompt))
