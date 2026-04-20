@@ -114,12 +114,3 @@ spec:
         - name: prompts
           configMap:
             name: open-leaks-prompts
-            items:
-              - key: ner-basic.prompt
-                path: ner/basic.prompt
-              - key: propositions-spo.prompt
-                path: propositions/spo.prompt
-              - key: mentions.prompt
-                path: mentions/leaks.prompt
-              - key: assertions.prompt
-                path: assertions/leaks.prompt

@@ -163,8 +163,3 @@ spec:
         - name: prompts
           configMap:
             name: media-ingest-prompts
-            items:
-              - key: mentions.prompt
-                path: mentions/media.prompt
-              - key: assertions.prompt
-                path: assertions/media.prompt
