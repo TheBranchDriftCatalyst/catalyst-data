@@ -109,21 +109,17 @@ spec:
               - configMap:
                   name: open-leaks-prompts
                   items:
-                    - key: ner-basic.prompt
-                      path: ner/basic.prompt
-                    - key: propositions-spo.prompt
-                      path: propositions/spo.prompt
-                    - key: mentions.prompt
-                      path: mentions/leaks.prompt
-                    - key: assertions.prompt
-                      path: assertions/leaks.prompt
+                    - key: mention_extraction.prompt
+                      path: open-leaks/mention_extraction.prompt
+                    - key: proposition_extraction.prompt
+                      path: open-leaks/proposition_extraction.prompt
               - configMap:
                   name: congress-data-prompts
                   items:
-                    - key: mentions.prompt
-                      path: mentions/congress.prompt
-                    - key: assertions.prompt
-                      path: assertions/congress.prompt
+                    - key: mention_extraction.prompt
+                      path: congress-data/mention_extraction.prompt
+                    - key: proposition_extraction.prompt
+                      path: congress-data/proposition_extraction.prompt
               - configMap:
                   name: data-explorer-prompts
                   items:

@@ -61,20 +61,16 @@ resources:
 configMapGenerator:
   - name: open-leaks-prompts
     files:
-      - ner-basic.prompt=open-leaks/prompts/ner-basic.prompt
-      - propositions-spo.prompt=open-leaks/prompts/propositions-spo.prompt
-      - mentions.prompt=open-leaks/prompts/mentions.prompt
-      - assertions.prompt=open-leaks/prompts/assertions.prompt
+      - mention_extraction.prompt=open-leaks/prompts/mention_extraction.prompt
+      - proposition_extraction.prompt=open-leaks/prompts/proposition_extraction.prompt
   - name: congress-data-prompts
     files:
-      - ner-basic.prompt=congress-data/prompts/ner-basic.prompt
-      - propositions-spo.prompt=congress-data/prompts/propositions-spo.prompt
-      - mentions.prompt=congress-data/prompts/mentions.prompt
-      - assertions.prompt=congress-data/prompts/assertions.prompt
+      - mention_extraction.prompt=congress-data/prompts/mention_extraction.prompt
+      - proposition_extraction.prompt=congress-data/prompts/proposition_extraction.prompt
   - name: media-ingest-prompts
     files:
-      - mentions.prompt=media-ingest/prompts/mentions.prompt
-      - assertions.prompt=media-ingest/prompts/assertions.prompt
+      - mention_extraction.prompt=media-ingest/prompts/mention_extraction.prompt
+      - proposition_extraction.prompt=media-ingest/prompts/proposition_extraction.prompt
   - name: data-explorer-prompts
     files:
       - rag-research-assistant.prompt=data-explorer/prompts/rag-research-assistant.prompt
