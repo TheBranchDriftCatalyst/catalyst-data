@@ -121,7 +121,11 @@ class LLMResource(ConfigurableResource):
     max_retries: int = int(os.environ.get("LLM_MAX_RETRIES", "5"))
     request_timeout: float = float(os.environ.get("LLM_REQUEST_TIMEOUT", "300"))
 
+    # Code location for LiteLLM metadata labels
+    _code_location: str = PrivateAttr(default="")
+
     def setup_for_execution(self, context) -> None:  # noqa: ANN001
+        self._code_location = os.environ.get("DAGSTER_CODE_LOCATION", "unknown")
         logger.info("Initializing LLM resource model=%s base_url=%s", self.model, self.base_url)
         self._chat_model = ChatOpenAI(
             base_url=self.base_url,
@@ -131,6 +135,26 @@ class LLMResource(ConfigurableResource):
             max_tokens=self.max_tokens,
             max_retries=self.max_retries,
             timeout=self.request_timeout,
+            model_kwargs={
+                "extra_body": {
+                    "metadata": {
+                        "code_location": self._code_location,
+                        "pipeline": self._code_location,
+                    }
+                }
+            },
+        )
+
+    def _with_metadata(self, operation: str) -> ChatOpenAI:
+        """Return a ChatOpenAI with LiteLLM metadata labels for tracking."""
+        return self._chat_model.bind(
+            extra_body={
+                "metadata": {
+                    "operation": operation,
+                    "code_location": self._code_location,
+                    "model": self.model,
+                }
+            }
         )
 
     def get_model(self) -> BaseChatModel:
