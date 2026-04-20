@@ -111,6 +111,9 @@ def extract_validated(
     Uses the LangGraph extraction graph with MCP contract validation
     and repair cycles. Runs chunks concurrently.
 
+    Domain-specific prompts are loaded automatically from PROMPT_REGISTRY_DIR
+    (each Docker image bakes in shared + domain-specific .prompt files).
+
     Args:
         chunks: List of TextChunk objects (must have .text, .document_id, .chunk_id).
         code_location: For metrics labeling.
