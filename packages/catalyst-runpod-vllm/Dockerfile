@@ -25,14 +25,17 @@ RUN apt-get update -y && \
 # CUDA compat for RunPod's heterogeneous GPU fleet
 RUN ldconfig /usr/local/cuda-12.9/compat/
 
+# Allow pip to install system-wide (PEP 668 — fine in a container)
+RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
+
 # vLLM + FlashInfer attention backend
-RUN python3 -m pip install --no-cache-dir --upgrade pip && \
-    python3 -m pip install --no-cache-dir \
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
         "vllm[flashinfer]" \
         --extra-index-url https://download.pytorch.org/whl/cu129
 
 # Upgrade transformers for gemma4 architecture support
-RUN python3 -m pip install --no-cache-dir \
+RUN pip install --no-cache-dir \
         "transformers>=4.53.0" \
         runpod>=1.7.0 \
         huggingface_hub[hf_transfer] \
