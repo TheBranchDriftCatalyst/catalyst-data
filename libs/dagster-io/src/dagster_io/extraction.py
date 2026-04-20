@@ -121,7 +121,7 @@ def extract_validated(
         (all_mentions, all_assertions) — flattened lists of Mention and
         Assertion domain model instances.
     """
-    from dagster_io.models import Assertion, Mention, MentionType
+    from dagster_io.models import Assertion, Mention, MentionType, Provenance
 
     if not chunks:
         return [], []
@@ -148,6 +148,10 @@ def extract_validated(
             start = time.monotonic()
             result = loop.run_until_complete(_extract_chunk(graph, chunk.text, chunk.document_id, chunk.chunk_id))
             duration = time.monotonic() - start
+            # Attach chunk metadata to result so we can build provenance later
+            chunk_meta = getattr(chunk, "metadata", {}) or {}
+            result["_chunk_metadata"] = chunk_meta
+            result["_chunk_id"] = getattr(chunk, "chunk_id", "")
             LLM_REQUEST_DURATION.labels(model="gpt-4o-mini", operation="validated_extraction").observe(duration)
             LLM_REQUESTS.labels(model="gpt-4o-mini", operation="validated_extraction", status="success").inc()
             return idx, result
@@ -164,6 +168,15 @@ def extract_validated(
         futures = {pool.submit(_run_chunk, i, chunk): i for i, chunk in enumerate(chunks)}
         for future in as_completed(futures):
             idx, result = future.result()  # raises on permanent failure
+            chunk_meta = result.get("_chunk_metadata", {})
+            chunk_id = result.get("_chunk_id", "")
+            # Tag each mention/assertion with its source chunk metadata
+            for m in result["mentions"]:
+                m["_chunk_metadata"] = chunk_meta
+                m["_chunk_id"] = chunk_id
+            for a in result["propositions"]:
+                a["_chunk_metadata"] = chunk_meta
+                a["_chunk_id"] = chunk_id
             all_mentions.extend(result["mentions"])
             all_assertions.extend(result["propositions"])
             total_mention_retries += result["mention_retries"]
@@ -197,20 +210,54 @@ def extract_validated(
             method="langgraph_validated",
         ).inc()
 
+        # Build provenance from chunk metadata (temporal + speaker data)
+        chunk_meta = m.pop("_chunk_metadata", {})
+        chunk_id_from_meta = m.pop("_chunk_id", "")
+        prov = None
+        start_s = chunk_meta.get("start_s")
+        end_s = chunk_meta.get("end_s")
+        speaker = chunk_meta.get("speaker")
+        if start_s is not None or speaker:
+            prov = Provenance(
+                source_document_id=m.get("document_id", ""),
+                chunk_id=chunk_id_from_meta or m.get("chunk_id", ""),
+                temporal_start_ms=int(start_s * 1000) if start_s is not None else None,
+                temporal_end_ms=int(end_s * 1000) if end_s is not None else None,
+                speaker_label=speaker,
+                extraction_method="langgraph_validated",
+            )
+
         mention_models.append(
             Mention(
                 document_id=m.get("document_id", ""),
-                chunk_id=m.get("chunk_id", ""),
+                chunk_id=chunk_id_from_meta or m.get("chunk_id", ""),
                 text=m.get("text", ""),
                 mention_type=mention_type,
                 span_start=m.get("span_start"),
                 span_end=m.get("span_end"),
                 context=m.get("context", ""),
+                provenance=prov,
             )
         )
 
     assertion_models = []
     for a in all_assertions:
+        chunk_meta = a.pop("_chunk_metadata", {})
+        chunk_id_from_meta = a.pop("_chunk_id", "")
+        a_prov = None
+        a_start_s = chunk_meta.get("start_s")
+        a_end_s = chunk_meta.get("end_s")
+        a_speaker = chunk_meta.get("speaker")
+        if a_start_s is not None or a_speaker:
+            a_prov = Provenance(
+                source_document_id=a.get("document_id", ""),
+                chunk_id=chunk_id_from_meta,
+                temporal_start_ms=int(a_start_s * 1000) if a_start_s is not None else None,
+                temporal_end_ms=int(a_end_s * 1000) if a_end_s is not None else None,
+                speaker_label=a_speaker,
+                extraction_method="langgraph_validated",
+            )
+
         assertion_models.append(
             Assertion(
                 subject_text=a.get("subject", a.get("subject_text", "")),
@@ -220,6 +267,7 @@ def extract_validated(
                 negated=a.get("negated", False),
                 hedged=a.get("hedged", False),
                 qualifiers=a.get("qualifiers", {}),
+                provenance=a_prov,
             )
         )
 
