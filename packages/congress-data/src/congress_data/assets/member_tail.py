@@ -8,6 +8,8 @@ Silver: member_document, member_chunks
 Gold: member_mentions, member_embeddings
 """
 
+import time
+
 from dagster import (
     AssetExecutionContext,
     AssetIn,
@@ -15,7 +17,6 @@ from dagster import (
     RetryPolicy,
     asset,
 )
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from congress_data.client import CongressAPIClient
 from congress_data.config import CongressionalConfig
@@ -26,11 +27,10 @@ from dagster_io import (
     LLM_ASSET_K8S_CONFIG,
     ChunkingResource,
     EmbeddingResource,
-    LLMResource,
-    MentionExtractionResult,
+    Mention,
     TextChunk,
-    build_mentions,
 )
+from dagster_io.extraction import extract_validated
 from dagster_io.logging import get_logger
 from dagster_io.observability import get_tracer, trace_operation
 
@@ -303,7 +303,7 @@ def member_chunks(
 
 @asset(
     group_name="congress",
-    description="Extract entity mentions from member profile via LLM",
+    description="Extract entity mentions from member profile via LangGraph validated pipeline",
     compute_kind="llm",
     metadata={"layer": "gold"},
     partitions_def=member_partitions,
@@ -311,24 +311,22 @@ def member_chunks(
 )
 def member_mentions(
     context: AssetExecutionContext,
-    llm: LLMResource,
     member_chunks: list[TextChunk],
-) -> Output[list]:
+) -> Output[list[Mention]]:
     with trace_operation("member_mentions", tracer, {"partition": context.partition_key, "layer": "gold"}):
-        chain = llm.with_structured_output(MentionExtractionResult)
-        results = llm.invoke_batch(
-            chain,
-            lambda chunk: [
-                SystemMessage(content="Extract all named entity mentions from this congressional member profile."),
-                HumanMessage(content=f"Extract mentions:\n\n{chunk.text}"),
-            ],
+        if not member_chunks:
+            context.log.info("No chunks — returning empty mentions")
+            return Output([], metadata={"mention_count": 0})
+
+        llm_start = time.monotonic()
+        all_mentions, _ = extract_validated(
             member_chunks,
-            operation="mention_extract",
+            code_location="congress_data",
+            max_concurrency=5,
         )
+        llm_elapsed = time.monotonic() - llm_start
 
-        all_mentions = build_mentions(member_chunks, results, llm_model=llm.model, code_location="congress_data")
-
-        context.log.info(f"Member mentions: {len(all_mentions)}")
+        context.log.info(f"Member mentions: {len(all_mentions)} in {llm_elapsed:.1f}s")
         return Output(all_mentions, metadata={"mention_count": len(all_mentions)})
 
 

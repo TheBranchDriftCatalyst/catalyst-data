@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
 ASSERTION_SYSTEM_PROMPT = load_prompt(
-    "assertions/media",
+    "assertions",
     fallback="""\
 You are a knowledge-graph extraction system specialized in transcribed audio/video content.
 Given a text chunk from a media transcription (which may include speaker labels),

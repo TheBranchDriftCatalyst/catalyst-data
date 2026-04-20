@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
 MENTION_SYSTEM_PROMPT = load_prompt(
-    "mentions/leaks",
+    "mentions",
     fallback="""\
 You are a named-entity extraction system specialized in leaked documents analysis.
 Given a text chunk, extract all named entity mentions with precise information.

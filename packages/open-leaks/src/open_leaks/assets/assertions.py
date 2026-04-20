@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
 ASSERTION_SYSTEM_PROMPT = load_prompt(
-    "assertions/leaks",
+    "assertions",
     fallback="""\
 You are a knowledge-graph extraction system specialized in leaked documents analysis.
 Given a text chunk, extract qualified Subject-Predicate-Object assertions.

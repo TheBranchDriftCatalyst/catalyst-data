@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
 ASSERTION_SYSTEM_PROMPT = load_prompt(
-    "assertions/congress",
+    "assertions",
     fallback="""\
 You are a knowledge-graph extraction system specialized in U.S. Congressional data.
 Given a text chunk, extract qualified Subject-Predicate-Object assertions.

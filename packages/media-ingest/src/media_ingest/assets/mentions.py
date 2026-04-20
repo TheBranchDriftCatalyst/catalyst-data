@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
 MENTION_SYSTEM_PROMPT = load_prompt(
-    "mentions/media",
+    "mentions",
     fallback="""\
 You are a named-entity extraction system specialized in transcribed audio/video content.
 Given a text chunk from a media transcription (which may include speaker labels like [SPEAKER_00]),

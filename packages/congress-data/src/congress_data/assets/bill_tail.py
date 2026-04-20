@@ -8,6 +8,7 @@ Silver: bill_document, bill_chunks
 Gold: bill_mentions, bill_assertions, bill_embeddings
 """
 
+import time
 from collections import Counter
 
 from dagster import (
@@ -16,7 +17,6 @@ from dagster import (
     RetryPolicy,
     asset,
 )
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from congress_data.bill_chunker import chunk_bill_text
 from congress_data.client import CongressAPIClient
@@ -32,16 +32,15 @@ from congress_data.entities import (
 from congress_data.partitions import bill_partitions, parse_bill_partition_key
 from dagster_io import (
     LLM_ASSET_K8S_CONFIG,
+    Assertion,
     EmbeddingResource,
-    LLMResource,
-    MentionExtractionResult,
+    Mention,
     TextChunk,
-    build_mentions,
 )
+from dagster_io.extraction import extract_validated
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
-from dagster_io.prompts import load_prompt
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -503,75 +502,9 @@ def bill_chunks(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-BILL_MENTION_PROMPT = load_prompt(
-    "mentions/congress",
-    fallback="""\
-You are a named-entity extraction system specialized in U.S. Congressional data.
-Given a text chunk, extract all named entity mentions with precise character offsets.
-
-## Output JSON Schema
-
-Return a JSON object matching this schema:
-{
-  "mentions": [
-    {
-      "text": "string -- exact surface form as it appears in the input",
-      "label": "string -- one of: PERSON, ORG, GPE, LOC, DATE, LAW, EVENT, MONEY, NORP, FACILITY, DOCUMENT, BOOK, ROLE, STRATEGIC_ASSET, FINANCIAL_INSTRUMENT, OTHER",
-      "context": "string -- the sentence fragment containing the entity",
-      "span_start": "integer -- character offset where the mention starts (0-based)",
-      "span_end": "integer -- character offset where the mention ends (exclusive)"
-    }
-  ]
-}
-
-## Entity Type Definitions
-
-- PERSON: legislators, officials, witnesses, nominees (e.g. "Rep. Pelosi", "Sen. Schumer")
-- ORG: committees, subcommittees, agencies, departments (e.g. "House Committee on Transportation", "EPA")
-- GPE: countries, states, districts, cities (e.g. "California", "United States")
-- DATE: specific dates, date ranges, congressional sessions (e.g. "March 15, 2025", "119th Congress 1st Session")
-- LAW: bill numbers, public laws, acts, amendments (e.g. "H.R. 1234", "Clean Air Act", "Public Law 91-589")
-- EVENT: hearings, votes, elections, investigations
-- MONEY: specific dollar amounts (e.g. "$1.5 billion", "$200 million")
-- NORP: political parties, caucuses, coalitions (e.g. "Republicans")
-
-## Examples
-
-### Example 1
-Input: "Rep. Nancy Pelosi (D-CA) introduced H.R. 1234, the Clean Energy Innovation Act, on March 15, 2025."
-Output:
-{"mentions": [
-  {"text": "Rep. Nancy Pelosi", "label": "PERSON", "context": "Rep. Nancy Pelosi (D-CA) introduced H.R. 1234", "span_start": 0, "span_end": 17},
-  {"text": "H.R. 1234", "label": "LAW", "context": "introduced H.R. 1234, the Clean Energy Innovation Act", "span_start": 32, "span_end": 41},
-  {"text": "Clean Energy Innovation Act", "label": "LAW", "context": "H.R. 1234, the Clean Energy Innovation Act", "span_start": 47, "span_end": 74},
-  {"text": "March 15, 2025", "label": "DATE", "context": "on March 15, 2025", "span_start": 79, "span_end": 93}
-]}
-Note: "D-CA" is a party-state code, NOT an entity.
-
-### Example 2
-Input: "119th CONGRESS, 1st Session. S. 456. To amend the Social Security Act."
-Output:
-{"mentions": [
-  {"text": "119th CONGRESS, 1st Session", "label": "DATE", "context": "119th CONGRESS, 1st Session", "span_start": 0, "span_end": 27},
-  {"text": "S. 456", "label": "LAW", "context": "S. 456. To amend the Social Security Act", "span_start": 29, "span_end": 35},
-  {"text": "Social Security Act", "label": "LAW", "context": "To amend the Social Security Act", "span_start": 50, "span_end": 69}
-]}
-Note: "119th CONGRESS" is a session identifier (DATE), NOT a PERSON or ORG.
-
-## Rules
-
-1. No duplicate spans: do not extract the same (span_start, span_end) twice.
-2. Do NOT extract party-state codes ("R-TX", "D-CA") as entities.
-3. "1st Session", "119th Congress" are DATE, not PERSON or ORG.
-4. Committees are ORG, not GPE.
-5. Extract MONEY only for specific dollar amounts.
-6. Be exhaustive but precise.""",
-)
-
-
 @asset(
     group_name="congress",
-    description="Extract entity mentions from bill chunks via LLM",
+    description="Extract entity mentions from bill chunks via LangGraph validated pipeline",
     compute_kind="llm",
     metadata={"layer": "gold"},
     partitions_def=bill_partitions,
@@ -579,34 +512,32 @@ Note: "119th CONGRESS" is a session identifier (DATE), NOT a PERSON or ORG.
 )
 def bill_mentions(
     context: AssetExecutionContext,
-    llm: LLMResource,
     bill_chunks: list[TextChunk],
-) -> Output[list]:
+) -> Output[list[Mention]]:
 
     with trace_operation("bill_mentions", tracer, {"partition": context.partition_key, "layer": "gold"}):
-        chain = llm.with_structured_output(MentionExtractionResult)
-        results = llm.invoke_batch(
-            chain,
-            lambda chunk: [
-                SystemMessage(content=BILL_MENTION_PROMPT),
-                HumanMessage(content=f"Extract all entity mentions:\n\n{chunk.text}"),
-            ],
-            bill_chunks,
-            operation="mention_extract",
-        )
+        if not bill_chunks:
+            context.log.info("No chunks — returning empty mentions")
+            return Output([], metadata={"mention_count": 0})
 
-        all_mentions = build_mentions(bill_chunks, results, llm_model=llm.model, code_location="congress_data")
+        llm_start = time.monotonic()
+        all_mentions, _ = extract_validated(
+            bill_chunks,
+            code_location="congress_data",
+            max_concurrency=5,
+        )
+        llm_elapsed = time.monotonic() - llm_start
 
         ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="bill_mentions", layer="gold").inc(
             len(all_mentions)
         )
-        context.log.info(f"Bill mentions: {len(all_mentions)} from {len(bill_chunks)} chunks")
+        context.log.info(f"Bill mentions: {len(all_mentions)} from {len(bill_chunks)} chunks in {llm_elapsed:.1f}s")
         return Output(all_mentions, metadata={"mention_count": len(all_mentions)})
 
 
 @asset(
     group_name="congress",
-    description="Extract structured assertions from bill chunks via LLM",
+    description="Extract structured assertions from bill chunks via LangGraph validated pipeline",
     compute_kind="llm",
     metadata={"layer": "gold"},
     partitions_def=bill_partitions,
@@ -614,88 +545,26 @@ def bill_mentions(
 )
 def bill_assertions(
     context: AssetExecutionContext,
-    llm: LLMResource,
     bill_chunks: list[TextChunk],
-) -> Output[list]:
-    from dagster_io import AssertionExtractionResult
-    from dagster_io.asset_factories import build_assertions as _build
+) -> Output[list[Assertion]]:
 
     with trace_operation("bill_assertions", tracer, {"partition": context.partition_key, "layer": "gold"}):
-        _ASSERTION_PROMPT = load_prompt(
-            "assertions/congress",
-            fallback=(
-                "You are a knowledge-graph extraction system for U.S. Congressional data.\n"
-                "Extract Subject-Predicate-Object assertions from the text.\n\n"
-                "## Output JSON Schema\n"
-                '{"assertions": [{"subject": "string", "predicate": "string", "object": "string", '
-                '"confidence": "float 0-1", "negated": "boolean", "hedged": "boolean", '
-                '"qualifiers": {"time": "", "location": "", "condition": "", "manner": "", "source_attribution": ""}}]}\n\n'
-                "## Canonical Predicates\n"
-                "sponsors, co_sponsors, introduces, refers_to, amends, votes_for, votes_against,\n"
-                "enacted, signed_by, regulates, appropriates, funds, member_of, chairs, supports, opposes\n\n"
-                "## Example\n"
-                'Input: "Rep. Smith introduced H.R. 5678, which was referred to the Committee on Finance."\n'
-                "Output:\n"
-                '{"assertions": [\n'
-                '  {"subject": "Rep. Smith", "predicate": "introduces", "object": "H.R. 5678", '
-                '"confidence": 1.0, "negated": false, "hedged": false, '
-                '"qualifiers": {"time": "", "location": "", "condition": "", "manner": "", "source_attribution": ""}},\n'
-                '  {"subject": "H.R. 5678", "predicate": "refers_to", "object": "Committee on Finance", '
-                '"confidence": 1.0, "negated": false, "hedged": false, '
-                '"qualifiers": {"time": "", "location": "", "condition": "", "manner": "", "source_attribution": ""}}\n'
-                "]}\n\n"
-                "## Anti-patterns (do NOT produce these)\n"
-                "- Self-referential: subject == object\n"
-                "- Reversed direction: person 'was sponsored by' bill (should be person 'sponsors' bill)\n"
-                '- Metadata noise: "has title", "has policy area"\n\n'
-                "## Rules\n"
-                "1. No self-referential triples. 2. Actor is always the subject. "
-                "3. No pronoun subjects/objects. 4. No metadata noise."
-            ),
-        )
-        chain = llm.with_structured_output(AssertionExtractionResult)
-        results = llm.invoke_batch(
-            chain,
-            lambda chunk: [
-                SystemMessage(content=_ASSERTION_PROMPT),
-                HumanMessage(content=f"Extract assertions:\n\n{chunk.text}"),
-            ],
-            bill_chunks,
-            operation="assertion_extract",
-        )
+        if not bill_chunks:
+            context.log.info("No chunks — returning empty assertions")
+            return Output([], metadata={"assertion_count": 0})
 
-        all_assertions = _build(
+        llm_start = time.monotonic()
+        _, all_assertions = extract_validated(
             bill_chunks,
-            results,
-            llm_model=llm.model,
             code_location="congress_data",
-            predicate_mappings={
-                "sponsored": "sponsors",
-                "co-sponsored": "co_sponsors",
-                "cosponsored": "co_sponsors",
-                "introduced": "introduces",
-                "voted for": "votes_for",
-                "voted against": "votes_against",
-                "is a member of": "member_of",
-                "is member of": "member_of",
-                "belongs to": "member_of",
-                "chairs": "chairs",
-                "opposes": "opposes",
-                "supports": "supports",
-                "referred to": "referred_to",
-                "amended by": "amended_by",
-                "signed by": "signed_by",
-                "vetoed by": "vetoed_by",
-                "passed": "passed",
-                "failed": "failed",
-                "enacted": "enacted",
-                "appropriates": "appropriates",
-                "funds": "funds",
-                "regulates": "regulates",
-            },
+            max_concurrency=5,
         )
+        llm_elapsed = time.monotonic() - llm_start
 
-        context.log.info(f"Bill assertions: {len(all_assertions)} from {len(bill_chunks)} chunks")
+        ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="bill_assertions", layer="gold").inc(
+            len(all_assertions)
+        )
+        context.log.info(f"Bill assertions: {len(all_assertions)} from {len(bill_chunks)} chunks in {llm_elapsed:.1f}s")
         return Output(all_assertions, metadata={"assertion_count": len(all_assertions)})
 
 

@@ -45,8 +45,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Copy React SPA build
 COPY --from=ui-builder /ui/dist /app/viewer-static
 
-# Prompts baked into image — no ConfigMap mount needed
-COPY packages/media-ingest/prompts/ /app/prompts/
+# Prompts baked into image — canonical source is k8s/{domain}/prompts/
+COPY k8s/media-ingest/prompts/ /app/prompts/
+COPY k8s/shared/prompts/ /app/prompts/
 ENV PROMPT_REGISTRY_DIR=/app/prompts
 
 # All other ENV vars (DAGSTER_HOME, PYTHONPATH, LD_LIBRARY_PATH, SYCL_CACHE_DIR)

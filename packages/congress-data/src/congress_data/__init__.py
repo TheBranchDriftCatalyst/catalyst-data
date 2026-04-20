@@ -22,7 +22,6 @@ from dagster_io import (
     AppendIOManager,
     ChunkingResource,
     EmbeddingResource,
-    LLMResource,
     MinioIOManager,
     OptionalMinioIOManager,
     make_run_status_sensor,
@@ -126,7 +125,6 @@ defs = Definitions(
         "optional_io_manager": OptionalMinioIOManager(),
         "append_io_manager": AppendIOManager(),
         "chunking": ChunkingResource(),
-        "llm": LLMResource(),
         "embeddings": EmbeddingResource(),
     },
 )

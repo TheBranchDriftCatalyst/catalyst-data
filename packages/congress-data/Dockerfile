@@ -42,8 +42,9 @@ ENV PYTHONPATH=/app/libs/catalyst-contracts-core/src:/app/libs/catalyst-llm-cont
 ENV PROMPT_REGISTRY_DIR=/app/prompts
 RUN mkdir -p $DAGSTER_HOME
 
-# Prompts baked into image — no ConfigMap mount needed
-COPY packages/congress-data/prompts/ /app/prompts/
+# Prompts baked into image — canonical source is k8s/{domain}/prompts/
+COPY k8s/congress-data/prompts/ /app/prompts/
+COPY k8s/shared/prompts/ /app/prompts/
 
 EXPOSE 4000
 
