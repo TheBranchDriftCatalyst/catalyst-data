@@ -38,4 +38,5 @@ ENV BASE_PATH="/runpod-volume" \
 
 COPY src/ /src/
 
+ENTRYPOINT []
 CMD ["python3", "/src/handler.py"]
