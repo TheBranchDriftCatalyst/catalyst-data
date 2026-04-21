@@ -2,12 +2,16 @@
 
 Models are resolved from MODEL_NAME env var and downloaded at cold-start
 via RunPod's network volume cache (HF_HOME points to /runpod-volume/).
+
+Supports both RunPod native format and OpenAI-compatible chat/completions format.
+When input contains "openai_route", returns OpenAI-compatible response shape.
 """
 
 import logging
 import os
 import sys
 import time
+import uuid
 
 import runpod
 from transformers import AutoTokenizer
@@ -23,6 +27,8 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 log = logging.getLogger("catalyst-vllm")
+
+MODEL_NAME = os.environ.get("MODEL_NAME", "")
 
 
 def _log_env_config():
@@ -55,12 +61,11 @@ def _log_env_config():
 
 def _build_engine() -> AsyncLLMEngine:
     """Initialize vLLM async engine from environment variables."""
-    model = os.environ.get("MODEL_NAME", "")
-    if not model:
+    if not MODEL_NAME:
         log.critical("MODEL_NAME env var is not set — cannot start")
         raise RuntimeError("MODEL_NAME env var is required")
 
-    log.info("Initializing vLLM engine for model: %s", model)
+    log.info("Initializing vLLM engine for model: %s", MODEL_NAME)
 
     # Parse limit_mm_per_prompt (e.g. "image=0,audio=0" -> {"image": 0, "audio": 0})
     limit_mm = {}
@@ -71,7 +76,7 @@ def _build_engine() -> AsyncLLMEngine:
             limit_mm[k.strip()] = int(v.strip())
 
     engine_args = AsyncEngineArgs(
-        model=model,
+        model=MODEL_NAME,
         tokenizer=os.environ.get("TOKENIZER_NAME") or None,
         dtype=os.environ.get("DTYPE", "auto"),
         max_model_len=int(os.environ.get("MAX_MODEL_LEN", "32768")),
@@ -104,37 +109,71 @@ engine = _build_engine()
 log.info("--- Cold-start complete (%.1fs total) ---", time.time() - t_cold)
 
 # Load tokenizer for chat template application
-_model_name = os.environ.get("MODEL_NAME", "")
-tokenizer = AutoTokenizer.from_pretrained(_model_name, trust_remote_code=True)
-log.info("Tokenizer loaded: %s (chat_template=%s)", _model_name, "yes" if tokenizer.chat_template else "no")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+log.info("Tokenizer loaded: %s (chat_template=%s)", MODEL_NAME, "yes" if tokenizer.chat_template else "no")
+
+
+def _is_openai_format(job_input: dict) -> bool:
+    """Detect if request is OpenAI chat/completions format (sent via /openai/v1 path)."""
+    return "model" in job_input and "messages" in job_input
+
+
+def _build_openai_response(
+    text: str, model: str, prompt_tokens: int, completion_tokens: int, finish_reason: str
+) -> dict:
+    """Build an OpenAI-compatible chat completion response."""
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": text,
+                },
+                "finish_reason": finish_reason or "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
 
 
 async def handler(job):
     """Process a RunPod serverless job.
 
-    Accepts both raw completion requests and OpenAI-compatible chat format.
-    Streams results back via async generator.
+    Accepts both RunPod native format and OpenAI-compatible chat format.
+    Detects format by presence of "model" key in input.
     """
     job_id = job["id"]
     job_input = job["input"]
     t_start = time.time()
 
-    log.info("[%s] Job received | stream=%s", job_id, job_input.get("stream", False))
+    openai_mode = _is_openai_format(job_input)
+    log.info("[%s] Job received | openai_compat=%s stream=%s", job_id, openai_mode, job_input.get("stream", False))
     log.debug("[%s] Full input: %s", job_id, {k: v for k, v in job_input.items() if k != "messages"})
 
-    # Apply chat template — always wrap into proper turn format
+    # Extract messages
     if "messages" in job_input:
         messages = job_input["messages"]
         log.info("[%s] Chat format | %d messages", job_id, len(messages))
     else:
-        # Wrap raw prompt as a user message so the chat template is applied
         raw_prompt = job_input.get("prompt", "")
         messages = [{"role": "user", "content": raw_prompt}] if raw_prompt else []
         log.info("[%s] Completion format (wrapped) | raw_len=%d", job_id, len(raw_prompt))
 
     if not messages:
         log.warning("[%s] Empty prompt — returning error", job_id)
-        yield {"error": "No prompt or messages provided"}
+        if openai_mode:
+            yield {"error": {"message": "No messages provided", "type": "invalid_request_error", "code": 400}}
+        else:
+            yield {"error": "No prompt or messages provided"}
         return
 
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -161,7 +200,10 @@ async def handler(job):
         results_generator = engine.generate(prompt, sampling_params, job_id)
     except Exception:
         log.exception("[%s] engine.generate() failed", job_id)
-        yield {"error": "Engine generation failed — check worker logs"}
+        if openai_mode:
+            yield {"error": {"message": "Engine generation failed", "type": "server_error", "code": 500}}
+        else:
+            yield {"error": "Engine generation failed — check worker logs"}
         return
 
     full_output = ""
@@ -172,11 +214,12 @@ async def handler(job):
         full_output = text
         token_count = len(request_output.outputs[0].token_ids)
 
-        if job_input.get("stream", False):
+        if job_input.get("stream", False) and not openai_mode:
             yield {"text": new_text, "finished": request_output.finished}
 
     elapsed = time.time() - t_start
     prompt_tokens = len(request_output.prompt_token_ids)
+    finish_reason = request_output.outputs[0].finish_reason
     log.info(
         "[%s] Complete | %d prompt + %d completion tokens | %.2fs | %.1f tok/s",
         job_id,
@@ -186,7 +229,12 @@ async def handler(job):
         token_count / elapsed if elapsed > 0 else 0,
     )
 
-    if not job_input.get("stream", False):
+    if openai_mode:
+        # Return OpenAI-compatible response
+        model_name = job_input.get("model", MODEL_NAME)
+        yield _build_openai_response(full_output, model_name, prompt_tokens, token_count, finish_reason)
+    elif not job_input.get("stream", False):
+        # RunPod native format
         yield {
             "text": full_output,
             "usage": {
@@ -194,7 +242,7 @@ async def handler(job):
                 "completion_tokens": token_count,
                 "total_tokens": prompt_tokens + token_count,
             },
-            "finish_reason": request_output.outputs[0].finish_reason,
+            "finish_reason": finish_reason,
         }
 
 
