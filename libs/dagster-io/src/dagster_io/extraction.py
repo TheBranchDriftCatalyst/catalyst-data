@@ -74,8 +74,22 @@ def _build_pipeline_breakdown(audit_events: list[dict]) -> dict:
     return stages
 
 
+_EXGRAPH_ENABLED = os.environ.get("EXGRAPH_ENABLED", "false").lower() == "true"
+
+
 def _build_graph():
-    """Build the LangGraph extraction graph with real validators."""
+    """Build the extraction graph — dispatches to v1 or v2.
+
+    Set EXGRAPH_ENABLED=true to use the new catalyst-exgraph pipeline.
+    Default (false) uses the original catalyst-langgraph-aio graph.
+    """
+    if _EXGRAPH_ENABLED:
+        return _build_graph_v2()
+    return _build_graph_v1()
+
+
+def _build_graph_v1():
+    """Build the original hardcoded NER→SPO graph (catalyst-langgraph-aio)."""
     from catalyst_contracts.validators.mention_validator import (
         validate_mentions as _validate_mentions,
     )
@@ -137,6 +151,41 @@ def _build_graph():
     repo = _NullRepository()
 
     return build_extraction_graph(llm_client, mcp_client, repo), llm_client
+
+
+def _build_graph_v2():
+    """Build the new generic pipeline via catalyst-exgraph.
+
+    Uses the same model detection logic as v1, but constructs a composable
+    pipeline instead of a hardcoded NER→SPO graph. Returns (graph, client)
+    with the same ainvoke() output shape as v1.
+    """
+    from catalyst_exgraph.config import ner_stage_config, spo_stage_config
+    from catalyst_exgraph.dispatch import _LegacyAdapter
+    from catalyst_exgraph.pipeline import build_pipeline
+    from catalyst_exgraph.resource import _build_mcp_client, _resolve_client
+
+    _llm_model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    client = _resolve_client(_llm_model_name)
+    mcp_client = _build_mcp_client()
+
+    is_encoder = any(x in _llm_model_name.lower() for x in ("gliner", "nuextract", "universalner", "uniner"))
+
+    ner_config = ner_stage_config(model=_llm_model_name, max_retries=0 if is_encoder else 3)
+    spo_config = spo_stage_config(model=_llm_model_name, max_retries=3)
+
+    # Set prompt_dir if PROMPT_REGISTRY_DIR is set
+    prompt_dir = os.environ.get("PROMPT_REGISTRY_DIR")
+    if prompt_dir:
+        from catalyst_exgraph.config import StageConfig
+
+        ner_config = StageConfig(**{**ner_config.__dict__, "prompt_dir": prompt_dir})
+        spo_config = StageConfig(**{**spo_config.__dict__, "prompt_dir": prompt_dir})
+
+    pipeline = build_pipeline([ner_config, spo_config], client, mcp_client)
+
+    logger.info("_build_graph_v2: using catalyst-exgraph pipeline (model=%s, encoder=%s)", _llm_model_name, is_encoder)
+    return _LegacyAdapter(pipeline), client
 
 
 async def _extract_chunk(graph, chunk_text: str, document_id: str, chunk_id: str, max_retries: int = 3) -> dict:
