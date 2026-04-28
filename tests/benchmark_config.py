@@ -3,7 +3,8 @@
 Defines which models/endpoints to test against. Edit this file to add or
 remove models from the benchmark suite.
 
-Constraint: ≤18B params for local inference on Apple Silicon.
+Target: ≤12B params for local inference on Apple Silicon.
+Focus: structured entity extraction (NER) and proposition extraction (SPO).
 
 Usage:
     # Run all configured models:
@@ -34,65 +35,159 @@ class ModelConfig:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Ollama models — all ≤18B params, json_mode for structured output
+# Ollama models — json_mode for structured output
 # ═══════════════════════════════════════════════════════════════════════════
 
 OLLAMA_BASE = "http://localhost:11434/v1"
 
-OLLAMA_MODELS = [
-    ModelConfig(
-        name="nuextract-3.8b",
-        model="nuextract:latest",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "extraction-specialist"],
-    ),
+# ── Extraction specialists (purpose-built for NER) ────────────────────────
+
+EXTRACTION_MODELS = [
     ModelConfig(
         name="nuextract-1.5",
         model="nuextract1.5:latest",
         base_url=OLLAMA_BASE,
-        tags=["ollama", "extraction-specialist"],
+        tags=["ollama", "extraction-specialist", "3.8b"],
     ),
+    ModelConfig(
+        name="nuextract-3.8b",
+        model="nuextract:latest",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "extraction-specialist", "3.8b"],
+    ),
+    # NuExtract 2.0-8B — import via:
+    #   curl -L -o /tmp/NuExtract-2.0-8B.Q4_K_M.gguf \
+    #     "https://huggingface.co/mradermacher/NuExtract-2.0-8B-GGUF/resolve/main/NuExtract-2.0-8B.Q4_K_M.gguf"
+    #   ollama create nuextract2 -f Modelfile.nuextract2
+    # ModelConfig(
+    #     name="nuextract-2.0-8b",
+    #     model="nuextract2:latest",
+    #     base_url=OLLAMA_BASE,
+    #     tags=["ollama", "extraction-specialist", "8b"],
+    # ),
+]
+
+# ── General-purpose LLMs (~4B) ────────────────────────────────────────────
+
+SMALL_MODELS = [
+    ModelConfig(
+        name="llama3.2-3b",
+        model="llama3.2:latest",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "3b"],
+    ),
+    ModelConfig(
+        name="qwen3-4b",
+        model="qwen3:4b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "4b"],
+    ),
+    ModelConfig(
+        name="gemma3-4b",
+        model="gemma3:4b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "4b"],
+    ),
+    ModelConfig(
+        name="phi4-mini",
+        model="phi4-mini:latest",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "3.8b"],
+    ),
+]
+
+# ── General-purpose LLMs (~7-8B) ──────────────────────────────────────────
+
+MEDIUM_MODELS = [
     ModelConfig(
         name="mistral-7b",
         model="mistral:latest",
         base_url=OLLAMA_BASE,
-        tags=["ollama"],
+        tags=["ollama", "7b"],
     ),
     ModelConfig(
         name="qwen2.5-7b",
         model="qwen2.5:7b-instruct",
         base_url=OLLAMA_BASE,
-        tags=["ollama"],
+        tags=["ollama", "7b"],
     ),
     ModelConfig(
         name="llama3.1-8b",
         model="llama3.1:8b",
         base_url=OLLAMA_BASE,
-        tags=["ollama"],
+        tags=["ollama", "8b"],
     ),
+    ModelConfig(
+        name="qwen3-8b",
+        model="qwen3:8b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "8b"],
+    ),
+    ModelConfig(
+        name="hermes3-8b",
+        model="hermes3:8b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "8b"],
+    ),
+    ModelConfig(
+        name="dolphin3-8b",
+        model="dolphin3:8b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "8b"],
+    ),
+    ModelConfig(
+        name="granite3.1-8b",
+        model="granite3.1-dense:8b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "8b"],
+    ),
+]
+
+# ── General-purpose LLMs (~12B) ───────────────────────────────────────────
+
+LARGE_MODELS = [
     ModelConfig(
         name="mistral-nemo-12b",
         model="mistral-nemo:latest",
         base_url=OLLAMA_BASE,
-        tags=["ollama"],
+        tags=["ollama", "12b"],
     ),
     ModelConfig(
-        name="llama3.2-3b",
-        model="llama3.2:latest",
+        name="gemma3-12b",
+        model="gemma3:12b",
         base_url=OLLAMA_BASE,
-        tags=["ollama"],
+        tags=["ollama", "12b"],
     ),
 ]
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Non-LLM extraction models (need custom adapters, not Ollama)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# These are encoder-based models that run via Python libraries, not serving APIs.
+# They need custom adapter integration (like the NuExtract adapter).
+#
+# GLiNER (~300M) — pip install gliner
+#   Zero-shot NER via bidirectional transformer. Competitive with ChatGPT.
+#   https://github.com/urchade/GLiNER
+#
+# NuNER (125M) — HuggingFace encoder
+#   56x smaller than UniversalNER, similar fine-tuning performance.
+#   https://arxiv.org/html/2402.15343v1
+#
+# UniversalNER (7B GGUF available)
+#   GPT-3.5 distilled, 43 NER datasets. yuuko-eth/UniNER-7B-all-GGUF
+#   Could be imported to Ollama like NuExtract 1.5.
 
 # ═══════════════════════════════════════════════════════════════════════════
 # All models — used by the multi-model benchmark runner
 # ═══════════════════════════════════════════════════════════════════════════
 
-ALL_MODELS = OLLAMA_MODELS
+ALL_MODELS = EXTRACTION_MODELS + SMALL_MODELS + MEDIUM_MODELS + LARGE_MODELS
 
 
 def get_available_models(tags: list[str] | None = None) -> list[ModelConfig]:
-    """Return models filtered by tags (e.g. ["ollama"])."""
+    """Return models filtered by tags (e.g. ["ollama", "8b"])."""
     if not tags:
         return ALL_MODELS
     return [m for m in ALL_MODELS if any(t in m.tags for t in tags)]
