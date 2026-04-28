@@ -31,7 +31,7 @@ class ModelConfig:
     structured_method: str = "json_mode"  # json_mode works best for local models
     api_key: str = "unused"
     max_tokens: int = 4096
-    timeout: int = 600
+    timeout: int = 300  # 5 minutes per model
     tags: list[str] = field(default_factory=list)
 
 
@@ -51,18 +51,8 @@ EXTRACTION_MODELS = [
         base_url=OLLAMA_BASE,
         tags=["ollama", "extraction-specialist", "3.8b"],
     ),
-    ModelConfig(
-        name="nuextract-3.8b",
-        model="nuextract:latest",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "extraction-specialist", "3.8b"],
-    ),
-    ModelConfig(
-        name="nuextract-2.0-8b",
-        model="nuextract2:latest",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "extraction-specialist", "8b"],
-    ),
+    # nuextract 3.8b (v1.0) — removed: degenerates on long text, slow sliding window
+    # nuextract 2.0-8B — removed: Qwen2.5-VL GGUF template issues, 0 mentions
     ModelConfig(
         name="universalner-7b",
         model="universalner:latest",
