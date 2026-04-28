@@ -13,6 +13,8 @@ dependencies = [
     "pydantic>=2.9",
     "catalyst-contracts-core",
     "catalyst-llm-contract-mcp",
+    "catalyst-langgraph-aio",
+    "dagster-io",
 ]
 
 [project.optional-dependencies]
