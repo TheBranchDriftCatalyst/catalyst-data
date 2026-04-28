@@ -25,33 +25,35 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# Map our MentionType enum values to nuextract-friendly category names and back
-MENTION_TYPE_TO_CATEGORY = {
-    "PERSON": "Person",
-    "ORG": "Organization",
-    "GPE": "Country_State_City",
-    "LOC": "Location",
-    "DATE": "Date",
-    "LAW": "Law_Legislation",
-    "EVENT": "Event",
-    "MONEY": "Money_Amount",
-    "NORP": "Political_National_Group",
-    "FACILITY": "Facility_Building",
-    "DOCUMENT": "Document_Report",
-    "BOOK": "Book",
-    "ROLE": "Role_Title",
-    "STRATEGIC_ASSET": "Strategic_Asset",
-    "FINANCIAL_INSTRUMENT": "Financial_Instrument",
-    "OTHER": "Other",
+# NuExtract template categories → MentionType mapping.
+# NuExtract works best with ≤8 simple, well-named categories.
+# Too many categories cause the 3.8B model to degenerate.
+# Rare types (BOOK, STRATEGIC_ASSET, FINANCIAL_INSTRUMENT) are omitted —
+# they can be post-classified from OTHER if needed.
+NUEXTRACT_CATEGORIES = {
+    "Person": "PERSON",
+    "Organization": "ORG",
+    "Country": "GPE",
+    "Location": "LOC",
+    "Date": "DATE",
+    "Law": "LAW",
+    "Event": "EVENT",
+    "Money": "MONEY",
+    "Group": "NORP",
 }
 
-CATEGORY_TO_MENTION_TYPE = {v: k for k, v in MENTION_TYPE_TO_CATEGORY.items()}
+# Reverse: MentionType → category name (for building templates)
+MENTION_TYPE_TO_CATEGORY = {v: k for k, v in NUEXTRACT_CATEGORIES.items()}
+CATEGORY_TO_MENTION_TYPE = NUEXTRACT_CATEGORIES
 
 
 def _build_nuextract_template(categories: list[str] | None = None) -> str:
-    """Build the JSON template that nuextract uses to extract entities."""
+    """Build the JSON template that nuextract uses to extract entities.
+
+    Uses ≤9 simple category names. NuExtract degenerates with too many categories.
+    """
     if categories is None:
-        categories = list(MENTION_TYPE_TO_CATEGORY.values())
+        categories = list(NUEXTRACT_CATEGORIES.keys())
     return json.dumps({cat: [""] for cat in categories})
 
 
@@ -95,18 +97,35 @@ class NuExtractClient:
         self.temperature = 0.0
 
     async def _call_llm(self, prompt: str) -> str:
-        """Send a chat request and return the response text.
+        """Send a request to the LLM and return the response text.
 
-        Auto-detects the API format:
-        - Ollama: uses /api/chat with {message: {content: ...}}
-        - OpenAI-compatible (vLLM-MLX): uses /v1/chat/completions
+        For Ollama: uses /api/generate with raw=true and the Phi-3 chat template
+        baked into the prompt. This avoids double-wrapping of <|user|> tags that
+        happens with /api/chat.
+
+        For OpenAI-compatible (vLLM-MLX): uses /v1/chat/completions.
         """
-        # If base_url ends with /v1 or contains a non-11434 port, use OpenAI format
-        is_openai_api = "/v1" in self.base_url or ":11434" not in self.base_url
+        is_ollama = ":11434" in self.base_url
 
-        if is_openai_api:
+        if is_ollama:
+            # Wrap in Phi-3 chat template manually, send raw
+            formatted = f"<|user|>\n{prompt}<|end|>\n<|assistant|>\n"
+            ollama_base = self.base_url.rstrip("/").removesuffix("/v1")
+            url = f"{ollama_base}/api/generate"
+            payload = {
+                "model": self.model,
+                "prompt": formatted,
+                "stream": False,
+                "raw": True,
+                "options": {"temperature": 0.0},
+            }
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                return data["response"]
+        else:
             base = self.base_url.rstrip("/")
-            # Ensure /v1 is in the path
             if not base.endswith("/v1"):
                 base = f"{base}/v1"
             url = f"{base}/chat/completions"
@@ -121,19 +140,6 @@ class NuExtractClient:
                 resp.raise_for_status()
                 data = resp.json()
                 return data["choices"][0]["message"]["content"]
-        else:
-            url = f"{self.base_url}/api/chat"
-            payload = {
-                "model": self.model,
-                "stream": False,
-                "messages": [{"role": "user", "content": prompt}],
-                "options": {"temperature": 0.0},
-            }
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(url, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                return data["message"]["content"]
 
     def _parse_nuextract_output(self, raw: str) -> dict:
         """Parse nuextract's output, stripping template markers."""
@@ -236,8 +242,11 @@ class NuExtractClient:
 
             for category, entities in parsed.items():
                 mention_type = CATEGORY_TO_MENTION_TYPE.get(category, "OTHER")
+                if not isinstance(entities, list):
+                    continue
                 for entity_text in entities:
-                    if not entity_text or not entity_text.strip():
+                    # NuExtract sometimes returns dicts or nested structures — skip non-strings
+                    if not isinstance(entity_text, str) or not entity_text.strip():
                         continue
                     entity_text = entity_text.strip()
 
