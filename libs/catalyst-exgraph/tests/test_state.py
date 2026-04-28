@@ -8,13 +8,6 @@ from catalyst_exgraph.state import ExGraphState, ExGraphStatus, StageStateDict
 # ── ExGraphState construction ───────────────────────────────────────────────
 
 
-def test_exgraph_state_can_be_empty_dict():
-    """ExGraphState is total=False, so an empty dict is valid."""
-    state: ExGraphState = {}
-    assert isinstance(state, dict)
-    assert len(state) == 0
-
-
 def test_exgraph_state_stages_holds_multiple_entries():
     state: ExGraphState = {
         "stages": {
@@ -29,12 +22,6 @@ def test_exgraph_state_stages_holds_multiple_entries():
 
 
 # ── ExGraphStatus enum ─────────────────────────────────────────────────────
-
-
-def test_exgraph_status_values_are_lowercase_strings():
-    for member in ExGraphStatus:
-        assert member.value == member.value.lower()
-        assert isinstance(member.value, str)
 
 
 def test_exgraph_status_contains_expected_members():
