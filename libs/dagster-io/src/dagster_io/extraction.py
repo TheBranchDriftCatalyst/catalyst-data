@@ -253,6 +253,7 @@ def extract_validated(
                 mention_type=mention_type,
                 span_start=m.get("span_start"),
                 span_end=m.get("span_end"),
+                confidence=m.get("confidence", 1.0),
                 context=m.get("context", ""),
                 provenance=prov,
             )

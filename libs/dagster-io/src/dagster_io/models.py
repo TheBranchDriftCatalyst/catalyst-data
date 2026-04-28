@@ -52,6 +52,7 @@ class Mention(BaseModel):
     mention_type: MentionType
     span_start: int | None = None
     span_end: int | None = None
+    confidence: float = Field(default=1.0, ge=0, le=1, description="Extraction confidence 0-1")
     context: str = ""
     provenance: Provenance | None = None
     content_hash: str = Field(default="", description="For dedup")
