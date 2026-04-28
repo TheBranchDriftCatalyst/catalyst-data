@@ -275,7 +275,8 @@ def extraction_result(chunks_result):
     """Run validated extraction via the actual dagster_io.extraction pipeline.
 
     Uses extract_validated() — the same code path as production Dagster assets.
-    Fixtures are saved per-model so you can compare results across models:
+    Runs on a benchmark subset (4 chunks) for fast iteration. Fixtures are
+    saved per-model so you can compare results across models:
         LLM_MODEL=gpt-4o-mini pytest ... -k extraction
         LLM_MODEL=gpt-4o      pytest ... -k extraction
     """
@@ -286,19 +287,32 @@ def extraction_result(chunks_result):
 
     _needs_llm()
 
-    # Set PROMPT_REGISTRY_DIR to use media-ingest domain prompts
-    prompt_dir = Path(__file__).resolve().parents[0] / ".." / "k8s" / "media-ingest" / "prompts"
-    if prompt_dir.exists():
-        os.environ.setdefault("PROMPT_REGISTRY_DIR", str(prompt_dir.resolve()))
+    # Use shared prompts dir (has extraction + repair prompts for the full cycle).
+    shared_prompts = Path(__file__).resolve().parents[0] / ".." / "k8s" / "shared" / "prompts"
+    if shared_prompts.exists():
+        os.environ.setdefault("PROMPT_REGISTRY_DIR", str(shared_prompts.resolve()))
+
+    # Use benchmark subset (4 representative chunks) instead of all 15.
+    # Full set takes too long with local models (~30-60s per chunk).
+    benchmark_chunks_path = FIXTURES / "benchmark_chunks.json"
+    if benchmark_chunks_path.exists():
+        from dagster_io import TextChunk
+
+        benchmark_data = json.loads(benchmark_chunks_path.read_text())
+        eval_chunks = [TextChunk(**c) for c in benchmark_data]
+        print(f"\n  Using benchmark subset: {len(eval_chunks)} chunks (from benchmark_chunks.json)")
+    else:
+        eval_chunks = chunks_result
+        print(f"\n  Using full chunk set: {len(eval_chunks)} chunks")
 
     from dagster_io.extraction import extract_validated
 
-    print(f"\n  Running validated extraction on {len(chunks_result)} chunks (model={model})...")
+    print(f"  Running validated extraction (model={model}, concurrency=1)...")
     start = time.monotonic()
     mentions, assertions = extract_validated(
-        chunks_result,
+        eval_chunks,
         code_location="media_ingest",
-        max_concurrency=3,
+        max_concurrency=1,  # sequential — safe for local model RAM
     )
     duration = time.monotonic() - start
 

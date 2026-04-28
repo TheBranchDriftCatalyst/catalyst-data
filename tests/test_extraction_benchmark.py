@@ -385,7 +385,7 @@ class TestRunAll:
                 "LLM_STRUCTURED_METHOD": cfg.structured_method,
                 "LLM_MAX_TOKENS": str(cfg.max_tokens),
                 "LLM_TIMEOUT": str(cfg.timeout),
-                "PROMPT_REGISTRY_DIR": str(Path(__file__).resolve().parent.parent / "k8s" / "media-ingest" / "prompts"),
+                "PROMPT_REGISTRY_DIR": str(Path(__file__).resolve().parent.parent / "k8s" / "shared" / "prompts"),
                 "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
             }
 
