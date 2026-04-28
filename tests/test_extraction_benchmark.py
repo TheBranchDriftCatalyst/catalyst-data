@@ -43,6 +43,110 @@ from tests.shared.extraction_scoring import (
 REPO_ROOT = Path(__file__).resolve().parents[0] / ".."
 TEST_OUTPUT = Path(os.environ.get("TEST_OUTPUT_ROOT", str(REPO_ROOT / ".test-output"))) / "media-ingest"
 FIXTURES = TEST_OUTPUT / "fixtures"
+
+
+def _build_report_json(results: list[dict]) -> dict:
+    """Build a structured JSON report for the viewer-ui SPA.
+
+    Contains all the data needed to render entity matrices, SPO matrices,
+    pipeline breakdowns, and performance charts.
+    """
+    from datetime import UTC, datetime
+
+    # ── Models summary ───────────────────────────────────────────────
+    models = []
+    for r in results:
+        s = r["fixture"].get("stats", {})
+        tags = r.get("tags", [])
+        if "encoder" in tags:
+            model_type = "encoder"
+        elif "extraction-specialist" in tags:
+            model_type = "specialist"
+        else:
+            model_type = "llm"
+
+        models.append(
+            {
+                "name": r["model"],
+                "type": model_type,
+                "tags": tags,
+                "stats": {
+                    "mention_count": s.get("mention_count", 0),
+                    "assertion_count": s.get("assertion_count", 0),
+                    "duration_s": s.get("duration_s", 0),
+                    "tokens_per_sec": s.get("tokens_per_sec", 0),
+                    "mention_retries": s.get("mention_retries", 0),
+                    "proposition_retries": s.get("proposition_retries", 0),
+                    "errors": s.get("errors", 0),
+                    "chunk_count": s.get("chunk_count", 0),
+                },
+                "pipeline": s.get("pipeline", {}),
+            }
+        )
+
+    # ── Entity matrix ────────────────────────────────────────────────
+    entity_rows: dict[str, dict] = {}  # entity_text -> {type, models: {name: type}}
+    for r in results:
+        for m in r["fixture"].get("mentions", []):
+            text = m.get("text", "").strip()
+            if not text:
+                continue
+            if text not in entity_rows:
+                entity_rows[text] = {"text": text, "consensus_type": "", "models": {}}
+            entity_rows[text]["models"][r["model"]] = {
+                "type": m.get("mention_type", "?"),
+                "confidence": m.get("confidence", 0),
+                "span_start": m.get("span_start"),
+                "span_end": m.get("span_end"),
+            }
+
+    # Compute consensus type per entity
+    for row in entity_rows.values():
+        type_counts: dict[str, int] = {}
+        for info in row["models"].values():
+            t = info["type"]
+            type_counts[t] = type_counts.get(t, 0) + 1
+        row["consensus_type"] = max(type_counts, key=type_counts.get) if type_counts else "?"
+        row["model_count"] = len(row["models"])
+
+    entities = sorted(entity_rows.values(), key=lambda x: -x["model_count"])
+
+    # ── SPO matrix ───────────────────────────────────────────────────
+    spo_rows: dict[str, dict] = {}  # "s|p|o" -> {subject, predicate, object, models: [names]}
+    for r in results:
+        for a in r["fixture"].get("assertions", []):
+            subj = a.get("subject_text", a.get("subject", "")).strip()
+            pred = a.get("predicate", "").strip()
+            obj = a.get("object_text", a.get("object", "")).strip()
+            if not (subj and pred and obj):
+                continue
+            key = f"{subj}|{pred}|{obj}"
+            if key not in spo_rows:
+                spo_rows[key] = {
+                    "subject": subj,
+                    "predicate": pred,
+                    "object": obj,
+                    "models": [],
+                }
+            if r["model"] not in spo_rows[key]["models"]:
+                spo_rows[key]["models"].append(r["model"])
+
+    for row in spo_rows.values():
+        row["model_count"] = len(row["models"])
+    propositions = sorted(spo_rows.values(), key=lambda x: -x["model_count"])
+
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "model_count": len(models),
+        "entity_count": len(entities),
+        "proposition_count": len(propositions),
+        "model_names": [r["model"] for r in results],
+        "models": models,
+        "entities": entities,
+        "propositions": propositions,
+    }
+
+
 # Fallback for curated files still in tests/fixtures/
 LEGACY_FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -497,6 +601,14 @@ class TestRunAll:
         # Full benchmark report: entity matrix, SPO matrix, stats by type
         if results:
             print_benchmark_report(results)
+
+            # Save structured JSON report for the viewer-ui SPA
+            report = _build_report_json(results)
+            report_path = FIXTURES.parent / "benchmark-report.json"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(report_path, "w") as f:
+                json.dump(report, f, indent=2, default=str)
+            print(f"  Report saved: {report_path}")
 
             if not gt:
                 print(

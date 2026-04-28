@@ -24,6 +24,7 @@ import {
   AudioLines,
   Tv2,
   ArrowRightLeft,
+  BarChart3,
   Database,
 } from "lucide-react";
 import { fetchDocuments } from "@/api/client";
@@ -143,6 +144,17 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
           </TooltipTrigger>
           <TooltipContent side="right">S3 Explorer</TooltipContent>
         </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" asChild>
+              <Link to="/benchmarks">
+                <BarChart3 className="h-4 w-4" />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Benchmarks</TooltipContent>
+        </Tooltip>
       </div>
     );
   }
@@ -184,6 +196,12 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
           <Link to="/s3">
             <Database className="h-3.5 w-3.5 mr-1.5" />
             S3 Explorer
+          </Link>
+        </Button>
+        <Button variant="ghost" size="sm" className="text-xs h-7" asChild>
+          <Link to="/benchmarks">
+            <BarChart3 className="h-3.5 w-3.5 mr-1.5" />
+            Benchmarks
           </Link>
         </Button>
       </div>

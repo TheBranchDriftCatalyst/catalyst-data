@@ -29,7 +29,17 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    // Serve benchmark report JSON from .test-output/
+    fs: {
+      allow: [
+        path.resolve(__dirname, "src"),
+        path.resolve(__dirname, "node_modules"),
+        path.resolve(__dirname, "../../../.test-output/media-ingest"),
+      ],
+    },
   },
+  // Map /viewer/benchmark-report.json to the .test-output file
+  publicDir: path.resolve(__dirname, "../../../.test-output/media-ingest"),
   build: {
     outDir: "dist",
     sourcemap: true,
