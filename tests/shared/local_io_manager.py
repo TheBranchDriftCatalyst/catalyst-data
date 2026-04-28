@@ -15,7 +15,7 @@ import pickle
 import typing
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from dagster import ConfigurableIOManager, InputContext, OutputContext
 from pydantic import BaseModel
@@ -44,16 +44,56 @@ def _to_serializable(obj: Any) -> Any:
 class LocalJsonIOManager(ConfigurableIOManager):
     """Filesystem IO manager using JSON/JSONL — same medallion paths as MinioIOManager.
 
+    Adds an optional ``model_tag`` dimension for benchmark comparisons. When set,
+    gold/platinum layer outputs get a ``model={tag}`` segment in the path so
+    extraction results from different LLM models don't overwrite each other.
+
+    Path layout:
+        {base_dir}/{layer}/{code_location}/{group}/{asset}/[model={tag}/][{partition}/]data.jsonl
+
     Usage:
-        resources={"io_manager": LocalJsonIOManager(base_dir="/tmp/dagster-local")}
+        # Without model tagging (same as MinioIOManager):
+        resources={"io_manager": LocalJsonIOManager(base_dir=".test-output/media-ingest")}
+
+        # With model tagging for benchmark runs:
+        resources={"io_manager": LocalJsonIOManager(
+            base_dir=".test-output/media-ingest",
+            model_tag="mistral:latest",
+        )}
     """
 
     base_dir: str = "/tmp/dagster-local"
+    model_tag: str = ""  # set to LLM_MODEL value to key gold-layer outputs by model
+
+    # Layers where model_tag is injected into the path
+    _MODEL_KEYED_LAYERS: ClassVar[set[str]] = {"gold", "platinum"}
 
     def _prefix(self, context: OutputContext | InputContext) -> str:
-        if isinstance(context, OutputContext):
-            return build_output_prefix(context)
-        return build_input_prefix(context)
+        prefix = build_output_prefix(context) if isinstance(context, OutputContext) else build_input_prefix(context)
+
+        # Inject model tag for gold/platinum layers
+        if self.model_tag:
+            layer = prefix.split("/")[0] if "/" in prefix else ""
+            if layer in self._MODEL_KEYED_LAYERS:
+                # Insert model={tag} after the asset name, before partition
+                # e.g. gold/media_ingest/media/media_mentions/model=mistral/data.jsonl
+                safe_tag = self.model_tag.replace("/", "_").replace(":", "_")
+                prefix = self._inject_model_segment(prefix, safe_tag)
+        return prefix
+
+    @staticmethod
+    def _inject_model_segment(prefix: str, tag: str) -> str:
+        """Insert model={tag} into the path after the asset name segment.
+
+        Input:  gold/media_ingest/media/media_mentions/119-hres-1
+        Output: gold/media_ingest/media/media_mentions/model=mistral_latest/119-hres-1
+        """
+        parts = prefix.split("/")
+        # Layout: layer/code_location/group/asset/[partition...]
+        # Insert after index 3 (the asset name)
+        if len(parts) >= 4:
+            return "/".join(parts[:4] + [f"model={tag}"] + parts[4:])
+        return f"{prefix}/model={tag}"
 
     def _detect_format(self, obj: Any, type_hint: type | None) -> str:
         if isinstance(obj, list):

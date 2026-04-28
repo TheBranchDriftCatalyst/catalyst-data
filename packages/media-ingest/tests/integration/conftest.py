@@ -60,7 +60,8 @@ def output_dir(request) -> Path:
 
 @pytest.fixture(scope="session")
 def local_io_manager(output_dir) -> LocalJsonIOManager:
-    return LocalJsonIOManager(base_dir=str(output_dir))
+    model_tag = os.environ.get("LLM_MODEL", "")
+    return LocalJsonIOManager(base_dir=str(output_dir), model_tag=model_tag)
 
 
 @pytest.fixture(scope="session")

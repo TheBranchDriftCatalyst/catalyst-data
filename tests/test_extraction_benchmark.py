@@ -39,7 +39,11 @@ from tests.shared.extraction_scoring import (
     validate_ground_truth,
 )
 
-FIXTURES = Path(__file__).parent / "fixtures"
+REPO_ROOT = Path(__file__).resolve().parents[0] / ".."
+TEST_OUTPUT = Path(os.environ.get("TEST_OUTPUT_ROOT", str(REPO_ROOT / ".test-output"))) / "media-ingest"
+FIXTURES = TEST_OUTPUT / "fixtures"
+# Fallback for curated files still in tests/fixtures/
+LEGACY_FIXTURES = Path(__file__).parent / "fixtures"
 
 pytestmark = pytest.mark.llm
 
@@ -50,7 +54,11 @@ def _llm_model() -> str:
 
 def _load_fixture(name: str) -> dict | list | None:
     f = FIXTURES / f"{name}.json"
-    return json.loads(f.read_text()) if f.exists() else None
+    if f.exists():
+        return json.loads(f.read_text())
+    # Fallback to legacy location
+    f2 = LEGACY_FIXTURES / f"{name}.json"
+    return json.loads(f2.read_text()) if f2.exists() else None
 
 
 def _save_fixture(name: str, data):

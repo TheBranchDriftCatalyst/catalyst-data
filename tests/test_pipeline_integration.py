@@ -18,7 +18,9 @@ from pathlib import Path
 import pytest
 
 DEMO_VIDEO = Path(__file__).parent / "demo_video.mp4"
-FIXTURES = Path(__file__).parent / "fixtures"
+REPO_ROOT = Path(__file__).resolve().parents[0] / ".."
+TEST_OUTPUT = Path(os.environ.get("TEST_OUTPUT_ROOT", str(REPO_ROOT / ".test-output"))) / "media-ingest"
+FIXTURES = TEST_OUTPUT / "fixtures"
 LOCAL_MODEL_CACHE = str(Path(__file__).parent / "fixtures" / "model_cache")
 
 pytestmark = pytest.mark.skipif(not DEMO_VIDEO.exists(), reason="demo_video.mp4 not found")
@@ -294,7 +296,10 @@ def extraction_result(chunks_result):
 
     # Use benchmark subset (4 representative chunks) instead of all 15.
     # Full set takes too long with local models (~30-60s per chunk).
+    # Curated benchmark subset — check .test-output first, fallback to tests/fixtures
     benchmark_chunks_path = FIXTURES / "benchmark_chunks.json"
+    if not benchmark_chunks_path.exists():
+        benchmark_chunks_path = Path(__file__).parent / "fixtures" / "benchmark_chunks.json"
     if benchmark_chunks_path.exists():
         from dagster_io import TextChunk
 
@@ -320,7 +325,7 @@ def extraction_result(chunks_result):
     pipeline_stats = getattr(extract_validated, "last_stats", {})
 
     # Compute performance stats
-    total_input_chars = sum(len(c.text) for c in chunks_result)
+    total_input_chars = sum(len(c.text) for c in eval_chunks)
     est_input_tokens = total_input_chars // 4  # ~4 chars per token
     est_output_tokens = (len(mentions) + len(assertions)) * 50
     est_total_tokens = est_input_tokens + est_output_tokens
@@ -333,7 +338,7 @@ def extraction_result(chunks_result):
         "mentions": [m.model_dump(mode="json") for m in mentions],
         "assertions": [a.model_dump(mode="json") for a in assertions],
         "stats": {
-            "chunk_count": len(chunks_result),
+            "chunk_count": len(eval_chunks),
             "duration_s": round(duration, 1),
             "total_input_chars": total_input_chars,
             "est_total_tokens": est_total_tokens,
