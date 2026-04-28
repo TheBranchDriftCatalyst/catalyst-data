@@ -474,18 +474,24 @@ class TestRunAll:
 
     Usage:
         PYTHONPATH=. pytest tests/test_extraction_benchmark.py::TestRunAll -v -s
+        PYTHONPATH=. pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --regen
 
-    This runs the FULL production pipeline (extract → validate → repair) for
-    each model and saves per-model fixtures.
+    Pass --regen to force regenerate all fixtures (ignore cached results).
     """
 
-    def test_run_all_models(self):
+    def test_run_all_models(self, request):
         """Run extraction for every model in benchmark_config.ALL_MODELS."""
         import subprocess
         import sys
         import urllib.request
 
         from tests.benchmark_config import ALL_MODELS
+
+        regen = request.config.getoption("--regen", default=False)
+        if regen:
+            print("\n  --regen: clearing all extraction fixtures")
+            for f in FIXTURES.glob("extraction_*.json"):
+                f.unlink()
 
         chunks = _load_fixture("chunks")
         if not chunks:

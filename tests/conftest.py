@@ -1,7 +1,24 @@
 """Shared Dagster test fixtures for catalyst-data pipelines."""
 
+import contextlib
+
 import pytest
 from dagster import build_asset_context
+
+
+def _safe_addoption(parser, *args, **kwargs):
+    with contextlib.suppress(ValueError):
+        parser.addoption(*args, **kwargs)
+
+
+def pytest_addoption(parser):
+    _safe_addoption(
+        parser,
+        "--regen",
+        action="store_true",
+        default=False,
+        help="Force regenerate all extraction fixtures (ignore cached results)",
+    )
 
 
 @pytest.fixture(autouse=True)
