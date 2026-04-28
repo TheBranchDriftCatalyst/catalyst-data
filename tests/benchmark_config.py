@@ -95,27 +95,10 @@ TIER1_MODELS = [
     #     base_url=OLLAMA_BASE,
     #     tags=["ollama", "7b", "tier1", "reasoning"],
     # ),
-    # LLMStructBench 0.66 — best 3.8B model, punches above weight
-    ModelConfig(
-        name="phi4-mini",
-        model="phi4-mini:latest",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "3.8b", "tier1"],
-    ),
-    # LLMStructBench 0.65 — same score at 4B as 8B (remarkable efficiency)
-    ModelConfig(
-        name="qwen3-4b",
-        model="qwen3:4b",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "4b", "tier1"],
-    ),
-    # LLMStructBench 0.65
-    ModelConfig(
-        name="qwen3-8b",
-        model="qwen3:8b",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "8b", "tier1"],
-    ),
+    # phi4-mini — removed: timeouts on json_mode extraction
+    # qwen3-4b — removed: timeouts on json_mode extraction
+    # qwen3-8b — removed: timeouts on json_mode extraction
+    # These models may work with function_calling or need /no_think prompting
 ]
 
 # ── Tier 2: Strong empirical performers (our benchmark) ───────────────────
