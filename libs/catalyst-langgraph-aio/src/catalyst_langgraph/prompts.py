@@ -57,6 +57,27 @@ def parse_prompt_file(path: Path, prompt_id: str | None = None) -> ParsedPrompt:
     )
 
 
+def strip_think_blocks(text: str) -> str:
+    """Strip ``<think>...</think>`` blocks from reasoning-model output.
+
+    Models like DeepSeek-R1 and Qwen3 (thinking mode) emit chain-of-thought
+    wrapped in ``<think>`` tags before the actual response::
+
+        <think>
+        Let me analyze the text...
+        </think>
+        {"mentions": [...]}
+
+    This strips all such blocks (including nested/multiple) and returns only
+    the content outside the tags.  Safe to call on output that has no think
+    tags — it returns the input unchanged.
+    """
+    import re
+
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    return cleaned.strip()
+
+
 def strip_code_fences(text: str) -> str:
     """Strip markdown code fences from LLM output.
 

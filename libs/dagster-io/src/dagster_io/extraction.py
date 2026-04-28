@@ -83,16 +83,20 @@ def _build_graph():
         from catalyst_langgraph.clients.nuextract import NuExtractClient
 
         llm_client = NuExtractClient()
+    elif "universalner" in _llm_model_name.lower() or "uniner" in _llm_model_name.lower():
+        from catalyst_langgraph.clients.universalner import UniversalNERClient
+
+        llm_client = UniversalNERClient()
     else:
         llm_client = LLMClient()
 
     mcp_client = DirectMCPClient(_ValidatorHandler())
     repo = _NullRepository()
 
-    return build_extraction_graph(llm_client, mcp_client, repo)
+    return build_extraction_graph(llm_client, mcp_client, repo), llm_client
 
 
-async def _extract_chunk(graph, chunk_text: str, document_id: str, chunk_id: str) -> dict:
+async def _extract_chunk(graph, chunk_text: str, document_id: str, chunk_id: str, max_retries: int = 3) -> dict:
     """Run the full extraction graph on one chunk."""
     state = {
         "raw_text": chunk_text,
@@ -100,7 +104,7 @@ async def _extract_chunk(graph, chunk_text: str, document_id: str, chunk_id: str
             "document_id": document_id,
             "chunk_id": chunk_id,
         },
-        "max_retries": 3,
+        "max_retries": max_retries,
     }
     result = await graph.ainvoke(state)
     return {
@@ -144,7 +148,11 @@ def extract_validated(
 
     _llm_model = os.environ.get("LLM_MODEL", "unknown")
 
-    graph = _build_graph()
+    graph, llm_client = _build_graph()
+    # Encoder/specialist models (GLiNER, NuExtract, UniversalNER) produce
+    # deterministic output — repair loops are pointless. Skip retries.
+    _is_encoder = getattr(llm_client, "structured_method", "") in ("gliner", "nuextract", "universalner")
+    _max_retries = 0 if _is_encoder else max_retries
     all_mentions: list[dict] = []
     all_assertions: list[dict] = []
     completed = 0
@@ -164,7 +172,9 @@ def extract_validated(
         loop = asyncio.new_event_loop()
         try:
             start = time.monotonic()
-            result = loop.run_until_complete(_extract_chunk(graph, chunk.text, chunk.document_id, chunk.chunk_id))
+            result = loop.run_until_complete(
+                _extract_chunk(graph, chunk.text, chunk.document_id, chunk.chunk_id, max_retries=_max_retries)
+            )
             duration = time.monotonic() - start
             # Attach chunk metadata to result so we can build provenance later
             chunk_meta = getattr(chunk, "metadata", {}) or {}

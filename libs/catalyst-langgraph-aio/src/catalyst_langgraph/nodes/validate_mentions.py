@@ -45,7 +45,7 @@ class ValidateMentions:
             }
 
             if verdict == "valid":
-                # Assign stable span-based composite IDs to each accepted mention
+                # All valid — accept everything
                 for m in candidates:
                     m["id"] = (
                         f"{m.get('mention_type', m.get('entity_type', 'UNK'))}:"
@@ -54,6 +54,20 @@ class ValidateMentions:
                     )
                 update["accepted_mentions"] = candidates
                 update["status"] = WorkflowStatus.EXTRACTING_PROPOSITIONS.value
+            elif verdict == "ambiguous":
+                # Mix of valid and invalid — accept the valid subset.
+                # For LLMs, repair will still run if max_retries > 0.
+                # For encoders (max_retries=0), this ensures valid mentions aren't lost.
+                valid_items = result.get("valid_items", [])
+                accepted = [candidates[i] for i in valid_items if i < len(candidates)]
+                for m in accepted:
+                    m["id"] = (
+                        f"{m.get('mention_type', m.get('entity_type', 'UNK'))}:"
+                        f"{m.get('span_start', m.get('start_offset', 0))}:"
+                        f"{m.get('span_end', m.get('end_offset', 0))}"
+                    )
+                update["accepted_mentions"] = accepted
+                update["status"] = WorkflowStatus.REPAIRING_MENTIONS.value
             else:
                 update["status"] = WorkflowStatus.REPAIRING_MENTIONS.value
 

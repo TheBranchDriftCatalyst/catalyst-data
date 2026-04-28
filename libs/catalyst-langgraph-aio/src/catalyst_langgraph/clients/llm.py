@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -10,6 +11,8 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
+
+from catalyst_langgraph.prompts import strip_code_fences, strip_think_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +85,10 @@ class LLMClient:
         - "function_calling" (default): OpenAI tool/function calling
         - "json_mode": response_format=json_object (for models without tool support)
         - "json_schema": response_format=json_schema (OpenAI strict mode)
+
+        Handles reasoning models (DeepSeek-R1, Qwen3 thinking) that prepend
+        ``<think>...</think>`` blocks before their JSON output, which breaks
+        LangChain's built-in parser.
         """
         prompt_chars = sum(len(str(getattr(m, "content", m))) for m in messages)
         logger.info(
@@ -92,8 +99,55 @@ class LLMClient:
             prompt_chars,
         )
         t0 = time.perf_counter()
-        chain = self._chat_model.with_structured_output(schema, method=self.structured_method)
-        result = await chain.ainvoke(messages)
+        chain = self._chat_model.with_structured_output(
+            schema,
+            method=self.structured_method,
+            include_raw=True,
+        )
+        raw_result = await chain.ainvoke(messages)
         elapsed = time.perf_counter() - t0
-        logger.info("llm.structured_output: done, schema=%s, duration=%.3fs", schema.__name__, elapsed)
-        return result
+
+        parsed = raw_result.get("parsed")
+        parsing_error = raw_result.get("parsing_error")
+
+        if parsed is not None:
+            logger.info("llm.structured_output: done, schema=%s, duration=%.3fs", schema.__name__, elapsed)
+            return parsed
+
+        # Parsing failed — try to recover from <think>-tagged or
+        # code-fenced output that the default parser can't handle.
+        raw_msg = raw_result.get("raw")
+        raw_text = str(raw_msg.content) if raw_msg and hasattr(raw_msg, "content") else ""
+
+        if not raw_text:
+            raise ValueError(
+                f"Structured output parsing failed for {schema.__name__} "
+                f"and no raw text available. Error: {parsing_error}"
+            )
+
+        logger.warning(
+            "llm.structured_output: parser failed, attempting think-tag/fence stripping. raw_len=%d, error=%s",
+            len(raw_text),
+            parsing_error,
+        )
+
+        # Strip <think> blocks, then code fences, then try JSON parse
+        cleaned = strip_think_blocks(raw_text)
+        cleaned = strip_code_fences(cleaned)
+
+        try:
+            data = json.loads(cleaned)
+            result = schema.model_validate(data)
+            logger.info(
+                "llm.structured_output: recovered via stripping, schema=%s, duration=%.3fs",
+                schema.__name__,
+                elapsed,
+            )
+            return result
+        except (json.JSONDecodeError, Exception) as e:
+            raise ValueError(
+                f"Structured output parsing failed for {schema.__name__}. "
+                f"Original error: {parsing_error}. "
+                f"Recovery error: {e}. "
+                f"Cleaned text: {cleaned[:500]}"
+            ) from e

@@ -63,6 +63,12 @@ EXTRACTION_MODELS = [
         base_url=OLLAMA_BASE,
         tags=["ollama", "extraction-specialist", "8b"],
     ),
+    ModelConfig(
+        name="universalner-7b",
+        model="universalner:latest",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "extraction-specialist", "7b"],
+    ),
 ]
 
 # ── GLiNER (encoder, not an LLM) ─────────────────────────────────────────
