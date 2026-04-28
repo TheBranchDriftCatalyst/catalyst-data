@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from catalyst_langgraph.prompts import ParsedPrompt, load_prompt, parse_prompt_file
+from catalyst_langgraph.prompts import (
+    ParsedPrompt,
+    load_prompt,
+    parse_prompt_file,
+    strip_think_blocks,
+)
 
 
 class TestParsedPrompt:
@@ -66,6 +71,38 @@ class TestLoadPrompt:
         prompt_file.write_text("---\nmodel: gpt-4o\n---\nLoaded prompt body.")
         result = load_prompt("my_prompt", "fallback")
         assert result == "Loaded prompt body."
+
+
+class TestStripThinkBlocks:
+    def test_strips_single_think_block(self):
+        text = '<think>\nLet me analyze...\n</think>\n{"mentions": []}'
+        assert strip_think_blocks(text) == '{"mentions": []}'
+
+    def test_strips_multiple_think_blocks(self):
+        text = "<think>first</think>middle<think>second</think>end"
+        assert strip_think_blocks(text) == "middleend"
+
+    def test_strips_multiline_think_content(self):
+        text = '<think>\nLine 1\nLine 2\nLine 3\n</think>\n{"result": "ok"}'
+        assert strip_think_blocks(text) == '{"result": "ok"}'
+
+    def test_no_think_tags_returns_unchanged(self):
+        text = '{"mentions": [{"text": "foo"}]}'
+        assert strip_think_blocks(text) == text
+
+    def test_empty_think_block(self):
+        text = '<think></think>{"data": 1}'
+        assert strip_think_blocks(text) == '{"data": 1}'
+
+    def test_think_block_with_nested_angle_brackets(self):
+        text = '<think>compare <a> vs <b></think>\n{"x": 1}'
+        assert strip_think_blocks(text) == '{"x": 1}'
+
+    def test_empty_string(self):
+        assert strip_think_blocks("") == ""
+
+    def test_only_think_block(self):
+        assert strip_think_blocks("<think>just thinking</think>") == ""
 
 
 class TestParsePromptFilePartialFrontmatter:

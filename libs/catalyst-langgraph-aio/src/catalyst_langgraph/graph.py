@@ -22,6 +22,7 @@ from catalyst_langgraph.repository.base import ArtifactRepository
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 # --- Stratified error handling: RetryPolicy for transient errors ---
 
