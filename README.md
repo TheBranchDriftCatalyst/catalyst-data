@@ -49,6 +49,13 @@ kubectl apply -k k8s/ --dry-run=client
 open http://dagster.talos00
 ```
 
+## Testing
+
+See **[TESTING.md](TESTING.md)** for the full testing guide, including:
+- Unit tests per code location
+- Integration pipeline tests (media-ingest, congress-data)
+- Extraction benchmark framework (multi-model comparison)
+
 ## CI/CD
 
 Push to `main` triggers:

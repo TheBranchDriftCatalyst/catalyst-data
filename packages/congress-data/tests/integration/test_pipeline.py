@@ -234,7 +234,10 @@ class TestGold:
     """bill_mentions, bill_assertions, bill_embeddings — full chain."""
 
     def test_bill_mentions(self, test_resources, partition_key, output_dir, dagster_instance):
-        """Extract entity mentions via LLM."""
+        """Extract entity mentions via LLM.
+
+        Saves extraction output as a per-model fixture for benchmark comparison.
+        """
         _needs_api_key()
         _needs_llm()
         result = materialize(
@@ -247,7 +250,17 @@ class TestGold:
         mentions = result.output_for_node("bill_mentions")
         assert isinstance(mentions, list)
         assert len(mentions) >= 1, "Should extract at least one mention"
-        print(f"\n  {len(mentions)} mentions extracted")
+
+        # Save extraction fixture per-model for benchmark comparison
+        model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+        fixture_dir = output_dir / "fixtures"
+        fixture_dir.mkdir(parents=True, exist_ok=True)
+        fixture_path = fixture_dir / f"mentions_{model}.json"
+        mention_dicts = [m.model_dump(mode="json") if hasattr(m, "model_dump") else m for m in mentions]
+        with open(fixture_path, "w") as f:
+            json.dump({"model": model, "mentions": mention_dicts, "partition": partition_key}, f, indent=2, default=str)
+        print(f"\n  {len(mentions)} mentions extracted → {fixture_path}")
+
         types = {}
         for m in mentions:
             t = m.mention_type if hasattr(m, "mention_type") else m.get("mention_type", "?")
@@ -318,6 +331,29 @@ class TestFullChain:
         mentions = result.output_for_node("bill_mentions")
         embedded = result.output_for_node("bill_embeddings")
 
+        # Save full extraction fixture per-model for benchmark comparison
+        model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+        assertions = result.output_for_node("bill_assertions")
+        fixture_dir = output_dir / "fixtures"
+        fixture_dir.mkdir(parents=True, exist_ok=True)
+        mention_dicts = [m.model_dump(mode="json") if hasattr(m, "model_dump") else m for m in mentions]
+        assertion_dicts = [a.model_dump(mode="json") if hasattr(a, "model_dump") else a for a in (assertions or [])]
+        chunk_dicts = [c.model_dump(mode="json") if hasattr(c, "model_dump") else c for c in chunks]
+        fixture_path = fixture_dir / f"extraction_{model}.json"
+        with open(fixture_path, "w") as f:
+            json.dump(
+                {
+                    "model": model,
+                    "partition": partition_key,
+                    "mentions": mention_dicts,
+                    "assertions": assertion_dicts,
+                    "chunks": chunk_dicts,
+                },
+                f,
+                indent=2,
+                default=str,
+            )
+
         print("\n  ═══ FULL PIPELINE RESULTS ═══")
         print(f"  Bill: {detail.id} — {detail.title}")
         print(f"  Sponsor: {detail.sponsor_name}")
@@ -325,4 +361,5 @@ class TestFullChain:
         print(f"  Chunks: {len(chunks)}")
         print(f"  Mentions: {len(mentions)}")
         print(f"  Embeddings: {len(embedded)} × {len(embedded[0]['embedding'])} dims")
+        print(f"  Extraction fixture: {fixture_path}")
         print(f"  Output dir: {output_dir}")

@@ -254,3 +254,149 @@ def test_split_chunks_have_precise_timestamps(chunks_result):
     if len(split) > 1:
         starts = {c.metadata["start_s"] for c in split}
         assert len(starts) > 1, "All split chunks have the same start_s"
+
+
+# ── Step 5: Validated Extraction (Mentions + Assertions) ────────────────
+
+
+def _llm_model() -> str:
+    return os.environ.get("LLM_MODEL", "gpt-4o-mini")
+
+
+def _needs_llm():
+    base_url = os.environ.get("LLM_BASE_URL", "")
+    is_local = "localhost" in base_url or "127.0.0.1" in base_url or "192.168" in base_url
+    if not is_local and not (os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")):
+        pytest.skip("LLM_API_KEY / OPENAI_API_KEY not set — required for non-local extraction")
+
+
+@pytest.fixture(scope="session")
+def extraction_result(chunks_result):
+    """Run validated extraction via the actual dagster_io.extraction pipeline.
+
+    Uses extract_validated() — the same code path as production Dagster assets.
+    Fixtures are saved per-model so you can compare results across models:
+        LLM_MODEL=gpt-4o-mini pytest ... -k extraction
+        LLM_MODEL=gpt-4o      pytest ... -k extraction
+    """
+    model = _llm_model()
+    cached = _load_fixture(f"extraction_{model}")
+    if cached:
+        return cached
+
+    _needs_llm()
+
+    # Set PROMPT_REGISTRY_DIR to use media-ingest domain prompts
+    prompt_dir = Path(__file__).resolve().parents[0] / ".." / "k8s" / "media-ingest" / "prompts"
+    if prompt_dir.exists():
+        os.environ.setdefault("PROMPT_REGISTRY_DIR", str(prompt_dir.resolve()))
+
+    from dagster_io.extraction import extract_validated
+
+    print(f"\n  Running validated extraction on {len(chunks_result)} chunks (model={model})...")
+    start = time.monotonic()
+    mentions, assertions = extract_validated(
+        chunks_result,
+        code_location="media_ingest",
+        max_concurrency=3,
+    )
+    duration = time.monotonic() - start
+
+    # Grab pipeline stats (retries, errors) from extract_validated
+    pipeline_stats = getattr(extract_validated, "last_stats", {})
+
+    # Compute performance stats
+    total_input_chars = sum(len(c.text) for c in chunks_result)
+    est_input_tokens = total_input_chars // 4  # ~4 chars per token
+    est_output_tokens = (len(mentions) + len(assertions)) * 50
+    est_total_tokens = est_input_tokens + est_output_tokens
+    tokens_per_sec = est_total_tokens / duration if duration > 0 else 0
+
+    output = {
+        "model": model,
+        "base_url": os.environ.get("LLM_BASE_URL", ""),
+        "structured_method": os.environ.get("LLM_STRUCTURED_METHOD", "function_calling"),
+        "mentions": [m.model_dump(mode="json") for m in mentions],
+        "assertions": [a.model_dump(mode="json") for a in assertions],
+        "stats": {
+            "chunk_count": len(chunks_result),
+            "duration_s": round(duration, 1),
+            "total_input_chars": total_input_chars,
+            "est_total_tokens": est_total_tokens,
+            "tokens_per_sec": round(tokens_per_sec, 1),
+            "mention_count": len(mentions),
+            "assertion_count": len(assertions),
+            "mention_retries": pipeline_stats.get("mention_retries", 0),
+            "proposition_retries": pipeline_stats.get("proposition_retries", 0),
+            "errors": pipeline_stats.get("errors", 0),
+        },
+    }
+
+    print(f"  Extraction complete: {len(mentions)} mentions, {len(assertions)} assertions in {duration:.1f}s")
+    print(f"  Estimated {est_total_tokens:,} tokens, {tokens_per_sec:.1f} tok/s")
+    print(
+        f"  Retries: {pipeline_stats.get('mention_retries', 0)} mention, "
+        f"{pipeline_stats.get('proposition_retries', 0)} proposition, "
+        f"{pipeline_stats.get('errors', 0)} errors"
+    )
+    _save_fixture(f"extraction_{model}", output)
+    return output
+
+
+@pytest.mark.llm
+def test_extraction_produces_mentions(extraction_result):
+    assert len(extraction_result["mentions"]) > 0, "Should extract at least one mention"
+
+
+@pytest.mark.llm
+def test_extraction_produces_assertions(extraction_result):
+    assert len(extraction_result["assertions"]) > 0, "Should extract at least one assertion"
+
+
+@pytest.mark.llm
+def test_mentions_have_valid_types(extraction_result):
+    from catalyst_contracts_core.enums import MentionType
+
+    valid_types = {t.value for t in MentionType}
+    for m in extraction_result["mentions"]:
+        assert m["mention_type"] in valid_types, f"Invalid type: {m['mention_type']}"
+
+
+@pytest.mark.llm
+def test_mentions_have_valid_spans(extraction_result, chunks_result):
+    """Verify span offsets actually match the source text."""
+    chunk_texts = {c.chunk_id: c.text for c in chunks_result}
+    checked = 0
+    for m in extraction_result["mentions"]:
+        s, e = m.get("span_start"), m.get("span_end")
+        chunk_id = m.get("chunk_id", "")
+        if s is not None and e is not None and chunk_id in chunk_texts:
+            source = chunk_texts[chunk_id]
+            if 0 <= s < e <= len(source):
+                assert source[s:e] == m["text"], f"Span mismatch: '{m['text']}' != source[{s}:{e}]='{source[s:e]}'"
+                checked += 1
+    print(f"\n  Verified {checked} mention spans against source text")
+
+
+@pytest.mark.llm
+def test_assertions_have_valid_structure(extraction_result):
+    for a in extraction_result["assertions"]:
+        subject = a.get("subject_text") or a.get("subject", "")
+        predicate = a.get("predicate", "")
+        obj = a.get("object_text") or a.get("object", "")
+        assert subject, f"Assertion missing subject: {a}"
+        assert predicate, f"Assertion missing predicate: {a}"
+        assert obj, f"Assertion missing object: {a}"
+
+
+@pytest.mark.llm
+def test_extraction_type_distribution(extraction_result):
+    """Print mention type distribution for inspection."""
+    types: dict[str, int] = {}
+    for m in extraction_result["mentions"]:
+        t = m.get("mention_type", "?")
+        types[t] = types.get(t, 0) + 1
+    print(f"\n  Mention type distribution (model={extraction_result['model']}):")
+    for t, c in sorted(types.items(), key=lambda x: -x[1]):
+        print(f"    {t}: {c}")
+    print(f"  Total: {sum(types.values())} mentions, {len(extraction_result['assertions'])} assertions")

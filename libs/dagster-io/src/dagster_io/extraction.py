@@ -289,4 +289,15 @@ def extract_validated(
         errors,
     )
 
+    # Stash stats for callers that need them (e.g. benchmark tests).
+    # Does not change the return signature — production assets are unaffected.
+    extract_validated.last_stats = {
+        "chunk_count": len(chunks),
+        "mention_count": len(mention_models),
+        "assertion_count": len(assertion_models),
+        "mention_retries": total_mention_retries,
+        "proposition_retries": total_proposition_retries,
+        "errors": errors,
+    }
+
     return mention_models, assertion_models

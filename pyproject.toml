@@ -11,6 +11,10 @@ test = ["pytest>=8.0", "pytest-cov", "dagster>=1.9", "pydantic>=2.0"]
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/congress-data/tests", "packages/media-ingest/tests", "packages/open-leaks/tests"]
 addopts = "--import-mode=importlib"
+markers = [
+    "llm: requires LLM API key (OPENAI_API_KEY or LLM_API_KEY)",
+    "slow: long-running test",
+]
 
 [tool.ruff]
 target-version = "py312"

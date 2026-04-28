@@ -37,6 +37,7 @@ class LLMClient:
         max_tokens: int | None = None,
         max_retries: int | None = None,
         timeout: int | None = None,
+        structured_method: str | None = None,
     ) -> None:
         self.base_url = base_url or os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1")
         self.api_key = api_key or os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
@@ -45,6 +46,9 @@ class LLMClient:
         self.max_tokens = max_tokens if max_tokens is not None else int(os.environ.get("LLM_MAX_TOKENS", "16384"))
         self.max_retries = max_retries if max_retries is not None else int(os.environ.get("LLM_MAX_RETRIES", "5"))
         self.timeout = timeout if timeout is not None else int(os.environ.get("LLM_TIMEOUT", "300"))
+        # "function_calling" (default for OpenAI/vLLM), "json_mode" (for models
+        # without tool support like nuextract), or "json_schema".
+        self.structured_method = structured_method or os.environ.get("LLM_STRUCTURED_METHOD", "function_calling")
 
         self._chat_model = ChatOpenAI(
             base_url=self.base_url,
@@ -72,13 +76,23 @@ class LLMClient:
         return str(response.content)
 
     async def structured_output(self, schema: type[BaseModel], messages: list[Any]) -> BaseModel:
-        """Invoke with structured output, returning a Pydantic model instance."""
+        """Invoke with structured output, returning a Pydantic model instance.
+
+        Uses self.structured_method to select the extraction strategy:
+        - "function_calling" (default): OpenAI tool/function calling
+        - "json_mode": response_format=json_object (for models without tool support)
+        - "json_schema": response_format=json_schema (OpenAI strict mode)
+        """
         prompt_chars = sum(len(str(getattr(m, "content", m))) for m in messages)
         logger.info(
-            "llm.structured_output: model=%s, schema=%s, prompt_chars=%d", self.model, schema.__name__, prompt_chars
+            "llm.structured_output: model=%s, schema=%s, method=%s, prompt_chars=%d",
+            self.model,
+            schema.__name__,
+            self.structured_method,
+            prompt_chars,
         )
         t0 = time.perf_counter()
-        chain = self._chat_model.with_structured_output(schema)
+        chain = self._chat_model.with_structured_output(schema, method=self.structured_method)
         result = await chain.ainvoke(messages)
         elapsed = time.perf_counter() - t0
         logger.info("llm.structured_output: done, schema=%s, duration=%.3fs", schema.__name__, elapsed)
