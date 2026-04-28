@@ -47,6 +47,12 @@ OLLAMA_MODELS = [
         tags=["ollama", "extraction-specialist"],
     ),
     ModelConfig(
+        name="nuextract-1.5-mlx",
+        model="mlx-community/numind-NuExtract-1.5-MLX-8bit",
+        base_url="http://localhost:8004/v1",
+        tags=["vllm", "extraction-specialist"],
+    ),
+    ModelConfig(
         name="mistral-7b",
         model="mistral:latest",
         base_url=OLLAMA_BASE,

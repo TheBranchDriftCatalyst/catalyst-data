@@ -17,6 +17,7 @@ Usage in Dagster assets:
 """
 
 import asyncio
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -72,7 +73,15 @@ def _build_graph():
         async def load_propositions(self, document_id):
             return []
 
-    llm_client = LLMClient()
+    # Auto-detect nuextract and use its native adapter
+    _llm_model_name = os.environ.get("LLM_MODEL", "")
+    if "nuextract" in _llm_model_name.lower():
+        from catalyst_langgraph.clients.nuextract import NuExtractClient
+
+        llm_client = NuExtractClient()
+    else:
+        llm_client = LLMClient()
+
     mcp_client = DirectMCPClient(_ValidatorHandler())
     repo = _NullRepository()
 
@@ -128,8 +137,6 @@ def extract_validated(
 
     if not chunks:
         return [], []
-
-    import os
 
     _llm_model = os.environ.get("LLM_MODEL", "unknown")
 
