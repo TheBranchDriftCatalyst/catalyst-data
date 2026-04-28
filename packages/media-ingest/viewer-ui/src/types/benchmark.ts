@@ -6,6 +6,7 @@ export interface BenchmarkReport {
   entity_count: number;
   proposition_count: number;
   model_names: string[];
+  domains: Record<string, number>;
   models: ModelResult[];
   entities: EntityRow[];
   propositions: PropositionRow[];
@@ -43,6 +44,7 @@ export interface PipelineStage {
 export interface EntityRow {
   text: string;
   consensus_type: string;
+  domain: string;
   model_count: number;
   models: Record<
     string,
@@ -59,6 +61,7 @@ export interface PropositionRow {
   subject: string;
   predicate: string;
   object: string;
+  domain: string;
   model_count: number;
   models: string[];
 }

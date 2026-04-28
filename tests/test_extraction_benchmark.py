@@ -84,6 +84,14 @@ def _build_report_json(results: list[dict]) -> dict:
             }
         )
 
+    # ── Chunk domains ────────────────────────────────────────────────
+    # Read benchmark chunks to get domain labels
+    benchmark_path = Path(__file__).parent / "fixtures" / "benchmark_chunks.json"
+    chunk_domains: dict[str, str] = {}
+    if benchmark_path.exists():
+        for c in json.loads(benchmark_path.read_text()):
+            chunk_domains[c.get("chunk_id", "")] = c.get("metadata", {}).get("domain", "unknown")
+
     # ── Entity matrix ────────────────────────────────────────────────
     entity_rows: dict[str, dict] = {}  # entity_text -> {type, models: {name: type}}
     for r in results:
@@ -92,13 +100,17 @@ def _build_report_json(results: list[dict]) -> dict:
             if not text:
                 continue
             if text not in entity_rows:
-                entity_rows[text] = {"text": text, "consensus_type": "", "models": {}}
+                entity_rows[text] = {"text": text, "consensus_type": "", "domain": "", "models": {}}
             entity_rows[text]["models"][r["model"]] = {
                 "type": m.get("mention_type", "?"),
                 "confidence": m.get("confidence", 0),
                 "span_start": m.get("span_start"),
                 "span_end": m.get("span_end"),
             }
+            # Infer domain from chunk_id
+            chunk_id = m.get("chunk_id", "")
+            if chunk_id and not entity_rows[text]["domain"]:
+                entity_rows[text]["domain"] = chunk_domains.get(chunk_id, "unknown")
 
     # Compute consensus type per entity
     for row in entity_rows.values():
@@ -122,10 +134,13 @@ def _build_report_json(results: list[dict]) -> dict:
                 continue
             key = f"{subj}|{pred}|{obj}"
             if key not in spo_rows:
+                prov = a.get("provenance") or {}
+                chunk_id = prov.get("chunk_id", "")
                 spo_rows[key] = {
                     "subject": subj,
                     "predicate": pred,
                     "object": obj,
+                    "domain": chunk_domains.get(chunk_id, "unknown"),
                     "models": [],
                 }
             if r["model"] not in spo_rows[key]["models"]:
@@ -135,12 +150,19 @@ def _build_report_json(results: list[dict]) -> dict:
         row["model_count"] = len(row["models"])
     propositions = sorted(spo_rows.values(), key=lambda x: -x["model_count"])
 
+    # Domain summary
+    domain_counts: dict[str, int] = {}
+    for c in json.loads(benchmark_path.read_text()) if benchmark_path.exists() else []:
+        d = c.get("metadata", {}).get("domain", "unknown")
+        domain_counts[d] = domain_counts.get(d, 0) + 1
+
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "model_count": len(models),
         "entity_count": len(entities),
         "proposition_count": len(propositions),
         "model_names": [r["model"] for r in results],
+        "domains": domain_counts,
         "models": models,
         "entities": entities,
         "propositions": propositions,

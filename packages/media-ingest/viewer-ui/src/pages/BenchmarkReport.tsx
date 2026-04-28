@@ -23,6 +23,13 @@ const TYPE_COLORS: Record<string, string> = {
   OTHER: "bg-zinc-500/20 text-zinc-300 border-zinc-500/30",
 };
 
+const DOMAIN_COLORS: Record<string, string> = {
+  media: "bg-violet-500/20 text-violet-300",
+  congress: "bg-blue-500/20 text-blue-300",
+  open_leaks: "bg-rose-500/20 text-rose-300",
+  unknown: "bg-zinc-500/20 text-zinc-300",
+};
+
 const MODEL_TYPE_COLORS: Record<string, string> = {
   encoder: "bg-emerald-500/20 text-emerald-300",
   specialist: "bg-amber-500/20 text-amber-300",
@@ -54,6 +61,20 @@ function ModelTypeBadge({ type }: { type: string }) {
   return (
     <span className={`inline-block px-2 py-0.5 text-[10px] font-mono uppercase rounded ${colors}`}>
       {type}
+    </span>
+  );
+}
+
+function DomainBadge({ domain }: { domain: string }) {
+  const colors = DOMAIN_COLORS[domain] || DOMAIN_COLORS.unknown;
+  const labels: Record<string, string> = {
+    media: "MEDIA",
+    congress: "CONGRESS",
+    open_leaks: "LEAKS",
+  };
+  return (
+    <span className={`inline-block px-1.5 py-0.5 text-[9px] font-mono uppercase rounded ${colors}`}>
+      {labels[domain] || domain}
     </span>
   );
 }
@@ -125,6 +146,7 @@ function EntityMatrix({ entities, modelNames }: { entities: EntityRow[]; modelNa
         <thead>
           <tr className="text-zinc-500 border-b border-white/5">
             <th className="text-left py-2 px-2 sticky left-0 bg-surface-0">Entity</th>
+            <th className="text-left py-2 px-1">Domain</th>
             <th className="text-left py-2 px-1">Type</th>
             <th className="text-center py-2 px-1">#</th>
             {modelNames.map((n) => (
@@ -141,6 +163,9 @@ function EntityMatrix({ entities, modelNames }: { entities: EntityRow[]; modelNa
             <tr key={`${e.text}-${i}`} className="border-b border-white/5 hover:bg-white/[0.02]">
               <td className="py-1.5 px-2 text-zinc-200 sticky left-0 bg-surface-0 max-w-[200px] truncate">
                 {e.text}
+              </td>
+              <td className="py-1.5 px-1">
+                <DomainBadge domain={e.domain || "unknown"} />
               </td>
               <td className="py-1.5 px-1">
                 <TypeBadge type={e.consensus_type} />
@@ -347,10 +372,17 @@ export default function BenchmarkReport() {
         </div>
 
         {/* Stat Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <StatCard label="Models" value={report.model_count} />
           <StatCard label="Unique Entities" value={report.entity_count} />
           <StatCard label="Propositions" value={report.proposition_count} />
+          <StatCard
+            label="Domains"
+            value={Object.keys(report.domains || {}).length}
+            sub={Object.entries(report.domains || {})
+              .map(([d, n]) => `${d}: ${n}`)
+              .join(", ")}
+          />
           <StatCard
             label="Fastest"
             value={
