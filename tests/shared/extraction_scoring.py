@@ -284,3 +284,136 @@ def print_comparison_table(results: list[dict]) -> None:
         )
 
     print(f"{'=' * 100}\n")
+
+
+def print_benchmark_report(results: list[dict]) -> None:
+    """Print a comprehensive benchmark report with entity matrix, SPO matrix, and stats.
+
+    Args:
+        results: list of dicts with keys: model, fixture, tags (optional)
+    """
+    if not results:
+        return
+
+    # ── Classify models by type ──────────────────────────────────────────
+    encoders = []
+    specialists = []
+    llms = []
+    for r in results:
+        tags = r.get("tags", [])
+        if "encoder" in tags:
+            encoders.append(r)
+        elif "extraction-specialist" in tags:
+            specialists.append(r)
+        else:
+            llms.append(r)
+
+    # ── Collect all unique entities and SPOs across all models ────────────
+    all_entities: dict[str, set[str]] = {}  # entity_text -> set of models that found it
+    all_entity_types: dict[str, dict[str, str]] = {}  # entity_text -> {model: type}
+    all_spos: dict[str, set[str]] = {}  # "subj -> pred -> obj" -> set of models
+
+    model_names = []
+    for r in results:
+        name = r["model"]
+        model_names.append(name)
+        ext = r["fixture"]
+
+        for m in ext.get("mentions", []):
+            text = m.get("text", "").strip()
+            if not text:
+                continue
+            all_entities.setdefault(text, set()).add(name)
+            all_entity_types.setdefault(text, {})[name] = m.get("mention_type", "?")
+
+        for a in ext.get("assertions", []):
+            subj = a.get("subject_text", a.get("subject", "")).strip()
+            pred = a.get("predicate", "").strip()
+            obj = a.get("object_text", a.get("object", "")).strip()
+            if subj and pred and obj:
+                spo_key = f"{subj} -> {pred} -> {obj}"
+                all_spos.setdefault(spo_key, set()).add(name)
+
+    # ── NER Entity Matrix ────────────────────────────────────────────────
+    # Sort entities by how many models found them (consensus first)
+    sorted_entities = sorted(all_entities.items(), key=lambda x: -len(x[1]))
+
+    # Abbreviate model names for column headers
+    short_names = []
+    for n in model_names:
+        short = n.replace("-", "").replace(".", "")[:8]
+        short_names.append(short)
+
+    print(f"\n{'=' * 100}")
+    print("  NER Entity Matrix — which models found which entities")
+    print(f"{'=' * 100}")
+    print(f"\n  {'Entity':<30} {'Type':<8} {'#':>3}  ", end="")
+    for sn in short_names:
+        print(f"{sn:>9}", end="")
+    print()
+    print(f"  {'-' * (45 + 9 * len(short_names))}")
+
+    for entity_text, found_by in sorted_entities:
+        # Use the most common type across models
+        types = all_entity_types.get(entity_text, {})
+        type_counts: dict[str, int] = {}
+        for t in types.values():
+            type_counts[t] = type_counts.get(t, 0) + 1
+        best_type = max(type_counts, key=type_counts.get) if type_counts else "?"
+
+        display_text = entity_text[:29]
+        print(f"  {display_text:<30} {best_type:<8} {len(found_by):>3}  ", end="")
+        for name in model_names:
+            if name in found_by:
+                t = types.get(name, "?")
+                marker = t[:3] if t != best_type else "  ✓"
+                print(f"{marker:>9}", end="")
+            else:
+                print(f"{'·':>9}", end="")
+        print()
+
+    # ── SPO Proposition Matrix ───────────────────────────────────────────
+    if all_spos:
+        sorted_spos = sorted(all_spos.items(), key=lambda x: -len(x[1]))
+
+        print(f"\n{'=' * 100}")
+        print("  SPO Proposition Matrix — which models found which relationships")
+        print(f"{'=' * 100}")
+        print(f"\n  {'Subject -> Predicate -> Object':<55} {'#':>3}  ", end="")
+        for sn in short_names:
+            print(f"{sn:>9}", end="")
+        print()
+        print(f"  {'-' * (60 + 9 * len(short_names))}")
+
+        for spo_key, found_by in sorted_spos[:30]:  # cap at 30 rows
+            display = spo_key[:54]
+            print(f"  {display:<55} {len(found_by):>3}  ", end="")
+            for name in model_names:
+                marker = "  ✓" if name in found_by else "  ·"
+                print(f"{marker:>9}", end="")
+            print()
+
+    # ── Stats Table (grouped by type) ────────────────────────────────────
+    print(f"\n{'=' * 100}")
+    print("  Performance Stats (grouped by extractor type)")
+    print(f"{'=' * 100}")
+    print(
+        f"\n  {'Model':<22} {'Type':<12} {'Mentions':>8} {'Asserts':>8} "
+        f"{'Time(s)':>8} {'Tok/s':>8} {'Retries':>8} {'Errors':>7}"
+    )
+    print(f"  {'-' * 88}")
+
+    for group_name, group in [("ENCODERS", encoders), ("SPECIALISTS", specialists), ("LLMs", llms)]:
+        if not group:
+            continue
+        for r in sorted(group, key=lambda x: x["fixture"].get("stats", {}).get("duration_s", 999)):
+            s = r["fixture"].get("stats", {})
+            retries = s.get("mention_retries", 0) + s.get("proposition_retries", 0)
+            print(
+                f"  {r['model']:<22} {group_name:<12} {s.get('mention_count', 0):>8} "
+                f"{s.get('assertion_count', 0):>8} {s.get('duration_s', 0):>8.1f} "
+                f"{s.get('tokens_per_sec', 0):>8.1f} {retries:>8} {s.get('errors', 0):>7}"
+            )
+        print(f"  {'-' * 88}")
+
+    print(f"{'=' * 100}\n")

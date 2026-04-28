@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from tests.shared.extraction_scoring import (
+    print_benchmark_report,
     print_comparison_table,
     print_scores,
     score_mentions,
@@ -385,7 +386,7 @@ class TestRunAll:
                     f"{s.get('assertion_count', '?')} assertions, "
                     f"{s.get('duration_s', '?')}s, {s.get('mention_retries', '?')} retries"
                 )
-                results.append({"model": cfg.name, "fixture": cached})
+                results.append({"model": cfg.name, "fixture": cached, "tags": cfg.tags})
                 continue
 
             print(f"\n  RUNNING {cfg.name} ({cfg.model}) via {cfg.base_url or 'in-process'}...")
@@ -431,7 +432,7 @@ class TestRunAll:
             if proc.returncode == 0:
                 fixture = _load_fixture(f"extraction_{cfg.model}")
                 if fixture:
-                    results.append({"model": cfg.name, "fixture": fixture})
+                    results.append({"model": cfg.name, "fixture": fixture, "tags": cfg.tags})
                     s = fixture.get("stats", {})
                     # Print detailed results
                     print(
@@ -493,28 +494,12 @@ class TestRunAll:
                     }
                 )
             print_comparison_table(scored)
-        # Always print a summary table with stats
+        # Full benchmark report: entity matrix, SPO matrix, stats by type
         if results:
-            print(f"\n{'=' * 90}")
-            print(f"  Summary — {len(results)} models benchmarked")
-            print(f"{'=' * 90}")
-            print(
-                f"\n  {'Model':<22} {'Mentions':>8} {'Asserts':>8} {'Time(s)':>8} "
-                f"{'Tok/s':>8} {'Retries':>8} {'Errors':>7}"
-            )
-            print(f"  {'-' * 78}")
-            for r in sorted(results, key=lambda x: x["fixture"].get("stats", {}).get("duration_s", 999)):
-                s = r["fixture"].get("stats", {})
-                retries = s.get("mention_retries", 0) + s.get("proposition_retries", 0)
-                print(
-                    f"  {r['model']:<22} {s.get('mention_count', 0):>8} "
-                    f"{s.get('assertion_count', 0):>8} {s.get('duration_s', 0):>8.1f} "
-                    f"{s.get('tokens_per_sec', 0):>8.1f} {retries:>8} {s.get('errors', 0):>7}"
-                )
-            print(f"{'=' * 90}")
+            print_benchmark_report(results)
 
             if not gt:
                 print(
-                    "\n  No ground truth yet. Generate with: "
-                    "pytest tests/test_extraction_benchmark.py -k generate_ground_truth -v -s"
+                    "  No ground truth yet. Generate with: "
+                    "pytest tests/test_extraction_benchmark.py -k generate_ground_truth -v -s\n"
                 )
