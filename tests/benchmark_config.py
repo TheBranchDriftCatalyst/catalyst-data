@@ -58,7 +58,19 @@ EXTRACTION_MODELS = [
         tags=["ollama", "extraction-specialist", "3.8b"],
     ),
     # NuExtract 2.0-8B — needs GGUF import (see CD-9zg)
-    # GLiNER 300M — needs pip adapter, not Ollama (see CD-rrj)
+]
+
+# ── GLiNER (encoder, not an LLM) ─────────────────────────────────────────
+# Runs locally via Python, no serving endpoint. Set LLM_MODEL=gliner to activate.
+# 87% F1 zero-shot NER, 0.1s inference, 300M params.
+
+ENCODER_MODELS = [
+    ModelConfig(
+        name="gliner-medium",
+        model="gliner",  # triggers GLiNERClient in _build_graph()
+        base_url="",  # not used — runs in-process
+        tags=["encoder", "extraction-specialist", "300m"],
+    ),
 ]
 
 # ── Tier 1: Best composite scores on LLMStructBench ──────────────────────
@@ -172,7 +184,7 @@ TIER2_MODELS = [
 # All models — used by the multi-model benchmark runner
 # ═══════════════════════════════════════════════════════════════════════════
 
-ALL_MODELS = EXTRACTION_MODELS + TIER1_MODELS + TIER2_MODELS
+ALL_MODELS = EXTRACTION_MODELS + ENCODER_MODELS + TIER1_MODELS + TIER2_MODELS
 
 
 def get_available_models(tags: list[str] | None = None) -> list[ModelConfig]:
