@@ -96,13 +96,15 @@ TIER1_MODELS = [
         base_url=OLLAMA_BASE,
         tags=["ollama", "12b", "tier1"],
     ),
-    # LLMStructBench 0.67 — top scorer at 7B
-    ModelConfig(
-        name="deepseek-r1-7b",
-        model="deepseek-r1:7b",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "7b", "tier1"],
-    ),
+    # DeepSeek-R1 7B — LLMStructBench 0.67 but reasoning models are too slow
+    # for benchmark (10+ min per chunk due to <think> phase). Use for
+    # quality comparison only, not routine benchmarks.
+    # ModelConfig(
+    #     name="deepseek-r1-7b",
+    #     model="deepseek-r1:7b",
+    #     base_url=OLLAMA_BASE,
+    #     tags=["ollama", "7b", "tier1", "reasoning"],
+    # ),
     # LLMStructBench 0.66 — best 3.8B model, punches above weight
     ModelConfig(
         name="phi4-mini",

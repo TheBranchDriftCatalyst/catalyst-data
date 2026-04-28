@@ -404,25 +404,29 @@ class TestRunAll:
             if cfg.base_url:
                 env["LLM_BASE_URL"] = cfg.base_url
 
-            proc = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pytest",
-                    "tests/test_pipeline_integration.py",
-                    "-k",
-                    "extraction_produces_mentions",
-                    "-v",
-                    "-s",
-                    "--no-header",
-                    "--tb=short",
-                ],
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=cfg.timeout,
-                cwd=str(Path(__file__).resolve().parent.parent),
-            )
+            try:
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pytest",
+                        "tests/test_pipeline_integration.py",
+                        "-k",
+                        "extraction_produces_mentions",
+                        "-v",
+                        "-s",
+                        "--no-header",
+                        "--tb=short",
+                    ],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=cfg.timeout,
+                    cwd=str(Path(__file__).resolve().parent.parent),
+                )
+            except subprocess.TimeoutExpired:
+                print(f"  TIMEOUT {cfg.name}: exceeded {cfg.timeout}s — skipping")
+                continue
 
             if proc.returncode == 0:
                 fixture = _load_fixture(f"extraction_{cfg.model}")
