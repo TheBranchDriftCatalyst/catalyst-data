@@ -57,7 +57,12 @@ EXTRACTION_MODELS = [
         base_url=OLLAMA_BASE,
         tags=["ollama", "extraction-specialist", "3.8b"],
     ),
-    # NuExtract 2.0-8B — needs GGUF import (see CD-9zg)
+    ModelConfig(
+        name="nuextract-2.0-8b",
+        model="nuextract2:latest",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "extraction-specialist", "8b"],
+    ),
 ]
 
 # ── GLiNER (encoder, not an LLM) ─────────────────────────────────────────

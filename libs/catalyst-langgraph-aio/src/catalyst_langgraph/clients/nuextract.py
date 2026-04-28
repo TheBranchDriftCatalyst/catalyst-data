@@ -57,6 +57,41 @@ def _build_nuextract_template(categories: list[str] | None = None) -> str:
     return json.dumps({cat: [""] for cat in categories})
 
 
+def _entities_to_mentions(parsed: dict, raw_text: str) -> dict[tuple[str, str], dict]:
+    """Convert nuextract category output to deduplicated mention dicts with computed spans."""
+    mentions: dict[tuple[str, str], dict] = {}
+    for category, entities in parsed.items():
+        mention_type = CATEGORY_TO_MENTION_TYPE.get(category, "OTHER")
+        if not isinstance(entities, list):
+            continue
+        for entity_text in entities:
+            if not isinstance(entity_text, str) or not entity_text.strip():
+                continue
+            entity_text = entity_text.strip()
+
+            spans = _compute_spans(raw_text, entity_text)
+            if spans:
+                span_start, span_end = spans[0]
+            else:
+                lower_spans = _compute_spans(raw_text.lower(), entity_text.lower())
+                if lower_spans:
+                    span_start, span_end = lower_spans[0]
+                    entity_text = raw_text[span_start:span_end]
+                else:
+                    span_start, span_end = 0, 0
+
+            key = (entity_text.lower(), mention_type)
+            if key not in mentions:
+                mentions[key] = {
+                    "text": entity_text,
+                    "mention_type": mention_type,
+                    "span_start": span_start,
+                    "span_end": span_end,
+                    "confidence": 0.9,
+                }
+    return mentions
+
+
 def _compute_spans(text: str, entity_text: str) -> list[tuple[int, int]]:
     """Find all occurrences of entity_text in text, return (start, end) pairs."""
     spans = []
@@ -71,8 +106,12 @@ def _compute_spans(text: str, entity_text: str) -> list[tuple[int, int]]:
 
 
 class NuExtractClient:
-    """Adapter that calls nuextract via Ollama's /api/chat endpoint and
-    returns results matching our Pydantic extraction schemas.
+    """Adapter that calls nuextract via Ollama and returns results matching
+    our Pydantic extraction schemas.
+
+    Supports both NuExtract 1.5 (Phi-3.5, <|input|>/<|output|> format) and
+    NuExtract 2.0 (Qwen2.5-VL, ### Template: format). Auto-detects version
+    from model name.
 
     Config from environment (same vars as LLMClient):
     - LLM_BASE_URL: Ollama base (default http://localhost:11434)
@@ -88,27 +127,42 @@ class NuExtractClient:
         timeout: int | None = None,
     ) -> None:
         raw_url = base_url or os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
-        # Strip /v1 suffix — we call /api/chat directly
         self.base_url = raw_url.rstrip("/").removesuffix("/v1")
         self.model = model or os.environ.get("LLM_MODEL", "nuextract:latest")
         self.timeout = timeout or int(os.environ.get("LLM_TIMEOUT", "300"))
-        # Expose for compatibility with code that reads these
+        # Auto-detect version: "nuextract2" or "2.0" → v2 format
+        self.is_v2 = "2" in self.model.lower().replace("nuextract1", "").replace("1.5", "")
         self.structured_method = "nuextract"
         self.temperature = 0.0
 
     async def _call_llm(self, prompt: str) -> str:
         """Send a request to the LLM and return the response text.
 
-        For Ollama: uses /api/generate with raw=true and the Phi-3 chat template
-        baked into the prompt. This avoids double-wrapping of <|user|> tags that
-        happens with /api/chat.
+        NuExtract 1.5 (Phi-3): uses /api/generate with raw mode and manually
+        baked Phi-3 chat template to avoid double-wrapping.
 
-        For OpenAI-compatible (vLLM-MLX): uses /v1/chat/completions.
+        NuExtract 2.0 (Qwen2.5): uses /api/chat which correctly applies the
+        Qwen im_start/im_end template.
         """
         is_ollama = ":11434" in self.base_url
 
-        if is_ollama:
-            # Wrap in Phi-3 chat template manually, send raw
+        if is_ollama and self.is_v2:
+            # v2 (Qwen2.5 template) — use /api/chat, template handles wrapping
+            ollama_base = self.base_url.rstrip("/").removesuffix("/v1")
+            url = f"{ollama_base}/api/chat"
+            payload = {
+                "model": self.model,
+                "stream": False,
+                "messages": [{"role": "user", "content": prompt}],
+                "options": {"temperature": 0.0},
+            }
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                return data["message"]["content"]
+        elif is_ollama:
+            # v1.5 (Phi-3 template) — use /api/generate with raw mode
             formatted = f"<|user|>\n{prompt}<|end|>\n<|assistant|>\n"
             ollama_base = self.base_url.rstrip("/").removesuffix("/v1")
             url = f"{ollama_base}/api/generate"
@@ -210,10 +264,14 @@ class NuExtractClient:
     async def _extract_mentions(self, raw_text: str, schema: type[BaseModel]) -> BaseModel:
         """Extract entity mentions using nuextract's category template.
 
-        For texts longer than MAX_WINDOW_CHARS, uses a sliding window approach:
-        split into overlapping windows, extract from each, then deduplicate.
-        The 3.8B nuextract model degenerates on inputs >~600 chars.
+        NuExtract 2.0 (8B, Qwen2.5): handles full text, uses ### Template: format
+        with verbatim-string type annotations.
+
+        NuExtract 1.5 (3.8B, Phi-3): uses sliding window (degenerates >600 chars)
+        with <|input|>/<|output|> format.
         """
+        if self.is_v2:
+            return await self._extract_mentions_v2(raw_text, schema)
         MAX_WINDOW_CHARS = 500
         OVERLAP_CHARS = 50
 
@@ -229,7 +287,7 @@ class NuExtractClient:
             logger.info("nuextract: splitting %d chars into %d windows", len(raw_text), len(windows))
 
         template = _build_nuextract_template()
-        all_mentions: dict[tuple[str, str], dict] = {}  # (text, type) -> mention dict
+        all_mentions: dict[tuple[str, str], dict] = {}
 
         for window_offset, window_text in windows:
             prompt = f"<|input|>\n{window_text}\n<|output|>\n{template}"
@@ -240,37 +298,9 @@ class NuExtractClient:
                 logger.warning("nuextract: window at offset %d failed: %s", window_offset, e)
                 continue
 
-            for category, entities in parsed.items():
-                mention_type = CATEGORY_TO_MENTION_TYPE.get(category, "OTHER")
-                if not isinstance(entities, list):
-                    continue
-                for entity_text in entities:
-                    # NuExtract sometimes returns dicts or nested structures — skip non-strings
-                    if not isinstance(entity_text, str) or not entity_text.strip():
-                        continue
-                    entity_text = entity_text.strip()
-
-                    # Compute span against the FULL source text (not the window)
-                    spans = _compute_spans(raw_text, entity_text)
-                    if spans:
-                        span_start, span_end = spans[0]
-                    else:
-                        lower_spans = _compute_spans(raw_text.lower(), entity_text.lower())
-                        if lower_spans:
-                            span_start, span_end = lower_spans[0]
-                            entity_text = raw_text[span_start:span_end]
-                        else:
-                            span_start, span_end = 0, 0
-
-                    key = (entity_text.lower(), mention_type)
-                    if key not in all_mentions:
-                        all_mentions[key] = {
-                            "text": entity_text,
-                            "mention_type": mention_type,
-                            "span_start": span_start,
-                            "span_end": span_end,
-                            "confidence": 0.9,
-                        }
+            # Compute spans against FULL source text, not the window
+            window_mentions = _entities_to_mentions(parsed, raw_text)
+            all_mentions.update(window_mentions)
 
         from catalyst_contracts.models.extraction_output import MentionCandidate
 
@@ -317,3 +347,21 @@ class NuExtractClient:
         from catalyst_contracts.models.extraction_output import PropositionCandidate
 
         return schema(propositions=[PropositionCandidate(**p) for p in propositions])
+
+    async def _extract_mentions_v2(self, raw_text: str, schema: type[BaseModel]) -> BaseModel:
+        """NuExtract 2.0 extraction — uses ### Template: format with verbatim-string types.
+
+        The 8B model handles full text without sliding window.
+        """
+        # Build v2 template with verbatim-string type annotations
+        v2_template = json.dumps({cat: ["verbatim-string"] for cat in NUEXTRACT_CATEGORIES})
+        prompt = f"{raw_text}\n\n### Template:\n{v2_template}"
+
+        response = await self._call_llm(prompt)
+        parsed = self._parse_nuextract_output(response)
+
+        from catalyst_contracts.models.extraction_output import MentionCandidate
+
+        mentions = _entities_to_mentions(parsed, raw_text)
+
+        return schema(mentions=[MentionCandidate(**m) for m in mentions.values()])

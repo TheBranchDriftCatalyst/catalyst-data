@@ -367,27 +367,32 @@ class TestRunAll:
 
         results = []
         for cfg in ALL_MODELS:
-            # Check if endpoint is reachable
-            try:
-                req = urllib.request.Request(f"{cfg.base_url}/models", method="GET")
-                urllib.request.urlopen(req, timeout=3)
-            except Exception:
-                print(f"\n  SKIP {cfg.name}: endpoint {cfg.base_url} not reachable")
-                continue
+            # Check if endpoint is reachable (skip for encoder models like GLiNER)
+            if cfg.base_url:
+                try:
+                    req = urllib.request.Request(f"{cfg.base_url}/models", method="GET")
+                    urllib.request.urlopen(req, timeout=3)
+                except Exception:
+                    print(f"\n  SKIP {cfg.name}: endpoint {cfg.base_url} not reachable")
+                    continue
 
             # Check if we already have a fixture for this model
             cached = _load_fixture(f"extraction_{cfg.model}")
             if cached:
-                print(f"\n  CACHED {cfg.name}: using existing fixture")
+                s = cached.get("stats", {})
+                print(
+                    f"\n  CACHED {cfg.name}: {s.get('mention_count', '?')} mentions, "
+                    f"{s.get('assertion_count', '?')} assertions, "
+                    f"{s.get('duration_s', '?')}s, {s.get('mention_retries', '?')} retries"
+                )
                 results.append({"model": cfg.name, "fixture": cached})
                 continue
 
-            print(f"\n  RUNNING {cfg.name} ({cfg.model}) via {cfg.base_url}...")
+            print(f"\n  RUNNING {cfg.name} ({cfg.model}) via {cfg.base_url or 'in-process'}...")
 
             # Run as subprocess to isolate env vars per model
             env = {
                 **os.environ,
-                "LLM_BASE_URL": cfg.base_url,
                 "LLM_MODEL": cfg.model,
                 "LLM_API_KEY": cfg.api_key,
                 "LLM_STRUCTURED_METHOD": cfg.structured_method,
@@ -396,6 +401,8 @@ class TestRunAll:
                 "PROMPT_REGISTRY_DIR": str(Path(__file__).resolve().parent.parent / "k8s" / "shared" / "prompts"),
                 "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
             }
+            if cfg.base_url:
+                env["LLM_BASE_URL"] = cfg.base_url
 
             proc = subprocess.run(
                 [
@@ -421,11 +428,43 @@ class TestRunAll:
                 fixture = _load_fixture(f"extraction_{cfg.model}")
                 if fixture:
                     results.append({"model": cfg.name, "fixture": fixture})
-                    print(f"  OK {cfg.name}: {len(fixture.get('mentions', []))} mentions")
+                    s = fixture.get("stats", {})
+                    # Print detailed results
+                    print(
+                        f"  OK {cfg.name}: {s.get('mention_count', 0)} mentions, "
+                        f"{s.get('assertion_count', 0)} assertions, "
+                        f"{s.get('duration_s', 0)}s, "
+                        f"{s.get('tokens_per_sec', 0)} tok/s, "
+                        f"{s.get('mention_retries', 0)} retries, "
+                        f"{s.get('errors', 0)} errors"
+                    )
+                    # Print extracted entities
+                    types: dict[str, int] = {}
+                    for m in fixture.get("mentions", []):
+                        t = m.get("mention_type", "?")
+                        types[t] = types.get(t, 0) + 1
+                    if types:
+                        type_str = ", ".join(f"{t}:{c}" for t, c in sorted(types.items(), key=lambda x: -x[1]))
+                        print(f"  Types: {type_str}")
+                    # Show top entities
+                    top = fixture.get("mentions", [])[:8]
+                    if top:
+                        ents = [f"{m.get('text', '?')}" for m in top]
+                        print(f"  Top entities: {', '.join(ents)}")
                 else:
                     print(f"  WARN {cfg.name}: test passed but no fixture saved")
             else:
-                print(f"  FAIL {cfg.name}: {proc.stderr[-200:] if proc.stderr else 'no stderr'}")
+                # Show the failure details
+                stderr_tail = proc.stderr[-300:] if proc.stderr else ""
+                stdout_tail = proc.stdout[-300:] if proc.stdout else ""
+                print(f"  FAIL {cfg.name}")
+                if "FAILED" in stdout_tail:
+                    # Extract the failure reason
+                    for line in stdout_tail.split("\n"):
+                        if "FAILED" in line or "Error" in line or "assert" in line:
+                            print(f"    {line.strip()}")
+                elif stderr_tail:
+                    print(f"    stderr: {stderr_tail[:200]}")
 
         # Print comparison if we have ground truth
         gt = _load_fixture("ground_truth_media_ingest")
@@ -450,5 +489,28 @@ class TestRunAll:
                     }
                 )
             print_comparison_table(scored)
-        elif results:
-            print(f"\n  {len(results)} models completed. Generate ground truth to see comparison scores.")
+        # Always print a summary table with stats
+        if results:
+            print(f"\n{'=' * 90}")
+            print(f"  Summary — {len(results)} models benchmarked")
+            print(f"{'=' * 90}")
+            print(
+                f"\n  {'Model':<22} {'Mentions':>8} {'Asserts':>8} {'Time(s)':>8} "
+                f"{'Tok/s':>8} {'Retries':>8} {'Errors':>7}"
+            )
+            print(f"  {'-' * 78}")
+            for r in sorted(results, key=lambda x: x["fixture"].get("stats", {}).get("duration_s", 999)):
+                s = r["fixture"].get("stats", {})
+                retries = s.get("mention_retries", 0) + s.get("proposition_retries", 0)
+                print(
+                    f"  {r['model']:<22} {s.get('mention_count', 0):>8} "
+                    f"{s.get('assertion_count', 0):>8} {s.get('duration_s', 0):>8.1f} "
+                    f"{s.get('tokens_per_sec', 0):>8.1f} {retries:>8} {s.get('errors', 0):>7}"
+                )
+            print(f"{'=' * 90}")
+
+            if not gt:
+                print(
+                    "\n  No ground truth yet. Generate with: "
+                    "pytest tests/test_extraction_benchmark.py -k generate_ground_truth -v -s"
+                )
