@@ -60,6 +60,23 @@ class ExtractPropositions:
 
             elapsed = time.perf_counter() - t0
             logger.info("extract_propositions: done, candidates=%d, duration=%.3fs", len(candidates), elapsed)
+
+            # If no propositions extracted (e.g. encoder models that only do NER),
+            # skip validation and go straight to persist with empty list.
+            if not candidates:
+                logger.info("extract_propositions: 0 candidates, skipping validation → persist")
+                return {
+                    "current_proposition_candidates": [],
+                    "accepted_propositions": [],
+                    "status": WorkflowStatus.PERSISTING.value,
+                    "audit_events": state.get("audit_events", [])
+                    + [
+                        make_audit_event(
+                            "extract_propositions", "completed", candidate_count=0, skipped="no_propositions"
+                        )
+                    ],
+                }
+
             return {
                 "current_proposition_candidates": candidates,
                 "status": WorkflowStatus.VALIDATING_PROPOSITIONS.value,
