@@ -416,4 +416,71 @@ def print_benchmark_report(results: list[dict]) -> None:
             )
         print(f"  {'-' * 88}")
 
-    print(f"{'=' * 100}\n")
+    # ── Pipeline Breakdown (MCP validation + LangGraph repair) ─────────
+    has_pipeline = any(r["fixture"].get("stats", {}).get("pipeline") for r in results)
+    if has_pipeline:
+        print(f"\n{'=' * 100}")
+        print("  LangGraph Pipeline Breakdown (MCP validation gates + repair flows)")
+        print(f"{'=' * 100}")
+
+        stage_order = [
+            "extract_mentions",
+            "validate_mentions",
+            "repair_mentions",
+            "extract_propositions",
+            "validate_propositions",
+            "repair_propositions",
+            "persist_artifacts",
+            "failure_handler",
+        ]
+        stage_short = {
+            "extract_mentions": "ExtMen",
+            "validate_mentions": "ValMen",
+            "repair_mentions": "RepMen",
+            "extract_propositions": "ExtPrp",
+            "validate_propositions": "ValPrp",
+            "repair_propositions": "RepPrp",
+            "persist_artifacts": "Persist",
+            "failure_handler": "Failed",
+        }
+
+        print(f"\n  {'Model':<22}", end="")
+        for stage in stage_order:
+            print(f" {stage_short.get(stage, stage[:7]):>8}", end="")
+        print()
+        print(f"  {'-' * (22 + 9 * len(stage_order))}")
+
+        for r in results:
+            pipeline = r["fixture"].get("stats", {}).get("pipeline", {})
+            if not pipeline:
+                continue
+            print(f"  {r['model']:<22}", end="")
+            for stage in stage_order:
+                info = pipeline.get(stage, {})
+                calls = info.get("calls", 0)
+                errs = info.get("error", 0) + info.get("failed", 0)
+                ambig = info.get("ambiguous", 0)
+                if calls == 0:
+                    cell = "—"
+                elif errs > 0:
+                    cell = f"{calls}({errs}e)"
+                elif ambig > 0:
+                    cell = f"{calls}({ambig}a)"
+                else:
+                    cell = str(calls)
+                print(f" {cell:>8}", end="")
+            print()
+
+        # MCP validation error codes
+        all_error_codes: dict[str, int] = {}
+        for r in results:
+            pipeline = r["fixture"].get("stats", {}).get("pipeline", {})
+            for stage_info in pipeline.values():
+                for code, count in stage_info.get("error_codes", {}).items():
+                    all_error_codes[code] = all_error_codes.get(code, 0) + count
+        if all_error_codes:
+            print("\n  MCP Validation Error Codes (across all models):")
+            for code, count in sorted(all_error_codes.items(), key=lambda x: -x[1]):
+                print(f"    {code}: {count}")
+
+    print(f"\n{'=' * 100}\n")

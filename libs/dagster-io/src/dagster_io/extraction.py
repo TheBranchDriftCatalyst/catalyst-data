@@ -31,6 +31,49 @@ from dagster_io.metrics import (
 logger = get_logger(__name__)
 
 
+def _build_pipeline_breakdown(audit_events: list[dict]) -> dict:
+    """Parse audit events into a per-stage breakdown.
+
+    Returns a dict with counts for each pipeline stage:
+    - extract_mentions: how many times called, successes, errors
+    - validate_mentions: verdicts (valid/ambiguous/invalid)
+    - repair_mentions: attempts, successes, errors
+    - extract_propositions / validate_propositions / repair_propositions: same
+    - persist_artifacts / failure_handler: counts
+    """
+    stages: dict[str, dict] = {}
+    for event in audit_events:
+        node = event.get("node_name", "unknown")
+        status = event.get("status", "unknown")
+        details = event.get("details", {})
+
+        if node not in stages:
+            stages[node] = {"calls": 0, "completed": 0, "error": 0, "failed": 0}
+
+        stages[node]["calls"] += 1
+        if status in ("completed", "valid"):
+            stages[node]["completed"] += 1
+        elif status == "error":
+            stages[node]["error"] += 1
+        elif status in ("failed", "invalid"):
+            stages[node]["failed"] += 1
+        elif status == "ambiguous":
+            stages[node].setdefault("ambiguous", 0)
+            stages[node]["ambiguous"] += 1
+
+        # Capture validation-specific details
+        if "candidate_count" in details:
+            stages[node].setdefault("total_candidates", 0)
+            stages[node]["total_candidates"] += details["candidate_count"]
+        if "errors" in details and isinstance(details["errors"], list):
+            for err in details["errors"]:
+                code = err.get("code", "unknown")
+                stages[node].setdefault("error_codes", {})
+                stages[node]["error_codes"][code] = stages[node]["error_codes"].get(code, 0) + 1
+
+    return stages
+
+
 def _build_graph():
     """Build the LangGraph extraction graph with real validators."""
     from catalyst_contracts.validators.mention_validator import (
@@ -113,6 +156,7 @@ async def _extract_chunk(graph, chunk_text: str, document_id: str, chunk_id: str
         "status": result.get("status", "unknown"),
         "mention_retries": result.get("mention_retry_count", 0),
         "proposition_retries": result.get("proposition_retry_count", 0),
+        "audit_events": result.get("audit_events", []),
     }
 
 
@@ -155,6 +199,7 @@ def extract_validated(
     _max_retries = 0 if _is_encoder else max_retries
     all_mentions: list[dict] = []
     all_assertions: list[dict] = []
+    all_audit_events: list[dict] = []
     completed = 0
     errors = 0
     total_mention_retries = 0
@@ -207,6 +252,7 @@ def extract_validated(
                 a["_chunk_id"] = chunk_id
             all_mentions.extend(result["mentions"])
             all_assertions.extend(result["propositions"])
+            all_audit_events.extend(result.get("audit_events", []))
             total_mention_retries += result["mention_retries"]
             total_proposition_retries += result["proposition_retries"]
 
@@ -311,6 +357,9 @@ def extract_validated(
         errors,
     )
 
+    # Build pipeline breakdown from audit events
+    pipeline_breakdown = _build_pipeline_breakdown(all_audit_events)
+
     # Stash stats for callers that need them (e.g. benchmark tests).
     # Does not change the return signature — production assets are unaffected.
     extract_validated.last_stats = {
@@ -320,6 +369,7 @@ def extract_validated(
         "mention_retries": total_mention_retries,
         "proposition_retries": total_proposition_retries,
         "errors": errors,
+        "pipeline": pipeline_breakdown,
     }
 
     return mention_models, assertion_models

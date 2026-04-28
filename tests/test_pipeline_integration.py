@@ -348,6 +348,7 @@ def extraction_result(chunks_result):
             "mention_retries": pipeline_stats.get("mention_retries", 0),
             "proposition_retries": pipeline_stats.get("proposition_retries", 0),
             "errors": pipeline_stats.get("errors", 0),
+            "pipeline": pipeline_stats.get("pipeline", {}),
         },
     }
 
