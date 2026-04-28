@@ -94,20 +94,46 @@ class NuExtractClient:
         self.structured_method = "nuextract"
         self.temperature = 0.0
 
-    async def _call_ollama(self, prompt: str) -> str:
-        """Send a chat request to Ollama and return the response text."""
-        url = f"{self.base_url}/api/chat"
-        payload = {
-            "model": self.model,
-            "stream": False,
-            "messages": [{"role": "user", "content": prompt}],
-            "options": {"temperature": 0.0},
-        }
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            return data["message"]["content"]
+    async def _call_llm(self, prompt: str) -> str:
+        """Send a chat request and return the response text.
+
+        Auto-detects the API format:
+        - Ollama: uses /api/chat with {message: {content: ...}}
+        - OpenAI-compatible (vLLM-MLX): uses /v1/chat/completions
+        """
+        # If base_url ends with /v1 or contains a non-11434 port, use OpenAI format
+        is_openai_api = "/v1" in self.base_url or ":11434" not in self.base_url
+
+        if is_openai_api:
+            base = self.base_url.rstrip("/")
+            # Ensure /v1 is in the path
+            if not base.endswith("/v1"):
+                base = f"{base}/v1"
+            url = f"{base}/chat/completions"
+            payload = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.0,
+                "max_tokens": 4096,
+            }
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+        else:
+            url = f"{self.base_url}/api/chat"
+            payload = {
+                "model": self.model,
+                "stream": False,
+                "messages": [{"role": "user", "content": prompt}],
+                "options": {"temperature": 0.0},
+            }
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                return data["message"]["content"]
 
     def _parse_nuextract_output(self, raw: str) -> dict:
         """Parse nuextract's output, stripping template markers."""
@@ -136,7 +162,7 @@ class NuExtractClient:
     async def complete(self, prompt: str, *, system: str = "") -> str:
         """Simple completion — just wraps the Ollama call."""
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
-        return await self._call_ollama(full_prompt)
+        return await self._call_llm(full_prompt)
 
     async def structured_output(self, schema: type[BaseModel], messages: list[Any]) -> BaseModel:
         """Extract structured data using nuextract's native template format.
@@ -202,7 +228,7 @@ class NuExtractClient:
         for window_offset, window_text in windows:
             prompt = f"<|input|>\n{window_text}\n<|output|>\n{template}"
             try:
-                response = await self._call_ollama(prompt)
+                response = await self._call_llm(prompt)
                 parsed = self._parse_nuextract_output(response)
             except Exception as e:
                 logger.warning("nuextract: window at offset %d failed: %s", window_offset, e)
@@ -260,7 +286,7 @@ class NuExtractClient:
         )
         prompt = f"<|input|>\n{raw_text}\n<|output|>\n{template}"
 
-        response = await self._call_ollama(prompt)
+        response = await self._call_llm(prompt)
         parsed = self._parse_nuextract_output(response)
 
         propositions = []
