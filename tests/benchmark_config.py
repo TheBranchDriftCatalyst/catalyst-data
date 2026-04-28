@@ -4,7 +4,8 @@ Defines which models/endpoints to test against. Edit this file to add or
 remove models from the benchmark suite.
 
 Target: ≤12B params for local inference on Apple Silicon.
-Focus: structured entity extraction (NER) and proposition extraction (SPO).
+Selection based on LLMStructBench (arxiv:2602.14743) composite scores,
+GLiNER NER benchmarks, and our own empirical results.
 
 Usage:
     # Run all configured models:
@@ -40,7 +41,8 @@ class ModelConfig:
 
 OLLAMA_BASE = "http://localhost:11434/v1"
 
-# ── Extraction specialists (purpose-built for NER) ────────────────────────
+# ── Extraction specialists ────────────────────────────────────────────────
+# Purpose-built for NER, not general LLMs
 
 EXTRACTION_MODELS = [
     ModelConfig(
@@ -55,108 +57,97 @@ EXTRACTION_MODELS = [
         base_url=OLLAMA_BASE,
         tags=["ollama", "extraction-specialist", "3.8b"],
     ),
-    # NuExtract 2.0-8B — import via:
-    #   curl -L -o /tmp/NuExtract-2.0-8B.Q4_K_M.gguf \
-    #     "https://huggingface.co/mradermacher/NuExtract-2.0-8B-GGUF/resolve/main/NuExtract-2.0-8B.Q4_K_M.gguf"
-    #   ollama create nuextract2 -f Modelfile.nuextract2
-    # ModelConfig(
-    #     name="nuextract-2.0-8b",
-    #     model="nuextract2:latest",
-    #     base_url=OLLAMA_BASE,
-    #     tags=["ollama", "extraction-specialist", "8b"],
-    # ),
+    # NuExtract 2.0-8B — needs GGUF import (see CD-9zg)
+    # GLiNER 300M — needs pip adapter, not Ollama (see CD-rrj)
 ]
 
-# ── General-purpose LLMs (~4B) ────────────────────────────────────────────
+# ── Tier 1: Best composite scores on LLMStructBench ──────────────────────
+# These scored highest on structured extraction benchmarks.
+# Source: arxiv:2602.14743 Table V
 
-SMALL_MODELS = [
-    ModelConfig(
-        name="llama3.2-3b",
-        model="llama3.2:latest",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "3b"],
-    ),
-    ModelConfig(
-        name="qwen3-4b",
-        model="qwen3:4b",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "4b"],
-    ),
-    ModelConfig(
-        name="gemma3-4b",
-        model="gemma3:4b",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "4b"],
-    ),
-    ModelConfig(
-        name="phi4-mini",
-        model="phi4-mini:latest",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "3.8b"],
-    ),
-]
-
-# ── General-purpose LLMs (~7-8B) ──────────────────────────────────────────
-
-MEDIUM_MODELS = [
-    ModelConfig(
-        name="mistral-7b",
-        model="mistral:latest",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "7b"],
-    ),
-    ModelConfig(
-        name="qwen2.5-7b",
-        model="qwen2.5:7b-instruct",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "7b"],
-    ),
-    ModelConfig(
-        name="llama3.1-8b",
-        model="llama3.1:8b",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "8b"],
-    ),
-    ModelConfig(
-        name="qwen3-8b",
-        model="qwen3:8b",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "8b"],
-    ),
-    ModelConfig(
-        name="hermes3-8b",
-        model="hermes3:8b",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "8b"],
-    ),
-    ModelConfig(
-        name="dolphin3-8b",
-        model="dolphin3:8b",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "8b"],
-    ),
-    ModelConfig(
-        name="granite3.1-8b",
-        model="granite3.1-dense:8b",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "8b"],
-    ),
-]
-
-# ── General-purpose LLMs (~12B) ───────────────────────────────────────────
-
-LARGE_MODELS = [
-    ModelConfig(
-        name="mistral-nemo-12b",
-        model="mistral-nemo:latest",
-        base_url=OLLAMA_BASE,
-        tags=["ollama", "12b"],
-    ),
+TIER1_MODELS = [
+    # LLMStructBench 0.72 — beats 70B models, best ≤12B
     ModelConfig(
         name="gemma3-12b",
         model="gemma3:12b",
         base_url=OLLAMA_BASE,
-        tags=["ollama", "12b"],
+        tags=["ollama", "12b", "tier1"],
+    ),
+    # LLMStructBench 0.67 — top scorer at 7B
+    ModelConfig(
+        name="deepseek-r1-7b",
+        model="deepseek-r1:7b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "7b", "tier1"],
+    ),
+    # LLMStructBench 0.66 — best 3.8B model, punches above weight
+    ModelConfig(
+        name="phi4-mini",
+        model="phi4-mini:latest",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "3.8b", "tier1"],
+    ),
+    # LLMStructBench 0.65 — same score at 4B as 8B (remarkable efficiency)
+    ModelConfig(
+        name="qwen3-4b",
+        model="qwen3:4b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "4b", "tier1"],
+    ),
+    # LLMStructBench 0.65
+    ModelConfig(
+        name="qwen3-8b",
+        model="qwen3:8b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "8b", "tier1"],
+    ),
+]
+
+# ── Tier 2: Strong empirical performers (our benchmark) ───────────────────
+# Not in LLMStructBench but performed well in our extraction pipeline tests.
+
+TIER2_MODELS = [
+    # Our benchmark: 23 mentions (best recall), 72s, 3 retries
+    ModelConfig(
+        name="mistral-7b",
+        model="mistral:latest",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "7b", "tier2"],
+    ),
+    # Our benchmark: 22 mentions, 12 assertions (best balanced), 95s
+    ModelConfig(
+        name="qwen2.5-7b",
+        model="qwen2.5:7b-instruct",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "7b", "tier2"],
+    ),
+    # Our benchmark: 17 mentions, 29 assertions (best SPO), 88s
+    ModelConfig(
+        name="llama3.1-8b",
+        model="llama3.1:8b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "8b", "tier2"],
+    ),
+    # Our benchmark: fastest (38s, 116 tok/s), decent quality at 3B
+    ModelConfig(
+        name="llama3.2-3b",
+        model="llama3.2:latest",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "3b", "tier2"],
+    ),
+    # LLMStructBench 0.67 at only 1.7B — smallest high scorer
+    # (not yet tested in our pipeline)
+    # ModelConfig(
+    #     name="qwen3-1.7b",
+    #     model="qwen3:1.7b",
+    #     base_url=OLLAMA_BASE,
+    #     tags=["ollama", "1.7b", "tier2"],
+    # ),
+    ModelConfig(
+        name="gemma3-4b",
+        model="gemma3:4b",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "4b", "tier2"],
     ),
 ]
 
@@ -164,30 +155,28 @@ LARGE_MODELS = [
 # Non-LLM extraction models (need custom adapters, not Ollama)
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# These are encoder-based models that run via Python libraries, not serving APIs.
-# They need custom adapter integration (like the NuExtract adapter).
-#
-# GLiNER (~300M) — pip install gliner
-#   Zero-shot NER via bidirectional transformer. Competitive with ChatGPT.
+# GLiNER (~300M) — pip install gliner                          [CD-rrj]
+#   87% F1 zero-shot NER, 140x smaller than UniNER, 0.08s inference.
+#   Bidirectional encoder, NOT an LLM. Runs on CPU.
 #   https://github.com/urchade/GLiNER
 #
-# NuNER (125M) — HuggingFace encoder
-#   56x smaller than UniversalNER, similar fine-tuning performance.
-#   https://arxiv.org/html/2402.15343v1
+# NuExtract 2.0-8B — GGUF import to Ollama                    [CD-9zg]
+#   Qwen2.5-VL fine-tune, multimodal extraction.
+#   mradermacher/NuExtract-2.0-8B-GGUF Q4_K_M (4.5GB)
 #
-# UniversalNER (7B GGUF available)
-#   GPT-3.5 distilled, 43 NER datasets. yuuko-eth/UniNER-7B-all-GGUF
-#   Could be imported to Ollama like NuExtract 1.5.
+# UniversalNER 7B — GGUF import to Ollama                     [CD-3jl]
+#   GPT-3.5 distilled, 43 NER datasets across 9 domains.
+#   yuuko-eth/UniNER-7B-all-GGUF
 
 # ═══════════════════════════════════════════════════════════════════════════
 # All models — used by the multi-model benchmark runner
 # ═══════════════════════════════════════════════════════════════════════════
 
-ALL_MODELS = EXTRACTION_MODELS + SMALL_MODELS + MEDIUM_MODELS + LARGE_MODELS
+ALL_MODELS = EXTRACTION_MODELS + TIER1_MODELS + TIER2_MODELS
 
 
 def get_available_models(tags: list[str] | None = None) -> list[ModelConfig]:
-    """Return models filtered by tags (e.g. ["ollama", "8b"])."""
+    """Return models filtered by tags (e.g. ["tier1"], ["8b"])."""
     if not tags:
         return ALL_MODELS
     return [m for m in ALL_MODELS if any(t in m.tags for t in tags)]
