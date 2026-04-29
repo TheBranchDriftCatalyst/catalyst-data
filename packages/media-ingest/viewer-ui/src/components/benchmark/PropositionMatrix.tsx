@@ -166,51 +166,54 @@ export function PropositionMatrix({
           ))}
         </thead>
         <tbody>
-          {table.getRowModel().rows.map((row) => {
-            if (row.getIsGrouped()) {
+          {table
+            .getRowModel()
+            .rows.slice(0, 50)
+            .map((row) => {
+              if (row.getIsGrouped()) {
+                return (
+                  <tr
+                    key={row.id}
+                    className="bg-white/[0.03] border-b border-white/5 cursor-pointer"
+                    onClick={row.getToggleExpandedHandler()}
+                  >
+                    <td colSpan={columns.length} className="py-2 px-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 text-[10px]">
+                          {row.getIsExpanded() ? "▼" : "▶"}
+                        </span>
+                        <DomainBadge domain={(row.groupingValue as string) || "unknown"} />
+                        <span className="text-zinc-500 text-[10px]">
+                          ({row.subRows.length} proposition{row.subRows.length !== 1 ? "s" : ""})
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              }
+
               return (
-                <tr
-                  key={row.id}
-                  className="bg-white/[0.03] border-b border-white/5 cursor-pointer"
-                  onClick={row.getToggleExpandedHandler()}
-                >
-                  <td colSpan={columns.length} className="py-2 px-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-zinc-500 text-[10px]">
-                        {row.getIsExpanded() ? "▼" : "▶"}
-                      </span>
-                      <DomainBadge domain={(row.groupingValue as string) || "unknown"} />
-                      <span className="text-zinc-500 text-[10px]">
-                        ({row.subRows.length} proposition{row.subRows.length !== 1 ? "s" : ""})
-                      </span>
-                    </div>
-                  </td>
+                <tr key={row.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  {row.getVisibleCells().map((cell) => {
+                    if (cell.getIsGrouped() || cell.getIsPlaceholder()) return null;
+                    return (
+                      <td
+                        key={cell.id}
+                        className={`py-1.5 px-1 ${
+                          ["subject", "predicate", "object"].includes(cell.column.id)
+                            ? "text-left px-2"
+                            : "text-center"
+                        }`}
+                      >
+                        {cell.getIsAggregated()
+                          ? null
+                          : flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    );
+                  })}
                 </tr>
               );
-            }
-
-            return (
-              <tr key={row.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                {row.getVisibleCells().map((cell) => {
-                  if (cell.getIsGrouped() || cell.getIsPlaceholder()) return null;
-                  return (
-                    <td
-                      key={cell.id}
-                      className={`py-1.5 px-1 ${
-                        ["subject", "predicate", "object"].includes(cell.column.id)
-                          ? "text-left px-2"
-                          : "text-center"
-                      }`}
-                    >
-                      {cell.getIsAggregated()
-                        ? null
-                        : flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
+            })}
         </tbody>
       </table>
     </div>

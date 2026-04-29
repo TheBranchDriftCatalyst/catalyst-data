@@ -115,6 +115,10 @@ export function EntityMatrix({
     getSortedRowModel: getSortedRowModel(),
   });
 
+  const [showAll, setShowAll] = useState(false);
+  const allRows = table.getRowModel().rows;
+  const visibleRows = showAll ? allRows : allRows.slice(0, 50);
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs font-mono">
@@ -162,7 +166,7 @@ export function EntityMatrix({
           ))}
         </thead>
         <tbody>
-          {table.getRowModel().rows.map((row) => {
+          {visibleRows.map((row) => {
             if (row.getIsGrouped()) {
               return (
                 <tr
@@ -209,6 +213,14 @@ export function EntityMatrix({
           })}
         </tbody>
       </table>
+      {!showAll && allRows.length > 50 && (
+        <button
+          onClick={() => setShowAll(true)}
+          className="mt-2 text-xs text-cyan-400 hover:text-cyan-300 font-mono"
+        >
+          Show all {allRows.length} rows ({allRows.length - 50} hidden)
+        </button>
+      )}
     </div>
   );
 }
