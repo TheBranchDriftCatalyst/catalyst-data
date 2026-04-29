@@ -156,6 +156,53 @@ def _build_report_json(results: list[dict]) -> dict:
         d = c.get("metadata", {}).get("domain", "unknown")
         domain_counts[d] = domain_counts.get(d, 0) + 1
 
+    # ── Ground truth scoring ────────────────────────────────────────
+    gt_path = FIXTURES / "ground_truth_media_ingest.json"
+    ground_truth_meta: dict = {"available": False}
+    if gt_path.exists():
+        gt = json.loads(gt_path.read_text())
+        gt_mentions: list[dict] = []
+        gt_propositions: list[dict] = []
+        for chunk in gt.get("chunks", []):
+            gt_mentions.extend(chunk.get("mentions", []))
+            gt_propositions.extend(chunk.get("propositions", []))
+
+        ground_truth_meta = {
+            "available": True,
+            "reference_model": gt.get("reference_model", "unknown"),
+            "manually_reviewed": gt.get("manually_reviewed", False),
+            "mention_count": len(gt_mentions),
+            "proposition_count": len(gt_propositions),
+        }
+
+        # Score each model against ground truth
+        for model_entry, r in zip(models, results, strict=False):
+            ext = r["fixture"]
+            m_scores = score_mentions(ext.get("mentions", []), gt_mentions)
+            p_scores = score_propositions(ext.get("assertions", []), gt_propositions)
+            model_entry["scores"] = {
+                "mention_strict_precision": round(m_scores["strict_precision"], 4),
+                "mention_strict_recall": round(m_scores["strict_recall"], 4),
+                "mention_strict_f1": round(m_scores["strict_f1"], 4),
+                "mention_relaxed_precision": round(m_scores["relaxed_precision"], 4),
+                "mention_relaxed_recall": round(m_scores["relaxed_recall"], 4),
+                "mention_relaxed_f1": round(m_scores["relaxed_f1"], 4),
+                "mention_type_accuracy": round(m_scores["type_accuracy"], 4),
+                "mention_span_accuracy": round(m_scores["span_accuracy"], 4),
+                "proposition_strict_precision": round(p_scores["strict_precision"], 4),
+                "proposition_strict_recall": round(p_scores["strict_recall"], 4),
+                "proposition_strict_f1": round(p_scores["strict_f1"], 4),
+                "proposition_relaxed_precision": round(p_scores["relaxed_precision"], 4),
+                "proposition_relaxed_recall": round(p_scores["relaxed_recall"], 4),
+                "proposition_relaxed_f1": round(p_scores["relaxed_f1"], 4),
+                # Derived efficiency metrics
+                "hallucination_rate": round(1.0 - m_scores["span_accuracy"], 4),
+                "quality_speed_ratio": round(m_scores["strict_f1"] / max(model_entry["stats"]["duration_s"], 0.1), 4),
+                "per_chunk_latency": round(
+                    model_entry["stats"]["duration_s"] / max(model_entry["stats"]["chunk_count"], 1), 4
+                ),
+            }
+
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "model_count": len(models),
@@ -163,6 +210,7 @@ def _build_report_json(results: list[dict]) -> dict:
         "proposition_count": len(propositions),
         "model_names": [r["model"] for r in results],
         "domains": domain_counts,
+        "ground_truth": ground_truth_meta,
         "models": models,
         "entities": entities,
         "propositions": propositions,

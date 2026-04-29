@@ -46,6 +46,10 @@ regexes = [
   # by "API" in asset description strings (congress-data head assets).
   '''extract''',
 
+  # Benchmark metric field names ending in _f1 falsely matched as API keys
+  # (mention_relaxed_f1, proposition_relaxed_f1, etc.)
+  '''_f1''',
+
   # k8s/platform/dagster-instance.yaml, k8s/platform/postgres.yaml,
   # k8s/platform/deployment.yaml, k8s/media-ingest/deployment.yaml
   '''dagster-homelab''',

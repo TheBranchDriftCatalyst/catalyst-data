@@ -1,5 +1,33 @@
 /** Types for the extraction benchmark report */
 
+export interface GroundTruthMeta {
+  available: boolean;
+  reference_model: string;
+  manually_reviewed: boolean;
+  mention_count: number;
+  proposition_count: number;
+}
+
+export interface ModelScores {
+  mention_strict_precision: number;
+  mention_strict_recall: number;
+  mention_strict_f1: number;
+  mention_relaxed_precision: number;
+  mention_relaxed_recall: number;
+  mention_relaxed_f1: number;
+  mention_type_accuracy: number;
+  mention_span_accuracy: number;
+  proposition_strict_precision: number;
+  proposition_strict_recall: number;
+  proposition_strict_f1: number;
+  proposition_relaxed_precision: number;
+  proposition_relaxed_recall: number;
+  proposition_relaxed_f1: number;
+  hallucination_rate: number;
+  quality_speed_ratio: number;
+  per_chunk_latency: number;
+}
+
 export interface BenchmarkReport {
   generated_at: string;
   model_count: number;
@@ -7,6 +35,7 @@ export interface BenchmarkReport {
   proposition_count: number;
   model_names: string[];
   domains: Record<string, number>;
+  ground_truth?: GroundTruthMeta;
   models: ModelResult[];
   entities: EntityRow[];
   propositions: PropositionRow[];
@@ -17,6 +46,7 @@ export interface ModelResult {
   type: "encoder" | "specialist" | "llm";
   tags: string[];
   stats: ModelStats;
+  scores?: ModelScores;
   pipeline: Record<string, PipelineStage>;
 }
 
