@@ -1,7 +1,7 @@
 """Integration tests against a real demo video.
 
 Each test runs ACTUAL pipeline code against tests/demo_video.mp4 and saves
-the output to tests/fixtures/ for downstream tests to consume. Tests are
+cached artifacts via BenchmarkStore for downstream tests to consume. Tests are
 ordered — transcription first, then diarization, then merge, etc.
 
 Run with: pytest tests/test_pipeline_integration.py -v -s
@@ -10,17 +10,15 @@ Run with: pytest tests/test_pipeline_integration.py -v -s
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from pathlib import Path
 
 import pytest
 
+from tests.shared.store import BenchmarkStore
+
 DEMO_VIDEO = Path(__file__).parent / "demo_video.mp4"
-REPO_ROOT = Path(__file__).resolve().parents[0] / ".."
-TEST_OUTPUT = Path(os.environ.get("TEST_OUTPUT_ROOT", str(REPO_ROOT / ".test-output"))) / "media-ingest"
-FIXTURES = TEST_OUTPUT / "fixtures"
 LOCAL_MODEL_CACHE = str(Path(__file__).parent / "fixtures" / "model_cache")
 
 pytestmark = pytest.mark.skipif(not DEMO_VIDEO.exists(), reason="demo_video.mp4 not found")
@@ -28,15 +26,7 @@ pytestmark = pytest.mark.skipif(not DEMO_VIDEO.exists(), reason="demo_video.mp4 
 # Override model cache to local dir (not /data/whisper-models which is NFS in k8s)
 os.environ.setdefault("MODEL_CACHE_DIR", LOCAL_MODEL_CACHE)
 
-
-def _load_fixture(name: str) -> dict | list | None:
-    f = FIXTURES / f"{name}.json"
-    return json.loads(f.read_text()) if f.exists() else None
-
-
-def _save_fixture(name: str, data):
-    FIXTURES.mkdir(exist_ok=True)
-    (FIXTURES / f"{name}.json").write_text(json.dumps(data, indent=2, default=str))
+_store = BenchmarkStore()
 
 
 # ── Step 1: Transcription ────────────────────────────────────────────────
@@ -45,7 +35,7 @@ def _save_fixture(name: str, data):
 @pytest.fixture(scope="session")
 def transcription_result():
     """Transcribe using our actual _transcribe_faster_whisper pipeline code."""
-    cached = _load_fixture("transcription")
+    cached = _store.load_fixture("transcription")
     if cached:
         return cached
 
@@ -78,7 +68,7 @@ def transcription_result():
     }
 
     print(f"  Transcription complete: {len(result['segments'])} segments in {duration:.1f}s")
-    _save_fixture("transcription", output)
+    _store.save_fixture("transcription", output)
     return output
 
 
@@ -110,7 +100,7 @@ def test_transcription_words_have_timestamps(transcription_result):
 @pytest.fixture(scope="session")
 def diarization_result(transcription_result):
     """Run our actual _run_diarization + _assign_speakers pipeline code."""
-    cached = _load_fixture("diarization")
+    cached = _store.load_fixture("diarization")
     if cached:
         return cached
 
@@ -121,7 +111,7 @@ def diarization_result(transcription_result):
     from media_ingest.assets.diarization import _assign_speakers, _run_diarization
 
     # Use local cache dir instead of /data/whisper-models (NFS in k8s)
-    local_cache = str(FIXTURES / "model_cache")
+    local_cache = str(_store.pipeline_cache_dir / "model_cache")
     os.makedirs(local_cache, exist_ok=True)
 
     print("\n  Running pyannote diarization (actual pipeline code)...")
@@ -142,7 +132,7 @@ def diarization_result(transcription_result):
     }
 
     print(f"  Diarization complete: {len(unique_speakers)} speakers on {device} in {output['diarization_time_s']}s")
-    _save_fixture("diarization", output)
+    _store.save_fixture("diarization", output)
     return output
 
 
@@ -167,7 +157,7 @@ def test_diarization_preserves_words(diarization_result):
 @pytest.fixture(scope="session")
 def segment_merge_result(diarization_result):
     """Run our actual _merge_same_speaker_segments + _build_speaker_text."""
-    cached = _load_fixture("segment_merge")
+    cached = _store.load_fixture("segment_merge")
     if cached:
         return cached
 
@@ -186,7 +176,7 @@ def segment_merge_result(diarization_result):
     }
 
     print(f"\n  Segment merge: {pre_merge} → {len(merged)} segments")
-    _save_fixture("segment_merge", output)
+    _store.save_fixture("segment_merge", output)
     return output
 
 
@@ -209,7 +199,7 @@ def test_merge_preserves_words(segment_merge_result):
 @pytest.fixture(scope="session")
 def chunks_result(segment_merge_result):
     """Run our actual _speaker_turn_chunks."""
-    cached = _load_fixture("chunks")
+    cached = _store.load_fixture("chunks")
     if cached:
         from dagster_io import TextChunk
 
@@ -228,7 +218,7 @@ def chunks_result(segment_merge_result):
     )
 
     print(f"\n  Chunking: {len(segment_merge_result['segments'])} turns → {len(chunks)} chunks")
-    _save_fixture("chunks", [c.model_dump() for c in chunks])
+    _store.save_fixture("chunks", [c.model_dump() for c in chunks])
     return chunks
 
 
@@ -283,7 +273,7 @@ def extraction_result(chunks_result):
         LLM_MODEL=gpt-4o      pytest ... -k extraction
     """
     model = _llm_model()
-    cached = _load_fixture(f"extraction_{model}")
+    cached = _store.load_fixture(f"extraction_{model}")
     if cached:
         return cached
 
@@ -296,14 +286,10 @@ def extraction_result(chunks_result):
 
     # Use benchmark subset (4 representative chunks) instead of all 15.
     # Full set takes too long with local models (~30-60s per chunk).
-    # Curated benchmark subset — check .test-output first, fallback to tests/fixtures
-    benchmark_chunks_path = FIXTURES / "benchmark_chunks.json"
-    if not benchmark_chunks_path.exists():
-        benchmark_chunks_path = Path(__file__).parent / "fixtures" / "benchmark_chunks.json"
-    if benchmark_chunks_path.exists():
+    benchmark_data = _store.load_benchmark_chunks()
+    if benchmark_data:
         from dagster_io import TextChunk
 
-        benchmark_data = json.loads(benchmark_chunks_path.read_text())
         eval_chunks = [TextChunk(**c) for c in benchmark_data]
         print(f"\n  Using benchmark subset: {len(eval_chunks)} chunks (from benchmark_chunks.json)")
     else:
@@ -360,7 +346,7 @@ def extraction_result(chunks_result):
         f"{pipeline_stats.get('proposition_retries', 0)} proposition, "
         f"{pipeline_stats.get('errors', 0)} errors"
     )
-    _save_fixture(f"extraction_{model}", output)
+    _store.save_fixture(f"extraction_{model}", output)
     return output
 
 

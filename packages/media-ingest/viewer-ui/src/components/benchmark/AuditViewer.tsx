@@ -30,13 +30,21 @@ function sanitizeName(name: string): string {
 }
 
 async function fetchAuditLog(name: string): Promise<AuditLog | null> {
-  try {
-    const res = await fetch(`/viewer/audit-logs/${sanitizeName(name)}.json`);
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
+  const safeName = sanitizeName(name);
+  // Try runs/latest first (new layout), then top-level (backward compat)
+  const paths = [
+    `/viewer/runs/latest/audit-logs/${safeName}.json`,
+    `/viewer/audit-logs/${safeName}.json`,
+  ];
+  for (const path of paths) {
+    try {
+      const res = await fetch(path);
+      if (res.ok) return res.json();
+    } catch {
+      // try next path
+    }
   }
+  return null;
 }
 
 interface ChunkGroup {

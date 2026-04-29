@@ -179,6 +179,7 @@ interface ReportSource {
 }
 
 const REPORT_SOURCES: ReportSource[] = [
+  { label: "Latest Run", url: "/viewer/runs/latest/benchmark-report.json" },
   { label: "Latest", url: "/viewer/benchmark-report.json" },
   { label: "v2 (exgraph)", url: "/viewer/compare-v2/media-ingest/benchmark-report.json" },
   { label: "v1 (legacy)", url: "/viewer/compare-v1/media-ingest/benchmark-report.json" },
@@ -237,7 +238,7 @@ export default function BenchmarkReport() {
           <h2 className="text-lg font-mono text-zinc-200 mb-2">No Benchmark Report</h2>
           <p className="text-sm text-zinc-500 mb-4">{error}</p>
           <pre className="text-xs text-zinc-400 bg-surface-0 rounded p-3 text-left">
-            PYTHONPATH=. pytest tests/test_extraction_benchmark.py::TestRunAll -v -s
+            PYTHONPATH=. python tests/benchmark_harness.py --full
           </pre>
         </div>
       </div>

@@ -253,3 +253,24 @@ def get_model_by_name(name: str) -> ModelConfig | None:
         if m.name == name:
             return m
     return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Ensemble Ground Truth — model panels for consensus voting
+# ═══════════════════════════════════════════════════════════════════════════
+# Default panels — models most likely to have cached fixtures.
+# The ensemble generator gracefully skips models without fixtures.
+
+NER_ENSEMBLE_MODELS = [
+    "gliner-large",  # encoder
+    "gpt-4o",  # cloud LLM
+    "claude-sonnet-4-20250514",  # cloud LLM
+    "mistral:latest",  # local LLM
+    "gemma3:12b",  # local LLM
+]
+
+SPO_ENSEMBLE_MODELS = [
+    "claude-sonnet-4-20250514",
+    "gemma3:12b",
+    "mistral:latest",
+]

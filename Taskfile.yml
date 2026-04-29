@@ -146,13 +146,7 @@ tasks:
       PYTHONPATH: "."
       EXGRAPH_ENABLED: "true"
     cmds:
-      - echo "Step 1/4 — Running all models..."
-      - pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --regen --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
-      - echo "Step 2/4 — Generating ensemble ground truth..."
-      - pytest tests/test_extraction_benchmark.py -k "generate_ground_truth" -v -s
-      - echo "Step 3/4 — Regenerating report with F1 scores..."
-      - pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
-      - echo "Step 4/4 — Done! Run 'task bench:view' to open the report."
+      - python tests/benchmark_harness.py --full --regen --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
 
   bench:run:
     desc: "Run extraction benchmarks (skip ground truth regen)"
@@ -160,14 +154,14 @@ tasks:
       PYTHONPATH: "."
       EXGRAPH_ENABLED: "true"
     cmds:
-      - pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --regen --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
+      - python tests/benchmark_harness.py --regen --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
 
   bench:ground-truth:
-    desc: "Generate ensemble consensus ground truth from existing fixtures"
+    desc: "Generate ensemble consensus ground truth from existing cached artifacts"
     env:
       PYTHONPATH: "."
     cmds:
-      - pytest tests/test_extraction_benchmark.py -k "generate_ground_truth" -v -s
+      - python tests/benchmark_harness.py --ensemble-gt
 
   bench:report:
     desc: "Regenerate benchmark report with F1 scores (needs ground truth)"
@@ -175,7 +169,7 @@ tasks:
       PYTHONPATH: "."
       EXGRAPH_ENABLED: "true"
     cmds:
-      - pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
+      - python tests/benchmark_harness.py --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
 
   bench:view:
     desc: "Start benchmark viewer SPA"
@@ -185,13 +179,15 @@ tasks:
       - npm run dev
 
   bench:clean:
-    desc: "Clean all benchmark artifacts (fixtures, ground truth, report, audit logs)"
+    desc: "Clean all cached benchmark artifacts (extractions, ground truth, report, audit logs, runs)"
     cmds:
       - rm -f .test-output/media-ingest/fixtures/extraction_*.json
       - rm -f .test-output/media-ingest/fixtures/ground_truth_*.json
       - rm -f .test-output/media-ingest/benchmark-report.json
       - rm -rf .test-output/media-ingest/audit-logs/
-      - echo "Cleaned. Kept benchmark_chunks.json and pipeline stage fixtures."
+      - rm -rf .test-output/media-ingest/ground-truth/
+      - rm -rf .test-output/media-ingest/runs/
+      - echo "Cleaned cached artifacts. Kept pipeline-cache and tests/fixtures/ (true fixtures)."
 
   # ── Dev ──────────────────────────────────────────────────────────────────
 
