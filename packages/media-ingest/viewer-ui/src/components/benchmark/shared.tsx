@@ -347,3 +347,58 @@ export const MODEL_TYPE_ORDER: Record<string, number> = {
   llm: 2,
   cloud: 3,
 };
+
+// ── Grouping dimensions ──────────────────────────────────────────────
+
+export type GroupByDimension = "type" | "tier" | "size" | "runtime" | "none";
+
+export const GROUP_BY_OPTIONS: { value: GroupByDimension; label: string }[] = [
+  { value: "type", label: "Model Type" },
+  { value: "tier", label: "Tier" },
+  { value: "size", label: "Param Size" },
+  { value: "runtime", label: "Runtime" },
+  { value: "none", label: "Flat" },
+];
+
+export const GROUP_SORT_ORDER: Record<GroupByDimension, Record<string, number>> = {
+  type: { encoder: 0, specialist: 1, llm: 2 },
+  tier: { tier1: 0, tier2: 1, baseline: 2, "extraction-specialist": 3, other: 4 },
+  size: { "small (<1B)": 0, "medium (1-8B)": 1, "large (>8B)": 2, unknown: 3 },
+  runtime: { local: 0, cloud: 1 },
+  none: { all: 0 },
+};
+
+const GROUP_BADGE_COLORS: Record<string, string> = {
+  // tier
+  tier1: "bg-emerald-500/20 text-emerald-300",
+  tier2: "bg-blue-500/20 text-blue-300",
+  baseline: "bg-violet-500/20 text-violet-300",
+  "extraction-specialist": "bg-amber-500/20 text-amber-300",
+  other: "bg-zinc-500/20 text-zinc-300",
+  // size
+  "small (<1B)": "bg-cyan-500/20 text-cyan-300",
+  "medium (1-8B)": "bg-blue-500/20 text-blue-300",
+  "large (>8B)": "bg-purple-500/20 text-purple-300",
+  unknown: "bg-zinc-500/20 text-zinc-300",
+  // runtime
+  local: "bg-emerald-500/20 text-emerald-300",
+  cloud: "bg-violet-500/20 text-violet-300",
+  // flat
+  all: "bg-zinc-500/20 text-zinc-300",
+};
+
+export function GroupBadge({
+  groupKey,
+  dimension,
+}: {
+  groupKey: string;
+  dimension: GroupByDimension;
+}) {
+  if (dimension === "type") return <ModelTypeBadge type={groupKey} />;
+  const colors = GROUP_BADGE_COLORS[groupKey] || "bg-zinc-500/20 text-zinc-300";
+  return (
+    <span className={`inline-block px-2 py-0.5 text-[11px] font-mono uppercase rounded ${colors}`}>
+      {groupKey}
+    </span>
+  );
+}

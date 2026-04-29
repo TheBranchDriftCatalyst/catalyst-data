@@ -1,12 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { ModelResult } from "@/types/benchmark";
-import {
-  MetricLabel,
-  ModelTypeBadge,
-  ScoreCell,
-  METRIC_TOOLTIPS,
-  MODEL_TYPE_ORDER,
-} from "./shared";
+import { MetricLabel, GroupBadge, ScoreCell, METRIC_TOOLTIPS } from "./shared";
+import type { GroupByDimension } from "./shared";
+import { useModelGrouping } from "./useModelGrouping";
 
 interface Row {
   name: string;
@@ -83,19 +79,21 @@ const scoreCols: { key: keyof Row; label: string; tooltip?: string; bold?: boole
   },
 ];
 
-export function ScoresTable({ models }: { models: ModelResult[] }) {
+export function ScoresTable({
+  models,
+  groupBy = "type",
+}: {
+  models: ModelResult[];
+  groupBy?: GroupByDimension;
+}) {
   const rows = useMemo(() => toRows(models), [models]);
   const [sortCol, setSortCol] = useState<keyof Row>("mention_strict_f1");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  const groups = useMemo(() => {
-    const map: Record<string, Row[]> = {};
-    for (const r of rows) (map[r.type] ??= []).push(r);
-    return Object.entries(map).sort(
-      (a, b) => (MODEL_TYPE_ORDER[a[0]] ?? 99) - (MODEL_TYPE_ORDER[b[0]] ?? 99),
-    );
-  }, [rows]);
+  useEffect(() => setCollapsed({}), [groupBy]);
+
+  const groups = useModelGrouping(models, rows, groupBy);
 
   const sortedGroup = (group: Row[]) => {
     const sorted = [...group];
@@ -176,7 +174,7 @@ export function ScoresTable({ models }: { models: ModelResult[] }) {
                   </td>
                   <td className="py-2 px-2">
                     <div className="flex items-center gap-2">
-                      <ModelTypeBadge type={type} />
+                      <GroupBadge groupKey={type} dimension={groupBy} />
                       <span className="text-zinc-400 text-[11px]">
                         ({group.length} model{group.length !== 1 ? "s" : ""})
                       </span>

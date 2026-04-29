@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { BenchmarkReport as BenchmarkReportType } from "@/types/benchmark";
 import {
   StatCard,
@@ -6,6 +6,7 @@ import {
   ScoreBarChart,
   METRIC_TOOLTIPS,
 } from "@/components/benchmark/shared";
+import type { GroupByDimension } from "@/components/benchmark/shared";
 import { ModelStatsTable } from "@/components/benchmark/ModelStatsTable";
 import { ScoresTable } from "@/components/benchmark/ScoresTable";
 import { EntityMatrix } from "@/components/benchmark/EntityMatrix";
@@ -13,9 +14,18 @@ import { PropositionMatrix } from "@/components/benchmark/PropositionMatrix";
 import { PipelineTable } from "@/components/benchmark/PipelineTable";
 import { AuditViewer } from "@/components/benchmark/AuditViewer";
 import { GroundTruthPanel } from "@/components/benchmark/GroundTruthPanel";
+import { TableControls } from "@/components/benchmark/TableControls";
 
 // ── Scores Tab Content ────────────────────────────────────────────────
-function ScoresTab({ report }: { report: BenchmarkReportType }) {
+function ScoresTab({
+  report,
+  visibleModels,
+  groupBy,
+}: {
+  report: BenchmarkReportType;
+  visibleModels: import("@/types/benchmark").ModelResult[];
+  groupBy: GroupByDimension;
+}) {
   const gt = report.ground_truth;
 
   if (!gt || !gt.available) {
@@ -32,7 +42,7 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
     );
   }
 
-  const scored = report.models.filter((m) => m.scores != null);
+  const scored = visibleModels.filter((m) => m.scores != null);
   if (scored.length === 0) {
     return (
       <div className="text-zinc-500 text-sm py-4">
@@ -100,25 +110,25 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
       {/* F1 comparison bar charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <ScoreBarChart
-          models={report.models}
+          models={visibleModels}
           metricKey="mention_strict_f1"
           label="Mention Strict F1"
           tooltip={METRIC_TOOLTIPS.strict_f1}
         />
         <ScoreBarChart
-          models={report.models}
+          models={visibleModels}
           metricKey="mention_relaxed_f1"
           label="Mention Relaxed F1"
           tooltip={METRIC_TOOLTIPS.relaxed_f1}
         />
         <ScoreBarChart
-          models={report.models}
+          models={visibleModels}
           metricKey="proposition_strict_f1"
           label="Proposition Strict F1"
           tooltip={METRIC_TOOLTIPS.proposition_strict_f1}
         />
         <ScoreBarChart
-          models={report.models}
+          models={visibleModels}
           metricKey="proposition_relaxed_f1"
           label="Proposition Relaxed F1"
           tooltip={METRIC_TOOLTIPS.proposition_relaxed_f1}
@@ -128,7 +138,7 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
       {/* Efficiency metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <ScoreBarChart
-          models={report.models}
+          models={visibleModels}
           metricKey="quality_speed_ratio"
           label="Quality/Speed (F1 per second)"
           isPercentage={false}
@@ -136,7 +146,7 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
           tooltip={METRIC_TOOLTIPS.quality_speed_ratio}
         />
         <ScoreBarChart
-          models={report.models}
+          models={visibleModels}
           metricKey="per_chunk_latency"
           label="Per-Chunk Latency (lower is better)"
           isPercentage={false}
@@ -147,7 +157,7 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
       </div>
       {scored.some((m) => m.scores!.hallucination_rate < 1.0) && (
         <ScoreBarChart
-          models={report.models}
+          models={visibleModels}
           metricKey="hallucination_rate"
           label="Hallucination Rate (lower is better)"
           invertSort={true}
@@ -166,7 +176,7 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
         <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">
           Precision / Recall / F1 Breakdown
         </h3>
-        <ScoresTable models={report.models} />
+        <ScoresTable models={visibleModels} groupBy={groupBy} />
       </div>
     </div>
   );
@@ -195,6 +205,8 @@ export default function BenchmarkReport() {
   const [activeTab, setActiveTab] = useState<
     "overview" | "scores" | "entities" | "propositions" | "pipeline" | "audit" | "ground-truth"
   >("overview");
+  const [groupBy, setGroupBy] = useState<GroupByDimension>("type");
+  const [hiddenModels, setHiddenModels] = useState<Set<string>>(new Set());
 
   // Probe which report sources exist
   useEffect(() => {
@@ -231,6 +243,11 @@ export default function BenchmarkReport() {
         setError(`Could not load benchmark report: ${e.message}. Run the benchmark first.`),
       );
   }, [reportSource]);
+
+  const visibleModels = useMemo(
+    () => (report?.models ?? []).filter((m) => !hiddenModels.has(m.name)),
+    [report?.models, hiddenModels],
+  );
 
   if (error) {
     return (
@@ -362,31 +379,42 @@ export default function BenchmarkReport() {
           id={`tabpanel-${activeTab}`}
           aria-labelledby={activeTab}
         >
+          {/* Shared controls for model tables */}
+          {(activeTab === "overview" || activeTab === "scores" || activeTab === "pipeline") && (
+            <TableControls
+              models={report.models}
+              groupBy={groupBy}
+              onGroupByChange={setGroupBy}
+              hiddenModels={hiddenModels}
+              onHiddenModelsChange={setHiddenModels}
+            />
+          )}
+
           {activeTab === "overview" && (
             <div className="space-y-6">
               {/* Performance charts */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <PerformanceChart
-                  models={report.models}
+                  models={visibleModels}
                   metric="mention_count"
                   label="Mentions Extracted"
                   tooltip={METRIC_TOOLTIPS.mentions}
                 />
                 <PerformanceChart
-                  models={report.models}
+                  models={visibleModels}
                   metric="assertion_count"
                   label="Assertions Extracted"
                   tooltip={METRIC_TOOLTIPS.assertions}
                 />
                 <PerformanceChart
-                  models={report.models}
+                  models={visibleModels}
                   metric="tokens_per_sec"
                   label="Speed (tok/s)"
                   format={(v) => `${v.toFixed(0)}`}
                   tooltip={METRIC_TOOLTIPS.tokens_per_sec}
                 />
                 <PerformanceChart
-                  models={report.models}
+                  models={visibleModels}
                   metric="duration_s"
                   label="Total Time"
                   format={(v) => `${v.toFixed(1)}s`}
@@ -395,16 +423,13 @@ export default function BenchmarkReport() {
               </div>
 
               {/* Model stats table */}
-              <div>
-                <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">
-                  Models by Type
-                </h3>
-                <ModelStatsTable models={report.models} />
-              </div>
+              <ModelStatsTable models={visibleModels} groupBy={groupBy} />
             </div>
           )}
 
-          {activeTab === "scores" && <ScoresTab report={report} />}
+          {activeTab === "scores" && (
+            <ScoresTab report={report} visibleModels={visibleModels} groupBy={groupBy} />
+          )}
 
           {activeTab === "entities" && (
             <EntityMatrix entities={report.entities} modelNames={report.model_names} />
@@ -414,14 +439,7 @@ export default function BenchmarkReport() {
             <PropositionMatrix propositions={report.propositions} modelNames={report.model_names} />
           )}
 
-          {activeTab === "pipeline" && (
-            <div className="space-y-4">
-              <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider">
-                LangGraph Pipeline — MCP Validation Gates + Repair Flows
-              </h3>
-              <PipelineTable models={report.models} />
-            </div>
-          )}
+          {activeTab === "pipeline" && <PipelineTable models={visibleModels} groupBy={groupBy} />}
 
           {activeTab === "audit" && <AuditViewer modelNames={report.model_names} />}
 

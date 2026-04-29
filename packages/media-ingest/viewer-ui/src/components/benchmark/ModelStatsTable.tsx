@@ -1,6 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { ModelResult } from "@/types/benchmark";
-import { MetricLabel, ModelTypeBadge, METRIC_TOOLTIPS, MODEL_TYPE_ORDER } from "./shared";
+import { MetricLabel, GroupBadge, METRIC_TOOLTIPS } from "./shared";
+import type { GroupByDimension } from "./shared";
+import { useModelGrouping } from "./useModelGrouping";
 
 interface Row {
   name: string;
@@ -33,19 +35,21 @@ function sum(rows: Row[], key: keyof Row): number {
   return rows.reduce((s, r) => s + (r[key] as number), 0);
 }
 
-export function ModelStatsTable({ models }: { models: ModelResult[] }) {
+export function ModelStatsTable({
+  models,
+  groupBy = "type",
+}: {
+  models: ModelResult[];
+  groupBy?: GroupByDimension;
+}) {
   const rows = useMemo(() => toRows(models), [models]);
   const [sortCol, setSortCol] = useState<keyof Row>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  const groups = useMemo(() => {
-    const map: Record<string, Row[]> = {};
-    for (const r of rows) (map[r.type] ??= []).push(r);
-    return Object.entries(map).sort(
-      (a, b) => (MODEL_TYPE_ORDER[a[0]] ?? 99) - (MODEL_TYPE_ORDER[b[0]] ?? 99),
-    );
-  }, [rows]);
+  useEffect(() => setCollapsed({}), [groupBy]);
+
+  const groups = useModelGrouping(models, rows, groupBy);
 
   const sortedGroup = (group: Row[]) => {
     const sorted = [...group];
@@ -116,7 +120,7 @@ export function ModelStatsTable({ models }: { models: ModelResult[] }) {
                   </td>
                   <td className="py-2 px-2">
                     <div className="flex items-center gap-2">
-                      <ModelTypeBadge type={type} />
+                      <GroupBadge groupKey={type} dimension={groupBy} />
                       <span className="text-zinc-500 text-[11px]">
                         ({group.length} model{group.length !== 1 ? "s" : ""})
                       </span>

@@ -1,12 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { ModelResult, PipelineStage } from "@/types/benchmark";
-import {
-  MetricLabel,
-  ModelTypeBadge,
-  METRIC_TOOLTIPS,
-  STAGE_LABELS,
-  MODEL_TYPE_ORDER,
-} from "./shared";
+import { MetricLabel, GroupBadge, METRIC_TOOLTIPS, STAGE_LABELS } from "./shared";
+import type { GroupByDimension } from "./shared";
+import { useModelGrouping } from "./useModelGrouping";
 
 interface PipelineRow {
   name: string;
@@ -31,7 +27,13 @@ function PipelineCell({ info }: { info: PipelineStage | undefined }) {
   );
 }
 
-export function PipelineTable({ models }: { models: ModelResult[] }) {
+export function PipelineTable({
+  models,
+  groupBy = "type",
+}: {
+  models: ModelResult[];
+  groupBy?: GroupByDimension;
+}) {
   const modelsWithPipeline = useMemo(
     () => models.filter((m) => Object.keys(m.pipeline).length > 0),
     [models],
@@ -50,13 +52,9 @@ export function PipelineTable({ models }: { models: ModelResult[] }) {
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  const groups = useMemo(() => {
-    const map: Record<string, PipelineRow[]> = {};
-    for (const r of data) (map[r.type] ??= []).push(r);
-    return Object.entries(map).sort(
-      (a, b) => (MODEL_TYPE_ORDER[a[0]] ?? 99) - (MODEL_TYPE_ORDER[b[0]] ?? 99),
-    );
-  }, [data]);
+  useEffect(() => setCollapsed({}), [groupBy]);
+
+  const groups = useModelGrouping(modelsWithPipeline, data, groupBy);
 
   if (modelsWithPipeline.length === 0) return null;
 
@@ -96,7 +94,7 @@ export function PipelineTable({ models }: { models: ModelResult[] }) {
                   </td>
                   <td className="py-2 px-2">
                     <div className="flex items-center gap-2">
-                      <ModelTypeBadge type={type} />
+                      <GroupBadge groupKey={type} dimension={groupBy} />
                       <span className="text-zinc-500 text-[11px]">
                         ({group.length} model{group.length !== 1 ? "s" : ""})
                       </span>
