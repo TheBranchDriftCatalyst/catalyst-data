@@ -48,7 +48,10 @@ class ExtractPropositions:
         try:
             system = load_prompt("proposition_extraction", FALLBACK_PROMPT)
 
-            prompt = f"Accepted mentions:\n{json.dumps(accepted_mentions, indent=2)}\n\nText:\n{raw_text}"
+            # Pass only entity surface forms as constraints (matching prompt examples).
+            # These constrain which entities SPO should reference, not text to extract from.
+            mention_names = [m.get("text", "") for m in accepted_mentions if m.get("text")]
+            prompt = f"Input mentions: {json.dumps(mention_names)}\n\nInput text: {raw_text}"
 
             result = await self.llm_client.structured_output(
                 PropositionExtractionResult,

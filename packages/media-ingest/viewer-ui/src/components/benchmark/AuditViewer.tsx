@@ -126,7 +126,7 @@ function GanttChart({ log, maxDuration }: { log: AuditLog; maxDuration: number }
   return (
     <div>
       {/* Summary stats */}
-      <div className="flex gap-4 mb-3 text-[10px] font-mono text-zinc-500">
+      <div className="flex gap-4 mb-3 text-[11px] font-mono text-zinc-500">
         <span>
           Duration: <span className="text-zinc-300">{log.stats.duration_s?.toFixed(1)}s</span>
         </span>
@@ -158,7 +158,7 @@ function GanttChart({ log, maxDuration }: { log: AuditLog; maxDuration: number }
         {ticks.map((t) => (
           <div
             key={t}
-            className="absolute top-0 text-[8px] text-zinc-600 font-mono"
+            className="absolute top-0 text-[11px] text-zinc-600 font-mono"
             style={{ left: `${(t / totalDuration) * 100}%`, transform: "translateX(-50%)" }}
           >
             {t}s
@@ -171,7 +171,7 @@ function GanttChart({ log, maxDuration }: { log: AuditLog; maxDuration: number }
         {chunks.map((chunk) => (
           <div key={chunk.index} className="flex items-center group">
             {/* Chunk label */}
-            <div className="w-16 flex-shrink-0 text-[9px] text-zinc-600 font-mono text-right pr-2">
+            <div className="w-16 flex-shrink-0 text-[11px] text-zinc-600 font-mono text-right pr-2">
               chunk {chunk.index + 1}
             </div>
 
@@ -192,7 +192,8 @@ function GanttChart({ log, maxDuration }: { log: AuditLog; maxDuration: number }
                       width: `${widthPct}%`,
                       minWidth: "3px",
                     }}
-                    title={`${event.node_name} (${event.status})`}
+                    aria-label={`${event.node_name} — ${event.status}, ${event.duration_s.toFixed(2)}s`}
+                    role="button"
                     onClick={() =>
                       setSelectedEvent(isSelected ? null : { ...event, chunkIndex: chunk.index })
                     }
@@ -214,7 +215,7 @@ function GanttChart({ log, maxDuration }: { log: AuditLog; maxDuration: number }
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap gap-3 mt-3 text-[9px] font-mono">
+      <div className="flex flex-wrap gap-3 mt-3 text-[11px] font-mono">
         {Object.entries(STAGE_COLORS)
           .filter(([k]) => log.audit_events.some((e) => e.node_name === k))
           .map(([name, color]) => (
@@ -245,7 +246,7 @@ function GanttChart({ log, maxDuration }: { log: AuditLog; maxDuration: number }
                 {selectedEvent.node_name.replace(/_/g, " ")}
               </span>
               <span
-                className={`px-1.5 py-0.5 rounded text-[10px] ${
+                className={`px-1.5 py-0.5 rounded text-[11px] ${
                   selectedEvent.status === "completed" || selectedEvent.status === "valid"
                     ? "bg-emerald-500/20 text-emerald-300"
                     : selectedEvent.status === "ambiguous"
@@ -266,26 +267,26 @@ function GanttChart({ log, maxDuration }: { log: AuditLog; maxDuration: number }
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             <div>
-              <div className="text-zinc-600 text-[10px] uppercase">Chunk</div>
+              <div className="text-zinc-600 text-[11px] uppercase">Chunk</div>
               <div className="text-zinc-300">{selectedEvent.chunkIndex + 1}</div>
             </div>
             <div>
-              <div className="text-zinc-600 text-[10px] uppercase">Duration</div>
+              <div className="text-zinc-600 text-[11px] uppercase">Duration</div>
               <div className="text-zinc-300">{selectedEvent.duration_s.toFixed(3)}s</div>
             </div>
             <div>
-              <div className="text-zinc-600 text-[10px] uppercase">Offset</div>
+              <div className="text-zinc-600 text-[11px] uppercase">Offset</div>
               <div className="text-zinc-300">{selectedEvent.offsetS.toFixed(1)}s from start</div>
             </div>
             {selectedEvent.details.candidate_count != null && (
               <div>
-                <div className="text-zinc-600 text-[10px] uppercase">Candidates</div>
+                <div className="text-zinc-600 text-[11px] uppercase">Candidates</div>
                 <div className="text-zinc-300">{selectedEvent.details.candidate_count}</div>
               </div>
             )}
             {selectedEvent.details.verdict && (
               <div>
-                <div className="text-zinc-600 text-[10px] uppercase">Verdict</div>
+                <div className="text-zinc-600 text-[11px] uppercase">Verdict</div>
                 <div className="text-zinc-300">{selectedEvent.details.verdict}</div>
               </div>
             )}
@@ -293,7 +294,7 @@ function GanttChart({ log, maxDuration }: { log: AuditLog; maxDuration: number }
 
           {selectedEvent.details.errors && selectedEvent.details.errors.length > 0 && (
             <div>
-              <div className="text-zinc-600 text-[10px] uppercase mb-1">
+              <div className="text-zinc-600 text-[11px] uppercase mb-1">
                 Validation Errors ({selectedEvent.details.errors.length})
               </div>
               <div className="max-h-[200px] overflow-y-auto space-y-1 bg-surface-0 rounded p-2">
@@ -310,7 +311,7 @@ function GanttChart({ log, maxDuration }: { log: AuditLog; maxDuration: number }
 
           {(!selectedEvent.details.errors || selectedEvent.details.errors.length === 0) &&
             selectedEvent.status !== "ambiguous" && (
-              <div className="text-zinc-600 text-[10px]">No validation errors.</div>
+              <div className="text-zinc-600 text-[11px]">No validation errors.</div>
             )}
         </div>
       )}
@@ -370,11 +371,15 @@ export function AuditViewer({ modelNames }: { modelNames: string[] }) {
       {/* Model selectors */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
-          <label className="text-[10px] text-zinc-500 font-mono">Model A:</label>
+          <label htmlFor="audit-model-a" className="text-[11px] text-zinc-400 font-mono">
+            Model A:
+          </label>
           <select
+            id="audit-model-a"
             value={modelA}
             onChange={(e) => setModelA(e.target.value)}
-            className="bg-surface-1 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200"
+            aria-label="Select primary model for audit log"
+            className="bg-surface-1 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             <option value="">Select model...</option>
             {modelNames.map((n) => (
@@ -386,11 +391,15 @@ export function AuditViewer({ modelNames }: { modelNames: string[] }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-[10px] text-zinc-500 font-mono">Model B (compare):</label>
+          <label htmlFor="audit-model-b" className="text-[11px] text-zinc-400 font-mono">
+            Model B (compare):
+          </label>
           <select
+            id="audit-model-b"
             value={modelB}
             onChange={(e) => setModelB(e.target.value)}
-            className="bg-surface-1 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200"
+            aria-label="Select comparison model for audit log"
+            className="bg-surface-1 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             <option value="">None</option>
             {modelNames
@@ -427,7 +436,7 @@ export function AuditViewer({ modelNames }: { modelNames: string[] }) {
       {logB && logA && (
         <div className="border-t border-white/5 pt-4">
           {/* Comparison delta */}
-          <div className="flex gap-4 mb-2 text-[10px] font-mono">
+          <div className="flex gap-4 mb-2 text-[11px] font-mono">
             <span className="text-zinc-500">
               Δ Duration:
               <span

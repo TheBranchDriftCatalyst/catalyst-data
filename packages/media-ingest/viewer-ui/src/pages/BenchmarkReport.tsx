@@ -154,7 +154,7 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
         />
       )}
       {scored.every((m) => m.scores!.hallucination_rate >= 1.0) && (
-        <p className="text-[10px] text-zinc-600">
+        <p className="text-[11px] text-zinc-500">
           Hallucination rate hidden — source_text not provided to scoring (span_accuracy = 0 for all
           models).
         </p>
@@ -285,7 +285,8 @@ export default function BenchmarkReport() {
             <select
               value={reportSource}
               onChange={(e) => setReportSource(e.target.value)}
-              className="bg-surface-1 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200"
+              aria-label="Select report version to view"
+              className="bg-surface-1 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
               {availableSources.map((src) => (
                 <option key={src.url} value={src.url}>
@@ -329,15 +330,22 @@ export default function BenchmarkReport() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b border-white/5 pb-0">
+        <div
+          className="flex gap-1 border-b border-white/5 pb-0"
+          role="tablist"
+          aria-label="Benchmark report sections"
+        >
           {tabs.map((t) => (
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className={`px-4 py-2 text-xs font-mono rounded-t transition-colors ${
+              role="tab"
+              aria-selected={activeTab === t.key}
+              aria-controls={`tabpanel-${t.key}`}
+              className={`px-4 py-2 text-xs font-mono rounded-t transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                 activeTab === t.key
                   ? "bg-surface-1 text-zinc-100 border border-white/5 border-b-0"
-                  : "text-zinc-500 hover:text-zinc-300"
+                  : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
               {t.label}
@@ -346,7 +354,12 @@ export default function BenchmarkReport() {
         </div>
 
         {/* Tab Content */}
-        <div className="bg-surface-0 border border-white/5 rounded-lg p-4">
+        <div
+          className="bg-surface-0 border border-white/5 rounded-lg p-4"
+          role="tabpanel"
+          id={`tabpanel-${activeTab}`}
+          aria-labelledby={activeTab}
+        >
           {activeTab === "overview" && (
             <div className="space-y-6">
               {/* Performance charts */}

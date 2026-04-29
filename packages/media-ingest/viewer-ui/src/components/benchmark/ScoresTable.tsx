@@ -126,11 +126,15 @@ export function ScoresTable({ models }: { models: ModelResult[] }) {
     <div className="overflow-x-auto">
       <table className="w-full text-xs font-mono">
         <thead>
-          <tr className="text-zinc-500 border-b border-white/5">
+          <tr className="text-zinc-400 border-b border-white/5">
             <th className="w-8" />
             <th
-              className="text-left py-2 px-2 cursor-pointer select-none"
+              className="text-left py-2 px-2 cursor-pointer select-none hover:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
               onClick={() => toggleSort("name")}
+              role="columnheader"
+              aria-sort={
+                sortCol === "name" ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+              }
             >
               Model{icon("name")}
             </th>
@@ -152,16 +156,28 @@ export function ScoresTable({ models }: { models: ModelResult[] }) {
             return (
               <GroupBlock key={type}>
                 <tr
-                  className="bg-white/[0.03] border-b border-white/5 cursor-pointer"
+                  className="bg-white/[0.03] border-b border-white/5 cursor-pointer focus-within:ring-1 focus-within:ring-cyan-400/50"
                   onClick={() => setCollapsed((p) => ({ ...p, [type]: !isCollapsed }))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setCollapsed((p) => ({ ...p, [type]: !isCollapsed }));
+                    }
+                  }}
+                  tabIndex={0}
+                  role="button"
+                  aria-expanded={!isCollapsed}
+                  aria-label={`${type} models group (${group.length} models)`}
                 >
                   <td className="py-2 px-2">
-                    <span className="text-zinc-500 text-[10px]">{isCollapsed ? "▶" : "▼"}</span>
+                    <span className="text-zinc-400 text-[11px]" aria-hidden="true">
+                      {isCollapsed ? "▶" : "▼"}
+                    </span>
                   </td>
                   <td className="py-2 px-2">
                     <div className="flex items-center gap-2">
                       <ModelTypeBadge type={type} />
-                      <span className="text-zinc-500 text-[10px]">
+                      <span className="text-zinc-400 text-[11px]">
                         ({group.length} model{group.length !== 1 ? "s" : ""})
                       </span>
                     </div>
@@ -169,7 +185,7 @@ export function ScoresTable({ models }: { models: ModelResult[] }) {
                   {scoreCols.map((c) => (
                     <td
                       key={c.key}
-                      className={`py-1.5 px-2 text-center text-[9px] ${c.bold ? "font-bold" : ""}`}
+                      className={`py-1.5 px-2 text-center text-[11px] ${c.bold ? "font-bold" : ""}`}
                     >
                       <ScoreCell value={groupAvg(group, c.key)} />
                     </td>

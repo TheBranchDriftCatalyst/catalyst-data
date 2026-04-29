@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import type { EntityRow } from "@/types/benchmark";
 import { DomainBadge, TypeBadge, METRIC_TOOLTIPS, MetricLabel } from "./shared";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@thebranchdriftcatalyst/catalyst-ui";
 
 const DOMAIN_ORDER: Record<string, number> = {
   media: 0,
@@ -116,16 +117,16 @@ export function EntityMatrix({
       <div className="flex items-center gap-2">
         <button
           onClick={toggleAll}
-          className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono"
+          className="text-[11px] text-cyan-400 hover:text-cyan-300 font-mono"
         >
           {allExpanded ? "Collapse All" : "Expand All"}
         </button>
-        <span className="text-[10px] text-zinc-600">{entities.length} entities total</span>
+        <span className="text-[11px] text-zinc-500">{entities.length} entities total</span>
       </div>
       <div className="overflow-auto max-h-[600px]">
         <table className="w-full text-xs font-mono border-collapse">
           <thead className="sticky top-0 bg-surface-0 z-10">
-            <tr className="text-zinc-500 border-b border-white/5">
+            <tr className="text-zinc-400 border-b border-white/5">
               <th className="text-left py-2 px-1 w-8" />
               <th
                 className="text-left py-2 px-2 cursor-pointer select-none"
@@ -150,7 +151,7 @@ export function EntityMatrix({
               </th>
               {activeModels.map((name) => (
                 <th key={name} className="text-center py-2 px-1 min-w-[50px]">
-                  <span className="writing-mode-vertical text-[10px]">
+                  <span className="writing-mode-vertical text-[11px]">
                     {name.replace(/-/g, "\u200b-")}
                   </span>
                 </th>
@@ -178,7 +179,7 @@ export function EntityMatrix({
         </table>
       </div>
       {hiddenModels.length > 0 && (
-        <p className="text-[10px] text-zinc-600 mt-1">
+        <p className="text-[11px] text-zinc-500 mt-1">
           Hidden (no entities extracted): {hiddenModels.join(", ")}
         </p>
       )}
@@ -209,12 +210,12 @@ function GroupRows({
       {/* Group header */}
       <tr className="bg-white/[0.03] border-b border-white/5 cursor-pointer" onClick={onToggle}>
         <td className="py-2 px-2">
-          <span className="text-zinc-500 text-[10px]">{isOpen ? "▼" : "▶"}</span>
+          <span className="text-zinc-500 text-[11px]">{isOpen ? "▼" : "▶"}</span>
         </td>
         <td className="py-2 px-2">
           <div className="flex items-center gap-2">
             <DomainBadge domain={domain} />
-            <span className="text-zinc-400 text-[10px]">
+            <span className="text-zinc-400 text-[11px]">
               {agg.count} entit{agg.count !== 1 ? "ies" : "y"}
             </span>
           </div>
@@ -222,14 +223,14 @@ function GroupRows({
         <td className="py-1.5 px-1 text-center">
           <div className="flex flex-wrap gap-0.5 justify-center">
             {agg.topTypes.map(([t, n]) => (
-              <span key={t} className="text-[9px] text-zinc-500">
+              <span key={t} className="text-[11px] text-zinc-500">
                 {t}:{n}
               </span>
             ))}
           </div>
         </td>
         <td className="py-1.5 px-1 text-center">
-          <span className="text-zinc-500 text-[9px]">avg {agg.avgModelCount.toFixed(1)}</span>
+          <span className="text-zinc-500 text-[11px]">avg {agg.avgModelCount.toFixed(1)}</span>
         </td>
         {modelNames.map((name) => {
           const found = agg.modelCoverage[name] || 0;
@@ -237,7 +238,7 @@ function GroupRows({
           return (
             <td key={name} className="py-1.5 px-1 text-center">
               <span
-                className={`text-[9px] ${pct >= 80 ? "text-emerald-500" : pct >= 50 ? "text-amber-500" : "text-zinc-600"}`}
+                className={`text-[11px] ${pct >= 80 ? "text-emerald-500" : pct >= 50 ? "text-amber-500" : "text-zinc-500"}`}
               >
                 {found}/{agg.count}
               </span>
@@ -270,12 +271,22 @@ function GroupRows({
               const isConsensus = info.type === entity.consensus_type;
               return (
                 <td key={name} className="py-1.5 px-1 text-center">
-                  <span
-                    className={isConsensus ? "text-emerald-400" : "text-amber-400"}
-                    title={`${info.type} (${(info.confidence * 100).toFixed(0)}%)`}
-                  >
-                    {isConsensus ? "✓" : info.type.slice(0, 3)}
-                  </span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className={`cursor-help ${isConsensus ? "text-emerald-400" : "text-amber-400"}`}
+                        aria-label={`${info.type} (${(info.confidence * 100).toFixed(0)}% confidence)`}
+                      >
+                        {isConsensus ? "✓" : info.type.slice(0, 3)}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      className="text-xs text-zinc-100 bg-zinc-800 border border-zinc-600 px-2 py-1 rounded shadow-lg"
+                    >
+                      {info.type} ({(info.confidence * 100).toFixed(0)}%)
+                    </TooltipContent>
+                  </Tooltip>
                 </td>
               );
             })}

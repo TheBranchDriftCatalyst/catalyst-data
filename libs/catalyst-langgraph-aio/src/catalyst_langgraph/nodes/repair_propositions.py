@@ -43,11 +43,12 @@ class RepairPropositions:
             errors = validation.get("errors", [])
             logger.debug("repair_propositions: errors_to_fix=%d", len(errors))
 
+            mention_names = [m.get("text", "") for m in accepted_mentions if m.get("text")]
             prompt = (
                 f"Errors:\n{json.dumps(errors, indent=2)}\n\n"
                 f"Propositions:\n{json.dumps(candidates, indent=2)}\n\n"
-                f"Accepted mentions:\n{json.dumps(accepted_mentions, indent=2)}\n\n"
-                f"Original text:\n{raw_text}"
+                f"Input mentions: {json.dumps(mention_names)}\n\n"
+                f"Input text: {raw_text}"
             )
 
             result = await self.llm_client.structured_output(

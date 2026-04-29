@@ -82,7 +82,7 @@ export function ModelStatsTable({ models }: { models: ModelResult[] }) {
     <div className="overflow-x-auto">
       <table className="w-full text-xs font-mono">
         <thead>
-          <tr className="text-zinc-500 border-b border-white/5">
+          <tr className="text-zinc-400 border-b border-white/5">
             <th className="w-8" />
             <th
               className="text-left py-2 px-2 cursor-pointer select-none"
@@ -112,26 +112,26 @@ export function ModelStatsTable({ models }: { models: ModelResult[] }) {
                   onClick={() => setCollapsed((p) => ({ ...p, [type]: !isCollapsed }))}
                 >
                   <td className="py-2 px-2">
-                    <span className="text-zinc-500 text-[10px]">{isCollapsed ? "▶" : "▼"}</span>
+                    <span className="text-zinc-500 text-[11px]">{isCollapsed ? "▶" : "▼"}</span>
                   </td>
                   <td className="py-2 px-2">
                     <div className="flex items-center gap-2">
                       <ModelTypeBadge type={type} />
-                      <span className="text-zinc-500 text-[10px]">
+                      <span className="text-zinc-500 text-[11px]">
                         ({group.length} model{group.length !== 1 ? "s" : ""})
                       </span>
                     </div>
                   </td>
-                  <td className="py-1.5 px-2 text-center text-zinc-500 text-[9px]">
+                  <td className="py-1.5 px-2 text-center text-zinc-500 text-[11px]">
                     avg {avg(group, "mentions").toFixed(0)}
                   </td>
-                  <td className="py-1.5 px-2 text-center text-zinc-500 text-[9px]">
+                  <td className="py-1.5 px-2 text-center text-zinc-500 text-[11px]">
                     avg {avg(group, "assertions").toFixed(0)}
                   </td>
-                  <td className="py-1.5 px-2 text-center text-zinc-500 text-[9px]">
+                  <td className="py-1.5 px-2 text-center text-zinc-500 text-[11px]">
                     avg {avg(group, "duration").toFixed(1)}s
                   </td>
-                  <td className="py-1.5 px-2 text-center text-zinc-500 text-[9px]">
+                  <td className="py-1.5 px-2 text-center text-zinc-500 text-[11px]">
                     avg {avg(group, "tokensPerSec").toFixed(0)}
                   </td>
                   <AggCell value={sum(group, "retries")} label="Σ" warn />
@@ -191,7 +191,7 @@ function AggCell({
           : "text-zinc-500"
       : "text-zinc-500";
   return (
-    <td className={`py-1.5 px-2 text-center text-[9px] ${color}`}>
+    <td className={`py-1.5 px-2 text-center text-[11px] ${color}`}>
       {label}
       {value}
     </td>

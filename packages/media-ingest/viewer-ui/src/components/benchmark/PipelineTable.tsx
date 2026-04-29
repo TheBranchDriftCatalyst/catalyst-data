@@ -23,9 +23,9 @@ function PipelineCell({ info }: { info: PipelineStage | undefined }) {
       className={hasErrors ? "text-red-400" : hasAmbiguous ? "text-amber-400" : "text-zinc-300"}
     >
       {info.calls}
-      {hasErrors && <span className="text-red-500 text-[9px]">({info.error + info.failed}e)</span>}
+      {hasErrors && <span className="text-red-500 text-[11px]">({info.error + info.failed}e)</span>}
       {hasAmbiguous && !hasErrors && (
-        <span className="text-amber-500 text-[9px]">({info.ambiguous}a)</span>
+        <span className="text-amber-500 text-[11px]">({info.ambiguous}a)</span>
       )}
     </span>
   );
@@ -64,14 +64,14 @@ export function PipelineTable({ models }: { models: ModelResult[] }) {
     <div className="overflow-x-auto">
       <table className="w-full text-xs font-mono">
         <thead>
-          <tr className="text-zinc-500 border-b border-white/5">
+          <tr className="text-zinc-400 border-b border-white/5">
             <th className="w-8" />
             <th className="text-left py-2 px-2">Model</th>
             {stageKeys.map((key) => {
               const label = STAGE_LABELS[key] || key.replace(/_/g, " ");
               return (
                 <th key={key} className="text-center py-2 px-1 min-w-[70px]">
-                  <span className="text-[10px]">
+                  <span className="text-[11px]">
                     <MetricLabel
                       label={label}
                       tooltip={METRIC_TOOLTIPS[key] || `Pipeline stage: ${label}`}
@@ -92,12 +92,12 @@ export function PipelineTable({ models }: { models: ModelResult[] }) {
                   onClick={() => setCollapsed((p) => ({ ...p, [type]: !isCollapsed }))}
                 >
                   <td className="py-2 px-2">
-                    <span className="text-zinc-500 text-[10px]">{isCollapsed ? "▶" : "▼"}</span>
+                    <span className="text-zinc-500 text-[11px]">{isCollapsed ? "▶" : "▼"}</span>
                   </td>
                   <td className="py-2 px-2">
                     <div className="flex items-center gap-2">
                       <ModelTypeBadge type={type} />
-                      <span className="text-zinc-500 text-[10px]">
+                      <span className="text-zinc-500 text-[11px]">
                         ({group.length} model{group.length !== 1 ? "s" : ""})
                       </span>
                     </div>
@@ -110,14 +110,14 @@ export function PipelineTable({ models }: { models: ModelResult[] }) {
                     }, 0);
                     if (total === 0)
                       return (
-                        <td key={key} className="py-1.5 px-1 text-center text-zinc-700 text-[9px]">
+                        <td key={key} className="py-1.5 px-1 text-center text-zinc-700 text-[11px]">
                           &mdash;
                         </td>
                       );
                     return (
                       <td
                         key={key}
-                        className={`py-1.5 px-1 text-center text-[9px] ${errors > 0 ? "text-red-500" : "text-zinc-500"}`}
+                        className={`py-1.5 px-1 text-center text-[11px] ${errors > 0 ? "text-red-500" : "text-zinc-500"}`}
                       >
                         Σ{total}
                         {errors > 0 && `(${errors}e)`}

@@ -137,9 +137,18 @@ export function MetricLabel({ label, tooltip }: { label: string; tooltip?: strin
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="cursor-help border-b border-dotted border-zinc-600">{label}</span>
+        <span
+          className="cursor-help border-b border-dotted border-zinc-500 hover:border-zinc-300 hover:text-zinc-200 transition-colors"
+          aria-label={`${label}: ${tooltip}`}
+        >
+          {label}
+        </span>
       </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={5}>
+      <TooltipContent
+        side="top"
+        sideOffset={8}
+        className="max-w-xs text-xs leading-relaxed text-zinc-100 bg-zinc-800 border border-zinc-600 px-3 py-2 rounded-md shadow-lg z-50"
+      >
         {tooltip}
       </TooltipContent>
     </Tooltip>
@@ -149,7 +158,7 @@ export function MetricLabel({ label, tooltip }: { label: string; tooltip?: strin
 export function TypeBadge({ type }: { type: string }) {
   const colors = TYPE_COLORS[type] || TYPE_COLORS.OTHER;
   return (
-    <span className={`inline-block px-1.5 py-0.5 text-[10px] font-mono rounded border ${colors}`}>
+    <span className={`inline-block px-1.5 py-0.5 text-[11px] font-mono rounded border ${colors}`}>
       {type}
     </span>
   );
@@ -158,7 +167,7 @@ export function TypeBadge({ type }: { type: string }) {
 export function ModelTypeBadge({ type }: { type: string }) {
   const colors = MODEL_TYPE_COLORS[type] || MODEL_TYPE_COLORS.llm;
   return (
-    <span className={`inline-block px-2 py-0.5 text-[10px] font-mono uppercase rounded ${colors}`}>
+    <span className={`inline-block px-2 py-0.5 text-[11px] font-mono uppercase rounded ${colors}`}>
       {type}
     </span>
   );
@@ -172,7 +181,9 @@ export function DomainBadge({ domain }: { domain: string }) {
     open_leaks: "LEAKS",
   };
   return (
-    <span className={`inline-block px-1.5 py-0.5 text-[9px] font-mono uppercase rounded ${colors}`}>
+    <span
+      className={`inline-block px-1.5 py-0.5 text-[11px] font-mono uppercase rounded ${colors}`}
+    >
       {labels[domain] || domain}
     </span>
   );
@@ -191,11 +202,11 @@ export function StatCard({
 }) {
   return (
     <div className="bg-surface-1 border border-white/5 rounded-lg p-4">
-      <div className="text-zinc-500 text-xs font-mono uppercase tracking-wider">
+      <div className="text-zinc-300 text-xs font-mono uppercase tracking-wider">
         {tooltip ? <MetricLabel label={label} tooltip={tooltip} /> : label}
       </div>
       <div className="text-2xl font-mono text-zinc-100 mt-1">{value}</div>
-      {sub && <div className="text-xs text-zinc-500 mt-1">{sub}</div>}
+      {sub && <div className="text-xs text-zinc-400 mt-1">{sub}</div>}
     </div>
   );
 }
@@ -207,7 +218,12 @@ export function StatCard({
 export function ScoreCell({ value }: { value: number }) {
   const pct = value * 100;
   const color = pct >= 80 ? "text-emerald-400" : pct >= 50 ? "text-amber-400" : "text-red-400";
-  return <span className={color}>{pct.toFixed(1)}%</span>;
+  const label = pct >= 80 ? "good" : pct >= 50 ? "fair" : "poor";
+  return (
+    <span className={color} aria-label={`${pct.toFixed(1)}% (${label})`}>
+      {pct.toFixed(1)}%
+    </span>
+  );
 }
 
 // ── Performance Bar Chart ─────────────────────────────────────────────
@@ -233,7 +249,7 @@ export function PerformanceChart({
 
   return (
     <div className="bg-surface-1 border border-white/5 rounded-lg p-4">
-      <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">
+      <h3 className="text-xs font-mono text-zinc-300 uppercase tracking-wider mb-3">
         {tooltip ? <MetricLabel label={label} tooltip={tooltip} /> : label}
       </h3>
       <div className="space-y-1.5">
@@ -296,7 +312,7 @@ export function ScoreBarChart({
 
   return (
     <div className="bg-surface-1 border border-white/5 rounded-lg p-4">
-      <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">
+      <h3 className="text-xs font-mono text-zinc-300 uppercase tracking-wider mb-3">
         {tooltip ? <MetricLabel label={label} tooltip={tooltip} /> : label}
       </h3>
       <div className="space-y-1.5">

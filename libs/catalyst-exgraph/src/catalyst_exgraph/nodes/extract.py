@@ -77,11 +77,15 @@ class ExtractNode:
             # Load prompt from config.prompt_dir or PROMPT_REGISTRY_DIR env var
             system = _load_prompt(self.config)
 
-            # Build human message — for SPO stages, include upstream context
+            # Build human message — for SPO stages, include upstream NER as constraints
             if self.config.stage_name == "spo":
                 upstream = state.get("upstream_context", {})
                 accepted_mentions = upstream.get("accepted_mentions", [])
-                prompt = f"Accepted mentions:\n{json.dumps(accepted_mentions, indent=2)}\n\nText:\n{raw_text}"
+                # Pass only entity surface forms as constraints (not full objects).
+                # These constrain which entities the SPO extraction should reference,
+                # NOT additional text to extract from.
+                mention_names = [m.get("text", "") for m in accepted_mentions if m.get("text")]
+                prompt = f"Input mentions: {json.dumps(mention_names)}\n\nInput text: {raw_text}"
             else:
                 prompt = raw_text
 
