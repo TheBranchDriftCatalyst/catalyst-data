@@ -103,46 +103,96 @@ Each run creates `fixtures/extraction_{model}.json` with the model's mention and
 
 ### Step 2: Generate Ground Truth
 
-Use a strong model's output as the starting point for ground truth:
+Two approaches for generating ground truth:
 
+**Option A: Single strong model** (when cloud API is available):
 ```bash
-# Media-ingest — uses extraction_{model}.json as the reference
 LLM_MODEL=gpt-4o \
     pytest tests/test_extraction_benchmark.py -k "generate_ground_truth" -v -s
-
-# Congress-data
-pytest packages/congress-data/tests/integration/test_extraction_benchmark.py \
-    -k "generate_ground_truth" -v -s --output-dir .test-output/congress-data
 ```
 
-This creates a ground truth fixture with `"manually_reviewed": false`.
+**Option B: Ensemble consensus** (recommended — uses existing local model fixtures):
+```bash
+# Run all local models first, then generate consensus ground truth:
+python tests/benchmark_harness.py --local-only
+# The harness uses ConsensusVoter to merge top-N model outputs:
+# - NER: top 5 models by mention count, majority vote (>=2/5 agree)
+# - SPO: top 3 models with assertions, majority vote (>=2/3 agree)
+```
+
+The ensemble approach produces stronger ground truth than any single model because
+it requires multiple independent models to agree on each entity/proposition.
 
 ### Step 3: Review Ground Truth
 
-Open the ground truth JSON and manually correct any errors:
+Ground truth is saved to `.test-output/media-ingest/fixtures/ground_truth_media_ingest.json`.
+
+Review and correct:
 - Fix wrong `mention_type` labels
 - Fix `span_start`/`span_end` offsets that don't match the text
-- Add missed entities
-- Remove false positives
+- Add missed entities, remove false positives
 - Set `"manually_reviewed": true` when done
 
-Run the self-check to validate spans:
+Validate spans: `pytest tests/test_extraction_benchmark.py -k "self_check" -v -s`
+
+### Step 4: Benchmark Models with F1 Scoring
+
+Once ground truth exists, all benchmark runs automatically compute F1 scores:
 
 ```bash
-pytest tests/test_extraction_benchmark.py -k "self_check" -v -s
+# Run benchmarks — F1 scores appear in report when ground truth exists
+python tests/benchmark_harness.py --regen
+
+# Or via pytest:
+PYTHONPATH=. pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --regen
 ```
 
-### Step 4: Benchmark Models
+## Scoring Methodology
 
-Score any model's output against the reviewed ground truth:
+### Metrics Computed
+
+**Extraction Quality (requires ground truth):**
+- **F1 Score** — harmonic mean of precision and recall (0-1, higher = better)
+- **Precision** — of predictions, how many were correct? (accuracy of positive predictions)
+- **Recall** — of actual entities, how many did the model catch? (completeness)
+- **Type Accuracy** — among text-matched entities, fraction with correct entity type
+- **Span Accuracy** — fraction where `source[start:end] == entity_text`
+- **Hallucination Rate** — 1 - span_accuracy (entities not found in source text)
+
+Both **strict** (text + type must match) and **relaxed** (text only) variants are computed.
+
+**Efficiency Metrics (no ground truth needed):**
+- **Tokens/sec** — generation throughput
+- **Per-chunk Latency** — duration / chunk_count
+- **Quality/Speed Ratio** — F1 / duration (best bang for buck)
+
+**Pipeline Metrics (from MCP validation audit trail):**
+- Per-stage call counts (extract, validate, repair)
+- Validation verdicts (valid/ambiguous/invalid)
+- Repair cycle counts
+- MCP error codes (SPAN_MISMATCH, DUPLICATE_SPAN, etc.)
+
+### How F1 Works
+
+F1 = 2 × (precision × recall) / (precision + recall)
+
+The harmonic mean punishes imbalance — a model with 99% precision but 1% recall
+gets ~2% F1, not 50%. This prevents gaming by either:
+- Always saying "no" (high precision, zero recall)
+- Extracting everything (high recall, low precision)
+
+### Benchmark Report Viewer
+
+The React SPA at `/viewer/benchmarks` renders:
+- **Overview** — stat cards, performance bar charts, model cards by type
+- **Scores** — F1 comparison charts, precision/recall table, efficiency metrics
+- **Entities** — matrix showing which models found which entities
+- **Propositions** — SPO triple matrix across models
+- **Pipeline** — LangGraph stage breakdown with MCP validation stats
 
 ```bash
-# Score a specific model
-LLM_MODEL=gpt-4o-mini \
-    pytest tests/test_extraction_benchmark.py -k "benchmark" -v -s
-
-# Compare ALL models at once
-pytest tests/test_extraction_benchmark.py -k "compare_all" -v -s
+cd packages/media-ingest/viewer-ui && npm run dev
+# Open http://localhost:5173/viewer/benchmarks
 ```
 
 Output example:
