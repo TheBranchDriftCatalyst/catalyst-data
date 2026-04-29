@@ -76,6 +76,13 @@ const METRIC_TOOLTIPS: Record<string, string> = {
   repair_propositions: "Automatic repair cycle for propositions that failed validation.",
   persist_artifacts: "Write validated extractions to storage.",
   failure_handler: "Chunks that failed all extraction/repair attempts.",
+  // v2 (exgraph) stage names
+  extract_ner: "Generic extract node: calls LLM/encoder for NER extraction.",
+  validate_ner: "MCP contract validation of NER mentions.",
+  repair_ner: "Repair cycle for NER mentions that failed validation.",
+  extract_spo: "Generic extract node: calls LLM for SPO triple extraction.",
+  validate_spo: "MCP contract validation of SPO propositions.",
+  repair_spo: "Repair cycle for propositions that failed validation.",
 };
 
 function MetricLabel({ label, tooltip }: { label: string; tooltip?: string }) {
@@ -125,16 +132,27 @@ const MODEL_TYPE_COLORS: Record<string, string> = {
   llm: "bg-blue-500/20 text-blue-300",
 };
 
-const PIPELINE_STAGES = [
-  { key: "extract_mentions", label: "Extract Mentions" },
-  { key: "validate_mentions", label: "Validate Mentions" },
-  { key: "repair_mentions", label: "Repair Mentions" },
-  { key: "extract_propositions", label: "Extract Props" },
-  { key: "validate_propositions", label: "Validate Props" },
-  { key: "repair_propositions", label: "Repair Props" },
-  { key: "persist_artifacts", label: "Persist" },
-  { key: "failure_handler", label: "Failed" },
-];
+// Pipeline stage display names — supports both v1 (langgraph-aio) and v2 (exgraph) names
+const STAGE_LABELS: Record<string, string> = {
+  // v1 names
+  extract_mentions: "Extract NER",
+  validate_mentions: "Validate NER",
+  repair_mentions: "Repair NER",
+  extract_propositions: "Extract SPO",
+  validate_propositions: "Validate SPO",
+  repair_propositions: "Repair SPO",
+  persist_artifacts: "Persist",
+  failure_handler: "Failed",
+  // v2 (exgraph) names
+  extract_ner: "Extract NER",
+  validate_ner: "Validate NER",
+  repair_ner: "Repair NER",
+  extract_spo: "Extract SPO",
+  validate_spo: "Validate SPO",
+  repair_spo: "Repair SPO",
+  // generic
+  passthrough: "Skip",
+};
 
 function TypeBadge({ type }: { type: string }) {
   const colors = TYPE_COLORS[type] || TYPE_COLORS.OTHER;
@@ -377,34 +395,45 @@ function PipelineBreakdown({ models }: { models: ModelResult[] }) {
   const modelsWithPipeline = models.filter((m) => Object.keys(m.pipeline).length > 0);
   if (modelsWithPipeline.length === 0) return null;
 
+  // Discover stage names from the data (supports both v1 and v2 naming)
+  const stageKeysSet = new Set<string>();
+  for (const m of modelsWithPipeline) {
+    for (const key of Object.keys(m.pipeline)) {
+      stageKeysSet.add(key);
+    }
+  }
+  const stageKeys = Array.from(stageKeysSet).sort();
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs font-mono">
         <thead>
           <tr className="text-zinc-500 border-b border-white/5">
             <th className="text-left py-2 px-2">Model</th>
-            {PIPELINE_STAGES.map((s) => (
-              <th key={s.key} className="text-center py-2 px-1 min-w-[70px]">
-                <span className="text-[10px]">
-                  {METRIC_TOOLTIPS[s.key] ? (
-                    <MetricLabel label={s.label} tooltip={METRIC_TOOLTIPS[s.key]} />
-                  ) : (
-                    s.label
-                  )}
-                </span>
-              </th>
-            ))}
+            {stageKeys.map((key) => {
+              const label = STAGE_LABELS[key] || key.replace(/_/g, " ");
+              return (
+                <th key={key} className="text-center py-2 px-1 min-w-[70px]">
+                  <span className="text-[10px]">
+                    <MetricLabel
+                      label={label}
+                      tooltip={METRIC_TOOLTIPS[key] || `Pipeline stage: ${label}`}
+                    />
+                  </span>
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
           {modelsWithPipeline.map((m) => (
             <tr key={m.name} className="border-b border-white/5 hover:bg-white/[0.02]">
               <td className="py-1.5 px-2 text-zinc-200">{m.name}</td>
-              {PIPELINE_STAGES.map((s) => {
-                const info = m.pipeline[s.key];
+              {stageKeys.map((key) => {
+                const info = m.pipeline[key];
                 if (!info || info.calls === 0) {
                   return (
-                    <td key={s.key} className="py-1.5 px-1 text-center text-zinc-700">
+                    <td key={key} className="py-1.5 px-1 text-center text-zinc-700">
                       —
                     </td>
                   );
@@ -413,7 +442,7 @@ function PipelineBreakdown({ models }: { models: ModelResult[] }) {
                 const hasAmbiguous = (info.ambiguous || 0) > 0;
                 return (
                   <td
-                    key={s.key}
+                    key={key}
                     className={`py-1.5 px-1 text-center ${hasErrors ? "text-red-400" : hasAmbiguous ? "text-amber-400" : "text-zinc-300"}`}
                   >
                     {info.calls}
