@@ -138,6 +138,61 @@ tasks:
         print(f'Killed {len(runs)} runs')
         "
 
+  # ── Benchmark ────────────────────────────────────────────────────────────
+
+  bench:
+    desc: "Full benchmark methodology: run models → ground truth → F1 report → viewer"
+    env:
+      PYTHONPATH: "."
+      EXGRAPH_ENABLED: "true"
+    cmds:
+      - echo "Step 1/4 — Running all models..."
+      - pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --regen --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
+      - echo "Step 2/4 — Generating ensemble ground truth..."
+      - pytest tests/test_extraction_benchmark.py -k "generate_ground_truth" -v -s
+      - echo "Step 3/4 — Regenerating report with F1 scores..."
+      - pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
+      - echo "Step 4/4 — Done! Run 'task bench:view' to open the report."
+
+  bench:run:
+    desc: "Run extraction benchmarks (skip ground truth regen)"
+    env:
+      PYTHONPATH: "."
+      EXGRAPH_ENABLED: "true"
+    cmds:
+      - pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --regen --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
+
+  bench:ground-truth:
+    desc: "Generate ensemble consensus ground truth from existing fixtures"
+    env:
+      PYTHONPATH: "."
+    cmds:
+      - pytest tests/test_extraction_benchmark.py -k "generate_ground_truth" -v -s
+
+  bench:report:
+    desc: "Regenerate benchmark report with F1 scores (needs ground truth)"
+    env:
+      PYTHONPATH: "."
+      EXGRAPH_ENABLED: "true"
+    cmds:
+      - pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
+
+  bench:view:
+    desc: "Start benchmark viewer SPA"
+    dir: packages/media-ingest/viewer-ui
+    cmds:
+      - echo "Opening http://localhost:5173/viewer/benchmarks"
+      - npm run dev
+
+  bench:clean:
+    desc: "Clean all benchmark artifacts (fixtures, ground truth, report, audit logs)"
+    cmds:
+      - rm -f .test-output/media-ingest/fixtures/extraction_*.json
+      - rm -f .test-output/media-ingest/fixtures/ground_truth_*.json
+      - rm -f .test-output/media-ingest/benchmark-report.json
+      - rm -rf .test-output/media-ingest/audit-logs/
+      - echo "Cleaned. Kept benchmark_chunks.json and pipeline stage fixtures."
+
   # ── Dev ──────────────────────────────────────────────────────────────────
 
   dev:congress:
