@@ -140,10 +140,7 @@ export function MetricLabel({ label, tooltip }: { label: string; tooltip?: strin
       <TooltipTrigger asChild>
         <span className="cursor-help border-b border-dotted border-zinc-600">{label}</span>
       </TooltipTrigger>
-      <TooltipContent
-        side="top"
-        className="max-w-xs text-xs bg-zinc-900 text-zinc-200 border border-zinc-700 px-3 py-2 rounded shadow-lg z-50"
-      >
+      <TooltipContent side="top" sideOffset={5}>
         {tooltip}
       </TooltipContent>
     </Tooltip>
