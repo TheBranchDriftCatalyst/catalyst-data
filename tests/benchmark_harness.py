@@ -55,10 +55,18 @@ def _load_fixture(name: str) -> dict | None:
 
 def _run_model(cfg: ModelConfig, timeout: int, save_audit: bool) -> dict | None:
     """Run extraction for one model via subprocess."""
-    api_key = cfg.api_key or os.environ.get("LLM_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "unused")
+    is_cloud = "cloud" in cfg.tags
+    if is_cloud:
+        api_key = cfg.api_key or os.environ.get("LLM_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
+        base_url = cfg.base_url
+    else:
+        api_key = "unused"
+        base_url = cfg.base_url or "http://localhost:11434/v1"
+
     env = {
         **os.environ,
         "LLM_MODEL": cfg.model,
+        "LLM_BASE_URL": base_url,
         "LLM_API_KEY": api_key,
         "OPENAI_API_KEY": api_key,
         "LLM_STRUCTURED_METHOD": cfg.structured_method,
@@ -68,8 +76,6 @@ def _run_model(cfg: ModelConfig, timeout: int, save_audit: bool) -> dict | None:
         "PROMPT_REGISTRY_DIR": str(ROOT / "k8s" / "shared" / "prompts"),
         "PYTHONPATH": str(ROOT),
     }
-    if cfg.base_url:
-        env["LLM_BASE_URL"] = cfg.base_url
 
     try:
         subprocess.run(

@@ -593,11 +593,21 @@ class TestRunAll:
 
             print(f"\n  RUNNING {cfg.name} ({cfg.model}) via {cfg.base_url or 'in-process'}...")
 
-            # Run as subprocess to isolate env vars per model
-            api_key = cfg.api_key or os.environ.get("OPENAI_API_KEY", "unused")
+            # Run as subprocess to isolate env vars per model.
+            # CRITICAL: for local models, override LLM_BASE_URL and LLM_API_KEY
+            # to prevent the parent env's litellm config from leaking through.
+            is_cloud = "cloud" in cfg.tags
+            if is_cloud:
+                api_key = cfg.api_key or os.environ.get("LLM_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
+                base_url = cfg.base_url
+            else:
+                api_key = "unused"
+                base_url = cfg.base_url or "http://localhost:11434/v1"
+
             env = {
                 **os.environ,
                 "LLM_MODEL": cfg.model,
+                "LLM_BASE_URL": base_url,
                 "LLM_API_KEY": api_key,
                 "OPENAI_API_KEY": api_key,
                 "SAVE_AUDIT_LOG": "true" if save_audit else "",
@@ -607,8 +617,6 @@ class TestRunAll:
                 "PROMPT_REGISTRY_DIR": str(Path(__file__).resolve().parent.parent / "k8s" / "shared" / "prompts"),
                 "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
             }
-            if cfg.base_url:
-                env["LLM_BASE_URL"] = cfg.base_url
 
             try:
                 proc = subprocess.run(
