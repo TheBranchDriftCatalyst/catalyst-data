@@ -1,21 +1,8 @@
 import { useState, useMemo } from "react";
-import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  getGroupedRowModel,
-  getExpandedRowModel,
-  flexRender,
-  createColumnHelper,
-  type SortingState,
-  type ColumnDef,
-  type ExpandedState,
-} from "@tanstack/react-table";
 import type { ModelResult, PipelineStage } from "@/types/benchmark";
 import {
   MetricLabel,
   ModelTypeBadge,
-  SortableHeader,
   METRIC_TOOLTIPS,
   STAGE_LABELS,
   MODEL_TYPE_ORDER,
@@ -28,9 +15,7 @@ interface PipelineRow {
 }
 
 function PipelineCell({ info }: { info: PipelineStage | undefined }) {
-  if (!info || info.calls === 0) {
-    return <span className="text-zinc-700">&mdash;</span>;
-  }
+  if (!info || info.calls === 0) return <span className="text-zinc-700">&mdash;</span>;
   const hasErrors = info.error > 0 || info.failed > 0;
   const hasAmbiguous = (info.ambiguous || 0) > 0;
   return (
@@ -52,79 +37,26 @@ export function PipelineTable({ models }: { models: ModelResult[] }) {
     [models],
   );
 
-  // Discover stage names from the data (supports both v1 and v2 naming)
   const stageKeys = useMemo(() => {
     const set = new Set<string>();
-    for (const m of modelsWithPipeline) {
-      for (const key of Object.keys(m.pipeline)) {
-        set.add(key);
-      }
-    }
+    for (const m of modelsWithPipeline) for (const key of Object.keys(m.pipeline)) set.add(key);
     return Array.from(set).sort();
   }, [modelsWithPipeline]);
 
   const data = useMemo<PipelineRow[]>(
-    () =>
-      modelsWithPipeline.map((m) => ({
-        name: m.name,
-        type: m.type,
-        stages: m.pipeline,
-      })),
+    () => modelsWithPipeline.map((m) => ({ name: m.name, type: m.type, stages: m.pipeline })),
     [modelsWithPipeline],
   );
 
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [expanded, setExpanded] = useState<ExpandedState>(true);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  const columns = useMemo<ColumnDef<PipelineRow, unknown>[]>(() => {
-    const helper = createColumnHelper<PipelineRow>();
-
-    const base: ColumnDef<PipelineRow, unknown>[] = [
-      helper.accessor("name", {
-        header: "Model",
-        cell: (info) => <span className="text-zinc-200">{info.getValue()}</span>,
-        enableGrouping: false,
-      }) as ColumnDef<PipelineRow, unknown>,
-      helper.accessor("type", {
-        header: "Type",
-        cell: (info) => <ModelTypeBadge type={info.getValue()} />,
-        sortingFn: (rowA, rowB) => {
-          const a = MODEL_TYPE_ORDER[rowA.original.type] ?? 99;
-          const b = MODEL_TYPE_ORDER[rowB.original.type] ?? 99;
-          return a - b;
-        },
-      }) as ColumnDef<PipelineRow, unknown>,
-    ];
-
-    const stageCols = stageKeys.map((key) => {
-      const label = STAGE_LABELS[key] || key.replace(/_/g, " ");
-      return helper.accessor((row) => row.stages[key]?.calls ?? 0, {
-        id: `stage_${key}`,
-        header: label,
-        cell: ({ row }) => <PipelineCell info={row.original.stages[key]} />,
-        meta: { tooltip: METRIC_TOOLTIPS[key] || `Pipeline stage: ${label}` },
-        enableGrouping: false,
-      }) as ColumnDef<PipelineRow, unknown>;
-    });
-
-    return [...base, ...stageCols];
-  }, [stageKeys]);
-
-  const table = useReactTable({
-    data,
-    columns,
-    state: {
-      sorting,
-      grouping: ["type"],
-      expanded,
-    },
-    onSortingChange: setSorting,
-    onExpandedChange: setExpanded,
-    getGroupedRowModel: getGroupedRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-  });
+  const groups = useMemo(() => {
+    const map: Record<string, PipelineRow[]> = {};
+    for (const r of data) (map[r.type] ??= []).push(r);
+    return Object.entries(map).sort(
+      (a, b) => (MODEL_TYPE_ORDER[a[0]] ?? 99) - (MODEL_TYPE_ORDER[b[0]] ?? 99),
+    );
+  }, [data]);
 
   if (modelsWithPipeline.length === 0) return null;
 
@@ -132,81 +64,88 @@ export function PipelineTable({ models }: { models: ModelResult[] }) {
     <div className="overflow-x-auto">
       <table className="w-full text-xs font-mono">
         <thead>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr key={headerGroup.id} className="text-zinc-500 border-b border-white/5">
-              {headerGroup.headers.map((header) => {
-                if (header.isPlaceholder) return <th key={header.id} />;
-                const meta = header.column.columnDef.meta as { tooltip?: string } | undefined;
-                const tooltip = meta?.tooltip;
-                const label = flexRender(header.column.columnDef.header, header.getContext());
-
-                if (header.column.getIsGrouped()) {
-                  return (
-                    <th key={header.id} className="text-left py-2 px-2">
-                      {tooltip ? <MetricLabel label={String(label)} tooltip={tooltip} /> : label}
-                    </th>
-                  );
-                }
-
-                return (
-                  <SortableHeader
-                    key={header.id}
-                    column={header.column}
-                    className={`py-2 px-1 ${header.column.id === "name" ? "text-left px-2" : "text-center min-w-[70px]"}`}
-                  >
-                    <span className="text-[10px]">
-                      {tooltip ? <MetricLabel label={String(label)} tooltip={tooltip} /> : label}
-                    </span>
-                  </SortableHeader>
-                );
-              })}
-            </tr>
-          ))}
+          <tr className="text-zinc-500 border-b border-white/5">
+            <th className="w-8" />
+            <th className="text-left py-2 px-2">Model</th>
+            {stageKeys.map((key) => {
+              const label = STAGE_LABELS[key] || key.replace(/_/g, " ");
+              return (
+                <th key={key} className="text-center py-2 px-1 min-w-[70px]">
+                  <span className="text-[10px]">
+                    <MetricLabel
+                      label={label}
+                      tooltip={METRIC_TOOLTIPS[key] || `Pipeline stage: ${label}`}
+                    />
+                  </span>
+                </th>
+              );
+            })}
+          </tr>
         </thead>
         <tbody>
-          {table.getRowModel().rows.map((row) => {
-            if (row.getIsGrouped()) {
-              return (
+          {groups.map(([type, group]) => {
+            const isCollapsed = !!collapsed[type];
+            return (
+              <GroupBlock key={type}>
                 <tr
-                  key={row.id}
                   className="bg-white/[0.03] border-b border-white/5 cursor-pointer"
-                  onClick={row.getToggleExpandedHandler()}
+                  onClick={() => setCollapsed((p) => ({ ...p, [type]: !isCollapsed }))}
                 >
-                  <td colSpan={columns.length} className="py-2 px-2">
+                  <td className="py-2 px-2">
+                    <span className="text-zinc-500 text-[10px]">{isCollapsed ? "▶" : "▼"}</span>
+                  </td>
+                  <td className="py-2 px-2">
                     <div className="flex items-center gap-2">
+                      <ModelTypeBadge type={type} />
                       <span className="text-zinc-500 text-[10px]">
-                        {row.getIsExpanded() ? "▼" : "▶"}
-                      </span>
-                      <ModelTypeBadge type={row.groupingValue as string} />
-                      <span className="text-zinc-500 text-[10px]">
-                        ({row.subRows.length} model{row.subRows.length !== 1 ? "s" : ""})
+                        ({group.length} model{group.length !== 1 ? "s" : ""})
                       </span>
                     </div>
                   </td>
+                  {stageKeys.map((key) => {
+                    const total = group.reduce((s, r) => s + (r.stages[key]?.calls ?? 0), 0);
+                    const errors = group.reduce((s, r) => {
+                      const st = r.stages[key];
+                      return s + (st ? st.error + st.failed : 0);
+                    }, 0);
+                    if (total === 0)
+                      return (
+                        <td key={key} className="py-1.5 px-1 text-center text-zinc-700 text-[9px]">
+                          &mdash;
+                        </td>
+                      );
+                    return (
+                      <td
+                        key={key}
+                        className={`py-1.5 px-1 text-center text-[9px] ${errors > 0 ? "text-red-500" : "text-zinc-500"}`}
+                      >
+                        Σ{total}
+                        {errors > 0 && `(${errors}e)`}
+                      </td>
+                    );
+                  })}
                 </tr>
-              );
-            }
-
-            return (
-              <tr key={row.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                {row.getVisibleCells().map((cell) => {
-                  if (cell.getIsGrouped() || cell.getIsPlaceholder()) return null;
-                  return (
-                    <td
-                      key={cell.id}
-                      className={`py-1.5 px-1 ${cell.column.id === "name" ? "text-left px-2" : "text-center"}`}
-                    >
-                      {cell.getIsAggregated()
-                        ? null
-                        : flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  );
-                })}
-              </tr>
+                {!isCollapsed &&
+                  group.map((r) => (
+                    <tr key={r.name} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td />
+                      <td className="py-1.5 px-2 text-left text-zinc-200">{r.name}</td>
+                      {stageKeys.map((key) => (
+                        <td key={key} className="py-1.5 px-1 text-center">
+                          <PipelineCell info={r.stages[key]} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+              </GroupBlock>
             );
           })}
         </tbody>
       </table>
     </div>
   );
+}
+
+function GroupBlock({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
 }

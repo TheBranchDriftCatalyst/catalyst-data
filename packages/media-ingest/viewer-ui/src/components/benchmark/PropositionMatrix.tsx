@@ -1,18 +1,6 @@
 import { useState, useMemo } from "react";
-import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  getGroupedRowModel,
-  getExpandedRowModel,
-  flexRender,
-  createColumnHelper,
-  type SortingState,
-  type ColumnDef,
-  type ExpandedState,
-} from "@tanstack/react-table";
 import type { PropositionRow } from "@/types/benchmark";
-import { MetricLabel, DomainBadge, SortableHeader, METRIC_TOOLTIPS } from "./shared";
+import { DomainBadge, METRIC_TOOLTIPS, MetricLabel } from "./shared";
 
 const DOMAIN_ORDER: Record<string, number> = {
   media: 0,
@@ -21,6 +9,13 @@ const DOMAIN_ORDER: Record<string, number> = {
   unknown: 3,
 };
 
+interface GroupAgg {
+  count: number;
+  avgModelCount: number;
+  uniquePredicates: number;
+  modelCoverage: Record<string, number>;
+}
+
 export function PropositionMatrix({
   propositions,
   modelNames,
@@ -28,91 +23,62 @@ export function PropositionMatrix({
   propositions: PropositionRow[];
   modelNames: string[];
 }) {
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [expanded, setExpanded] = useState<ExpandedState>(true);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
-  // Only show first 40 rows (as in original)
-  const data = useMemo(() => propositions.slice(0, 40), [propositions]);
-
-  const columns = useMemo<ColumnDef<PropositionRow, unknown>[]>(() => {
-    const helper = createColumnHelper<PropositionRow>();
-
-    const base: ColumnDef<PropositionRow, unknown>[] = [
-      helper.accessor("subject", {
-        header: "Subject",
-        cell: (info) => (
-          <span className="text-zinc-200 max-w-[150px] truncate block">{info.getValue()}</span>
-        ),
-        enableGrouping: false,
-        meta: { tooltip: METRIC_TOOLTIPS.subject },
-      }) as ColumnDef<PropositionRow, unknown>,
-      helper.accessor("predicate", {
-        header: "Predicate",
-        cell: (info) => <span className="text-cyan-400">{info.getValue()}</span>,
-        enableGrouping: false,
-        meta: { tooltip: METRIC_TOOLTIPS.predicate },
-      }) as ColumnDef<PropositionRow, unknown>,
-      helper.accessor("object", {
-        header: "Object",
-        cell: (info) => (
-          <span className="text-zinc-200 max-w-[150px] truncate block">{info.getValue()}</span>
-        ),
-        enableGrouping: false,
-        meta: { tooltip: METRIC_TOOLTIPS.object },
-      }) as ColumnDef<PropositionRow, unknown>,
-      helper.accessor("domain", {
-        header: "Domain",
-        cell: (info) => <DomainBadge domain={info.getValue() || "unknown"} />,
-        sortingFn: (rowA, rowB) => {
-          const a = DOMAIN_ORDER[rowA.original.domain || "unknown"] ?? 99;
-          const b = DOMAIN_ORDER[rowB.original.domain || "unknown"] ?? 99;
-          return a - b;
-        },
-        meta: { tooltip: METRIC_TOOLTIPS.entity_domain },
-      }) as ColumnDef<PropositionRow, unknown>,
-      helper.accessor("model_count", {
-        header: "#",
-        cell: (info) => <span className="text-zinc-400">{info.getValue()}</span>,
-        enableGrouping: false,
-        meta: { tooltip: METRIC_TOOLTIPS.prop_model_count },
-      }) as ColumnDef<PropositionRow, unknown>,
-    ];
-
-    const modelCols = modelNames.map(
-      (name) =>
-        helper.display({
-          id: `model_${name}`,
-          header: () => <span className="text-[10px]">{name.replace(/-/g, "\u200b-")}</span>,
-          cell: ({ row }) => {
-            const found = row.original.models.includes(name);
-            return (
-              <span className={found ? "text-emerald-400" : "text-zinc-700"}>
-                {found ? "✓" : "·"}
-              </span>
-            );
-          },
-          enableSorting: false,
-        }) as ColumnDef<PropositionRow, unknown>,
+  const groups = useMemo(() => {
+    const map: Record<string, PropositionRow[]> = {};
+    for (const p of propositions) {
+      const d = p.domain || "unknown";
+      (map[d] ??= []).push(p);
+    }
+    return Object.entries(map).sort(
+      (a, b) => (DOMAIN_ORDER[a[0]] ?? 99) - (DOMAIN_ORDER[b[0]] ?? 99),
     );
+  }, [propositions]);
 
-    return [...base, ...modelCols];
-  }, [modelNames]);
+  // Filter out models with zero propositions
+  const { active: activeModels, hidden: hiddenModels } = useMemo(() => {
+    const active: string[] = [];
+    const hidden: string[] = [];
+    for (const name of modelNames) {
+      if (propositions.some((p) => p.models.includes(name))) active.push(name);
+      else hidden.push(name);
+    }
+    return { active, hidden };
+  }, [propositions, modelNames]);
 
-  const table = useReactTable({
-    data,
-    columns,
-    state: {
-      sorting,
-      grouping: ["domain"],
-      expanded,
-    },
-    onSortingChange: setSorting,
-    onExpandedChange: setExpanded,
-    getGroupedRowModel: getGroupedRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-  });
+  const aggs = useMemo(() => {
+    const result: Record<string, GroupAgg> = {};
+    for (const [domain, rows] of groups) {
+      let totalMC = 0;
+      const preds = new Set<string>();
+      for (const r of rows) {
+        totalMC += r.model_count;
+        preds.add(r.predicate);
+      }
+      const mc: Record<string, number> = {};
+      for (const name of activeModels) {
+        mc[name] = rows.filter((r) => r.models.includes(name)).length;
+      }
+      result[domain] = {
+        count: rows.length,
+        avgModelCount: totalMC / rows.length,
+        uniquePredicates: preds.size,
+        modelCoverage: mc,
+      };
+    }
+    return result;
+  }, [groups, activeModels]);
+
+  const toggleGroup = (domain: string) =>
+    setExpandedGroups((prev) => ({ ...prev, [domain]: !prev[domain] }));
+
+  const allExpanded = groups.every(([d]) => expandedGroups[d]);
+  const toggleAll = () => {
+    const next: Record<string, boolean> = {};
+    for (const [d] of groups) next[d] = !allExpanded;
+    setExpandedGroups(next);
+  };
 
   if (propositions.length === 0) {
     return (
@@ -121,101 +87,145 @@ export function PropositionMatrix({
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs font-mono">
-        <thead>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr key={headerGroup.id} className="text-zinc-500 border-b border-white/5">
-              {headerGroup.headers.map((header) => {
-                if (header.isPlaceholder) return <th key={header.id} />;
-                const meta = header.column.columnDef.meta as { tooltip?: string } | undefined;
-                const tooltip = meta?.tooltip;
-                const label = flexRender(header.column.columnDef.header, header.getContext());
-
-                if (header.column.getIsGrouped()) {
-                  return (
-                    <th key={header.id} className="text-left py-2 px-1">
-                      {tooltip ? <MetricLabel label={String(label)} tooltip={tooltip} /> : label}
-                    </th>
-                  );
-                }
-
-                if (!header.column.getCanSort()) {
-                  return (
-                    <th key={header.id} className="text-center py-2 px-1 min-w-[60px]">
-                      {label}
-                    </th>
-                  );
-                }
-
-                return (
-                  <SortableHeader
-                    key={header.id}
-                    column={header.column}
-                    className={`py-2 px-1 ${
-                      ["subject", "predicate", "object"].includes(header.column.id)
-                        ? "text-left"
-                        : "text-center"
-                    }`}
-                  >
-                    {tooltip ? <MetricLabel label={String(label)} tooltip={tooltip} /> : label}
-                  </SortableHeader>
-                );
-              })}
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={toggleAll}
+          className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono"
+        >
+          {allExpanded ? "Collapse All" : "Expand All"}
+        </button>
+        <span className="text-[10px] text-zinc-600">{propositions.length} propositions total</span>
+      </div>
+      <div className="overflow-auto max-h-[600px]">
+        <table className="w-full text-xs font-mono border-collapse">
+          <thead className="sticky top-0 bg-surface-0 z-10">
+            <tr className="text-zinc-500 border-b border-white/5">
+              <th className="text-left py-2 px-1 w-8" />
+              <th className="text-left py-2 px-2">
+                <MetricLabel label="Subject" tooltip={METRIC_TOOLTIPS.subject} />
+              </th>
+              <th className="text-left py-2 px-1">
+                <MetricLabel label="Predicate" tooltip={METRIC_TOOLTIPS.predicate} />
+              </th>
+              <th className="text-left py-2 px-1">
+                <MetricLabel label="Object" tooltip={METRIC_TOOLTIPS.object} />
+              </th>
+              <th className="text-center py-2 px-1">
+                <MetricLabel label="#" tooltip={METRIC_TOOLTIPS.prop_model_count} />
+              </th>
+              {activeModels.map((name) => (
+                <th key={name} className="text-center py-2 px-1 min-w-[50px]">
+                  <span className="text-[10px]">{name.replace(/-/g, "\u200b-")}</span>
+                </th>
+              ))}
             </tr>
-          ))}
-        </thead>
-        <tbody>
-          {table
-            .getRowModel()
-            .rows.slice(0, 50)
-            .map((row) => {
-              if (row.getIsGrouped()) {
-                return (
-                  <tr
-                    key={row.id}
-                    className="bg-white/[0.03] border-b border-white/5 cursor-pointer"
-                    onClick={row.getToggleExpandedHandler()}
-                  >
-                    <td colSpan={columns.length} className="py-2 px-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-zinc-500 text-[10px]">
-                          {row.getIsExpanded() ? "▼" : "▶"}
-                        </span>
-                        <DomainBadge domain={(row.groupingValue as string) || "unknown"} />
-                        <span className="text-zinc-500 text-[10px]">
-                          ({row.subRows.length} proposition{row.subRows.length !== 1 ? "s" : ""})
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              }
-
+          </thead>
+          <tbody>
+            {groups.map(([domain, rows]) => {
+              const agg = aggs[domain]!;
+              const isOpen = !!expandedGroups[domain];
               return (
-                <tr key={row.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                  {row.getVisibleCells().map((cell) => {
-                    if (cell.getIsGrouped() || cell.getIsPlaceholder()) return null;
-                    return (
-                      <td
-                        key={cell.id}
-                        className={`py-1.5 px-1 ${
-                          ["subject", "predicate", "object"].includes(cell.column.id)
-                            ? "text-left px-2"
-                            : "text-center"
-                        }`}
-                      >
-                        {cell.getIsAggregated()
-                          ? null
-                          : flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    );
-                  })}
-                </tr>
+                <PropGroupRows
+                  key={domain}
+                  domain={domain}
+                  rows={rows}
+                  agg={agg}
+                  isOpen={isOpen}
+                  modelNames={activeModels}
+                  onToggle={() => toggleGroup(domain)}
+                />
               );
             })}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
+      {hiddenModels.length > 0 && (
+        <p className="text-[10px] text-zinc-600 mt-1">
+          Hidden (no propositions extracted): {hiddenModels.join(", ")}
+        </p>
+      )}
     </div>
+  );
+}
+
+function PropGroupRows({
+  domain,
+  rows,
+  agg,
+  isOpen,
+  modelNames,
+  onToggle,
+}: {
+  domain: string;
+  rows: PropositionRow[];
+  agg: GroupAgg;
+  isOpen: boolean;
+  modelNames: string[];
+  onToggle: () => void;
+}) {
+  return (
+    <>
+      <tr className="bg-white/[0.03] border-b border-white/5 cursor-pointer" onClick={onToggle}>
+        <td className="py-2 px-2">
+          <span className="text-zinc-500 text-[10px]">{isOpen ? "▼" : "▶"}</span>
+        </td>
+        <td className="py-2 px-2">
+          <div className="flex items-center gap-2">
+            <DomainBadge domain={domain} />
+            <span className="text-zinc-400 text-[10px]">
+              {agg.count} proposition{agg.count !== 1 ? "s" : ""}
+            </span>
+          </div>
+        </td>
+        <td className="py-1.5 px-1 text-center">
+          <span className="text-zinc-500 text-[9px]">{agg.uniquePredicates} unique</span>
+        </td>
+        <td className="py-1.5 px-1" />
+        <td className="py-1.5 px-1 text-center">
+          <span className="text-zinc-500 text-[9px]">avg {agg.avgModelCount.toFixed(1)}</span>
+        </td>
+        {modelNames.map((name) => {
+          const found = agg.modelCoverage[name] || 0;
+          const pct = agg.count > 0 ? Math.round((found / agg.count) * 100) : 0;
+          return (
+            <td key={name} className="py-1.5 px-1 text-center">
+              <span
+                className={`text-[9px] ${pct >= 80 ? "text-emerald-500" : pct >= 50 ? "text-amber-500" : "text-zinc-600"}`}
+              >
+                {found}/{agg.count}
+              </span>
+            </td>
+          );
+        })}
+      </tr>
+
+      {isOpen &&
+        rows.map((prop, i) => (
+          <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02]">
+            <td />
+            <td className="py-1.5 px-2 text-left">
+              <span className="text-zinc-200 max-w-[150px] truncate block">{prop.subject}</span>
+            </td>
+            <td className="py-1.5 px-1 text-left">
+              <span className="text-cyan-400">{prop.predicate}</span>
+            </td>
+            <td className="py-1.5 px-1 text-left">
+              <span className="text-zinc-200 max-w-[150px] truncate block">{prop.object}</span>
+            </td>
+            <td className="py-1.5 px-1 text-center text-zinc-400">{prop.model_count}</td>
+            {modelNames.map((name) => {
+              const found = prop.models.includes(name);
+              return (
+                <td key={name} className="py-1.5 px-1 text-center">
+                  <span className={found ? "text-emerald-400" : "text-zinc-700"}>
+                    {found ? "✓" : "·"}
+                  </span>
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+    </>
   );
 }

@@ -1,18 +1,6 @@
 import { useState, useMemo } from "react";
-import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  getGroupedRowModel,
-  getExpandedRowModel,
-  flexRender,
-  createColumnHelper,
-  type SortingState,
-  type ColumnDef,
-  type ExpandedState,
-} from "@tanstack/react-table";
 import type { EntityRow } from "@/types/benchmark";
-import { MetricLabel, TypeBadge, DomainBadge, SortableHeader, METRIC_TOOLTIPS } from "./shared";
+import { DomainBadge, TypeBadge, METRIC_TOOLTIPS, MetricLabel } from "./shared";
 
 const DOMAIN_ORDER: Record<string, number> = {
   media: 0,
@@ -21,6 +9,13 @@ const DOMAIN_ORDER: Record<string, number> = {
   unknown: 3,
 };
 
+interface GroupAgg {
+  count: number;
+  avgModelCount: number;
+  topTypes: [string, number][];
+  modelCoverage: Record<string, number>;
+}
+
 export function EntityMatrix({
   entities,
   modelNames,
@@ -28,199 +23,264 @@ export function EntityMatrix({
   entities: EntityRow[];
   modelNames: string[];
 }) {
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [expanded, setExpanded] = useState<ExpandedState>(true);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
-  const columns = useMemo<ColumnDef<EntityRow, unknown>[]>(() => {
-    const helper = createColumnHelper<EntityRow>();
+  // Filter out models with zero results across all entities
+  const { active: activeModels, hidden: hiddenModels } = useMemo(() => {
+    const active: string[] = [];
+    const hidden: string[] = [];
+    for (const name of modelNames) {
+      const hasAny = entities.some((e) => e.models[name]);
+      if (hasAny) active.push(name);
+      else hidden.push(name);
+    }
+    return { active, hidden };
+  }, [entities, modelNames]);
 
-    const base: ColumnDef<EntityRow, unknown>[] = [
-      helper.accessor("text", {
-        header: "Entity",
-        cell: (info) => (
-          <span className="text-zinc-200 max-w-[200px] truncate block">{info.getValue()}</span>
-        ),
-        enableGrouping: false,
-        meta: { tooltip: METRIC_TOOLTIPS.entity_text, sticky: true },
-      }) as ColumnDef<EntityRow, unknown>,
-      helper.accessor("domain", {
-        header: "Domain",
-        cell: (info) => <DomainBadge domain={info.getValue() || "unknown"} />,
-        sortingFn: (rowA, rowB) => {
-          const a = DOMAIN_ORDER[rowA.original.domain || "unknown"] ?? 99;
-          const b = DOMAIN_ORDER[rowB.original.domain || "unknown"] ?? 99;
-          return a - b;
-        },
-        meta: { tooltip: METRIC_TOOLTIPS.entity_domain },
-      }) as ColumnDef<EntityRow, unknown>,
-      helper.accessor("consensus_type", {
-        header: "Type",
-        cell: (info) => <TypeBadge type={info.getValue()} />,
-        meta: { tooltip: METRIC_TOOLTIPS.entity_type },
-        enableGrouping: false,
-      }) as ColumnDef<EntityRow, unknown>,
-      helper.accessor("model_count", {
-        header: "#",
-        cell: (info) => <span className="text-zinc-400">{info.getValue()}</span>,
-        meta: { tooltip: METRIC_TOOLTIPS.entity_model_count },
-        enableGrouping: false,
-      }) as ColumnDef<EntityRow, unknown>,
-    ];
-
-    const modelCols = modelNames.map(
-      (name) =>
-        helper.display({
-          id: `model_${name}`,
-          header: () => (
-            <span className="writing-mode-vertical text-[10px]">
-              {name.replace(/-/g, "\u200b-")}
-            </span>
-          ),
-          cell: ({ row }) => {
-            const entity = row.original;
-            const info = entity.models[name];
-            if (!info) {
-              return <span className="text-zinc-700">·</span>;
-            }
-            const isConsensus = info.type === entity.consensus_type;
-            return (
-              <span
-                className={isConsensus ? "text-emerald-400" : "text-amber-400"}
-                title={`${info.type} (${(info.confidence * 100).toFixed(0)}%)`}
-              >
-                {isConsensus ? "✓" : info.type.slice(0, 3)}
-              </span>
-            );
-          },
-          enableSorting: false,
-        }) as ColumnDef<EntityRow, unknown>,
+  // Group by domain
+  const groups = useMemo(() => {
+    const map: Record<string, EntityRow[]> = {};
+    for (const e of entities) {
+      const d = e.domain || "unknown";
+      (map[d] ??= []).push(e);
+    }
+    return Object.entries(map).sort(
+      (a, b) => (DOMAIN_ORDER[a[0]] ?? 99) - (DOMAIN_ORDER[b[0]] ?? 99),
     );
+  }, [entities]);
 
-    return [...base, ...modelCols];
-  }, [modelNames]);
+  // Aggregates per group
+  const aggs = useMemo(() => {
+    const result: Record<string, GroupAgg> = {};
+    for (const [domain, rows] of groups) {
+      const typeCounts: Record<string, number> = {};
+      let totalMC = 0;
+      for (const r of rows) {
+        typeCounts[r.consensus_type] = (typeCounts[r.consensus_type] || 0) + 1;
+        totalMC += r.model_count;
+      }
+      const mc: Record<string, number> = {};
+      for (const name of activeModels) {
+        mc[name] = rows.filter((r) => r.models[name]).length;
+      }
+      result[domain] = {
+        count: rows.length,
+        avgModelCount: totalMC / rows.length,
+        topTypes: Object.entries(typeCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3),
+        modelCoverage: mc,
+      };
+    }
+    return result;
+  }, [groups, activeModels]);
 
-  const table = useReactTable({
-    data: entities,
-    columns,
-    state: {
-      sorting,
-      grouping: ["domain"],
-      expanded,
-    },
-    onSortingChange: setSorting,
-    onExpandedChange: setExpanded,
-    getGroupedRowModel: getGroupedRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-  });
+  // Sort rows within expanded groups
+  const sortedGroup = (rows: EntityRow[]) => {
+    if (!sortCol) return rows;
+    const sorted = [...rows];
+    sorted.sort((a, b) => {
+      let cmp = 0;
+      if (sortCol === "text") cmp = a.text.localeCompare(b.text);
+      else if (sortCol === "consensus_type") cmp = a.consensus_type.localeCompare(b.consensus_type);
+      else if (sortCol === "model_count") cmp = a.model_count - b.model_count;
+      return sortDir === "desc" ? -cmp : cmp;
+    });
+    return sorted;
+  };
 
-  const [showAll, setShowAll] = useState(false);
-  const allRows = table.getRowModel().rows;
-  const visibleRows = showAll ? allRows : allRows.slice(0, 50);
+  const toggleSort = (col: string) => {
+    if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  };
+
+  const toggleGroup = (domain: string) =>
+    setExpandedGroups((prev) => ({ ...prev, [domain]: !prev[domain] }));
+
+  const allExpanded = groups.every(([d]) => expandedGroups[d]);
+  const toggleAll = () => {
+    const next: Record<string, boolean> = {};
+    for (const [d] of groups) next[d] = !allExpanded;
+    setExpandedGroups(next);
+  };
+
+  const sortIcon = (col: string) => (sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "");
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs font-mono">
-        <thead>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr key={headerGroup.id} className="text-zinc-500 border-b border-white/5">
-              {headerGroup.headers.map((header) => {
-                if (header.isPlaceholder) return <th key={header.id} />;
-                const meta = header.column.columnDef.meta as
-                  | { tooltip?: string; sticky?: boolean }
-                  | undefined;
-                const tooltip = meta?.tooltip;
-                const sticky = meta?.sticky;
-                const label = flexRender(header.column.columnDef.header, header.getContext());
-
-                const stickyClass = sticky ? "sticky left-0 bg-surface-0 z-10" : "";
-
-                if (header.column.getIsGrouped()) {
-                  return (
-                    <th key={header.id} className={`text-left py-2 px-1 ${stickyClass}`}>
-                      {tooltip ? <MetricLabel label={String(label)} tooltip={tooltip} /> : label}
-                    </th>
-                  );
-                }
-
-                if (!header.column.getCanSort()) {
-                  return (
-                    <th key={header.id} className="text-center py-2 px-1 min-w-[60px]">
-                      {label}
-                    </th>
-                  );
-                }
-
-                return (
-                  <SortableHeader
-                    key={header.id}
-                    column={header.column}
-                    className={`py-2 px-1 ${header.column.id === "text" ? `text-left ${stickyClass}` : "text-center"}`}
-                  >
-                    {tooltip ? <MetricLabel label={String(label)} tooltip={tooltip} /> : label}
-                  </SortableHeader>
-                );
-              })}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {visibleRows.map((row) => {
-            if (row.getIsGrouped()) {
-              return (
-                <tr
-                  key={row.id}
-                  className="bg-white/[0.03] border-b border-white/5 cursor-pointer"
-                  onClick={row.getToggleExpandedHandler()}
-                >
-                  <td colSpan={columns.length} className="py-2 px-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-zinc-500 text-[10px]">
-                        {row.getIsExpanded() ? "▼" : "▶"}
-                      </span>
-                      <DomainBadge domain={(row.groupingValue as string) || "unknown"} />
-                      <span className="text-zinc-500 text-[10px]">
-                        ({row.subRows.length} entit{row.subRows.length !== 1 ? "ies" : "y"})
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              );
-            }
-
-            return (
-              <tr key={row.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                {row.getVisibleCells().map((cell) => {
-                  if (cell.getIsGrouped() || cell.getIsPlaceholder()) return null;
-                  const meta = cell.column.columnDef.meta as { sticky?: boolean } | undefined;
-                  const sticky = meta?.sticky;
-                  const stickyClass = sticky ? "sticky left-0 bg-surface-0" : "";
-
-                  return (
-                    <td
-                      key={cell.id}
-                      className={`py-1.5 px-1 ${cell.column.id === "text" ? `text-left px-2 ${stickyClass}` : "text-center"}`}
-                    >
-                      {cell.getIsAggregated()
-                        ? null
-                        : flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {!showAll && allRows.length > 50 && (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
         <button
-          onClick={() => setShowAll(true)}
-          className="mt-2 text-xs text-cyan-400 hover:text-cyan-300 font-mono"
+          onClick={toggleAll}
+          className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono"
         >
-          Show all {allRows.length} rows ({allRows.length - 50} hidden)
+          {allExpanded ? "Collapse All" : "Expand All"}
         </button>
+        <span className="text-[10px] text-zinc-600">{entities.length} entities total</span>
+      </div>
+      <div className="overflow-auto max-h-[600px]">
+        <table className="w-full text-xs font-mono border-collapse">
+          <thead className="sticky top-0 bg-surface-0 z-10">
+            <tr className="text-zinc-500 border-b border-white/5">
+              <th className="text-left py-2 px-1 w-8" />
+              <th
+                className="text-left py-2 px-2 cursor-pointer select-none"
+                onClick={() => toggleSort("text")}
+              >
+                <MetricLabel label="Entity" tooltip={METRIC_TOOLTIPS.entity_text} />
+                {sortIcon("text")}
+              </th>
+              <th
+                className="text-left py-2 px-1 cursor-pointer select-none"
+                onClick={() => toggleSort("consensus_type")}
+              >
+                <MetricLabel label="Type" tooltip={METRIC_TOOLTIPS.entity_type} />
+                {sortIcon("consensus_type")}
+              </th>
+              <th
+                className="text-center py-2 px-1 cursor-pointer select-none"
+                onClick={() => toggleSort("model_count")}
+              >
+                <MetricLabel label="#" tooltip={METRIC_TOOLTIPS.entity_model_count} />
+                {sortIcon("model_count")}
+              </th>
+              {activeModels.map((name) => (
+                <th key={name} className="text-center py-2 px-1 min-w-[50px]">
+                  <span className="writing-mode-vertical text-[10px]">
+                    {name.replace(/-/g, "\u200b-")}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map(([domain, rows]) => {
+              const agg = aggs[domain]!;
+              const isOpen = !!expandedGroups[domain];
+              return (
+                <GroupRows
+                  key={domain}
+                  domain={domain}
+                  rows={rows}
+                  agg={agg}
+                  isOpen={isOpen}
+                  modelNames={activeModels}
+                  onToggle={() => toggleGroup(domain)}
+                  sortedRows={isOpen ? sortedGroup(rows) : []}
+                />
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {hiddenModels.length > 0 && (
+        <p className="text-[10px] text-zinc-600 mt-1">
+          Hidden (no entities extracted): {hiddenModels.join(", ")}
+        </p>
       )}
     </div>
+  );
+}
+
+// Split into a separate component so React can bail out of rendering closed groups
+function GroupRows({
+  domain,
+  rows: _rows,
+  agg,
+  isOpen,
+  modelNames,
+  onToggle,
+  sortedRows,
+}: {
+  domain: string;
+  rows: EntityRow[];
+  agg: GroupAgg;
+  isOpen: boolean;
+  modelNames: string[];
+  onToggle: () => void;
+  sortedRows: EntityRow[];
+}) {
+  return (
+    <>
+      {/* Group header */}
+      <tr className="bg-white/[0.03] border-b border-white/5 cursor-pointer" onClick={onToggle}>
+        <td className="py-2 px-2">
+          <span className="text-zinc-500 text-[10px]">{isOpen ? "▼" : "▶"}</span>
+        </td>
+        <td className="py-2 px-2">
+          <div className="flex items-center gap-2">
+            <DomainBadge domain={domain} />
+            <span className="text-zinc-400 text-[10px]">
+              {agg.count} entit{agg.count !== 1 ? "ies" : "y"}
+            </span>
+          </div>
+        </td>
+        <td className="py-1.5 px-1 text-center">
+          <div className="flex flex-wrap gap-0.5 justify-center">
+            {agg.topTypes.map(([t, n]) => (
+              <span key={t} className="text-[9px] text-zinc-500">
+                {t}:{n}
+              </span>
+            ))}
+          </div>
+        </td>
+        <td className="py-1.5 px-1 text-center">
+          <span className="text-zinc-500 text-[9px]">avg {agg.avgModelCount.toFixed(1)}</span>
+        </td>
+        {modelNames.map((name) => {
+          const found = agg.modelCoverage[name] || 0;
+          const pct = agg.count > 0 ? Math.round((found / agg.count) * 100) : 0;
+          return (
+            <td key={name} className="py-1.5 px-1 text-center">
+              <span
+                className={`text-[9px] ${pct >= 80 ? "text-emerald-500" : pct >= 50 ? "text-amber-500" : "text-zinc-600"}`}
+              >
+                {found}/{agg.count}
+              </span>
+            </td>
+          );
+        })}
+      </tr>
+
+      {/* Expanded entity rows */}
+      {isOpen &&
+        sortedRows.map((entity) => (
+          <tr key={entity.text} className="border-b border-white/5 hover:bg-white/[0.02]">
+            <td />
+            <td className="py-1.5 px-2 text-left">
+              <span className="text-zinc-200 max-w-[200px] truncate block">{entity.text}</span>
+            </td>
+            <td className="py-1.5 px-1 text-center">
+              <TypeBadge type={entity.consensus_type} />
+            </td>
+            <td className="py-1.5 px-1 text-center text-zinc-400">{entity.model_count}</td>
+            {modelNames.map((name) => {
+              const info = entity.models[name];
+              if (!info) {
+                return (
+                  <td key={name} className="py-1.5 px-1 text-center text-zinc-700">
+                    ·
+                  </td>
+                );
+              }
+              const isConsensus = info.type === entity.consensus_type;
+              return (
+                <td key={name} className="py-1.5 px-1 text-center">
+                  <span
+                    className={isConsensus ? "text-emerald-400" : "text-amber-400"}
+                    title={`${info.type} (${(info.confidence * 100).toFixed(0)}%)`}
+                  >
+                    {isConsensus ? "✓" : info.type.slice(0, 3)}
+                  </span>
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+    </>
   );
 }

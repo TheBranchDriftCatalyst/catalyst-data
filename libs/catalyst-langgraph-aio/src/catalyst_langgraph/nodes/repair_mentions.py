@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_langgraph.clients.llm import LLMClient
 from catalyst_langgraph.nodes._audit import make_audit_event
+from catalyst_langgraph.nodes._spans import correct_candidate_spans
 from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
 
@@ -92,6 +93,7 @@ class RepairMentions:
             )
 
             repaired = [m.model_dump() for m in result.mentions]
+            repaired = correct_candidate_spans(repaired, raw_text)
 
             elapsed = time.perf_counter() - t0
             logger.info(

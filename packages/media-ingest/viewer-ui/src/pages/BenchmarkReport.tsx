@@ -11,6 +11,7 @@ import { ScoresTable } from "@/components/benchmark/ScoresTable";
 import { EntityMatrix } from "@/components/benchmark/EntityMatrix";
 import { PropositionMatrix } from "@/components/benchmark/PropositionMatrix";
 import { PipelineTable } from "@/components/benchmark/PipelineTable";
+import { AuditViewer } from "@/components/benchmark/AuditViewer";
 
 // ── Scores Tab Content ────────────────────────────────────────────────
 function ScoresTab({ report }: { report: BenchmarkReportType }) {
@@ -124,7 +125,7 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
       </div>
 
       {/* Efficiency metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <ScoreBarChart
           models={report.models}
           metricKey="quality_speed_ratio"
@@ -132,13 +133,6 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
           isPercentage={false}
           format={(v) => v.toFixed(3)}
           tooltip={METRIC_TOOLTIPS.quality_speed_ratio}
-        />
-        <ScoreBarChart
-          models={report.models}
-          metricKey="hallucination_rate"
-          label="Hallucination Rate (lower is better)"
-          invertSort={true}
-          tooltip={METRIC_TOOLTIPS.hallucination_rate}
         />
         <ScoreBarChart
           models={report.models}
@@ -150,6 +144,21 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
           tooltip={METRIC_TOOLTIPS.per_chunk_latency}
         />
       </div>
+      {scored.some((m) => m.scores!.hallucination_rate < 1.0) && (
+        <ScoreBarChart
+          models={report.models}
+          metricKey="hallucination_rate"
+          label="Hallucination Rate (lower is better)"
+          invertSort={true}
+          tooltip={METRIC_TOOLTIPS.hallucination_rate}
+        />
+      )}
+      {scored.every((m) => m.scores!.hallucination_rate >= 1.0) && (
+        <p className="text-[10px] text-zinc-600">
+          Hallucination rate hidden — source_text not provided to scoring (span_accuracy = 0 for all
+          models).
+        </p>
+      )}
 
       {/* Full precision/recall table */}
       <div>
@@ -162,16 +171,55 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
   );
 }
 
+// ── Report sources ────────────────────────────────────────────────────
+
+interface ReportSource {
+  label: string;
+  url: string;
+}
+
+const REPORT_SOURCES: ReportSource[] = [
+  { label: "Latest", url: "/viewer/benchmark-report.json" },
+  { label: "v2 (exgraph)", url: "/viewer/compare-v2/media-ingest/benchmark-report.json" },
+  { label: "v1 (legacy)", url: "/viewer/compare-v1/media-ingest/benchmark-report.json" },
+];
+
 // ── Main Page ──────────────────────────────────────────────────────────
 export default function BenchmarkReport() {
   const [report, setReport] = useState<BenchmarkReportType | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reportSource, setReportSource] = useState(REPORT_SOURCES[0]!.url);
+  const [availableSources, setAvailableSources] = useState<ReportSource[]>([]);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "scores" | "entities" | "propositions" | "pipeline"
+    "overview" | "scores" | "entities" | "propositions" | "pipeline" | "audit"
   >("overview");
 
+  // Probe which report sources exist
   useEffect(() => {
-    fetch("/viewer/benchmark-report.json")
+    Promise.all(
+      REPORT_SOURCES.map(async (src) => {
+        try {
+          const res = await fetch(src.url, { method: "HEAD" });
+          return res.ok ? src : null;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((results) => {
+      const available = results.filter((r): r is ReportSource => r !== null);
+      setAvailableSources(available);
+      // Default to first available
+      if (available.length > 0 && !available.find((s) => s.url === reportSource)) {
+        setReportSource(available[0]!.url);
+      }
+    });
+  }, []);
+
+  // Load the selected report
+  useEffect(() => {
+    setReport(null);
+    setError(null);
+    fetch(reportSource)
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
         return r.json();
@@ -180,7 +228,7 @@ export default function BenchmarkReport() {
       .catch((e) =>
         setError(`Could not load benchmark report: ${e.message}. Run the benchmark first.`),
       );
-  }, []);
+  }, [reportSource]);
 
   if (error) {
     return (
@@ -217,18 +265,34 @@ export default function BenchmarkReport() {
       label: `Propositions (${report.proposition_count})`,
     },
     { key: "pipeline" as const, label: "Pipeline" },
+    { key: "audit" as const, label: "Audit" },
   ];
 
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-[1400px] mx-auto p-6 space-y-6">
         {/* Header */}
-        <div>
-          <h1 className="text-xl font-mono text-zinc-100">Extraction Benchmark Report</h1>
-          <p className="text-xs text-zinc-500 font-mono mt-1">
-            Generated {new Date(report.generated_at).toLocaleString()} — {report.model_count}{" "}
-            models, {report.entity_count} unique entities, {report.proposition_count} propositions
-          </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-xl font-mono text-zinc-100">Extraction Benchmark Report</h1>
+            <p className="text-xs text-zinc-500 font-mono mt-1">
+              Generated {new Date(report.generated_at).toLocaleString()} — {report.model_count}{" "}
+              models, {report.entity_count} unique entities, {report.proposition_count} propositions
+            </p>
+          </div>
+          {availableSources.length > 1 && (
+            <select
+              value={reportSource}
+              onChange={(e) => setReportSource(e.target.value)}
+              className="bg-surface-1 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200"
+            >
+              {availableSources.map((src) => (
+                <option key={src.url} value={src.url}>
+                  {src.label}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Stat Cards */}
@@ -342,6 +406,8 @@ export default function BenchmarkReport() {
               <PipelineTable models={report.models} />
             </div>
           )}
+
+          {activeTab === "audit" && <AuditViewer modelNames={report.model_names} />}
         </div>
       </div>
     </div>

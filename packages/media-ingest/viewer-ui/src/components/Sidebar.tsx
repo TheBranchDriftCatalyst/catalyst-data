@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   Button,
@@ -46,6 +46,9 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [sortKey, setSortKey] = useState<SortKey>("title");
 
+  const location = useLocation();
+  const isBenchmarks = location.pathname === "/benchmarks";
+
   const {
     data: documents = [],
     isLoading,
@@ -54,6 +57,7 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
     queryKey: ["documents"],
     queryFn: fetchDocuments,
     staleTime: 30_000,
+    enabled: !isBenchmarks, // don't fetch when viewing benchmarks (no API server needed)
   });
 
   const sources = useMemo(() => {

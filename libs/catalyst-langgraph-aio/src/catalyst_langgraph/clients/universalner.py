@@ -47,7 +47,14 @@ MENTION_TYPE_TO_QUERY = {
 
 
 def _compute_spans(text: str, entity_text: str) -> list[tuple[int, int]]:
-    """Find all occurrences of entity_text in text."""
+    """Find all occurrences of entity_text in text.
+
+    NOTE: Duplicate of catalyst_exgraph.nodes.spans.find_all_spans.
+    Cannot import directly because catalyst-langgraph-aio does not depend on
+    catalyst-exgraph (the dependency runs the other direction).  If the
+    dependency is ever added, replace this with:
+        from catalyst_exgraph.nodes.spans import find_all_spans as _compute_spans
+    """
     spans = []
     start = 0
     while True:

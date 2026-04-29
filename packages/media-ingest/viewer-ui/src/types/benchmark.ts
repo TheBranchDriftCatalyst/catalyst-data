@@ -87,6 +87,27 @@ export interface EntityRow {
   >;
 }
 
+export interface AuditEvent {
+  timestamp: string;
+  node_name: string;
+  status: string;
+  duration_s: number;
+  details: {
+    candidate_count?: number;
+    verdict?: string;
+    errors?: Array<{ code: string; message: string; path?: string }>;
+  };
+}
+
+export interface AuditLog {
+  model: string;
+  name: string;
+  tags: string[];
+  stats: ModelStats & { pipeline: Record<string, PipelineStage> };
+  audit_events: AuditEvent[];
+  event_count: number;
+}
+
 export interface PropositionRow {
   subject: string;
   predicate: string;

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from catalyst_exgraph.nodes.spans import (
     compute_correct_spans,
+    correct_candidate_spans,
     find_all_spans,
     find_best_span,
 )
@@ -136,3 +137,102 @@ def test_span_start_end_correctly_indexes_source_text():
     for span in result["Bob"]:
         assert text[span["start"] : span["end"]] == "Bob"
     assert len(result["Bob"]) == 3
+
+
+# ── correct_candidate_spans ───────────────────────────────────────────────
+
+
+def test_correct_candidate_spans_fixes_wrong_offsets():
+    """LLM guesses (0, 5) but 'Alice' is actually at (20, 25)."""
+    text = "The quick brown fox Alice went home."
+    idx = text.index("Alice")  # 20
+    candidates = [
+        {"text": "Alice", "span_start": 0, "span_end": 5, "mention_type": "PERSON"},
+    ]
+    result = correct_candidate_spans(candidates, text)
+    assert result[0]["span_start"] == idx
+    assert result[0]["span_end"] == idx + 5
+    assert text[result[0]["span_start"] : result[0]["span_end"]] == "Alice"
+
+
+def test_correct_candidate_spans_uses_proximity_hint():
+    """'Alice' at 10 and 200; LLM guessed 195; should pick 200."""
+    prefix = "1234567890Alice"  # Alice at 10
+    middle = "x" * (200 - len(prefix))
+    suffix = "Alice rest of text"
+    text = prefix + middle + suffix
+    # Verify our offsets
+    assert text[10:15] == "Alice"
+    assert text[200:205] == "Alice"
+
+    candidates = [
+        {"text": "Alice", "span_start": 195, "span_end": 200, "mention_type": "PERSON"},
+    ]
+    result = correct_candidate_spans(candidates, text)
+    assert result[0]["span_start"] == 200
+    assert result[0]["span_end"] == 205
+
+
+def test_correct_candidate_spans_leaves_not_found_unchanged():
+    """Text not in source; spans left as-is."""
+    text = "The quick brown fox."
+    candidates = [
+        {"text": "Zephyr", "span_start": 5, "span_end": 11, "mention_type": "PERSON"},
+    ]
+    result = correct_candidate_spans(candidates, text)
+    assert result[0]["span_start"] == 5
+    assert result[0]["span_end"] == 11
+
+
+def test_correct_candidate_spans_idempotent():
+    """Already-correct spans should remain unchanged."""
+    text = "Alice met Bob at the park."
+    alice_idx = text.index("Alice")
+    bob_idx = text.index("Bob")
+    candidates = [
+        {"text": "Alice", "span_start": alice_idx, "span_end": alice_idx + 5},
+        {"text": "Bob", "span_start": bob_idx, "span_end": bob_idx + 3},
+    ]
+    result = correct_candidate_spans(candidates, text)
+    assert result[0]["span_start"] == alice_idx
+    assert result[0]["span_end"] == alice_idx + 5
+    assert result[1]["span_start"] == bob_idx
+    assert result[1]["span_end"] == bob_idx + 3
+
+
+def test_correct_candidate_spans_case_insensitive():
+    """'the president' matches 'The President' via case-insensitive fallback."""
+    text = "The President spoke today."
+    candidates = [
+        {"text": "the president", "span_start": 0, "span_end": 13, "mention_type": "PERSON"},
+    ]
+    result = correct_candidate_spans(candidates, text)
+    assert result[0]["span_start"] == 0
+    assert result[0]["span_end"] == 13
+    # Text should be corrected to match original case in source
+    assert result[0]["text"] == "The President"
+
+
+def test_correct_candidate_spans_empty_list():
+    """Empty list returns empty."""
+    result = correct_candidate_spans([], "some text")
+    assert result == []
+
+
+def test_correct_candidate_spans_avoids_duplicates():
+    """Two candidates 'Alice'; one gets offset 10, other gets 200."""
+    prefix = "1234567890Alice"  # Alice at 10
+    middle = "x" * (200 - len(prefix))
+    suffix = "Alice rest of text"
+    text = prefix + middle + suffix
+
+    candidates = [
+        {"text": "Alice", "span_start": 8, "span_end": 13, "mention_type": "PERSON"},
+        {"text": "Alice", "span_start": 198, "span_end": 203, "mention_type": "PERSON"},
+    ]
+    result = correct_candidate_spans(candidates, text)
+
+    spans = {(c["span_start"], c["span_end"]) for c in result}
+    assert (10, 15) in spans
+    assert (200, 205) in spans
+    assert len(spans) == 2  # no duplicates

@@ -188,7 +188,7 @@ def _build_graph_v2():
     is_encoder = any(x in _llm_model_name.lower() for x in ("gliner", "nuextract", "universalner", "uniner"))
 
     ner_config = ner_stage_config(model=_llm_model_name, max_retries=0 if is_encoder else 3)
-    spo_config = spo_stage_config(model=_llm_model_name, max_retries=3)
+    spo_config = spo_stage_config(model=_llm_model_name, max_retries=3, skip=is_encoder)
 
     # Set prompt_dir if PROMPT_REGISTRY_DIR is set
     prompt_dir = os.environ.get("PROMPT_REGISTRY_DIR")

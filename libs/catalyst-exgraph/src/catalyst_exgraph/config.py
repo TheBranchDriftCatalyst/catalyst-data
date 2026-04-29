@@ -123,6 +123,7 @@ def ner_stage_config(
 def spo_stage_config(
     model: str | None = None,
     max_retries: int = 3,
+    skip: bool = False,
 ) -> StageConfig:
     """Create a standard SPO (proposition extraction) stage config."""
     from catalyst_contracts.models.extraction_output import PropositionExtractionResult
@@ -135,6 +136,7 @@ def spo_stage_config(
         repair_prompt_id="proposition_repair",
         max_retries=max_retries,
         model_override=model,
+        skip=skip,
     )
 
 

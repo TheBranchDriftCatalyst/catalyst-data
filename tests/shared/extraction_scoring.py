@@ -49,6 +49,7 @@ def score_mentions(
     predicted: list[dict],
     ground_truth: list[dict],
     source_text: str | None = None,
+    chunk_texts: dict[str, str] | None = None,
 ) -> dict:
     """Compare predicted mentions against ground truth.
 
@@ -92,13 +93,20 @@ def score_mentions(
     # Span accuracy: for predicted mentions with spans, check source_text alignment
     span_correct = 0
     span_total = 0
-    if source_text:
-        for m in predicted:
-            s, e = m.get("span_start"), m.get("span_end")
-            if s is not None and e is not None and 0 <= s < e <= len(source_text):
-                span_total += 1
-                if source_text[s:e] == m.get("text", ""):
-                    span_correct += 1
+    for m in predicted:
+        s, e = m.get("span_start"), m.get("span_end")
+        if s is None or e is None:
+            continue
+        # Resolve source text: per-chunk dict takes priority, then single source_text
+        src = None
+        if chunk_texts:
+            src = chunk_texts.get(m.get("chunk_id", ""))
+        elif source_text:
+            src = source_text
+        if src and 0 <= s < e <= len(src):
+            span_total += 1
+            if src[s:e] == m.get("text", ""):
+                span_correct += 1
     span_accuracy = span_correct / span_total if span_total else 0.0
 
     # Detail: what was missed and what was extra
@@ -287,200 +295,81 @@ def print_comparison_table(results: list[dict]) -> None:
 
 
 def print_benchmark_report(results: list[dict]) -> None:
-    """Print a comprehensive benchmark report with entity matrix, SPO matrix, and stats.
+    """Print a concise benchmark summary to the terminal.
 
-    Args:
-        results: list of dicts with keys: model, fixture, tags (optional)
+    Full entity/SPO matrices and detailed charts are in the viewer SPA —
+    the CLI output focuses on the stats table, pipeline health, and scores.
     """
     if not results:
         return
 
-    # ── Classify models by type ──────────────────────────────────────────
-    encoders = []
-    specialists = []
-    llms = []
+    # ── Classify models ─────────────────────────────────────────────────
+    groups: dict[str, list[dict]] = {"encoder": [], "specialist": [], "llm": []}
     for r in results:
         tags = r.get("tags", [])
         if "encoder" in tags:
-            encoders.append(r)
+            groups["encoder"].append(r)
         elif "extraction-specialist" in tags:
-            specialists.append(r)
+            groups["specialist"].append(r)
         else:
-            llms.append(r)
+            groups["llm"].append(r)
 
-    # ── Collect all unique entities and SPOs across all models ────────────
-    all_entities: dict[str, set[str]] = {}  # entity_text -> set of models that found it
-    all_entity_types: dict[str, dict[str, str]] = {}  # entity_text -> {model: type}
-    all_spos: dict[str, set[str]] = {}  # "subj -> pred -> obj" -> set of models
-
-    model_names = []
+    # ── Quick counts ────────────────────────────────────────────────────
+    total_mentions = sum(r["fixture"].get("stats", {}).get("mention_count", 0) for r in results)
+    total_asserts = sum(r["fixture"].get("stats", {}).get("assertion_count", 0) for r in results)
+    unique_entities: set[str] = set()
     for r in results:
-        name = r["model"]
-        model_names.append(name)
-        ext = r["fixture"]
+        for m in r["fixture"].get("mentions", []):
+            t = m.get("text", "").strip()
+            if t:
+                unique_entities.add(t.lower())
 
-        for m in ext.get("mentions", []):
-            text = m.get("text", "").strip()
-            if not text:
-                continue
-            all_entities.setdefault(text, set()).add(name)
-            all_entity_types.setdefault(text, {})[name] = m.get("mention_type", "?")
-
-        for a in ext.get("assertions", []):
-            subj = a.get("subject_text", a.get("subject", "")).strip()
-            pred = a.get("predicate", "").strip()
-            obj = a.get("object_text", a.get("object", "")).strip()
-            if subj and pred and obj:
-                spo_key = f"{subj} -> {pred} -> {obj}"
-                all_spos.setdefault(spo_key, set()).add(name)
-
-    # ── NER Entity Matrix ────────────────────────────────────────────────
-    # Sort entities by how many models found them (consensus first)
-    sorted_entities = sorted(all_entities.items(), key=lambda x: -len(x[1]))
-
-    # Abbreviate model names for column headers
-    short_names = []
-    for n in model_names:
-        short = n.replace("-", "").replace(".", "")[:8]
-        short_names.append(short)
-
-    print(f"\n{'=' * 100}")
-    print("  NER Entity Matrix — which models found which entities")
-    print(f"{'=' * 100}")
-    print(f"\n  {'Entity':<30} {'Type':<8} {'#':>3}  ", end="")
-    for sn in short_names:
-        print(f"{sn:>9}", end="")
-    print()
-    print(f"  {'-' * (45 + 9 * len(short_names))}")
-
-    for entity_text, found_by in sorted_entities:
-        # Use the most common type across models
-        types = all_entity_types.get(entity_text, {})
-        type_counts: dict[str, int] = {}
-        for t in types.values():
-            type_counts[t] = type_counts.get(t, 0) + 1
-        best_type = max(type_counts, key=type_counts.get) if type_counts else "?"
-
-        display_text = entity_text[:29]
-        print(f"  {display_text:<30} {best_type:<8} {len(found_by):>3}  ", end="")
-        for name in model_names:
-            if name in found_by:
-                t = types.get(name, "?")
-                marker = t[:3] if t != best_type else "  ✓"
-                print(f"{marker:>9}", end="")
-            else:
-                print(f"{'·':>9}", end="")
-        print()
-
-    # ── SPO Proposition Matrix ───────────────────────────────────────────
-    if all_spos:
-        sorted_spos = sorted(all_spos.items(), key=lambda x: -len(x[1]))
-
-        print(f"\n{'=' * 100}")
-        print("  SPO Proposition Matrix — which models found which relationships")
-        print(f"{'=' * 100}")
-        print(f"\n  {'Subject -> Predicate -> Object':<55} {'#':>3}  ", end="")
-        for sn in short_names:
-            print(f"{sn:>9}", end="")
-        print()
-        print(f"  {'-' * (60 + 9 * len(short_names))}")
-
-        for spo_key, found_by in sorted_spos[:30]:  # cap at 30 rows
-            display = spo_key[:54]
-            print(f"  {display:<55} {len(found_by):>3}  ", end="")
-            for name in model_names:
-                marker = "  ✓" if name in found_by else "  ·"
-                print(f"{marker:>9}", end="")
-            print()
-
-    # ── Stats Table (grouped by type) ────────────────────────────────────
-    print(f"\n{'=' * 100}")
-    print("  Performance Stats (grouped by extractor type)")
-    print(f"{'=' * 100}")
     print(
-        f"\n  {'Model':<22} {'Type':<12} {'Mentions':>8} {'Asserts':>8} "
-        f"{'Time(s)':>8} {'Tok/s':>8} {'Retries':>8} {'Errors':>7}"
+        f"\n  {len(results)} models | {len(unique_entities)} unique entities | {total_mentions} mentions | {total_asserts} assertions"
     )
-    print(f"  {'-' * 88}")
 
-    for group_name, group in [("ENCODERS", encoders), ("SPECIALISTS", specialists), ("LLMs", llms)]:
-        if not group:
-            continue
-        for r in sorted(group, key=lambda x: x["fixture"].get("stats", {}).get("duration_s", 999)):
+    # ── Stats Table ─────────────────────────────────────────────────────
+    print(f"\n  {'Model':<22} {'Type':<10} {'NER':>5} {'SPO':>5} {'Time':>7} {'Tok/s':>6} {'Retry':>5} {'Err':>4}")
+    print(f"  {'-' * 70}")
+
+    group_labels = {"encoder": "ENC", "specialist": "SPEC", "llm": "LLM"}
+    for gkey in ["encoder", "specialist", "llm"]:
+        for r in sorted(groups[gkey], key=lambda x: x["fixture"].get("stats", {}).get("duration_s", 999)):
             s = r["fixture"].get("stats", {})
             retries = s.get("mention_retries", 0) + s.get("proposition_retries", 0)
             print(
-                f"  {r['model']:<22} {group_name:<12} {s.get('mention_count', 0):>8} "
-                f"{s.get('assertion_count', 0):>8} {s.get('duration_s', 0):>8.1f} "
-                f"{s.get('tokens_per_sec', 0):>8.1f} {retries:>8} {s.get('errors', 0):>7}"
+                f"  {r['model']:<22} {group_labels[gkey]:<10} "
+                f"{s.get('mention_count', 0):>5} {s.get('assertion_count', 0):>5} "
+                f"{s.get('duration_s', 0):>6.1f}s {s.get('tokens_per_sec', 0):>6.0f} "
+                f"{retries:>5} {s.get('errors', 0):>4}"
             )
-        print(f"  {'-' * 88}")
 
-    # ── Pipeline Breakdown (MCP validation + LangGraph repair) ─────────
-    has_pipeline = any(r["fixture"].get("stats", {}).get("pipeline") for r in results)
-    if has_pipeline:
-        print(f"\n{'=' * 100}")
-        print("  LangGraph Pipeline Breakdown (MCP validation gates + repair flows)")
-        print(f"{'=' * 100}")
+    # ── Pipeline error summary (one line) ───────────────────────────────
+    all_error_codes: dict[str, int] = {}
+    for r in results:
+        pipeline = r["fixture"].get("stats", {}).get("pipeline", {})
+        for stage_info in pipeline.values():
+            for code, count in (stage_info.get("error_codes") or {}).items():
+                all_error_codes[code] = all_error_codes.get(code, 0) + count
+    if all_error_codes:
+        errs = ", ".join(f"{code}: {count}" for code, count in sorted(all_error_codes.items(), key=lambda x: -x[1]))
+        print(f"\n  MCP errors: {errs}")
 
-        stage_order = [
-            "extract_mentions",
-            "validate_mentions",
-            "repair_mentions",
-            "extract_propositions",
-            "validate_propositions",
-            "repair_propositions",
-            "persist_artifacts",
-            "failure_handler",
-        ]
-        stage_short = {
-            "extract_mentions": "ExtMen",
-            "validate_mentions": "ValMen",
-            "repair_mentions": "RepMen",
-            "extract_propositions": "ExtPrp",
-            "validate_propositions": "ValPrp",
-            "repair_propositions": "RepPrp",
-            "persist_artifacts": "Persist",
-            "failure_handler": "Failed",
-        }
+    # ── F1 scores (if ground truth available) ───────────────────────────
+    scored = [r for r in results if r.get("scores")]
+    if scored:
+        print(f"\n  {'Model':<22} {'Strict F1':>10} {'Relax F1':>10} {'SPO F1':>10} {'Span Acc':>10}")
+        print(f"  {'-' * 62}")
+        for r in sorted(scored, key=lambda x: -(x["scores"].get("mention_strict_f1", 0))):
+            sc = r["scores"]
+            span = sc.get("mention_span_accuracy", 0)
+            print(
+                f"  {r['model']:<22} "
+                f"{sc['mention_strict_f1'] * 100:>9.1f}% "
+                f"{sc['mention_relaxed_f1'] * 100:>9.1f}% "
+                f"{sc.get('proposition_relaxed_f1', 0) * 100:>9.1f}% "
+                f"{span * 100:>9.1f}%"
+            )
 
-        print(f"\n  {'Model':<22}", end="")
-        for stage in stage_order:
-            print(f" {stage_short.get(stage, stage[:7]):>8}", end="")
-        print()
-        print(f"  {'-' * (22 + 9 * len(stage_order))}")
-
-        for r in results:
-            pipeline = r["fixture"].get("stats", {}).get("pipeline", {})
-            if not pipeline:
-                continue
-            print(f"  {r['model']:<22}", end="")
-            for stage in stage_order:
-                info = pipeline.get(stage, {})
-                calls = info.get("calls", 0)
-                errs = info.get("error", 0) + info.get("failed", 0)
-                ambig = info.get("ambiguous", 0)
-                if calls == 0:
-                    cell = "—"
-                elif errs > 0:
-                    cell = f"{calls}({errs}e)"
-                elif ambig > 0:
-                    cell = f"{calls}({ambig}a)"
-                else:
-                    cell = str(calls)
-                print(f" {cell:>8}", end="")
-            print()
-
-        # MCP validation error codes
-        all_error_codes: dict[str, int] = {}
-        for r in results:
-            pipeline = r["fixture"].get("stats", {}).get("pipeline", {})
-            for stage_info in pipeline.values():
-                for code, count in stage_info.get("error_codes", {}).items():
-                    all_error_codes[code] = all_error_codes.get(code, 0) + count
-        if all_error_codes:
-            print("\n  MCP Validation Error Codes (across all models):")
-            for code, count in sorted(all_error_codes.items(), key=lambda x: -x[1]):
-                print(f"    {code}: {count}")
-
-    print(f"\n{'=' * 100}\n")
+    print("\n  Full report: open the benchmark viewer SPA for entity/SPO matrices and charts.")
+    print()

@@ -1,5 +1,4 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@thebranchdriftcatalyst/catalyst-ui";
-import type { Column } from "@tanstack/react-table";
 import type { ModelResult, ModelScores } from "@/types/benchmark";
 
 // ── Metric Tooltip Definitions ────────────────────────────────────────
@@ -201,31 +200,7 @@ export function StatCard({
   );
 }
 
-// ── Sortable Header for TanStack Table ────────────────────────────────
-
-export function SortableHeader<TData>({
-  column,
-  children,
-  className = "",
-}: {
-  column: Column<TData, unknown>;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <th
-      onClick={column.getToggleSortingHandler()}
-      className={`cursor-pointer select-none ${className}`}
-    >
-      <div className="flex items-center gap-1">
-        {children}
-        <span className="text-zinc-400">
-          {column.getIsSorted() === "asc" ? "↑" : column.getIsSorted() === "desc" ? "↓" : ""}
-        </span>
-      </div>
-    </th>
-  );
-}
+// SortableHeader removed — TanStack Table no longer used in benchmark components
 
 // ── Color-coded score cell ────────────────────────────────────────────
 

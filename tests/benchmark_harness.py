@@ -102,9 +102,14 @@ def _run_model(cfg: ModelConfig, timeout: int, save_audit: bool) -> dict | None:
         return None
 
 
-def _compute_scores(fixture: dict, gt_mentions: list, gt_propositions: list) -> dict:
+def _compute_scores(
+    fixture: dict,
+    gt_mentions: list,
+    gt_propositions: list,
+    chunk_texts: dict[str, str] | None = None,
+) -> dict:
     """Compute all metrics for one model against ground truth."""
-    m_scores = score_mentions(fixture.get("mentions", []), gt_mentions)
+    m_scores = score_mentions(fixture.get("mentions", []), gt_mentions, chunk_texts=chunk_texts)
     p_scores = score_propositions(fixture.get("assertions", []), gt_propositions)
     stats = fixture.get("stats", {})
 
@@ -136,6 +141,199 @@ def _compute_scores(fixture: dict, gt_mentions: list, gt_propositions: list) -> 
     }
 
 
+def _run_ensemble_gt():
+    """Generate ensemble ground truth from cached extraction fixtures."""
+    from tests.test_extraction_benchmark import generate_ensemble_ground_truth
+
+    print(f"\n{'=' * 70}")
+    print("  Ensemble Ground Truth Generation")
+    print(f"{'=' * 70}")
+
+    gt_path = FIXTURES / "ground_truth_media_ingest.json"
+    if gt_path.exists():
+        existing = json.loads(gt_path.read_text())
+        if existing.get("manually_reviewed"):
+            print("\n  Skipped: ground truth has been manually reviewed.")
+            print(f"{'=' * 70}")
+            return
+
+    ground_truth = generate_ensemble_ground_truth()
+    if ground_truth is None:
+        print("\n  Failed: not enough model fixtures for ensemble (need >= 2).")
+        print(f"{'=' * 70}")
+        return
+
+    FIXTURES.mkdir(exist_ok=True)
+    (FIXTURES / "ground_truth_media_ingest.json").write_text(json.dumps(ground_truth, indent=2, default=str))
+
+    config = ground_truth["ensemble_config"]
+    print("\n  Ensemble ground truth saved:")
+    print(f"    NER models ({len(config['ner_models'])}): {', '.join(config['ner_models'])}")
+    print(f"    SPO models ({len(config['spo_models'])}): {', '.join(config['spo_models'])}")
+    print(f"    Threshold: NER >= {config['ner_threshold']}, SPO >= {config['spo_threshold']}")
+    print(f"    Mentions: {ground_truth['total_mentions']} | Propositions: {ground_truth['total_propositions']}")
+    print(f"    File: {gt_path}")
+    print(f"{'=' * 70}")
+
+
+def _interactive_prompt() -> argparse.Namespace:
+    """Interactive mode — ask user what to run when no flags provided."""
+    current_pipeline = "exgraph v2" if os.environ.get("EXGRAPH_ENABLED") == "true" else "v1 (legacy)"
+
+    print(f"\n{'=' * 70}")
+    print("  Extraction Benchmark Harness — Interactive Mode")
+    print(f"  Current pipeline: {current_pipeline}")
+    print(f"{'=' * 70}\n")
+
+    options = [
+        ("full", "Full methodology (run models → ensemble GT → score → report)"),
+        ("regen", "Regenerate all extraction fixtures"),
+        ("ensemble-gt", "Generate ensemble ground truth only"),
+        ("audit-log", "Save detailed audit logs"),
+        ("local-only", "Skip cloud models (no API key needed)"),
+        ("exgraph", "Use exgraph v2 pipeline (instead of v1 legacy)"),
+        ("compare", "Compare v1 vs v2 (runs both, side-by-side report)"),
+    ]
+
+    for i, (_, desc) in enumerate(options, 1):
+        marker = " *" if (i == 6 and os.environ.get("EXGRAPH_ENABLED") == "true") else ""
+        print(f"  [{i}] {desc}{marker}")
+    print("  [Enter] Default run (use cached fixtures, score, report)")
+    print()
+
+    raw = input("  Select options (comma-separated, e.g. 1,4): ").strip()
+
+    args = argparse.Namespace(
+        regen=False,
+        audit_log=False,
+        timeout=300,
+        local_only=False,
+        generate_ground_truth=False,
+        ground_truth_model="gpt-4o",
+        ensemble_gt=False,
+        full=False,
+        compare=False,
+        exgraph=False,
+    )
+
+    if raw:
+        for choice in raw.split(","):
+            choice = choice.strip()
+            if choice == "1":
+                args.full = True
+                args.ensemble_gt = True
+            elif choice == "2":
+                args.regen = True
+            elif choice == "3":
+                args.ensemble_gt = True
+            elif choice == "4":
+                args.audit_log = True
+            elif choice == "5":
+                args.local_only = True
+            elif choice == "6":
+                os.environ["EXGRAPH_ENABLED"] = "true"
+            elif choice == "7":
+                args.compare = True
+
+    timeout_raw = input(f"  Timeout per model [{args.timeout}s]: ").strip()
+    if timeout_raw.isdigit():
+        args.timeout = int(timeout_raw)
+
+    print()
+    return args
+
+
+def _run_comparison(args):
+    """Run v1 and v2 pipelines and print side-by-side F1 comparison."""
+    import shutil
+
+    v1_dir = TEST_OUTPUT / "compare-v1"
+    v2_dir = TEST_OUTPUT / "compare-v2"
+
+    for version, output_dir, env_val in [("v1 (legacy)", v1_dir, "false"), ("v2 (exgraph)", v2_dir, "true")]:
+        print(f"\n{'=' * 70}")
+        print(f"  Running {version} pipeline...")
+        print(f"{'=' * 70}")
+
+        # Point fixtures to a version-specific directory
+        env = {
+            **os.environ,
+            "EXGRAPH_ENABLED": env_val,
+            "TEST_OUTPUT_ROOT": str(output_dir),
+        }
+
+        # Copy shared fixtures (chunks + ground truth) so both runs use the same baseline
+        dst_fixtures = output_dir / "media-ingest" / "fixtures"
+        dst_fixtures.mkdir(parents=True, exist_ok=True)
+        for shared_file in ["chunks.json", "ground_truth_media_ingest.json"]:
+            src = FIXTURES / shared_file
+            if src.exists():
+                shutil.copy2(src, dst_fixtures / shared_file)
+
+        subprocess.run(
+            [sys.executable, __file__, "--regen", "--timeout", str(args.timeout)]
+            + (["--local-only"] if args.local_only else [])
+            + (["--audit-log"] if args.audit_log else []),
+            env=env,
+            timeout=args.timeout * 20,
+        )
+
+    # Load both reports and compare
+    v1_report = v1_dir / "media-ingest" / "benchmark-report.json"
+    v2_report = v2_dir / "media-ingest" / "benchmark-report.json"
+
+    if not v1_report.exists() or not v2_report.exists():
+        print("\n  ERROR: one or both runs failed to produce a report")
+        return
+
+    v1 = json.loads(v1_report.read_text())
+    v2 = json.loads(v2_report.read_text())
+
+    v1_models = {m["name"]: m for m in v1["models"]}
+    v2_models = {m["name"]: m for m in v2["models"]}
+    all_names = sorted(set(v1_models) | set(v2_models))
+
+    print(f"\n{'=' * 90}")
+    print("  v1 vs v2 Pipeline Comparison")
+    print(f"{'=' * 90}")
+    print(
+        f"\n  {'Model':<22} {'v1 Strict F1':>14} {'v2 Strict F1':>14} {'Delta':>10} {'v1 SPAN_ERR':>12} {'v2 SPAN_ERR':>12}"
+    )
+    print(f"  {'-' * 84}")
+
+    for name in all_names:
+        m1 = v1_models.get(name)
+        m2 = v2_models.get(name)
+        f1_v1 = m1["scores"]["mention_strict_f1"] * 100 if m1 and m1.get("scores") else None
+        f1_v2 = m2["scores"]["mention_strict_f1"] * 100 if m2 and m2.get("scores") else None
+
+        # Count SPAN_MISMATCH from pipeline breakdown
+        def _span_errors(m):
+            if not m:
+                return "—"
+            pipeline = m.get("pipeline", {})
+            total = 0
+            for stage_info in pipeline.values():
+                for code, count in (stage_info.get("error_codes", {}) or {}).items():
+                    if "SPAN" in code:
+                        total += count
+            return str(total) if total else "0"
+
+        s1 = f"{f1_v1:.1f}%" if f1_v1 is not None else "—"
+        s2 = f"{f1_v2:.1f}%" if f1_v2 is not None else "—"
+        delta = ""
+        if f1_v1 is not None and f1_v2 is not None:
+            d = f1_v2 - f1_v1
+            delta = f"{'+' if d >= 0 else ''}{d:.1f}%"
+
+        print(f"  {name:<22} {s1:>14} {s2:>14} {delta:>10} {_span_errors(m1):>12} {_span_errors(m2):>12}")
+
+    print("\n  Reports saved:")
+    print(f"    v1: {v1_report}")
+    print(f"    v2: {v2_report}")
+    print(f"{'=' * 90}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Unified extraction benchmark harness")
     parser.add_argument("--regen", action="store_true", help="Clear and regenerate all fixtures")
@@ -144,7 +342,41 @@ def main():
     parser.add_argument("--local-only", action="store_true", help="Skip cloud models")
     parser.add_argument("--generate-ground-truth", action="store_true", help="Generate ground truth from best model")
     parser.add_argument("--ground-truth-model", type=str, default="gpt-4o", help="Model for ground truth generation")
+    parser.add_argument("--ensemble-gt", action="store_true", help="Generate ground truth via multi-model consensus")
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Full methodology: run all models → ensemble ground truth → score → report",
+    )
+    parser.add_argument("--exgraph", action="store_true", help="Use exgraph v2 pipeline")
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="Compare v1 vs v2: run both pipelines and print side-by-side F1 scores",
+    )
     args = parser.parse_args()
+
+    # Interactive mode when no flags given
+    if len(sys.argv) == 1:
+        args = _interactive_prompt()
+
+    # --exgraph sets the env var
+    if args.exgraph:
+        os.environ["EXGRAPH_ENABLED"] = "true"
+
+    # --full implies --ensemble-gt (run everything in one shot)
+    if args.full:
+        args.ensemble_gt = True
+
+    # ── Compare mode: run v1 then v2, side-by-side ────────────────────
+    if args.compare:
+        _run_comparison(args)
+        return
+
+    # ── Ensemble-only mode (no model runs) ──────────────────────────────
+    if args.ensemble_gt and not args.full:
+        _run_ensemble_gt()
+        return
 
     print(f"\n{'=' * 70}")
     print("  Extraction Benchmark Harness")
@@ -224,7 +456,15 @@ def main():
         else:
             print("TIMEOUT/FAIL")
 
+        # Unload local model from Ollama VRAM to free memory for next model
+        if "cloud" not in cfg.tags and "encoder" not in cfg.tags:
+            subprocess.run(["ollama", "stop", cfg.model], capture_output=True, timeout=10)
+
     total_time = time.monotonic() - t0
+
+    # Generate ensemble ground truth if --full
+    if args.ensemble_gt:
+        _run_ensemble_gt()
 
     # Load ground truth and compute scores
     gt = _load_fixture("ground_truth_media_ingest")
@@ -235,8 +475,12 @@ def main():
             gt_mentions.extend(chunk["mentions"])
             gt_propositions.extend(chunk["propositions"])
 
+        # Load chunk source texts for span accuracy
+        chunks_data = _load_fixture("chunks")
+        chunk_texts = {c["chunk_id"]: c["text"] for c in chunks_data} if chunks_data else None
+
         for r in results:
-            r["scores"] = _compute_scores(r["fixture"], gt_mentions, gt_propositions)
+            r["scores"] = _compute_scores(r["fixture"], gt_mentions, gt_propositions, chunk_texts)
 
     # Build and save report
     from tests.test_extraction_benchmark import _build_report_json

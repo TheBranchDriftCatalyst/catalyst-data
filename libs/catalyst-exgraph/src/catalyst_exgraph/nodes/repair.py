@@ -15,7 +15,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_exgraph.config import StageConfig
-from catalyst_exgraph.nodes.spans import compute_correct_spans
+from catalyst_exgraph.nodes.spans import compute_correct_spans, correct_candidate_spans
 from catalyst_exgraph.protocol import ExtractionClient
 from catalyst_exgraph.state import ExGraphState, ExGraphStatus
 
@@ -91,6 +91,8 @@ class RepairNode:
                 if items is not None:
                     repaired = [item.model_dump() for item in items]
                     break
+
+            repaired = correct_candidate_spans(repaired, raw_text)
 
             elapsed = time.perf_counter() - t0
             logger.info("%s: done, repaired=%d, duration=%.3fs", node_name, len(repaired), elapsed)

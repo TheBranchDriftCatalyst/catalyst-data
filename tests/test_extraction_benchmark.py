@@ -2,13 +2,22 @@
 
 Two-phase workflow:
 
-Phase 1: Generate reference ground truth (run once with a strong model):
+Phase 1a: Generate reference ground truth from a single model:
     LLM_MODEL=gpt-4o OPENAI_API_KEY=xxx \\
         pytest tests/test_extraction_benchmark.py -k "generate_ground_truth" -v -s
 
-    This creates tests/fixtures/ground_truth_media_ingest.json with
-    manually_reviewed=false. Open the file, review/correct annotations,
-    then set manually_reviewed=true.
+Phase 1b: Generate ensemble ground truth from multi-model consensus:
+    pytest tests/test_extraction_benchmark.py -k "ensemble_ground_truth" -v -s
+
+    Or via the harness:
+    python tests/benchmark_harness.py --ensemble-gt
+
+    Uses majority voting across available extraction fixtures.
+    Requires >= 2 model fixtures to exist.
+
+    This creates .test-output/media-ingest/fixtures/ground_truth_media_ingest.json
+    with manually_reviewed=false. Review/correct annotations, then set
+    manually_reviewed=true.
 
 Phase 2: Benchmark other models against ground truth:
     LLM_MODEL=gpt-4o-mini OPENAI_API_KEY=xxx \\
@@ -26,7 +35,9 @@ Run all models and compare:
 from __future__ import annotations
 
 import json
+import math
 import os
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -175,10 +186,14 @@ def _build_report_json(results: list[dict]) -> dict:
             "proposition_count": len(gt_propositions),
         }
 
+        # Load chunk source texts for span accuracy
+        chunks_data = _load_fixture("chunks")
+        chunk_texts = {c["chunk_id"]: c["text"] for c in chunks_data} if chunks_data else None
+
         # Score each model against ground truth
         for model_entry, r in zip(models, results, strict=False):
             ext = r["fixture"]
-            m_scores = score_mentions(ext.get("mentions", []), gt_mentions)
+            m_scores = score_mentions(ext.get("mentions", []), gt_mentions, chunk_texts=chunk_texts)
             p_scores = score_propositions(ext.get("assertions", []), gt_propositions)
             model_entry["scores"] = {
                 "mention_strict_precision": round(m_scores["strict_precision"], 4),
@@ -379,6 +394,338 @@ class TestGroundTruth:
             assert not all_errors, f"{len(all_errors)} span errors in reviewed ground truth"
         elif all_errors:
             print(f"\n  WARNING: {len(all_errors)} span errors in unreviewed ground truth")
+
+    def test_generate_ensemble_ground_truth(self):
+        """Generate ground truth from consensus across multiple models.
+
+        Uses majority voting: a mention/proposition is accepted as ground truth
+        if >= ceil(N/2) models agree on it. This produces more robust ground
+        truth than relying on a single model.
+
+        Only creates the fixture if it doesn't already exist or the existing
+        one is not manually reviewed.
+        """
+        gt_path = FIXTURES / "ground_truth_media_ingest.json"
+        if gt_path.exists():
+            gt = json.loads(gt_path.read_text())
+            if gt.get("manually_reviewed"):
+                pytest.skip("Ground truth already exists and has been manually reviewed")
+                return
+
+        ground_truth = generate_ensemble_ground_truth()
+        if ground_truth is None:
+            pytest.skip(
+                "Not enough model fixtures for ensemble ground truth (need >= 2). Run extraction benchmarks first."
+            )
+            return
+
+        _save_fixture("ground_truth_media_ingest", ground_truth)
+        config = ground_truth["ensemble_config"]
+        print("\n  Ensemble ground truth generated:")
+        print(f"    NER models ({len(config['ner_models'])}): {', '.join(config['ner_models'])}")
+        print(f"    SPO models ({len(config['spo_models'])}): {', '.join(config['spo_models'])}")
+        print(f"    Threshold: {config['threshold']}")
+        print(f"    {ground_truth['chunk_count']} chunks")
+        print(f"    {ground_truth['total_mentions']} mentions (consensus)")
+        print(f"    {ground_truth['total_propositions']} propositions (consensus)")
+        print(f"    File: {gt_path}")
+        print("\n  *** Review and correct the file, then set manually_reviewed=true ***")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Ensemble Ground Truth Logic
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Default ensemble panels — models most likely to have cached fixtures.
+# The ensemble generator gracefully skips models without fixtures.
+NER_ENSEMBLE_MODELS = [
+    "gliner-large",  # encoder
+    "gpt-4o",  # cloud LLM
+    "claude-sonnet-4-20250514",  # cloud LLM
+    "mistral:latest",  # local LLM
+    "gemma3:12b",  # local LLM
+]
+
+SPO_ENSEMBLE_MODELS = [
+    "claude-sonnet-4-20250514",
+    "gemma3:12b",
+    "mistral:latest",
+]
+
+
+def _load_available_extractions(model_list: list[str]) -> dict[str, dict]:
+    """Load extraction fixtures for models that have cached results.
+
+    Returns {model_name: extraction_data} for each model with a fixture file.
+    """
+    available = {}
+    for model in model_list:
+        ext = _load_fixture(f"extraction_{model}")
+        if ext is not None:
+            available[model] = ext
+    return available
+
+
+def _build_mentions_by_chunk(extraction: dict) -> dict[str, list[dict]]:
+    """Index an extraction fixture's mentions by chunk_id."""
+    by_chunk: dict[str, list[dict]] = {}
+    for m in extraction.get("mentions", []):
+        cid = m.get("chunk_id", "")
+        by_chunk.setdefault(cid, []).append(m)
+    return by_chunk
+
+
+def _build_assertions_by_chunk(extraction: dict) -> dict[str, list[dict]]:
+    """Index an extraction fixture's assertions by chunk_id."""
+    by_chunk: dict[str, list[dict]] = {}
+    for a in extraction.get("assertions", []):
+        prov = a.get("provenance") or {}
+        cid = prov.get("chunk_id", "")
+        by_chunk.setdefault(cid, []).append(a)
+    return by_chunk
+
+
+def _ner_consensus(
+    all_model_mentions: dict[str, list[dict]],
+    source_text: str,
+    threshold: int,
+) -> list[dict]:
+    """Compute NER consensus mentions via majority voting.
+
+    A mention is accepted if >= threshold models agree on
+    (normalized_text, mention_type). Spans are recomputed deterministically.
+    """
+    from catalyst_exgraph.nodes.spans import find_best_span
+
+    # Collect votes: (norm_text, norm_type) -> {model: mention}
+    # Using a dict keyed by model ensures each model votes at most once per entity.
+    votes: dict[tuple[str, str], dict[str, dict]] = {}
+    for model_name, mentions in all_model_mentions.items():
+        for m in mentions:
+            text = m.get("text", "").strip()
+            mtype = m.get("mention_type", "").upper().strip()
+            if not text:
+                continue
+            key = (text.lower().strip(), mtype)
+            votes.setdefault(key, {})
+            # First occurrence from this model wins (don't double-count duplicates)
+            if model_name not in votes[key]:
+                votes[key][model_name] = m
+
+    accepted = []
+    for (_norm_text, _norm_type), model_entries in votes.items():
+        if len(model_entries) < threshold:
+            continue
+
+        # Take the majority-voted mention_type (in case of normalization variance)
+        type_counts: Counter[str] = Counter()
+        for m in model_entries.values():
+            type_counts[m.get("mention_type", "").upper().strip()] += 1
+        best_type = type_counts.most_common(1)[0][0]
+
+        # Use the original text from the first voter (preserves casing)
+        first_mention = next(iter(model_entries.values()))
+        original_text = first_mention.get("text", "").strip()
+
+        # Compute span deterministically against source text
+        span_start, span_end = find_best_span(source_text, original_text)
+
+        # Confidence = fraction of models that agreed
+        confidence = round(len(model_entries) / len(all_model_mentions), 2)
+
+        accepted.append(
+            {
+                "text": original_text,
+                "mention_type": best_type,
+                "span_start": span_start,
+                "span_end": span_end,
+                "confidence": confidence,
+            }
+        )
+
+    return accepted
+
+
+def _spo_consensus(
+    all_model_assertions: dict[str, list[dict]],
+    threshold: int,
+) -> list[dict]:
+    """Compute SPO consensus propositions via majority voting.
+
+    A proposition is accepted if >= threshold models agree on
+    (normalized_subject, predicate, normalized_object).
+    """
+    # Collect votes: (norm_subj, norm_pred, norm_obj) -> {model: assertion}
+    # Using a dict keyed by model ensures each model votes at most once per triple.
+    votes: dict[tuple[str, str, str], dict[str, dict]] = {}
+    for model_name, assertions in all_model_assertions.items():
+        for a in assertions:
+            subj = (a.get("subject_text", a.get("subject", ""))).strip()
+            pred = a.get("predicate", "").strip()
+            obj = (a.get("object_text", a.get("object", ""))).strip()
+            if not (subj and pred and obj):
+                continue
+            key = (subj.lower(), pred.lower(), obj.lower())
+            votes.setdefault(key, {})
+            if model_name not in votes[key]:
+                votes[key][model_name] = a
+
+    accepted = []
+    for (_norm_subj, _norm_pred, _norm_obj), model_entries in votes.items():
+        if len(model_entries) < threshold:
+            continue
+
+        # Use original casing from first voter
+        first_a = next(iter(model_entries.values()))
+        subject = (first_a.get("subject_text", first_a.get("subject", ""))).strip()
+        predicate = first_a.get("predicate", "").strip()
+        obj_text = (first_a.get("object_text", first_a.get("object", ""))).strip()
+
+        confidence = round(len(model_entries) / len(all_model_assertions), 2)
+
+        accepted.append(
+            {
+                "subject": subject,
+                "predicate": predicate,
+                "object": obj_text,
+                "confidence": confidence,
+                "evidence": "",
+            }
+        )
+
+    return accepted
+
+
+def generate_ensemble_ground_truth(
+    ner_models: list[str] | None = None,
+    spo_models: list[str] | None = None,
+) -> dict | None:
+    """Generate ground truth from multi-model consensus.
+
+    Args:
+        ner_models: Models to use for NER consensus. Defaults to NER_ENSEMBLE_MODELS.
+        spo_models: Models to use for SPO consensus. Defaults to SPO_ENSEMBLE_MODELS.
+
+    Returns:
+        Ground truth dict matching the standard fixture format, or None if
+        fewer than 2 models have fixtures available.
+    """
+    if ner_models is None:
+        ner_models = NER_ENSEMBLE_MODELS
+    if spo_models is None:
+        spo_models = SPO_ENSEMBLE_MODELS
+
+    # Load chunks (required for source text)
+    chunks = _load_fixture("chunks")
+    if not chunks:
+        print("  ERROR: No chunks fixture. Run test_pipeline_integration.py first.")
+        return None
+
+    # Load available extraction fixtures
+    ner_extractions = _load_available_extractions(ner_models)
+    spo_extractions = _load_available_extractions(spo_models)
+
+    if len(ner_extractions) < 2:
+        print(
+            f"  Not enough NER model fixtures ({len(ner_extractions)} available, need >= 2). "
+            f"Looked for: {', '.join(ner_models)}"
+        )
+        return None
+
+    # SPO can have fewer models; warn but don't block
+    if len(spo_extractions) < 2:
+        print(
+            f"  WARNING: Only {len(spo_extractions)} SPO model fixture(s) available "
+            f"(looked for: {', '.join(spo_models)}). "
+            f"SPO consensus will be weak."
+        )
+
+    # Compute thresholds: majority = ceil(N/2)
+    ner_threshold = math.ceil(len(ner_extractions) / 2)
+    spo_threshold = math.ceil(len(spo_extractions) / 2) if spo_extractions else 1
+
+    print("\n  Ensemble ground truth configuration:")
+    print(f"    NER models ({len(ner_extractions)}): {', '.join(ner_extractions.keys())}")
+    print(f"    NER threshold: >= {ner_threshold} of {len(ner_extractions)} models must agree")
+    print(f"    SPO models ({len(spo_extractions)}): {', '.join(spo_extractions.keys())}")
+    print(f"    SPO threshold: >= {spo_threshold} of {len(spo_extractions)} models must agree")
+
+    # Pre-index mentions and assertions by chunk for each model
+    ner_by_chunk: dict[str, dict[str, list[dict]]] = {}  # {model: {chunk_id: [mentions]}}
+    for model, ext in ner_extractions.items():
+        ner_by_chunk[model] = _build_mentions_by_chunk(ext)
+
+    spo_by_chunk: dict[str, dict[str, list[dict]]] = {}  # {model: {chunk_id: [assertions]}}
+    for model, ext in spo_extractions.items():
+        spo_by_chunk[model] = _build_assertions_by_chunk(ext)
+
+    # Build per-chunk ground truth via consensus
+    gt_chunks = []
+    total_mention_candidates = 0
+    total_spo_candidates = 0
+
+    for chunk in chunks:
+        cid = chunk["chunk_id"]
+        source_text = chunk["text"]
+
+        # Gather this chunk's mentions from all NER models
+        chunk_model_mentions: dict[str, list[dict]] = {}
+        for model in ner_extractions:
+            model_mentions = ner_by_chunk[model].get(cid, [])
+            if model_mentions:
+                chunk_model_mentions[model] = model_mentions
+                total_mention_candidates += len(model_mentions)
+
+        # Gather this chunk's assertions from all SPO models
+        chunk_model_assertions: dict[str, list[dict]] = {}
+        for model in spo_extractions:
+            model_assertions = spo_by_chunk[model].get(cid, [])
+            if model_assertions:
+                chunk_model_assertions[model] = model_assertions
+                total_spo_candidates += len(model_assertions)
+
+        # Compute consensus
+        consensus_mentions = (
+            _ner_consensus(chunk_model_mentions, source_text, ner_threshold) if chunk_model_mentions else []
+        )
+        consensus_propositions = _spo_consensus(chunk_model_assertions, spo_threshold) if chunk_model_assertions else []
+
+        gt_chunks.append(
+            {
+                "chunk_id": cid,
+                "text": source_text,
+                "mentions": consensus_mentions,
+                "propositions": consensus_propositions,
+            }
+        )
+
+    total_mentions = sum(len(c["mentions"]) for c in gt_chunks)
+    total_propositions = sum(len(c["propositions"]) for c in gt_chunks)
+
+    # Build the reference_model label
+    all_models_used = sorted(set(list(ner_extractions.keys()) + list(spo_extractions.keys())))
+    reference_label = f"ensemble({','.join(all_models_used)})"
+
+    ground_truth = {
+        "domain": "media_ingest",
+        "reference_model": reference_label,
+        "manually_reviewed": False,
+        "chunk_count": len(gt_chunks),
+        "total_mentions": total_mentions,
+        "total_propositions": total_propositions,
+        "ensemble_config": {
+            "ner_models": list(ner_extractions.keys()),
+            "spo_models": list(spo_extractions.keys()),
+            "threshold": "majority",
+            "ner_threshold": ner_threshold,
+            "spo_threshold": spo_threshold,
+            "ner_candidates": total_mention_candidates,
+            "spo_candidates": total_spo_candidates,
+        },
+        "chunks": gt_chunks,
+    }
+
+    return ground_truth
 
 
 # ═══════════════════════════════════════════════════════════════════════════

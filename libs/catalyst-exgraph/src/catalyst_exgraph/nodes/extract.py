@@ -15,6 +15,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_exgraph.config import StageConfig
+from catalyst_exgraph.nodes.spans import correct_candidate_spans
 from catalyst_exgraph.protocol import ExtractionClient
 from catalyst_exgraph.state import ExGraphState, ExGraphStatus
 
@@ -97,6 +98,8 @@ class ExtractNode:
                 if items is not None:
                     candidates = [item.model_dump() for item in items]
                     break
+
+            candidates = correct_candidate_spans(candidates, raw_text)
 
             elapsed = time.perf_counter() - t0
             logger.info("%s: done, candidates=%d, duration=%.3fs", node_name, len(candidates), elapsed)
