@@ -89,7 +89,14 @@ def _build_graph():
 
 
 def _build_graph_v1():
-    """Build the original hardcoded NER→SPO graph (catalyst-langgraph-aio)."""
+    """Build the original hardcoded NER→SPO graph (catalyst-langgraph-aio).
+
+    .. deprecated:: Use EXGRAPH_ENABLED=true for the new generic pipeline.
+    """
+    logger.info(
+        "_build_graph_v1: using deprecated catalyst-langgraph-aio graph. "
+        "Set EXGRAPH_ENABLED=true to use catalyst-exgraph."
+    )
     from catalyst_contracts.validators.mention_validator import (
         validate_mentions as _validate_mentions,
     )
