@@ -167,10 +167,40 @@ TIER2_MODELS = [
 #   yuuko-eth/UniNER-7B-all-GGUF
 
 # ═══════════════════════════════════════════════════════════════════════════
+# OpenAI / Cloud API models — require OPENAI_API_KEY
+# Use as ground truth baseline for scoring local models against.
+# ═══════════════════════════════════════════════════════════════════════════
+
+OPENAI_BASE = "https://api.openai.com/v1"
+
+CLOUD_MODELS = [
+    ModelConfig(
+        name="gpt-4o-mini",
+        model="gpt-4o-mini",
+        base_url=OPENAI_BASE,
+        structured_method="function_calling",  # OpenAI supports proper tool calling
+        api_key="",  # read from OPENAI_API_KEY env var at runtime
+        tags=["cloud", "openai", "baseline"],
+    ),
+    ModelConfig(
+        name="gpt-4o",
+        model="gpt-4o",
+        base_url=OPENAI_BASE,
+        structured_method="function_calling",
+        api_key="",
+        tags=["cloud", "openai", "baseline"],
+    ),
+]
+
+# ═══════════════════════════════════════════════════════════════════════════
 # All models — used by the multi-model benchmark runner
 # ═══════════════════════════════════════════════════════════════════════════
 
-ALL_MODELS = EXTRACTION_MODELS + ENCODER_MODELS + TIER1_MODELS + TIER2_MODELS
+# Local models (no API key needed)
+LOCAL_MODELS = EXTRACTION_MODELS + ENCODER_MODELS + TIER1_MODELS + TIER2_MODELS
+
+# All models including cloud (requires OPENAI_API_KEY)
+ALL_MODELS = LOCAL_MODELS + CLOUD_MODELS
 
 
 def get_available_models(tags: list[str] | None = None) -> list[ModelConfig]:

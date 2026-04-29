@@ -500,8 +500,15 @@ class TestRunAll:
 
         results = []
         for cfg in ALL_MODELS:
+            # Skip cloud models if no API key
+            if "cloud" in cfg.tags:
+                api_key = os.environ.get("OPENAI_API_KEY", "")
+                if not api_key:
+                    print(f"\n  SKIP {cfg.name}: OPENAI_API_KEY not set")
+                    continue
+
             # Check if endpoint is reachable (skip for encoder models like GLiNER)
-            if cfg.base_url:
+            if cfg.base_url and "cloud" not in cfg.tags:
                 try:
                     req = urllib.request.Request(f"{cfg.base_url}/models", method="GET")
                     urllib.request.urlopen(req, timeout=3)
@@ -524,10 +531,12 @@ class TestRunAll:
             print(f"\n  RUNNING {cfg.name} ({cfg.model}) via {cfg.base_url or 'in-process'}...")
 
             # Run as subprocess to isolate env vars per model
+            api_key = cfg.api_key or os.environ.get("OPENAI_API_KEY", "unused")
             env = {
                 **os.environ,
                 "LLM_MODEL": cfg.model,
-                "LLM_API_KEY": cfg.api_key,
+                "LLM_API_KEY": api_key,
+                "OPENAI_API_KEY": api_key,
                 "LLM_STRUCTURED_METHOD": cfg.structured_method,
                 "LLM_MAX_TOKENS": str(cfg.max_tokens),
                 "LLM_TIMEOUT": str(cfg.timeout),
