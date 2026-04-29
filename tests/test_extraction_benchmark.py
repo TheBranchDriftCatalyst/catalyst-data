@@ -488,10 +488,13 @@ class TestRunAll:
         from tests.benchmark_config import ALL_MODELS
 
         regen = request.config.getoption("--regen", default=False)
+        timeout_override = request.config.getoption("--timeout", default=None)
         if regen:
             print("\n  --regen: clearing all extraction fixtures")
             for f in FIXTURES.glob("extraction_*.json"):
                 f.unlink()
+        if timeout_override:
+            print(f"  --timeout: {timeout_override}s per model")
 
         chunks = _load_fixture("chunks")
         if not chunks:
@@ -539,7 +542,7 @@ class TestRunAll:
                 "OPENAI_API_KEY": api_key,
                 "LLM_STRUCTURED_METHOD": cfg.structured_method,
                 "LLM_MAX_TOKENS": str(cfg.max_tokens),
-                "LLM_TIMEOUT": str(cfg.timeout),
+                "LLM_TIMEOUT": str(timeout_override or cfg.timeout),
                 "PROMPT_REGISTRY_DIR": str(Path(__file__).resolve().parent.parent / "k8s" / "shared" / "prompts"),
                 "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
             }
@@ -563,7 +566,7 @@ class TestRunAll:
                     env=env,
                     capture_output=True,
                     text=True,
-                    timeout=cfg.timeout,
+                    timeout=timeout_override or cfg.timeout,
                     cwd=str(Path(__file__).resolve().parent.parent),
                 )
             except subprocess.TimeoutExpired:

@@ -19,6 +19,13 @@ def pytest_addoption(parser):
         default=False,
         help="Force regenerate all extraction fixtures (ignore cached results)",
     )
+    _safe_addoption(
+        parser,
+        "--timeout",
+        type=int,
+        default=None,
+        help="Override per-model timeout in seconds (default: 300 from benchmark_config)",
+    )
 
 
 @pytest.fixture(autouse=True)
