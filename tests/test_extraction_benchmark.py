@@ -236,6 +236,18 @@ def _load_fixture(name: str) -> dict | list | None:
     return json.loads(f2.read_text()) if f2.exists() else None
 
 
+def _save_incremental_report(results: list[dict]) -> None:
+    """Save the benchmark report after each model so cancelled runs keep partial results."""
+    try:
+        report = _build_report_json(results)
+        report_path = FIXTURES.parent / "benchmark-report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(report_path, "w") as f:
+            json.dump(report, f, indent=2, default=str)
+    except Exception:
+        pass  # best effort — don't fail the run
+
+
 def _save_fixture(name: str, data):
     FIXTURES.mkdir(exist_ok=True)
     (FIXTURES / f"{name}.json").write_text(json.dumps(data, indent=2, default=str))
@@ -539,10 +551,10 @@ class TestRunAll:
         timeout_override = request.config.getoption("--timeout", default=None)
         save_audit = request.config.getoption("--audit-log", default=False)
 
+        # --regen clears each model's fixture individually before running it,
+        # NOT all at once. This way a cancelled run keeps the models that completed.
         if regen:
-            print("\n  --regen: clearing all extraction fixtures")
-            for f in FIXTURES.glob("extraction_*.json"):
-                f.unlink()
+            print("\n  --regen: will clear each model fixture before re-running")
         if timeout_override:
             print(f"  --timeout: {timeout_override}s per model")
 
@@ -578,6 +590,12 @@ class TestRunAll:
                 except Exception:
                     print(f"\n  SKIP {cfg.name}: endpoint {cfg.base_url} not reachable")
                     continue
+
+            # Clear this model's fixture if --regen
+            if regen:
+                fixture_path = FIXTURES / f"extraction_{cfg.model}.json"
+                if fixture_path.exists():
+                    fixture_path.unlink()
 
             # Check if we already have a fixture for this model
             cached = _load_fixture(f"extraction_{cfg.model}")
@@ -688,6 +706,8 @@ class TestRunAll:
                             with open(audit_file, "w") as f:
                                 json.dump(audit_data, f, indent=2, default=str)
                             print(f"  Audit log: {audit_file.name} ({len(audit_events)} events)")
+                    # Save incremental report so cancelled runs have partial results
+                    _save_incremental_report(results)
                 else:
                     print(f"  WARN {cfg.name}: test passed but no fixture saved")
             else:
