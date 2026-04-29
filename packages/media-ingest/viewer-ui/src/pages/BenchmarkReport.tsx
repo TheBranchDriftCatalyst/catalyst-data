@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@thebranchdriftcatalyst/catalyst-ui";
 import type {
   BenchmarkReport as BenchmarkReportType,
   ModelResult,
@@ -6,6 +7,90 @@ import type {
   EntityRow,
   PropositionRow,
 } from "@/types/benchmark";
+
+// ── Metric Tooltip Definitions ────────────────────────────────────────
+const METRIC_TOOLTIPS: Record<string, string> = {
+  // F1 / Precision / Recall
+  f1: "Harmonic mean of precision and recall. Range 0\u20131, higher is better. F1 = 2\u00d7(P\u00d7R)/(P+R). Punishes imbalance \u2014 99% precision + 1% recall \u2248 2% F1.",
+  precision:
+    "Of everything predicted positive, how many were actually correct? Higher = fewer false positives.",
+  recall:
+    "Of everything actually positive, how many did the model catch? Higher = fewer missed entities.",
+  strict_f1:
+    "Text AND entity type must both match ground truth. F1 = 2\u00d7(P\u00d7R)/(P+R), range 0\u20131, higher is better.",
+  relaxed_f1:
+    "Only text must match (type can differ). F1 = 2\u00d7(P\u00d7R)/(P+R), range 0\u20131, higher is better.",
+  strict_precision:
+    "Of predicted entities, fraction where both text and type match ground truth. Higher = fewer false positives.",
+  strict_recall:
+    "Of ground-truth entities, fraction where both text and type were found. Higher = fewer misses.",
+  relaxed_precision:
+    "Of predicted entities, fraction where text matches ground truth (type ignored). Higher = fewer false positives.",
+  relaxed_recall:
+    "Of ground-truth entities, fraction where text was found (type ignored). Higher = fewer misses.",
+  type_accuracy:
+    "Among text-matched entities, fraction with the correct entity type. Range 0\u20131, higher is better.",
+  span_accuracy:
+    "Fraction where source_text[start:end] == entity_text. Measures offset precision. Range 0\u20131, higher is better.",
+  hallucination_rate:
+    "1 \u2212 span_accuracy. Entities returned that don\u2019t exist at the claimed position in source text. Lower is better.",
+  // Speed / efficiency
+  quality_speed_ratio:
+    "F1 \u00f7 duration. Higher = better extraction quality per second of compute. Best \u201cbang for buck\u201d metric.",
+  per_chunk_latency:
+    "Total time \u00f7 number of chunks. Average time to process one text chunk. Lower is better.",
+  tokens_per_sec: "Estimated throughput in tokens per second. Higher = faster model.",
+  duration: "Wall-clock time for the full extraction run. Lower is better.",
+  // Counts
+  mentions: "Named entities extracted (PERSON, ORG, GPE, etc.). Count across all chunks.",
+  assertions: "Subject\u2013Predicate\u2013Object triples extracted. Count across all chunks.",
+  retries: "Number of MCP validation repair cycles needed. 0 = passed first try.",
+  errors: "Chunks where extraction failed completely. 0 is ideal.",
+  // Aggregate labels
+  models: "Total number of models evaluated in this benchmark run.",
+  unique_entities: "Distinct entity texts found across all models after deduplication.",
+  propositions: "Distinct Subject\u2013Predicate\u2013Object triples extracted across all models.",
+  domains: "Number of source-text domains (e.g. media, congress, leaks) included in the benchmark.",
+  fastest: "Model with the shortest wall-clock extraction time.",
+  // Proposition scores
+  proposition_strict_f1:
+    "SPO triple must match exactly (subject, predicate, and object). F1 range 0\u20131, higher is better.",
+  proposition_relaxed_f1:
+    "SPO triple with fuzzy matching on subject/object text. F1 range 0\u20131, higher is better.",
+  // Entity matrix columns
+  entity_text: "The surface text of the extracted entity.",
+  entity_domain: "Source-text domain this entity was found in.",
+  entity_type: "Consensus entity type across models (e.g. PERSON, ORG, GPE).",
+  entity_model_count: "Number of models that extracted this entity.",
+  // Proposition matrix columns
+  subject: "The subject of the extracted triple.",
+  predicate: "The relationship/verb connecting subject to object.",
+  object: "The object of the extracted triple.",
+  prop_model_count: "Number of models that extracted this triple.",
+  // Pipeline stages
+  extract_mentions: "LLM call to extract named entities from text chunks.",
+  validate_mentions: "MCP schema validation of extracted mentions.",
+  repair_mentions: "Automatic repair cycle for mentions that failed validation.",
+  extract_propositions: "LLM call to extract SPO triples from text chunks.",
+  validate_propositions: "MCP schema validation of extracted propositions.",
+  repair_propositions: "Automatic repair cycle for propositions that failed validation.",
+  persist_artifacts: "Write validated extractions to storage.",
+  failure_handler: "Chunks that failed all extraction/repair attempts.",
+};
+
+function MetricLabel({ label, tooltip }: { label: string; tooltip?: string }) {
+  if (!tooltip) return <span>{label}</span>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="cursor-help border-b border-dotted border-zinc-600">{label}</span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs text-xs">
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 // Entity type colors matching index.css entity highlights
 const TYPE_COLORS: Record<string, string> = {
@@ -80,10 +165,22 @@ function DomainBadge({ domain }: { domain: string }) {
   );
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+function StatCard({
+  label,
+  value,
+  sub,
+  tooltip,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  tooltip?: string;
+}) {
   return (
     <div className="bg-surface-1 border border-white/5 rounded-lg p-4">
-      <div className="text-zinc-500 text-xs font-mono uppercase tracking-wider">{label}</div>
+      <div className="text-zinc-500 text-xs font-mono uppercase tracking-wider">
+        {tooltip ? <MetricLabel label={label} tooltip={tooltip} /> : label}
+      </div>
       <div className="text-2xl font-mono text-zinc-100 mt-1">{value}</div>
       {sub && <div className="text-xs text-zinc-500 mt-1">{sub}</div>}
     </div>
@@ -96,11 +193,13 @@ function PerformanceChart({
   metric,
   label,
   format,
+  tooltip,
 }: {
   models: ModelResult[];
   metric: keyof ModelResult["stats"];
   label: string;
   format?: (v: number) => string;
+  tooltip?: string;
 }) {
   const max = Math.max(...models.map((m) => m.stats[metric] as number), 1);
   const fmt = format || ((v: number) => String(v));
@@ -110,7 +209,9 @@ function PerformanceChart({
 
   return (
     <div className="bg-surface-1 border border-white/5 rounded-lg p-4">
-      <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">{label}</h3>
+      <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">
+        {tooltip ? <MetricLabel label={label} tooltip={tooltip} /> : label}
+      </h3>
       <div className="space-y-1.5">
         {sorted.map((m) => {
           const val = m.stats[metric] as number;
@@ -146,10 +247,18 @@ function EntityMatrix({ entities, modelNames }: { entities: EntityRow[]; modelNa
       <table className="w-full text-xs font-mono">
         <thead>
           <tr className="text-zinc-500 border-b border-white/5">
-            <th className="text-left py-2 px-2 sticky left-0 bg-surface-0">Entity</th>
-            <th className="text-left py-2 px-1">Domain</th>
-            <th className="text-left py-2 px-1">Type</th>
-            <th className="text-center py-2 px-1">#</th>
+            <th className="text-left py-2 px-2 sticky left-0 bg-surface-0">
+              <MetricLabel label="Entity" tooltip={METRIC_TOOLTIPS.entity_text} />
+            </th>
+            <th className="text-left py-2 px-1">
+              <MetricLabel label="Domain" tooltip={METRIC_TOOLTIPS.entity_domain} />
+            </th>
+            <th className="text-left py-2 px-1">
+              <MetricLabel label="Type" tooltip={METRIC_TOOLTIPS.entity_type} />
+            </th>
+            <th className="text-center py-2 px-1">
+              <MetricLabel label="#" tooltip={METRIC_TOOLTIPS.entity_model_count} />
+            </th>
             {modelNames.map((n) => (
               <th key={n} className="text-center py-2 px-1 min-w-[60px]">
                 <span className="writing-mode-vertical text-[10px]">
@@ -218,10 +327,18 @@ function PropositionMatrix({
       <table className="w-full text-xs font-mono">
         <thead>
           <tr className="text-zinc-500 border-b border-white/5">
-            <th className="text-left py-2 px-2">Subject</th>
-            <th className="text-left py-2 px-1">Predicate</th>
-            <th className="text-left py-2 px-1">Object</th>
-            <th className="text-center py-2 px-1">#</th>
+            <th className="text-left py-2 px-2">
+              <MetricLabel label="Subject" tooltip={METRIC_TOOLTIPS.subject} />
+            </th>
+            <th className="text-left py-2 px-1">
+              <MetricLabel label="Predicate" tooltip={METRIC_TOOLTIPS.predicate} />
+            </th>
+            <th className="text-left py-2 px-1">
+              <MetricLabel label="Object" tooltip={METRIC_TOOLTIPS.object} />
+            </th>
+            <th className="text-center py-2 px-1">
+              <MetricLabel label="#" tooltip={METRIC_TOOLTIPS.prop_model_count} />
+            </th>
             {modelNames.map((n) => (
               <th key={n} className="text-center py-2 px-1 min-w-[60px]">
                 <span className="text-[10px]">{n.replace(/-/g, "\u200b-")}</span>
@@ -265,7 +382,13 @@ function PipelineBreakdown({ models }: { models: ModelResult[] }) {
             <th className="text-left py-2 px-2">Model</th>
             {PIPELINE_STAGES.map((s) => (
               <th key={s.key} className="text-center py-2 px-1 min-w-[70px]">
-                <span className="text-[10px]">{s.label}</span>
+                <span className="text-[10px]">
+                  {METRIC_TOOLTIPS[s.key] ? (
+                    <MetricLabel label={s.label} tooltip={METRIC_TOOLTIPS[s.key]} />
+                  ) : (
+                    s.label
+                  )}
+                </span>
               </th>
             ))}
           </tr>
@@ -316,6 +439,7 @@ function ScoreBarChart({
   format,
   isPercentage = true,
   invertSort = false,
+  tooltip,
 }: {
   models: ModelResult[];
   metricKey: keyof ModelScores;
@@ -323,6 +447,7 @@ function ScoreBarChart({
   format?: (v: number) => string;
   isPercentage?: boolean;
   invertSort?: boolean;
+  tooltip?: string;
 }) {
   const scored = models.filter((m) => m.scores != null);
   const sorted = [...scored].sort((a, b) => {
@@ -337,7 +462,9 @@ function ScoreBarChart({
 
   return (
     <div className="bg-surface-1 border border-white/5 rounded-lg p-4">
-      <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">{label}</h3>
+      <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">
+        {tooltip ? <MetricLabel label={label} tooltip={tooltip} /> : label}
+      </h3>
       <div className="space-y-1.5">
         {sorted.map((m) => {
           const val = m.scores![metricKey] as number;
@@ -380,15 +507,33 @@ function PrecisionRecallTable({ models }: { models: ModelResult[] }) {
           <tr className="text-zinc-500 border-b border-white/5">
             <th className="text-left py-2 px-2">Model</th>
             <th className="text-left py-2 px-1">Type</th>
-            <th className="text-center py-2 px-2">M Strict P</th>
-            <th className="text-center py-2 px-2">M Strict R</th>
-            <th className="text-center py-2 px-2">M Strict F1</th>
-            <th className="text-center py-2 px-2">M Relax P</th>
-            <th className="text-center py-2 px-2">M Relax R</th>
-            <th className="text-center py-2 px-2">M Relax F1</th>
-            <th className="text-center py-2 px-2">Type Acc</th>
-            <th className="text-center py-2 px-2">P Strict F1</th>
-            <th className="text-center py-2 px-2">P Relax F1</th>
+            <th className="text-center py-2 px-2">
+              <MetricLabel label="M Strict P" tooltip={METRIC_TOOLTIPS.strict_precision} />
+            </th>
+            <th className="text-center py-2 px-2">
+              <MetricLabel label="M Strict R" tooltip={METRIC_TOOLTIPS.strict_recall} />
+            </th>
+            <th className="text-center py-2 px-2">
+              <MetricLabel label="M Strict F1" tooltip={METRIC_TOOLTIPS.strict_f1} />
+            </th>
+            <th className="text-center py-2 px-2">
+              <MetricLabel label="M Relax P" tooltip={METRIC_TOOLTIPS.relaxed_precision} />
+            </th>
+            <th className="text-center py-2 px-2">
+              <MetricLabel label="M Relax R" tooltip={METRIC_TOOLTIPS.relaxed_recall} />
+            </th>
+            <th className="text-center py-2 px-2">
+              <MetricLabel label="M Relax F1" tooltip={METRIC_TOOLTIPS.relaxed_f1} />
+            </th>
+            <th className="text-center py-2 px-2">
+              <MetricLabel label="Type Acc" tooltip={METRIC_TOOLTIPS.type_accuracy} />
+            </th>
+            <th className="text-center py-2 px-2">
+              <MetricLabel label="P Strict F1" tooltip={METRIC_TOOLTIPS.proposition_strict_f1} />
+            </th>
+            <th className="text-center py-2 px-2">
+              <MetricLabel label="P Relax F1" tooltip={METRIC_TOOLTIPS.proposition_relaxed_f1} />
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -493,21 +638,25 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
           label="Best Strict F1"
           value={`${(bestF1.scores!.mention_strict_f1 * 100).toFixed(1)}%`}
           sub={bestF1.name}
+          tooltip={METRIC_TOOLTIPS.strict_f1}
         />
         <StatCard
           label="Best Precision"
           value={`${(bestPrecision.scores!.mention_strict_precision * 100).toFixed(1)}%`}
           sub={bestPrecision.name}
+          tooltip={METRIC_TOOLTIPS.precision}
         />
         <StatCard
           label="Best Recall"
           value={`${(bestRecall.scores!.mention_strict_recall * 100).toFixed(1)}%`}
           sub={bestRecall.name}
+          tooltip={METRIC_TOOLTIPS.recall}
         />
         <StatCard
           label="Best Prop F1"
           value={`${(bestPropF1.scores!.proposition_relaxed_f1 * 100).toFixed(1)}%`}
           sub={bestPropF1.name}
+          tooltip={METRIC_TOOLTIPS.proposition_relaxed_f1}
         />
       </div>
 
@@ -517,21 +666,25 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
           models={report.models}
           metricKey="mention_strict_f1"
           label="Mention Strict F1"
+          tooltip={METRIC_TOOLTIPS.strict_f1}
         />
         <ScoreBarChart
           models={report.models}
           metricKey="mention_relaxed_f1"
           label="Mention Relaxed F1"
+          tooltip={METRIC_TOOLTIPS.relaxed_f1}
         />
         <ScoreBarChart
           models={report.models}
           metricKey="proposition_strict_f1"
           label="Proposition Strict F1"
+          tooltip={METRIC_TOOLTIPS.proposition_strict_f1}
         />
         <ScoreBarChart
           models={report.models}
           metricKey="proposition_relaxed_f1"
           label="Proposition Relaxed F1"
+          tooltip={METRIC_TOOLTIPS.proposition_relaxed_f1}
         />
       </div>
 
@@ -543,12 +696,14 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
           label="Quality/Speed (F1 per second)"
           isPercentage={false}
           format={(v) => v.toFixed(3)}
+          tooltip={METRIC_TOOLTIPS.quality_speed_ratio}
         />
         <ScoreBarChart
           models={report.models}
           metricKey="hallucination_rate"
           label="Hallucination Rate (lower is better)"
           invertSort={true}
+          tooltip={METRIC_TOOLTIPS.hallucination_rate}
         />
         <ScoreBarChart
           models={report.models}
@@ -557,6 +712,7 @@ function ScoresTab({ report }: { report: BenchmarkReportType }) {
           isPercentage={false}
           invertSort={true}
           format={(v) => `${v.toFixed(2)}s`}
+          tooltip={METRIC_TOOLTIPS.per_chunk_latency}
         />
       </div>
 
@@ -642,15 +798,24 @@ export default function BenchmarkReport() {
 
         {/* Stat Cards */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <StatCard label="Models" value={report.model_count} />
-          <StatCard label="Unique Entities" value={report.entity_count} />
-          <StatCard label="Propositions" value={report.proposition_count} />
+          <StatCard label="Models" value={report.model_count} tooltip={METRIC_TOOLTIPS.models} />
+          <StatCard
+            label="Unique Entities"
+            value={report.entity_count}
+            tooltip={METRIC_TOOLTIPS.unique_entities}
+          />
+          <StatCard
+            label="Propositions"
+            value={report.proposition_count}
+            tooltip={METRIC_TOOLTIPS.propositions}
+          />
           <StatCard
             label="Domains"
             value={Object.keys(report.domains || {}).length}
             sub={Object.entries(report.domains || {})
               .map(([d, n]) => `${d}: ${n}`)
               .join(", ")}
+            tooltip={METRIC_TOOLTIPS.domains}
           />
           <StatCard
             label="Fastest"
@@ -659,6 +824,7 @@ export default function BenchmarkReport() {
               "—"
             }
             sub={`${[...report.models].sort((a, b) => a.stats.duration_s - b.stats.duration_s)[0]?.stats.duration_s.toFixed(1)}s`}
+            tooltip={METRIC_TOOLTIPS.fastest}
           />
         </div>
 
@@ -689,23 +855,27 @@ export default function BenchmarkReport() {
                   models={report.models}
                   metric="mention_count"
                   label="Mentions Extracted"
+                  tooltip={METRIC_TOOLTIPS.mentions}
                 />
                 <PerformanceChart
                   models={report.models}
                   metric="assertion_count"
                   label="Assertions Extracted"
+                  tooltip={METRIC_TOOLTIPS.assertions}
                 />
                 <PerformanceChart
                   models={report.models}
                   metric="tokens_per_sec"
                   label="Speed (tok/s)"
                   format={(v) => `${v.toFixed(0)}`}
+                  tooltip={METRIC_TOOLTIPS.tokens_per_sec}
                 />
                 <PerformanceChart
                   models={report.models}
                   metric="duration_s"
                   label="Total Time"
                   format={(v) => `${v.toFixed(1)}s`}
+                  tooltip={METRIC_TOOLTIPS.duration}
                 />
               </div>
 
@@ -722,25 +892,37 @@ export default function BenchmarkReport() {
                         <ModelTypeBadge type={m.type} />
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
-                        <div className="text-zinc-500">Mentions</div>
+                        <div className="text-zinc-500">
+                          <MetricLabel label="Mentions" tooltip={METRIC_TOOLTIPS.mentions} />
+                        </div>
                         <div className="text-zinc-300 text-right">{m.stats.mention_count}</div>
-                        <div className="text-zinc-500">Assertions</div>
+                        <div className="text-zinc-500">
+                          <MetricLabel label="Assertions" tooltip={METRIC_TOOLTIPS.assertions} />
+                        </div>
                         <div className="text-zinc-300 text-right">{m.stats.assertion_count}</div>
-                        <div className="text-zinc-500">Time</div>
+                        <div className="text-zinc-500">
+                          <MetricLabel label="Time" tooltip={METRIC_TOOLTIPS.duration} />
+                        </div>
                         <div className="text-zinc-300 text-right">
                           {m.stats.duration_s.toFixed(1)}s
                         </div>
-                        <div className="text-zinc-500">Tok/s</div>
+                        <div className="text-zinc-500">
+                          <MetricLabel label="Tok/s" tooltip={METRIC_TOOLTIPS.tokens_per_sec} />
+                        </div>
                         <div className="text-zinc-300 text-right">
                           {m.stats.tokens_per_sec.toFixed(0)}
                         </div>
-                        <div className="text-zinc-500">Retries</div>
+                        <div className="text-zinc-500">
+                          <MetricLabel label="Retries" tooltip={METRIC_TOOLTIPS.retries} />
+                        </div>
                         <div
                           className={`text-right ${m.stats.mention_retries + m.stats.proposition_retries > 0 ? "text-amber-400" : "text-zinc-300"}`}
                         >
                           {m.stats.mention_retries + m.stats.proposition_retries}
                         </div>
-                        <div className="text-zinc-500">Errors</div>
+                        <div className="text-zinc-500">
+                          <MetricLabel label="Errors" tooltip={METRIC_TOOLTIPS.errors} />
+                        </div>
                         <div
                           className={`text-right ${m.stats.errors > 0 ? "text-red-400" : "text-zinc-300"}`}
                         >
