@@ -18,6 +18,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 
@@ -171,24 +172,41 @@ TIER2_MODELS = [
 # Use as ground truth baseline for scoring local models against.
 # ═══════════════════════════════════════════════════════════════════════════
 
-OPENAI_BASE = "https://api.openai.com/v1"
+LITELLM_BASE = os.environ.get("LLM_BASE_URL", "http://litellm.talos00/v1")
+LITELLM_KEY = os.environ.get("LLM_API_KEY", "")
 
 CLOUD_MODELS = [
     ModelConfig(
         name="gpt-4o-mini",
         model="gpt-4o-mini",
-        base_url=OPENAI_BASE,
-        structured_method="function_calling",  # OpenAI supports proper tool calling
-        api_key="",  # read from OPENAI_API_KEY env var at runtime
+        base_url=LITELLM_BASE,
+        structured_method="function_calling",
+        api_key=LITELLM_KEY,
         tags=["cloud", "openai", "baseline"],
     ),
     ModelConfig(
         name="gpt-4o",
         model="gpt-4o",
-        base_url=OPENAI_BASE,
+        base_url=LITELLM_BASE,
         structured_method="function_calling",
-        api_key="",
+        api_key=LITELLM_KEY,
         tags=["cloud", "openai", "baseline"],
+    ),
+    ModelConfig(
+        name="claude-sonnet-4",
+        model="claude-sonnet-4-20250514",
+        base_url=LITELLM_BASE,
+        structured_method="function_calling",
+        api_key=LITELLM_KEY,
+        tags=["cloud", "anthropic", "baseline"],
+    ),
+    ModelConfig(
+        name="claude-haiku-3.5",
+        model="claude-3-5-haiku-20241022",
+        base_url=LITELLM_BASE,
+        structured_method="function_calling",
+        api_key=LITELLM_KEY,
+        tags=["cloud", "anthropic"],
     ),
 ]
 

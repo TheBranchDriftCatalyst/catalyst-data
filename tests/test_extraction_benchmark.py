@@ -502,9 +502,9 @@ class TestRunAll:
         for cfg in ALL_MODELS:
             # Skip cloud models if no API key
             if "cloud" in cfg.tags:
-                api_key = os.environ.get("OPENAI_API_KEY", "")
+                api_key = cfg.api_key or os.environ.get("LLM_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
                 if not api_key:
-                    print(f"\n  SKIP {cfg.name}: OPENAI_API_KEY not set")
+                    print(f"\n  SKIP {cfg.name}: LLM_API_KEY / OPENAI_API_KEY not set")
                     continue
 
             # Check if endpoint is reachable (skip for encoder models like GLiNER)
