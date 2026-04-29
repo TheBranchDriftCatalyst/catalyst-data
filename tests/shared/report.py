@@ -169,14 +169,18 @@ def build_report_json(
                 "mention_relaxed_recall": round(m_scores["relaxed_recall"], 4),
                 "mention_relaxed_f1": round(m_scores["relaxed_f1"], 4),
                 "mention_type_accuracy": round(m_scores["type_accuracy"], 4),
-                "mention_span_accuracy": round(m_scores["span_accuracy"], 4),
+                "mention_span_accuracy": round(m_scores["span_accuracy"], 4)
+                if m_scores["span_accuracy"] is not None
+                else 0.0,
                 "proposition_strict_precision": round(p_scores["strict_precision"], 4),
                 "proposition_strict_recall": round(p_scores["strict_recall"], 4),
                 "proposition_strict_f1": round(p_scores["strict_f1"], 4),
                 "proposition_relaxed_precision": round(p_scores["relaxed_precision"], 4),
                 "proposition_relaxed_recall": round(p_scores["relaxed_recall"], 4),
                 "proposition_relaxed_f1": round(p_scores["relaxed_f1"], 4),
-                "hallucination_rate": round(1.0 - m_scores["span_accuracy"], 4),
+                "hallucination_rate": round(1.0 - m_scores["span_accuracy"], 4)
+                if m_scores["span_accuracy"] is not None
+                else None,
                 "quality_speed_ratio": round(m_scores["strict_f1"] / max(model_entry["stats"]["duration_s"], 0.1), 4),
                 "per_chunk_latency": round(
                     model_entry["stats"]["duration_s"] / max(model_entry["stats"]["chunk_count"], 1), 4

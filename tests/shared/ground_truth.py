@@ -13,7 +13,6 @@ Usage:
 
 from __future__ import annotations
 
-import math
 from collections import Counter
 
 from tests.benchmark_config import NER_ENSEMBLE_MODELS, SPO_ENSEMBLE_MODELS
@@ -53,6 +52,7 @@ def _ner_consensus(
     all_model_mentions: dict[str, list[dict]],
     source_text: str,
     threshold: int,
+    ensemble_size: int | None = None,
 ) -> list[dict]:
     """Compute NER consensus mentions via majority voting.
 
@@ -88,7 +88,9 @@ def _ner_consensus(
         original_text = first_mention.get("text", "").strip()
 
         span_start, span_end = find_best_span(source_text, original_text)
-        confidence = round(len(model_entries) / len(all_model_mentions), 2)
+        # Confidence = fraction of the full ensemble that agreed (not just chunk-local models)
+        total = ensemble_size if ensemble_size else len(all_model_mentions)
+        confidence = round(len(model_entries) / total, 2)
 
         accepted.append(
             {
@@ -106,6 +108,7 @@ def _ner_consensus(
 def _spo_consensus(
     all_model_assertions: dict[str, list[dict]],
     threshold: int,
+    ensemble_size: int | None = None,
 ) -> list[dict]:
     """Compute SPO consensus propositions via majority voting.
 
@@ -115,9 +118,9 @@ def _spo_consensus(
     votes: dict[tuple[str, str, str], dict[str, dict]] = {}
     for model_name, assertions in all_model_assertions.items():
         for a in assertions:
-            subj = (a.get("subject_text", a.get("subject", ""))).strip()
+            subj = (a.get("subject") or a.get("subject_text") or "").strip()
             pred = a.get("predicate", "").strip()
-            obj = (a.get("object_text", a.get("object", ""))).strip()
+            obj = (a.get("object") or a.get("object_text") or "").strip()
             if not (subj and pred and obj):
                 continue
             key = (subj.lower(), pred.lower(), obj.lower())
@@ -131,11 +134,12 @@ def _spo_consensus(
             continue
 
         first_a = next(iter(model_entries.values()))
-        subject = (first_a.get("subject_text", first_a.get("subject", ""))).strip()
+        subject = (first_a.get("subject") or first_a.get("subject_text") or "").strip()
         predicate = first_a.get("predicate", "").strip()
-        obj_text = (first_a.get("object_text", first_a.get("object", ""))).strip()
+        obj_text = (first_a.get("object") or first_a.get("object_text") or "").strip()
 
-        confidence = round(len(model_entries) / len(all_model_assertions), 2)
+        total = ensemble_size if ensemble_size else len(all_model_assertions)
+        confidence = round(len(model_entries) / total, 2)
 
         accepted.append(
             {
@@ -197,9 +201,10 @@ def generate_ensemble_ground_truth(
             f"SPO consensus will be weak."
         )
 
-    # Compute thresholds: majority = ceil(N/2)
-    ner_threshold = math.ceil(len(ner_extractions) / 2)
-    spo_threshold = math.ceil(len(spo_extractions) / 2) if spo_extractions else 1
+    # Compute thresholds: strict majority = floor(N/2) + 1
+    # ceil(N/2) is wrong for even N (e.g., N=2 gives threshold=1, no consensus)
+    ner_threshold = len(ner_extractions) // 2 + 1
+    spo_threshold = len(spo_extractions) // 2 + 1 if spo_extractions else 1
 
     print("\n  Ensemble ground truth configuration:")
     print(f"    NER models ({len(ner_extractions)}): {', '.join(ner_extractions.keys())}")
@@ -240,9 +245,15 @@ def generate_ensemble_ground_truth(
                 total_spo_candidates += len(model_assertions)
 
         consensus_mentions = (
-            _ner_consensus(chunk_model_mentions, source_text, ner_threshold) if chunk_model_mentions else []
+            _ner_consensus(chunk_model_mentions, source_text, ner_threshold, ensemble_size=len(ner_extractions))
+            if chunk_model_mentions
+            else []
         )
-        consensus_propositions = _spo_consensus(chunk_model_assertions, spo_threshold) if chunk_model_assertions else []
+        consensus_propositions = (
+            _spo_consensus(chunk_model_assertions, spo_threshold, ensemble_size=len(spo_extractions))
+            if chunk_model_assertions
+            else []
+        )
 
         gt_chunks.append(
             {

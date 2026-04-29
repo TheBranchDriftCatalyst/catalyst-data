@@ -107,7 +107,8 @@ def score_mentions(
             span_total += 1
             if src[s:e] == m.get("text", ""):
                 span_correct += 1
-    span_accuracy = span_correct / span_total if span_total else 0.0
+    # None when source text unavailable (can't compute), 0.0-1.0 otherwise
+    span_accuracy: float | None = span_correct / span_total if span_total else None
 
     # Detail: what was missed and what was extra
     missed = gt_relaxed - pred_relaxed
@@ -144,17 +145,23 @@ def score_propositions(
     Returns dict with precision, recall, f1, and per-proposition details.
     """
 
+    def _get_subj(p: dict) -> str:
+        return p.get("subject") or p.get("subject_text") or ""
+
+    def _get_obj(p: dict) -> str:
+        return p.get("object") or p.get("object_text") or ""
+
     def _triple_strict(p: dict) -> tuple:
         return (
-            _normalize(p.get("subject", p.get("subject_text", ""))),
+            _normalize(_get_subj(p)),
             _normalize(p.get("predicate", "")),
-            _normalize(p.get("object", p.get("object_text", ""))),
+            _normalize(_get_obj(p)),
         )
 
     def _triple_relaxed(p: dict) -> tuple:
         return (
-            _normalize(p.get("subject", p.get("subject_text", ""))),
-            _normalize(p.get("object", p.get("object_text", ""))),
+            _normalize(_get_subj(p)),
+            _normalize(_get_obj(p)),
         )
 
     gt_strict = {_triple_strict(p) for p in ground_truth}
