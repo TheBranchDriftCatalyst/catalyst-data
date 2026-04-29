@@ -44,11 +44,21 @@ def _resolve_client(model: str, base_url: str | None = None, api_key: str | None
     go through one place. Explicitly passes base_url and api_key to avoid
     env var leakage from parent processes.
     """
+    # GLiNER model name mapping
+    GLINER_MODELS = {
+        "gliner": "urchade/gliner_medium-v2.1",
+        "gliner-medium": "urchade/gliner_medium-v2.1",
+        "gliner-large": "urchade/gliner_large-v2.1",
+        "gliner-small": "urchade/gliner_small-v2.1",
+        "gliner-pii": "urchade/gliner_multi_pii-v1",
+    }
+
     model_lower = model.lower()
     if "gliner" in model_lower:
         from catalyst_langgraph.clients.gliner import GLiNERClient
 
-        return GLiNERClient()
+        hf_model = GLINER_MODELS.get(model_lower, GLINER_MODELS.get(model, "urchade/gliner_medium-v2.1"))
+        return GLiNERClient(model_name=hf_model)
     elif "nuextract" in model_lower:
         from catalyst_langgraph.clients.nuextract import NuExtractClient
 

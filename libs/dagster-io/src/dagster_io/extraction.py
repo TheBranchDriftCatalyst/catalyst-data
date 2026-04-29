@@ -140,7 +140,15 @@ def _build_graph_v1():
     if "gliner" in _llm_model_name.lower():
         from catalyst_langgraph.clients.gliner import GLiNERClient
 
-        llm_client = GLiNERClient()
+        _gliner_models = {
+            "gliner": "urchade/gliner_medium-v2.1",
+            "gliner-medium": "urchade/gliner_medium-v2.1",
+            "gliner-large": "urchade/gliner_large-v2.1",
+            "gliner-small": "urchade/gliner_small-v2.1",
+            "gliner-pii": "urchade/gliner_multi_pii-v1",
+        }
+        _hf_model = _gliner_models.get(_llm_model_name.lower(), "urchade/gliner_medium-v2.1")
+        llm_client = GLiNERClient(model_name=_hf_model)
     elif "nuextract" in _llm_model_name.lower():
         from catalyst_langgraph.clients.nuextract import NuExtractClient
 

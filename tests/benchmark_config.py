@@ -73,6 +73,24 @@ ENCODER_MODELS = [
         base_url="",  # not used — runs in-process
         tags=["encoder", "extraction-specialist", "300m"],
     ),
+    ModelConfig(
+        name="gliner-large",
+        model="gliner-large",  # resolved via GLINER_MODEL env var in subprocess
+        base_url="",
+        tags=["encoder", "extraction-specialist", "600m"],
+    ),
+    ModelConfig(
+        name="gliner-pii",
+        model="gliner-pii",  # PII + general NER — detects phone, email, SSN + standard entities
+        base_url="",
+        tags=["encoder", "extraction-specialist", "300m"],
+    ),
+    ModelConfig(
+        name="nuextract-2.0-8b",
+        model="nuextract2:latest",
+        base_url=OLLAMA_BASE,
+        tags=["ollama", "extraction-specialist", "8b"],
+    ),
 ]
 
 # ── Tier 1: Best composite scores on LLMStructBench ──────────────────────
