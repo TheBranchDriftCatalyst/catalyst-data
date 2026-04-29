@@ -424,6 +424,7 @@ def extract_validated(
         "proposition_retries": total_proposition_retries,
         "errors": errors,
         "pipeline": pipeline_breakdown,
+        "audit_events": all_audit_events,
     }
 
     return mention_models, assertion_models

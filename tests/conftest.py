@@ -26,6 +26,13 @@ def pytest_addoption(parser):
         default=None,
         help="Override per-model timeout in seconds (default: 300 from benchmark_config)",
     )
+    _safe_addoption(
+        parser,
+        "--audit-log",
+        action="store_true",
+        default=False,
+        help="Save full structured audit logs per model to .test-output/media-ingest/audit-logs/",
+    )
 
 
 @pytest.fixture(autouse=True)

@@ -489,12 +489,24 @@ class TestRunAll:
 
         regen = request.config.getoption("--regen", default=False)
         timeout_override = request.config.getoption("--timeout", default=None)
+        save_audit = request.config.getoption("--audit-log", default=False)
+
         if regen:
             print("\n  --regen: clearing all extraction fixtures")
             for f in FIXTURES.glob("extraction_*.json"):
                 f.unlink()
         if timeout_override:
             print(f"  --timeout: {timeout_override}s per model")
+
+        # Audit log directory — wipe and recreate if flag is set
+        audit_dir = FIXTURES.parent / "audit-logs"
+        if save_audit:
+            import shutil
+
+            if audit_dir.exists():
+                shutil.rmtree(audit_dir)
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            print(f"  --audit-log: saving to {audit_dir}")
 
         chunks = _load_fixture("chunks")
         if not chunks:
@@ -540,6 +552,7 @@ class TestRunAll:
                 "LLM_MODEL": cfg.model,
                 "LLM_API_KEY": api_key,
                 "OPENAI_API_KEY": api_key,
+                "SAVE_AUDIT_LOG": "true" if save_audit else "",
                 "LLM_STRUCTURED_METHOD": cfg.structured_method,
                 "LLM_MAX_TOKENS": str(cfg.max_tokens),
                 "LLM_TIMEOUT": str(timeout_override or cfg.timeout),
@@ -600,6 +613,25 @@ class TestRunAll:
                     if top:
                         ents = [f"{m.get('text', '?')}" for m in top]
                         print(f"  Top entities: {', '.join(ents)}")
+
+                    # Save structured audit log per model
+                    if save_audit:
+                        audit_events = s.get("audit_events", [])
+                        if audit_events:
+                            safe_name = cfg.name.replace("/", "_").replace(":", "_").replace(" ", "_")
+                            audit_file = audit_dir / f"{safe_name}.json"
+                            audit_data = {
+                                "model": cfg.model,
+                                "name": cfg.name,
+                                "tags": cfg.tags,
+                                "stats": {k: v for k, v in s.items() if k != "audit_events"},
+                                "audit_events": audit_events,
+                                "event_count": len(audit_events),
+                                "stages": sorted({e.get("node_name", "?") for e in audit_events}),
+                            }
+                            with open(audit_file, "w") as f:
+                                json.dump(audit_data, f, indent=2, default=str)
+                            print(f"  Audit log: {audit_file.name} ({len(audit_events)} events)")
                 else:
                     print(f"  WARN {cfg.name}: test passed but no fixture saved")
             else:

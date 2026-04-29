@@ -349,6 +349,7 @@ def extraction_result(chunks_result):
             "proposition_retries": pipeline_stats.get("proposition_retries", 0),
             "errors": pipeline_stats.get("errors", 0),
             "pipeline": pipeline_stats.get("pipeline", {}),
+            "audit_events": pipeline_stats.get("audit_events", []) if os.environ.get("SAVE_AUDIT_LOG") else [],
         },
     }
 
