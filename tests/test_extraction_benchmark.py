@@ -550,11 +550,43 @@ class TestRunAll:
         regen = request.config.getoption("--regen", default=False)
         timeout_override = request.config.getoption("--timeout", default=None)
         save_audit = request.config.getoption("--audit-log", default=False)
+        pipeline = "exgraph v2" if os.environ.get("EXGRAPH_ENABLED", "").lower() == "true" else "v1 (legacy)"
 
-        # --regen clears each model's fixture individually before running it,
-        # NOT all at once. This way a cancelled run keeps the models that completed.
+        # Print run summary
+        print(f"\n{'=' * 70}")
+        print(f"  Extraction Benchmark — {len(ALL_MODELS)} models")
+        print(f"  Pipeline: {pipeline} | Timeout: {timeout_override or 300}s | Regen: {regen} | Audit: {save_audit}")
+        print(f"{'=' * 70}")
+
+        encoders = [m for m in ALL_MODELS if "encoder" in m.tags]
+        specialists = [m for m in ALL_MODELS if "extraction-specialist" in m.tags and "encoder" not in m.tags]
+        llms = [
+            m
+            for m in ALL_MODELS
+            if "cloud" not in m.tags and "encoder" not in m.tags and "extraction-specialist" not in m.tags
+        ]
+        cloud = [m for m in ALL_MODELS if "cloud" in m.tags]
+
+        if encoders:
+            print(f"\n  Encoders ({len(encoders)}):")
+            for m in encoders:
+                print(f"    {m.name:<22} {m.model}")
+        if specialists:
+            print(f"\n  Specialists ({len(specialists)}):")
+            for m in specialists:
+                print(f"    {m.name:<22} {m.model}")
+        if llms:
+            print(f"\n  Local LLMs ({len(llms)}):")
+            for m in llms:
+                print(f"    {m.name:<22} {m.model}")
+        if cloud:
+            print(f"\n  Cloud ({len(cloud)}):")
+            for m in cloud:
+                print(f"    {m.name:<22} {m.model}")
+        print()
+
         if regen:
-            print("\n  --regen: will clear each model fixture before re-running")
+            print("  --regen: will clear each model fixture before re-running")
         if timeout_override:
             print(f"  --timeout: {timeout_override}s per model")
 
