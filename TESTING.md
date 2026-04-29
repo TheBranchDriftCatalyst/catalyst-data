@@ -129,6 +129,82 @@ Congress.gov API (partition: 119-hres-1)
 
 The benchmark system has a single CLI entry point (`tests/benchmark_harness.py`) that orchestrates all model runs, ground truth generation, scoring, and reporting. Pytest test classes provide thin wrappers for individual scoring tests.
 
+### Benchmark Flow
+
+```mermaid
+flowchart TD
+    START([benchmark_harness.py]) --> MODE{Mode?}
+
+    MODE -->|--full| RUN
+    MODE -->|--ensemble-gt| ENSEMBLE
+    MODE -->|--score| SCORE
+    MODE -->|--compare| COMPARE
+    MODE -->|no flags| INTERACTIVE[Interactive Prompt]
+    INTERACTIVE --> MODE
+
+    subgraph RUN_PHASE ["1. Model Runs"]
+        RUN[Run All Models]
+        RUN -->|for each model| EXTRACT[Extract via LangGraph]
+        EXTRACT --> SAVE_EXT[Save extraction_model.json]
+
+        RUN -.- RUN_OPTS
+        RUN_OPTS["Optional Args:
+        --models model1,model2
+        --local-only
+        --regen
+        --timeout N
+        --exgraph
+        --audit-log
+        --label NAME"]
+    end
+
+    subgraph GT_PHASE ["2. Ground Truth Generation"]
+        SAVE_EXT --> ENSEMBLE[Ensemble Consensus Vote]
+        ENSEMBLE --> |"majority >= ceil(N/2)"| ACTIVE[Save active.json]
+
+        ENSEMBLE -.- GT_OPTS
+        GT_OPTS["Optional Args:
+        --ner-models m1,m2,m3
+        --spo-models m1,m2,m3"]
+    end
+
+    subgraph SCORE_PHASE ["3. Scoring"]
+        ACTIVE --> SCORE[Score All Models vs GT]
+        SCORE --> |per model| METRICS["Compute:
+        Strict/Relaxed F1
+        Precision/Recall
+        Type Accuracy
+        Span Accuracy
+        Hallucination Rate
+        Quality/Speed Ratio"]
+
+        SCORE -.- SCORE_OPTS
+        SCORE_OPTS["Optional Args:
+        --use-gt NAME"]
+    end
+
+    subgraph REPORT_PHASE ["4. Report"]
+        METRICS --> REPORT[Generate benchmark-report.json]
+        REPORT --> VIEWER[Viewer SPA]
+
+        REPORT -.- REPORT_OPTS
+        REPORT_OPTS["Optional Args:
+        --view"]
+    end
+
+    COMPARE --> COMP_RUN["Run v1 + v2 pipelines
+    side-by-side F1 comparison"]
+
+    style RUN_OPTS fill:#1e293b,stroke:#334155,color:#94a3b8
+    style GT_OPTS fill:#1e293b,stroke:#334155,color:#94a3b8
+    style SCORE_OPTS fill:#1e293b,stroke:#334155,color:#94a3b8
+    style REPORT_OPTS fill:#1e293b,stroke:#334155,color:#94a3b8
+    style RUN_PHASE fill:#0f172a,stroke:#1e40af,color:#93c5fd
+    style GT_PHASE fill:#0f172a,stroke:#065f46,color:#6ee7b7
+    style SCORE_PHASE fill:#0f172a,stroke:#92400e,color:#fcd34d
+    style REPORT_PHASE fill:#0f172a,stroke:#7c3aed,color:#c4b5fd
+```
+
 ### Running Benchmarks
 
 ```bash
