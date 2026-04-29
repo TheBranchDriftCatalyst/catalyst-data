@@ -74,16 +74,14 @@ def _build_pipeline_breakdown(audit_events: list[dict]) -> dict:
     return stages
 
 
-_EXGRAPH_ENABLED = os.environ.get("EXGRAPH_ENABLED", "false").lower() == "true"
-
-
 def _build_graph():
     """Build the extraction graph — dispatches to v1 or v2.
 
     Set EXGRAPH_ENABLED=true to use the new catalyst-exgraph pipeline.
     Default (false) uses the original catalyst-langgraph-aio graph.
+    Reads env var at call time so it can be toggled per-test.
     """
-    if _EXGRAPH_ENABLED:
+    if os.environ.get("EXGRAPH_ENABLED", "false").lower() == "true":
         return _build_graph_v2()
     return _build_graph_v1()
 
