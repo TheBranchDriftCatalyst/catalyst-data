@@ -26,11 +26,10 @@ import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
 
 from dagster import ConfigurableResource
 
-from catalyst_exgraph.config import PipelineConfig, StageConfig, ner_stage_config, spo_stage_config
+from catalyst_exgraph.config import StageConfig, ner_stage_config, spo_stage_config
 from catalyst_exgraph.pipeline import build_pipeline, pipeline_result_to_legacy
 from catalyst_exgraph.protocol import ExtractionResult
 from catalyst_exgraph.state import ExGraphState
@@ -38,8 +37,13 @@ from catalyst_exgraph.state import ExGraphState
 logger = logging.getLogger(__name__)
 
 
-def _resolve_client(model: str):
-    """Resolve model name to the appropriate extraction client."""
+def _resolve_client(model: str, base_url: str | None = None, api_key: str | None = None):
+    """Resolve model name to the appropriate extraction client.
+
+    Centralizes client construction so all paths (v1, v2, benchmark, resource)
+    go through one place. Explicitly passes base_url and api_key to avoid
+    env var leakage from parent processes.
+    """
     model_lower = model.lower()
     if "gliner" in model_lower:
         from catalyst_langgraph.clients.gliner import GLiNERClient
@@ -48,15 +52,19 @@ def _resolve_client(model: str):
     elif "nuextract" in model_lower:
         from catalyst_langgraph.clients.nuextract import NuExtractClient
 
-        return NuExtractClient()
+        return NuExtractClient(base_url=base_url, model=model)
     elif "universalner" in model_lower or "uniner" in model_lower:
         from catalyst_langgraph.clients.universalner import UniversalNERClient
 
-        return UniversalNERClient()
+        return UniversalNERClient(base_url=base_url, model=model)
     else:
         from catalyst_langgraph.clients.llm import LLMClient
 
-        return LLMClient(model=model)
+        return LLMClient(
+            model=model,
+            base_url=base_url or os.environ.get("LLM_BASE_URL"),
+            api_key=api_key or os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", "")),
+        )
 
 
 def _build_mcp_client():

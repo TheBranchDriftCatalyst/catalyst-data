@@ -171,7 +171,10 @@ def _build_graph_v2():
     from catalyst_exgraph.resource import _build_mcp_client, _resolve_client
 
     _llm_model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
-    client = _resolve_client(_llm_model_name)
+    _llm_base_url = os.environ.get("LLM_BASE_URL")
+    _llm_api_key = os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+    logger.info("_build_graph_v2: model=%s, base_url=%s", _llm_model_name, _llm_base_url)
+    client = _resolve_client(_llm_model_name, base_url=_llm_base_url, api_key=_llm_api_key)
     mcp_client = _build_mcp_client()
 
     is_encoder = any(x in _llm_model_name.lower() for x in ("gliner", "nuextract", "universalner", "uniner"))
