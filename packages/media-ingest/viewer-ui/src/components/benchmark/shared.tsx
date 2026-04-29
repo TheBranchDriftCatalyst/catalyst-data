@@ -1,5 +1,4 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@thebranchdriftcatalyst/catalyst-ui";
-import type { Column } from "@tanstack/react-table";
 import type { ModelResult, ModelScores } from "@/types/benchmark";
 
 // ── Metric Tooltip Definitions ────────────────────────────────────────
@@ -201,27 +200,39 @@ export function StatCard({
   );
 }
 
-// ── Sortable Header for TanStack Table ────────────────────────────────
+// ── Sortable Header (state-driven) ───────────────────────────────────
 
-export function SortableHeader<TData>({
-  column,
-  children,
+export function SortableHeader({
+  label,
+  sortKey,
+  currentSort,
+  currentDir,
+  onSort,
+  tooltip,
   className = "",
+  children,
 }: {
-  column: Column<TData, unknown>;
-  children: React.ReactNode;
+  label?: string;
+  sortKey: string;
+  currentSort: string;
+  currentDir: "asc" | "desc";
+  onSort: (key: string) => void;
+  tooltip?: string;
   className?: string;
+  children?: React.ReactNode;
 }) {
+  const isActive = currentSort === sortKey;
   return (
-    <th
-      onClick={column.getToggleSortingHandler()}
-      className={`cursor-pointer select-none ${className}`}
-    >
+    <th onClick={() => onSort(sortKey)} className={`cursor-pointer select-none ${className}`}>
       <div className="flex items-center gap-1">
-        {children}
-        <span className="text-zinc-400">
-          {column.getIsSorted() === "asc" ? "↑" : column.getIsSorted() === "desc" ? "↓" : ""}
-        </span>
+        {children ? (
+          children
+        ) : tooltip ? (
+          <MetricLabel label={label ?? sortKey} tooltip={tooltip} />
+        ) : (
+          (label ?? sortKey)
+        )}
+        <span className="text-zinc-400">{isActive ? (currentDir === "asc" ? "↑" : "↓") : ""}</span>
       </div>
     </th>
   );

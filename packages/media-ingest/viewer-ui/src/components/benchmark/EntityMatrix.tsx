@@ -1,18 +1,6 @@
-import { useState, useMemo } from "react";
-import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  getGroupedRowModel,
-  getExpandedRowModel,
-  flexRender,
-  createColumnHelper,
-  type SortingState,
-  type ColumnDef,
-  type ExpandedState,
-} from "@tanstack/react-table";
+import { useState, useMemo, useCallback } from "react";
 import type { EntityRow } from "@/types/benchmark";
-import { MetricLabel, TypeBadge, DomainBadge, SortableHeader, METRIC_TOOLTIPS } from "./shared";
+import { TypeBadge, DomainBadge, SortableHeader, METRIC_TOOLTIPS } from "./shared";
 
 const DOMAIN_ORDER: Record<string, number> = {
   media: 0,
@@ -21,6 +9,30 @@ const DOMAIN_ORDER: Record<string, number> = {
   unknown: 3,
 };
 
+type SortKey = "text" | "domain" | "consensus_type" | "model_count";
+
+function compareRows(a: EntityRow, b: EntityRow, key: SortKey, dir: "asc" | "desc"): number {
+  let cmp: number;
+  switch (key) {
+    case "text":
+      cmp = a.text.localeCompare(b.text);
+      break;
+    case "domain":
+      cmp =
+        (DOMAIN_ORDER[a.domain || "unknown"] ?? 99) - (DOMAIN_ORDER[b.domain || "unknown"] ?? 99);
+      break;
+    case "consensus_type":
+      cmp = a.consensus_type.localeCompare(b.consensus_type);
+      break;
+    case "model_count":
+      cmp = a.model_count - b.model_count;
+      break;
+    default:
+      cmp = 0;
+  }
+  return dir === "asc" ? cmp : -cmp;
+}
+
 export function EntityMatrix({
   entities,
   modelNames,
@@ -28,160 +40,132 @@ export function EntityMatrix({
   entities: EntityRow[];
   modelNames: string[];
 }) {
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [expanded, setExpanded] = useState<ExpandedState>(true);
-
-  const columns = useMemo<ColumnDef<EntityRow, unknown>[]>(() => {
-    const helper = createColumnHelper<EntityRow>();
-
-    const base: ColumnDef<EntityRow, unknown>[] = [
-      helper.accessor("text", {
-        header: "Entity",
-        cell: (info) => (
-          <span className="text-zinc-200 max-w-[200px] truncate block">{info.getValue()}</span>
-        ),
-        enableGrouping: false,
-        meta: { tooltip: METRIC_TOOLTIPS.entity_text, sticky: true },
-      }) as ColumnDef<EntityRow, unknown>,
-      helper.accessor("domain", {
-        header: "Domain",
-        cell: (info) => <DomainBadge domain={info.getValue() || "unknown"} />,
-        sortingFn: (rowA, rowB) => {
-          const a = DOMAIN_ORDER[rowA.original.domain || "unknown"] ?? 99;
-          const b = DOMAIN_ORDER[rowB.original.domain || "unknown"] ?? 99;
-          return a - b;
-        },
-        meta: { tooltip: METRIC_TOOLTIPS.entity_domain },
-      }) as ColumnDef<EntityRow, unknown>,
-      helper.accessor("consensus_type", {
-        header: "Type",
-        cell: (info) => <TypeBadge type={info.getValue()} />,
-        meta: { tooltip: METRIC_TOOLTIPS.entity_type },
-        enableGrouping: false,
-      }) as ColumnDef<EntityRow, unknown>,
-      helper.accessor("model_count", {
-        header: "#",
-        cell: (info) => <span className="text-zinc-400">{info.getValue()}</span>,
-        meta: { tooltip: METRIC_TOOLTIPS.entity_model_count },
-        enableGrouping: false,
-      }) as ColumnDef<EntityRow, unknown>,
-    ];
-
-    const modelCols = modelNames.map(
-      (name) =>
-        helper.display({
-          id: `model_${name}`,
-          header: () => (
-            <span className="writing-mode-vertical text-[10px]">
-              {name.replace(/-/g, "\u200b-")}
-            </span>
-          ),
-          cell: ({ row }) => {
-            const entity = row.original;
-            const info = entity.models[name];
-            if (!info) {
-              return <span className="text-zinc-700">·</span>;
-            }
-            const isConsensus = info.type === entity.consensus_type;
-            return (
-              <span
-                className={isConsensus ? "text-emerald-400" : "text-amber-400"}
-                title={`${info.type} (${(info.confidence * 100).toFixed(0)}%)`}
-              >
-                {isConsensus ? "✓" : info.type.slice(0, 3)}
-              </span>
-            );
-          },
-          enableSorting: false,
-        }) as ColumnDef<EntityRow, unknown>,
-    );
-
-    return [...base, ...modelCols];
-  }, [modelNames]);
-
-  const table = useReactTable({
-    data: entities,
-    columns,
-    state: {
-      sorting,
-      grouping: ["domain"],
-      expanded,
-    },
-    onSortingChange: setSorting,
-    onExpandedChange: setExpanded,
-    getGroupedRowModel: getGroupedRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-  });
-
+  const [sortKey, setSortKey] = useState<SortKey>("text");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [showAll, setShowAll] = useState(false);
-  const allRows = table.getRowModel().rows;
-  const visibleRows = showAll ? allRows : allRows.slice(0, 50);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const onSort = useCallback(
+    (key: string) => {
+      if (key === sortKey) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSortKey(key as SortKey);
+        setSortDir("asc");
+      }
+    },
+    [sortKey],
+  );
+
+  // Group by domain, sort within groups
+  const grouped = useMemo(() => {
+    const groups = new Map<string, EntityRow[]>();
+    for (const row of entities) {
+      const d = row.domain || "unknown";
+      const list = groups.get(d) || [];
+      list.push(row);
+      groups.set(d, list);
+    }
+    for (const [, rows] of groups) {
+      rows.sort((a, b) => compareRows(a, b, sortKey, sortDir));
+    }
+    const sortedKeys = Array.from(groups.keys()).sort(
+      (a, b) => (DOMAIN_ORDER[a] ?? 99) - (DOMAIN_ORDER[b] ?? 99),
+    );
+    return sortedKeys.map((key) => ({ domain: key, rows: groups.get(key)! }));
+  }, [entities, sortKey, sortDir]);
+
+  // Flatten for row limiting
+  const allFlatRows = useMemo(() => {
+    const flat: Array<
+      { kind: "group"; domain: string; count: number } | { kind: "row"; entity: EntityRow }
+    > = [];
+    for (const g of grouped) {
+      flat.push({ kind: "group", domain: g.domain, count: g.rows.length });
+      if (!collapsed[g.domain]) {
+        for (const row of g.rows) {
+          flat.push({ kind: "row", entity: row });
+        }
+      }
+    }
+    return flat;
+  }, [grouped, collapsed]);
+
+  const visibleRows = showAll ? allFlatRows : allFlatRows.slice(0, 50);
+  const totalDataRows = entities.length;
+  const colCount = 4 + modelNames.length;
+
+  const toggleGroup = (domain: string) => {
+    setCollapsed((prev) => ({ ...prev, [domain]: !prev[domain] }));
+  };
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs font-mono">
         <thead>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr key={headerGroup.id} className="text-zinc-500 border-b border-white/5">
-              {headerGroup.headers.map((header) => {
-                if (header.isPlaceholder) return <th key={header.id} />;
-                const meta = header.column.columnDef.meta as
-                  | { tooltip?: string; sticky?: boolean }
-                  | undefined;
-                const tooltip = meta?.tooltip;
-                const sticky = meta?.sticky;
-                const label = flexRender(header.column.columnDef.header, header.getContext());
-
-                const stickyClass = sticky ? "sticky left-0 bg-surface-0 z-10" : "";
-
-                if (header.column.getIsGrouped()) {
-                  return (
-                    <th key={header.id} className={`text-left py-2 px-1 ${stickyClass}`}>
-                      {tooltip ? <MetricLabel label={String(label)} tooltip={tooltip} /> : label}
-                    </th>
-                  );
-                }
-
-                if (!header.column.getCanSort()) {
-                  return (
-                    <th key={header.id} className="text-center py-2 px-1 min-w-[60px]">
-                      {label}
-                    </th>
-                  );
-                }
-
-                return (
-                  <SortableHeader
-                    key={header.id}
-                    column={header.column}
-                    className={`py-2 px-1 ${header.column.id === "text" ? `text-left ${stickyClass}` : "text-center"}`}
-                  >
-                    {tooltip ? <MetricLabel label={String(label)} tooltip={tooltip} /> : label}
-                  </SortableHeader>
-                );
-              })}
-            </tr>
-          ))}
+          <tr className="text-zinc-500 border-b border-white/5">
+            <SortableHeader
+              label="Entity"
+              sortKey="text"
+              currentSort={sortKey}
+              currentDir={sortDir}
+              onSort={onSort}
+              tooltip={METRIC_TOOLTIPS.entity_text}
+              className="text-left py-2 px-1 sticky left-0 bg-surface-0 z-10"
+            />
+            <SortableHeader
+              label="Domain"
+              sortKey="domain"
+              currentSort={sortKey}
+              currentDir={sortDir}
+              onSort={onSort}
+              tooltip={METRIC_TOOLTIPS.entity_domain}
+              className="text-center py-2 px-1"
+            />
+            <SortableHeader
+              label="Type"
+              sortKey="consensus_type"
+              currentSort={sortKey}
+              currentDir={sortDir}
+              onSort={onSort}
+              tooltip={METRIC_TOOLTIPS.entity_type}
+              className="text-center py-2 px-1"
+            />
+            <SortableHeader
+              label="#"
+              sortKey="model_count"
+              currentSort={sortKey}
+              currentDir={sortDir}
+              onSort={onSort}
+              tooltip={METRIC_TOOLTIPS.entity_model_count}
+              className="text-center py-2 px-1"
+            />
+            {modelNames.map((name) => (
+              <th key={name} className="text-center py-2 px-1 min-w-[60px]">
+                <span className="writing-mode-vertical text-[10px]">
+                  {name.replace(/-/g, "\u200b-")}
+                </span>
+              </th>
+            ))}
+          </tr>
         </thead>
         <tbody>
-          {visibleRows.map((row) => {
-            if (row.getIsGrouped()) {
+          {visibleRows.map((item, idx) => {
+            if (item.kind === "group") {
               return (
                 <tr
-                  key={row.id}
+                  key={`group-${item.domain}`}
                   className="bg-white/[0.03] border-b border-white/5 cursor-pointer"
-                  onClick={row.getToggleExpandedHandler()}
+                  onClick={() => toggleGroup(item.domain)}
                 >
-                  <td colSpan={columns.length} className="py-2 px-2">
+                  <td colSpan={colCount} className="py-2 px-2">
                     <div className="flex items-center gap-2">
                       <span className="text-zinc-500 text-[10px]">
-                        {row.getIsExpanded() ? "▼" : "▶"}
+                        {collapsed[item.domain] ? "▶" : "▼"}
                       </span>
-                      <DomainBadge domain={(row.groupingValue as string) || "unknown"} />
+                      <DomainBadge domain={item.domain} />
                       <span className="text-zinc-500 text-[10px]">
-                        ({row.subRows.length} entit{row.subRows.length !== 1 ? "ies" : "y"})
+                        ({item.count} entit{item.count !== 1 ? "ies" : "y"})
                       </span>
                     </div>
                   </td>
@@ -189,22 +173,42 @@ export function EntityMatrix({
               );
             }
 
+            const entity = item.entity;
             return (
-              <tr key={row.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                {row.getVisibleCells().map((cell) => {
-                  if (cell.getIsGrouped() || cell.getIsPlaceholder()) return null;
-                  const meta = cell.column.columnDef.meta as { sticky?: boolean } | undefined;
-                  const sticky = meta?.sticky;
-                  const stickyClass = sticky ? "sticky left-0 bg-surface-0" : "";
-
+              <tr
+                key={`${entity.text}-${idx}`}
+                className="border-b border-white/5 hover:bg-white/[0.02]"
+              >
+                <td className="py-1.5 px-2 text-left sticky left-0 bg-surface-0">
+                  <span className="text-zinc-200 max-w-[200px] truncate block">{entity.text}</span>
+                </td>
+                <td className="py-1.5 px-1 text-center">
+                  <DomainBadge domain={entity.domain || "unknown"} />
+                </td>
+                <td className="py-1.5 px-1 text-center">
+                  <TypeBadge type={entity.consensus_type} />
+                </td>
+                <td className="py-1.5 px-1 text-center">
+                  <span className="text-zinc-400">{entity.model_count}</span>
+                </td>
+                {modelNames.map((name) => {
+                  const info = entity.models[name];
+                  if (!info) {
+                    return (
+                      <td key={name} className="py-1.5 px-1 text-center">
+                        <span className="text-zinc-700">·</span>
+                      </td>
+                    );
+                  }
+                  const isConsensus = info.type === entity.consensus_type;
                   return (
-                    <td
-                      key={cell.id}
-                      className={`py-1.5 px-1 ${cell.column.id === "text" ? `text-left px-2 ${stickyClass}` : "text-center"}`}
-                    >
-                      {cell.getIsAggregated()
-                        ? null
-                        : flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    <td key={name} className="py-1.5 px-1 text-center">
+                      <span
+                        className={isConsensus ? "text-emerald-400" : "text-amber-400"}
+                        title={`${info.type} (${(info.confidence * 100).toFixed(0)}%)`}
+                      >
+                        {isConsensus ? "✓" : info.type.slice(0, 3)}
+                      </span>
                     </td>
                   );
                 })}
@@ -213,12 +217,12 @@ export function EntityMatrix({
           })}
         </tbody>
       </table>
-      {!showAll && allRows.length > 50 && (
+      {!showAll && totalDataRows > 50 && (
         <button
           onClick={() => setShowAll(true)}
           className="mt-2 text-xs text-cyan-400 hover:text-cyan-300 font-mono"
         >
-          Show all {allRows.length} rows ({allRows.length - 50} hidden)
+          Show all {totalDataRows} rows ({totalDataRows - 50} hidden)
         </button>
       )}
     </div>
