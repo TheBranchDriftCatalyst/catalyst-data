@@ -249,49 +249,76 @@ function GroupRows({
 
       {/* Expanded entity rows */}
       {isOpen &&
-        sortedRows.map((entity) => (
-          <tr key={entity.text} className="border-b border-white/5 hover:bg-white/[0.02]">
-            <td />
-            <td className="py-1.5 px-2 text-left">
-              <span className="text-zinc-200 max-w-[200px] truncate block">{entity.text}</span>
-            </td>
-            <td className="py-1.5 px-1 text-center">
-              <TypeBadge type={entity.consensus_type} />
-            </td>
-            <td className="py-1.5 px-1 text-center text-zinc-400">{entity.model_count}</td>
-            {modelNames.map((name) => {
-              const info = entity.models[name];
-              if (!info) {
-                return (
-                  <td key={name} className="py-1.5 px-1 text-center text-zinc-700">
-                    ·
+        sortedRows.map((entity) => {
+          const modelEntries = Object.entries(entity.models);
+          return (
+            <Tooltip key={entity.text}>
+              <TooltipTrigger asChild>
+                <tr className="border-b border-white/5 hover:bg-white/[0.02] cursor-default">
+                  <td />
+                  <td className="py-1.5 px-2 text-left">
+                    <span className="text-zinc-200 max-w-[200px] truncate block">
+                      {entity.text}
+                    </span>
                   </td>
-                );
-              }
-              const isConsensus = info.type === entity.consensus_type;
-              return (
-                <td key={name} className="py-1.5 px-1 text-center">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span
-                        className={`cursor-help ${isConsensus ? "text-emerald-400" : "text-amber-400"}`}
-                        aria-label={`${info.type} (${(info.confidence * 100).toFixed(0)}% confidence)`}
-                      >
-                        {isConsensus ? "✓" : info.type.slice(0, 3)}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="top"
-                      className="text-xs text-zinc-100 bg-zinc-800 border border-zinc-600 px-2 py-1 rounded shadow-lg"
-                    >
-                      {info.type} ({(info.confidence * 100).toFixed(0)}%)
-                    </TooltipContent>
-                  </Tooltip>
-                </td>
-              );
-            })}
-          </tr>
-        ))}
+                  <td className="py-1.5 px-1 text-center">
+                    <TypeBadge type={entity.consensus_type} />
+                  </td>
+                  <td className="py-1.5 px-1 text-center text-zinc-400">{entity.model_count}</td>
+                  {modelNames.map((name) => {
+                    const info = entity.models[name];
+                    if (!info) {
+                      return (
+                        <td key={name} className="py-1.5 px-1 text-center text-zinc-700">
+                          ·
+                        </td>
+                      );
+                    }
+                    const isConsensus = info.type === entity.consensus_type;
+                    return (
+                      <td key={name} className="py-1.5 px-1 text-center">
+                        <span className={isConsensus ? "text-emerald-400" : "text-amber-400"}>
+                          {isConsensus ? "✓" : info.type.slice(0, 3)}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              </TooltipTrigger>
+              <TooltipContent
+                side="top"
+                sideOffset={8}
+                className="max-w-sm text-xs leading-relaxed p-0"
+              >
+                <div className="px-3 py-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <DomainBadge domain={entity.domain || "unknown"} />
+                    <TypeBadge type={entity.consensus_type} />
+                    <span className="text-zinc-400 text-[10px] font-mono">
+                      {entity.model_count}/{modelNames.length} models
+                    </span>
+                  </div>
+                  <div className="font-mono text-zinc-100">{entity.text}</div>
+                  <div className="border-t border-white/10 pt-1.5 space-y-1">
+                    <span className="text-[10px] text-zinc-500 uppercase">Per-model breakdown</span>
+                    {modelEntries.map(([name, info]) => (
+                      <div key={name} className="flex items-center gap-2 text-[11px] font-mono">
+                        <span className="text-zinc-400 min-w-[80px] truncate">{name}</span>
+                        <TypeBadge type={info.type} />
+                        <span className="text-zinc-300">{(info.confidence * 100).toFixed(0)}%</span>
+                        {info.span_start != null && (
+                          <span className="text-zinc-600">
+                            [{info.span_start}:{info.span_end}]
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
     </>
   );
 }

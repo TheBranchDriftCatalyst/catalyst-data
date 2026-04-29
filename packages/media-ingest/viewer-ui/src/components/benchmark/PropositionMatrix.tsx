@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@thebranchdriftcatalyst/catalyst-ui";
 import type { PropositionRow } from "@/types/benchmark";
 import { DomainBadge, METRIC_TOOLTIPS, MetricLabel } from "./shared";
 
@@ -202,29 +203,71 @@ function PropGroupRows({
 
       {isOpen &&
         rows.map((prop, i) => (
-          <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02]">
-            <td />
-            <td className="py-1.5 px-2 text-left">
-              <span className="text-zinc-200 max-w-[150px] truncate block">{prop.subject}</span>
-            </td>
-            <td className="py-1.5 px-1 text-left">
-              <span className="text-cyan-400">{prop.predicate}</span>
-            </td>
-            <td className="py-1.5 px-1 text-left">
-              <span className="text-zinc-200 max-w-[150px] truncate block">{prop.object}</span>
-            </td>
-            <td className="py-1.5 px-1 text-center text-zinc-400">{prop.model_count}</td>
-            {modelNames.map((name) => {
-              const found = prop.models.includes(name);
-              return (
-                <td key={name} className="py-1.5 px-1 text-center">
-                  <span className={found ? "text-emerald-400" : "text-zinc-700"}>
-                    {found ? "✓" : "·"}
-                  </span>
+          <Tooltip key={i}>
+            <TooltipTrigger asChild>
+              <tr className="border-b border-white/5 hover:bg-white/[0.02] cursor-default">
+                <td />
+                <td className="py-1.5 px-2 text-left">
+                  <span className="text-zinc-200 max-w-[150px] truncate block">{prop.subject}</span>
                 </td>
-              );
-            })}
-          </tr>
+                <td className="py-1.5 px-1 text-left">
+                  <span className="text-cyan-400">{prop.predicate}</span>
+                </td>
+                <td className="py-1.5 px-1 text-left">
+                  <span className="text-zinc-200 max-w-[150px] truncate block">{prop.object}</span>
+                </td>
+                <td className="py-1.5 px-1 text-center text-zinc-400">{prop.model_count}</td>
+                {modelNames.map((name) => {
+                  const found = prop.models.includes(name);
+                  return (
+                    <td key={name} className="py-1.5 px-1 text-center">
+                      <span className={found ? "text-emerald-400" : "text-zinc-700"}>
+                        {found ? "✓" : "·"}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            </TooltipTrigger>
+            <TooltipContent
+              side="top"
+              sideOffset={8}
+              className="max-w-sm text-xs leading-relaxed p-0"
+            >
+              <div className="px-3 py-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  <DomainBadge domain={prop.domain || "unknown"} />
+                  <span className="text-zinc-400 text-[10px] font-mono">
+                    {prop.model_count}/{modelNames.length} models
+                  </span>
+                </div>
+                <div className="space-y-1 font-mono">
+                  <div className="flex gap-2">
+                    <span className="text-zinc-500 w-10 flex-shrink-0 text-[10px] uppercase">
+                      Subj
+                    </span>
+                    <span className="text-zinc-100">{prop.subject}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="text-zinc-500 w-10 flex-shrink-0 text-[10px] uppercase">
+                      Pred
+                    </span>
+                    <span className="text-cyan-400">{prop.predicate}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="text-zinc-500 w-10 flex-shrink-0 text-[10px] uppercase">
+                      Obj
+                    </span>
+                    <span className="text-zinc-100">{prop.object}</span>
+                  </div>
+                </div>
+                <div className="border-t border-white/10 pt-1.5">
+                  <span className="text-[10px] text-zinc-500 uppercase">Extracted by </span>
+                  <span className="text-[10px] text-zinc-300">{prop.models.join(", ")}</span>
+                </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
         ))}
     </>
   );

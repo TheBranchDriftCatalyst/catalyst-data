@@ -12,6 +12,7 @@ import { EntityMatrix } from "@/components/benchmark/EntityMatrix";
 import { PropositionMatrix } from "@/components/benchmark/PropositionMatrix";
 import { PipelineTable } from "@/components/benchmark/PipelineTable";
 import { AuditViewer } from "@/components/benchmark/AuditViewer";
+import { GroundTruthPanel } from "@/components/benchmark/GroundTruthPanel";
 
 // ── Scores Tab Content ────────────────────────────────────────────────
 function ScoresTab({ report }: { report: BenchmarkReportType }) {
@@ -192,7 +193,7 @@ export default function BenchmarkReport() {
   const [reportSource, setReportSource] = useState(REPORT_SOURCES[0]!.url);
   const [availableSources, setAvailableSources] = useState<ReportSource[]>([]);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "scores" | "entities" | "propositions" | "pipeline" | "audit"
+    "overview" | "scores" | "entities" | "propositions" | "pipeline" | "audit" | "ground-truth"
   >("overview");
 
   // Probe which report sources exist
@@ -267,6 +268,7 @@ export default function BenchmarkReport() {
     },
     { key: "pipeline" as const, label: "Pipeline" },
     { key: "audit" as const, label: "Audit" },
+    { key: "ground-truth" as const, label: "Ground Truth" },
   ];
 
   return (
@@ -422,6 +424,8 @@ export default function BenchmarkReport() {
           )}
 
           {activeTab === "audit" && <AuditViewer modelNames={report.model_names} />}
+
+          {activeTab === "ground-truth" && <GroundTruthPanel />}
         </div>
       </div>
     </div>

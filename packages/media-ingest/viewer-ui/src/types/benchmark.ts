@@ -116,3 +116,45 @@ export interface PropositionRow {
   model_count: number;
   models: string[];
 }
+
+// ── Ground Truth (full data, not just the summary meta) ──────────────
+
+export interface GroundTruthMention {
+  text: string;
+  mention_type: string;
+  span_start: number | null;
+  span_end: number | null;
+  confidence: number;
+}
+
+export interface GroundTruthProposition {
+  subject: string;
+  predicate: string;
+  object: string;
+  confidence: number;
+  evidence?: string;
+}
+
+export interface GroundTruthChunk {
+  chunk_id: string;
+  text: string;
+  mentions: GroundTruthMention[];
+  propositions: GroundTruthProposition[];
+}
+
+export interface GroundTruthFile {
+  domain: string;
+  reference_model: string;
+  manually_reviewed: boolean;
+  chunk_count: number;
+  total_mentions: number;
+  total_propositions: number;
+  ensemble_config?: {
+    ner_models: string[];
+    spo_models: string[];
+    threshold: number;
+    ner_threshold?: number;
+    spo_threshold?: number;
+  };
+  chunks: GroundTruthChunk[];
+}

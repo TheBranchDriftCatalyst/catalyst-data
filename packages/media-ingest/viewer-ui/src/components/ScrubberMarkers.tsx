@@ -120,7 +120,7 @@ export default function ScrubberMarkers({
                 }}
               />
             </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-xs text-xs">
+            <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
               {m.label}
             </TooltipContent>
           </Tooltip>
@@ -164,12 +164,12 @@ export default function ScrubberMarkers({
                 )}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-xs">
+            <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
               {isSingle ? (
-                <p className="text-xs">{primary.label}</p>
+                <p>{primary.label}</p>
               ) : (
                 <div className="space-y-0.5">
-                  <p className="text-xs font-medium">{cluster.markers.length} markers</p>
+                  <p className="font-medium">{cluster.markers.length} markers</p>
                   {cluster.markers.slice(0, 5).map((m) => (
                     <p key={m.id} className="text-[10px] text-zinc-400 truncate max-w-[200px]">
                       <span

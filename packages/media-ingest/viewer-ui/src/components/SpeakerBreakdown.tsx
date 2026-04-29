@@ -122,7 +122,7 @@ export default function SpeakerBreakdown({
                   )}
                 </div>
               </TooltipTrigger>
-              <TooltipContent>
+              <TooltipContent className="text-xs">
                 {displayName ? `${displayName} (${speaker})` : speaker}: {percentage.toFixed(1)}%
               </TooltipContent>
             </Tooltip>

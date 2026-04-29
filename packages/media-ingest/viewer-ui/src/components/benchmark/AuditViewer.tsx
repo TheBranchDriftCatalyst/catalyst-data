@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@thebranchdriftcatalyst/catalyst-ui";
 import type { AuditLog, AuditEvent } from "@/types/benchmark";
 
 // ── Stage colors ─────────────────────────────────────────────────────
@@ -184,29 +185,62 @@ function GanttChart({ log, maxDuration }: { log: AuditLog; maxDuration: number }
                 const isSelected = selectedEvent === event;
 
                 return (
-                  <div
-                    key={i}
-                    className={`absolute top-0.5 h-5 ${color} rounded-sm cursor-pointer transition-opacity ${isSelected ? "opacity-100 ring-1 ring-white/40" : "opacity-70 hover:opacity-100"}`}
-                    style={{
-                      left: `${startPct}%`,
-                      width: `${widthPct}%`,
-                      minWidth: "3px",
-                    }}
-                    aria-label={`${event.node_name} — ${event.status}, ${event.duration_s.toFixed(2)}s`}
-                    role="button"
-                    onClick={() =>
-                      setSelectedEvent(isSelected ? null : { ...event, chunkIndex: chunk.index })
-                    }
-                  >
-                    {event.status === "ambiguous" && (
-                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full" />
-                    )}
-                    {(event.status === "error" ||
-                      event.status === "failed" ||
-                      event.status === "invalid") && (
-                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
-                    )}
-                  </div>
+                  <Tooltip key={i}>
+                    <TooltipTrigger asChild>
+                      <div
+                        className={`absolute top-0.5 h-5 ${color} rounded-sm cursor-pointer transition-opacity ${isSelected ? "opacity-100 ring-1 ring-white/40" : "opacity-70 hover:opacity-100"}`}
+                        style={{
+                          left: `${startPct}%`,
+                          width: `${widthPct}%`,
+                          minWidth: "3px",
+                        }}
+                        onClick={() =>
+                          setSelectedEvent(
+                            isSelected ? null : { ...event, chunkIndex: chunk.index },
+                          )
+                        }
+                      >
+                        {event.status === "ambiguous" && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full" />
+                        )}
+                        {(event.status === "error" ||
+                          event.status === "failed" ||
+                          event.status === "invalid") && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+                        )}
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      sideOffset={6}
+                      className="text-xs leading-relaxed p-0"
+                    >
+                      <div className="px-2.5 py-1.5 space-y-1 font-mono">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 ${color} rounded-sm inline-block`} />
+                          <span className="text-zinc-100">
+                            {event.node_name.replace(/_/g, " ")}
+                          </span>
+                          <span
+                            className={`px-1 py-0.5 rounded text-[10px] ${
+                              event.status === "completed" || event.status === "valid"
+                                ? "bg-emerald-500/20 text-emerald-300"
+                                : event.status === "ambiguous"
+                                  ? "bg-amber-500/20 text-amber-300"
+                                  : "bg-red-500/20 text-red-300"
+                            }`}
+                          >
+                            {event.status}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-zinc-400">
+                          {event.duration_s.toFixed(3)}s at +{event.offsetS.toFixed(1)}s
+                          {event.details.candidate_count != null &&
+                            ` \u00b7 ${event.details.candidate_count} candidates`}
+                        </div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
                 );
               })}
             </div>

@@ -23,6 +23,11 @@
   --color-surface-2: #1c1f28;
   --color-surface-3: #2a2e3a;
 
+  /* Popover / tooltip tokens — consumed by catalyst-ui TooltipContent defaults */
+  --color-popover: #1c1f28;
+  --color-popover-foreground: #f4f4f5;
+  --color-border: rgba(255, 255, 255, 0.1);
+
   /* Typography */
   --font-display: "JetBrains Mono", ui-monospace, monospace;
   --font-body: "DM Sans", system-ui, sans-serif;

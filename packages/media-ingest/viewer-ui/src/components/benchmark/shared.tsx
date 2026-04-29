@@ -144,11 +144,7 @@ export function MetricLabel({ label, tooltip }: { label: string; tooltip?: strin
           {label}
         </span>
       </TooltipTrigger>
-      <TooltipContent
-        side="top"
-        sideOffset={8}
-        className="max-w-xs text-xs leading-relaxed text-zinc-100 bg-zinc-800 border border-zinc-600 px-3 py-2 rounded-md shadow-lg z-50"
-      >
+      <TooltipContent side="top" sideOffset={8} className="max-w-xs text-xs leading-relaxed">
         {tooltip}
       </TooltipContent>
     </Tooltip>
