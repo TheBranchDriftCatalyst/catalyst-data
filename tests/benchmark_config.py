@@ -218,14 +218,15 @@ CLOUD_MODELS = [
         api_key=LITELLM_KEY,
         tags=["cloud", "anthropic", "baseline"],
     ),
-    ModelConfig(
-        name="claude-haiku-3.5",
-        model="claude-3-5-haiku-20241022",
-        base_url=LITELLM_BASE,
-        structured_method="function_calling",
-        api_key=LITELLM_KEY,
-        tags=["cloud", "anthropic"],
-    ),
+    # claude-haiku-3.5 — disabled: LiteLLM deployment unavailable
+    # ModelConfig(
+    #     name="claude-haiku-3.5",
+    #     model="claude-3-5-haiku-20241022",
+    #     base_url=LITELLM_BASE,
+    #     structured_method="function_calling",
+    #     api_key=LITELLM_KEY,
+    #     tags=["cloud", "anthropic"],
+    # ),
 ]
 
 # ═══════════════════════════════════════════════════════════════════════════
