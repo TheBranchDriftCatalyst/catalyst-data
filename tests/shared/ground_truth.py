@@ -158,6 +158,7 @@ def generate_ensemble_ground_truth(
     store: BenchmarkStore | None = None,
     ner_models: list[str] | None = None,
     spo_models: list[str] | None = None,
+    exclude_model: str | None = None,
 ) -> dict | None:
     """Generate ground truth from multi-model consensus.
 
@@ -165,6 +166,9 @@ def generate_ensemble_ground_truth(
         store: BenchmarkStore instance for loading fixtures. If None, creates default.
         ner_models: Models to use for NER consensus. Defaults to NER_ENSEMBLE_MODELS.
         spo_models: Models to use for SPO consensus. Defaults to SPO_ENSEMBLE_MODELS.
+        exclude_model: If set, exclude this model from the ensemble (leave-one-out).
+            Used during scoring to avoid tautological self-grading — a model
+            should not vote on the ground truth it is scored against.
 
     Returns:
         Ground truth dict matching the standard fixture format, or None if
@@ -186,6 +190,16 @@ def generate_ensemble_ground_truth(
     # Load available extraction fixtures
     ner_extractions = _load_available_extractions(store, ner_models)
     spo_extractions = _load_available_extractions(store, spo_models)
+
+    # Leave-one-out: exclude the model being scored to avoid tautological bias
+    if exclude_model:
+        # Match by model name from the extraction fixture, not the config key
+        ner_extractions = {
+            k: v for k, v in ner_extractions.items() if k != exclude_model and v.get("model") != exclude_model
+        }
+        spo_extractions = {
+            k: v for k, v in spo_extractions.items() if k != exclude_model and v.get("model") != exclude_model
+        }
 
     if len(ner_extractions) < 2:
         print(

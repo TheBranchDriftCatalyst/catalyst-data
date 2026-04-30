@@ -146,7 +146,7 @@ tasks:
       PYTHONPATH: "."
       EXGRAPH_ENABLED: "true"
     cmds:
-      - python tests/benchmark_harness.py --full --regen --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
+      - python tests/benchmark_harness.py --full --regen --audit-log {{.CLI_ARGS}}
 
   bench:run:
     desc: "Run extraction benchmarks (skip ground truth regen)"
@@ -154,14 +154,14 @@ tasks:
       PYTHONPATH: "."
       EXGRAPH_ENABLED: "true"
     cmds:
-      - python tests/benchmark_harness.py --regen --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
+      - python tests/benchmark_harness.py --regen --audit-log {{.CLI_ARGS}}
 
   bench:ground-truth:
     desc: "Generate ensemble consensus ground truth from existing cached artifacts"
     env:
       PYTHONPATH: "."
     cmds:
-      - python tests/benchmark_harness.py --ensemble-gt
+      - python tests/benchmark_harness.py --ensemble-gt {{.CLI_ARGS}}
 
   bench:report:
     desc: "Regenerate benchmark report with F1 scores (needs ground truth)"
@@ -169,7 +169,7 @@ tasks:
       PYTHONPATH: "."
       EXGRAPH_ENABLED: "true"
     cmds:
-      - python tests/benchmark_harness.py --audit-log --timeout {{.BENCH_TIMEOUT | default "300"}}
+      - python tests/benchmark_harness.py --audit-log {{.CLI_ARGS}}
 
   bench:view:
     desc: "Start benchmark viewer SPA"

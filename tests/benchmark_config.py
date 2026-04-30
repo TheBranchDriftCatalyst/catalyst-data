@@ -270,7 +270,6 @@ NER_ENSEMBLE_MODELS = [
 ]
 
 SPO_ENSEMBLE_MODELS = [
-    "claude-sonnet-4-20250514",
-    "gemma3:12b",
-    "mistral:latest",
+    "claude-sonnet-4-20250514",  # best Anthropic
+    "gpt-4o",  # best OpenAI
 ]

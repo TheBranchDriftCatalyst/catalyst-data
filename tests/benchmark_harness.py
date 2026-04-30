@@ -352,7 +352,7 @@ def _save_incremental_report(results: list[dict], store: BenchmarkStore) -> None
         gt = store.load_ground_truth("active")
         chunks_data = store.load_chunks()
         chunk_texts = {c["chunk_id"]: c["text"] for c in chunks_data} if chunks_data else None
-        report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts)
+        report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts, store=store)
         store.save_top_level_report(report)
     except Exception:
         pass  # best effort
@@ -442,7 +442,7 @@ def _score_latest(store: BenchmarkStore) -> None:
         results.append({"model": model, "fixture": ext, "tags": [], "scores": scores})
         print(f"  {model}: strict_f1={scores['mention_strict_f1']:.3f}")
 
-    report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts)
+    report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts, store=store)
     run.save_report(report)
     store.save_top_level_report(report)
     print(f"\n  Report updated: {store.root / 'benchmark-report.json'}")
@@ -719,7 +719,7 @@ examples:
             r["scores"] = _compute_scores(r["fixture"], gt_mentions, gt_propositions, chunk_texts)
 
     # Build and save report
-    report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts)
+    report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts, store=store)
 
     # Save to run directory and top level
     run.save_report(report)

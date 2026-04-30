@@ -13,8 +13,12 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests.shared.extraction_scoring import score_mentions, score_propositions
+
+if TYPE_CHECKING:
+    from tests.shared.store import BenchmarkStore
 
 
 def build_report_json(
@@ -24,6 +28,7 @@ def build_report_json(
     chunks: list[dict] | None = None,
     chunk_texts: dict[str, str] | None = None,
     benchmark_chunks_path: Path | None = None,
+    store: BenchmarkStore | None = None,
 ) -> dict:
     """Build a structured JSON report for the viewer-ui SPA.
 
@@ -34,6 +39,8 @@ def build_report_json(
         chunk_texts: {chunk_id: text} mapping for span accuracy scoring.
         benchmark_chunks_path: Path to benchmark_chunks.json for domain labels.
             Falls back to tests/fixtures/benchmark_chunks.json.
+        store: BenchmarkStore for leave-one-out GT regeneration. If None,
+            ensemble models are scored against the same GT (legacy behavior).
 
     Returns:
         Report dict ready for JSON serialization.
@@ -149,6 +156,15 @@ def build_report_json(
             gt_mentions.extend(chunk.get("mentions", []))
             gt_propositions.extend(chunk.get("propositions", []))
 
+        # Identify ensemble member models for leave-one-out scoring
+        ensemble_config = ground_truth.get("ensemble_config", {})
+        ensemble_ner_models = set(ensemble_config.get("ner_models", []))
+        ensemble_spo_models = set(ensemble_config.get("spo_models", []))
+        ensemble_all = ensemble_ner_models | ensemble_spo_models
+
+        # Cache leave-one-out GTs to avoid regenerating for the same model
+        loo_cache: dict[str, dict] = {}
+
         ground_truth_meta = {
             "available": True,
             "reference_model": ground_truth.get("reference_model", "unknown"),
@@ -159,8 +175,32 @@ def build_report_json(
 
         for model_entry, r in zip(models, results, strict=False):
             ext = r["fixture"]
-            m_scores = score_mentions(ext.get("mentions", []), gt_mentions, chunk_texts=chunk_texts)
-            p_scores = score_propositions(ext.get("assertions", []), gt_propositions)
+            model_name = r["model"]
+
+            # Leave-one-out: if this model is in the ensemble, regenerate GT without it
+            score_gt_mentions = gt_mentions
+            score_gt_propositions = gt_propositions
+            if store and model_name in ensemble_all and not ground_truth.get("manually_reviewed"):
+                if model_name not in loo_cache:
+                    from tests.shared.ground_truth import generate_ensemble_ground_truth
+
+                    loo_gt = generate_ensemble_ground_truth(
+                        store,
+                        ner_models=list(ensemble_ner_models),
+                        spo_models=list(ensemble_spo_models),
+                        exclude_model=model_name,
+                    )
+                    loo_cache[model_name] = loo_gt or {}
+                loo_gt = loo_cache[model_name]
+                if loo_gt and loo_gt.get("chunks"):
+                    score_gt_mentions = []
+                    score_gt_propositions = []
+                    for chunk in loo_gt["chunks"]:
+                        score_gt_mentions.extend(chunk.get("mentions", []))
+                        score_gt_propositions.extend(chunk.get("propositions", []))
+
+            m_scores = score_mentions(ext.get("mentions", []), score_gt_mentions, chunk_texts=chunk_texts)
+            p_scores = score_propositions(ext.get("assertions", []), score_gt_propositions)
             model_entry["scores"] = {
                 "mention_strict_precision": round(m_scores["strict_precision"], 4),
                 "mention_strict_recall": round(m_scores["strict_recall"], 4),

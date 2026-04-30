@@ -84,7 +84,7 @@ def _save_incremental_report(results: list[dict]) -> None:
         gt = _store.load_ground_truth("active")
         chunks_data = _store.load_chunks()
         chunk_texts = {c["chunk_id"]: c["text"] for c in chunks_data} if chunks_data else None
-        report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts)
+        report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts, store=_store)
         _store.save_top_level_report(report)
     except Exception:
         pass  # best effort -- don't fail the run
