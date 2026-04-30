@@ -1,6 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
-import type { GroundTruthFile, GroundTruthChunk } from "@/types/benchmark";
-import { TypeBadge, MetricLabel } from "./shared";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import type {
+  GroundTruthFile,
+  GroundTruthChunk,
+  GroundTruthMention,
+  GroundTruthProposition,
+} from "@/types/benchmark";
+import { TypeBadge, MetricLabel, TYPE_COLORS } from "./shared";
 
 // ── Data fetching ────────────────────────────────────────────────────
 
@@ -9,8 +14,9 @@ interface GTListEntry {
   label: string;
 }
 
+const ENTITY_TYPES = Object.keys(TYPE_COLORS);
+
 async function fetchGTList(): Promise<GTListEntry[]> {
-  // Try to fetch a manifest, fall back to known filenames
   const known = [
     "active",
     "ensemble-4model",
@@ -19,7 +25,6 @@ async function fetchGTList(): Promise<GTListEntry[]> {
     "manually-reviewed",
   ];
   const results: GTListEntry[] = [];
-
   for (const name of known) {
     try {
       const res = await fetch(`/viewer/ground-truth/${name}.json`, { method: "HEAD" });
@@ -30,10 +35,9 @@ async function fetchGTList(): Promise<GTListEntry[]> {
         });
       }
     } catch {
-      // skip
+      /* skip */
     }
   }
-
   return results;
 }
 
@@ -47,18 +51,276 @@ async function fetchGT(name: string): Promise<GroundTruthFile | null> {
   }
 }
 
-// ── Chunk Detail ─────────────────────────────────────────────────────
+function deepClone<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj));
+}
 
-function ChunkDetail({ chunk }: { chunk: GroundTruthChunk }) {
+// ── Editable Mention Row ─────────────────────────────────────────────
+
+function MentionRow({
+  mention,
+  index,
+  onUpdate,
+  onRemove,
+  editing,
+  onStartEdit,
+  onStopEdit,
+}: {
+  mention: GroundTruthMention;
+  index: number;
+  onUpdate: (idx: number, m: GroundTruthMention) => void;
+  onRemove: (idx: number) => void;
+  editing: boolean;
+  onStartEdit: () => void;
+  onStopEdit: () => void;
+}) {
+  if (!editing) {
+    return (
+      <tr
+        className="border-b border-white/5 hover:bg-white/[0.02] cursor-pointer"
+        onClick={onStartEdit}
+      >
+        <td className="py-1.5 px-2 text-zinc-200">{mention.text}</td>
+        <td className="py-1.5 px-2">
+          <TypeBadge type={mention.mention_type} />
+        </td>
+        <td className="py-1.5 px-2 text-center text-zinc-500">
+          {mention.span_start != null ? `${mention.span_start}:${mention.span_end}` : "—"}
+        </td>
+        <td className="py-1.5 px-2 text-center text-zinc-400">
+          {(mention.confidence * 100).toFixed(0)}%
+        </td>
+        <td className="py-1 px-1 w-8" />
+      </tr>
+    );
+  }
+
+  return (
+    <tr className="border-b border-white/5 bg-cyan-500/5">
+      <td className="py-1 px-1">
+        <input
+          type="text"
+          value={mention.text}
+          onChange={(e) => onUpdate(index, { ...mention, text: e.target.value })}
+          className="w-full bg-surface-0 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+        />
+      </td>
+      <td className="py-1 px-1">
+        <select
+          value={mention.mention_type}
+          onChange={(e) => onUpdate(index, { ...mention, mention_type: e.target.value })}
+          className="bg-surface-0 border border-white/10 rounded px-1 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+        >
+          {ENTITY_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="py-1 px-1 text-center text-zinc-500 text-xs">
+        {mention.span_start != null ? `${mention.span_start}:${mention.span_end}` : "auto"}
+      </td>
+      <td className="py-1 px-1">
+        <input
+          type="number"
+          min={0}
+          max={100}
+          value={Math.round(mention.confidence * 100)}
+          onChange={(e) =>
+            onUpdate(index, { ...mention, confidence: parseInt(e.target.value || "100") / 100 })
+          }
+          className="w-14 bg-surface-0 border border-white/10 rounded px-1 py-1 text-xs font-mono text-zinc-200 text-center focus:outline-none focus:ring-1 focus:ring-cyan-400"
+        />
+      </td>
+      <td className="py-1 px-1 w-16">
+        <div className="flex gap-1">
+          <button
+            onClick={onStopEdit}
+            className="text-emerald-400 hover:text-emerald-300 text-xs px-1"
+            title="Done"
+          >
+            ✓
+          </button>
+          <button
+            onClick={() => onRemove(index)}
+            className="text-red-400 hover:text-red-300 text-xs px-1"
+            title="Remove"
+          >
+            ✕
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ── Editable Proposition Row ─────────────────────────────────────────
+
+function PropositionRow({
+  prop,
+  index,
+  onUpdate,
+  onRemove,
+  editing,
+  onStartEdit,
+  onStopEdit,
+}: {
+  prop: GroundTruthProposition;
+  index: number;
+  onUpdate: (idx: number, p: GroundTruthProposition) => void;
+  onRemove: (idx: number) => void;
+  editing: boolean;
+  onStartEdit: () => void;
+  onStopEdit: () => void;
+}) {
+  if (!editing) {
+    return (
+      <tr
+        className="border-b border-white/5 hover:bg-white/[0.02] cursor-pointer"
+        onClick={onStartEdit}
+      >
+        <td className="py-1.5 px-2 text-zinc-200">{prop.subject}</td>
+        <td className="py-1.5 px-2 text-cyan-400">{prop.predicate}</td>
+        <td className="py-1.5 px-2 text-zinc-200">{prop.object}</td>
+        <td className="py-1.5 px-2 text-center text-zinc-400">
+          {(prop.confidence * 100).toFixed(0)}%
+        </td>
+        <td className="py-1 px-1 w-8" />
+      </tr>
+    );
+  }
+
+  const inputClass =
+    "w-full bg-surface-0 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:ring-1 focus:ring-cyan-400";
+
+  return (
+    <tr className="border-b border-white/5 bg-cyan-500/5">
+      <td className="py-1 px-1">
+        <input
+          type="text"
+          value={prop.subject}
+          onChange={(e) => onUpdate(index, { ...prop, subject: e.target.value })}
+          className={inputClass}
+        />
+      </td>
+      <td className="py-1 px-1">
+        <input
+          type="text"
+          value={prop.predicate}
+          onChange={(e) => onUpdate(index, { ...prop, predicate: e.target.value })}
+          className={inputClass}
+        />
+      </td>
+      <td className="py-1 px-1">
+        <input
+          type="text"
+          value={prop.object}
+          onChange={(e) => onUpdate(index, { ...prop, object: e.target.value })}
+          className={inputClass}
+        />
+      </td>
+      <td className="py-1 px-1">
+        <input
+          type="number"
+          min={0}
+          max={100}
+          value={Math.round(prop.confidence * 100)}
+          onChange={(e) =>
+            onUpdate(index, { ...prop, confidence: parseInt(e.target.value || "100") / 100 })
+          }
+          className="w-14 bg-surface-0 border border-white/10 rounded px-1 py-1 text-xs font-mono text-zinc-200 text-center focus:outline-none focus:ring-1 focus:ring-cyan-400"
+        />
+      </td>
+      <td className="py-1 px-1 w-16">
+        <div className="flex gap-1">
+          <button
+            onClick={onStopEdit}
+            className="text-emerald-400 hover:text-emerald-300 text-xs px-1"
+            title="Done"
+          >
+            ✓
+          </button>
+          <button
+            onClick={() => onRemove(index)}
+            className="text-red-400 hover:text-red-300 text-xs px-1"
+            title="Remove"
+          >
+            ✕
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ── Chunk Editor ─────────────────────────────────────────────────────
+
+function ChunkEditor({
+  chunk,
+  onChunkChange,
+}: {
+  chunk: GroundTruthChunk;
+  onChunkChange: (updated: GroundTruthChunk) => void;
+}) {
   const [showMentions, setShowMentions] = useState(true);
   const [showProps, setShowProps] = useState(true);
+  const [editingMention, setEditingMention] = useState<number | null>(null);
+  const [editingProp, setEditingProp] = useState<number | null>(null);
+
+  const updateMention = (idx: number, m: GroundTruthMention) => {
+    const mentions = [...chunk.mentions];
+    mentions[idx] = m;
+    onChunkChange({ ...chunk, mentions });
+  };
+
+  const removeMention = (idx: number) => {
+    const mentions = chunk.mentions.filter((_, i) => i !== idx);
+    onChunkChange({ ...chunk, mentions });
+    setEditingMention(null);
+  };
+
+  const addMention = () => {
+    const m: GroundTruthMention = {
+      text: "",
+      mention_type: "PERSON",
+      span_start: null,
+      span_end: null,
+      confidence: 1.0,
+    };
+    onChunkChange({ ...chunk, mentions: [...chunk.mentions, m] });
+    setEditingMention(chunk.mentions.length);
+  };
+
+  const updateProp = (idx: number, p: GroundTruthProposition) => {
+    const propositions = [...chunk.propositions];
+    propositions[idx] = p;
+    onChunkChange({ ...chunk, propositions });
+  };
+
+  const removeProp = (idx: number) => {
+    const propositions = chunk.propositions.filter((_, i) => i !== idx);
+    onChunkChange({ ...chunk, propositions });
+    setEditingProp(null);
+  };
+
+  const addProp = () => {
+    const p: GroundTruthProposition = {
+      subject: "",
+      predicate: "",
+      object: "",
+      confidence: 1.0,
+    };
+    onChunkChange({ ...chunk, propositions: [...chunk.propositions, p] });
+    setEditingProp(chunk.propositions.length);
+  };
 
   // Highlight mentions in text
   const highlightedText = useMemo(() => {
     if (!chunk.mentions.length) return <span className="text-zinc-300">{chunk.text}</span>;
 
-    // Sort mentions by span_start (handle nulls)
     const sorted = [...chunk.mentions]
+      .map((m, i) => ({ ...m, origIdx: i }))
       .filter((m) => m.span_start != null && m.span_end != null)
       .sort((a, b) => a.span_start! - b.span_start!);
 
@@ -72,7 +334,6 @@ function ChunkDetail({ chunk }: { chunk: GroundTruthChunk }) {
       const start = m.span_start!;
       const end = m.span_end!;
 
-      // Text before this mention
       if (start > lastEnd) {
         parts.push(
           <span key={`pre-${i}`} className="text-zinc-300">
@@ -81,12 +342,17 @@ function ChunkDetail({ chunk }: { chunk: GroundTruthChunk }) {
         );
       }
 
-      // The mention itself
+      const isEditing = editingMention === m.origIdx;
       parts.push(
         <mark
           key={`m-${i}`}
-          className="bg-cyan-500/20 text-cyan-200 rounded px-0.5 border-b border-cyan-500/40"
-          title={`${m.mention_type} (${(m.confidence * 100).toFixed(0)}%)`}
+          className={`rounded px-0.5 border-b cursor-pointer ${
+            isEditing
+              ? "bg-cyan-500/40 text-cyan-100 border-cyan-400"
+              : "bg-cyan-500/20 text-cyan-200 border-cyan-500/40 hover:bg-cyan-500/30"
+          }`}
+          title={`${m.mention_type} — click to edit`}
+          onClick={() => setEditingMention(isEditing ? null : m.origIdx)}
         >
           {chunk.text.slice(start, end)}
         </mark>,
@@ -95,7 +361,6 @@ function ChunkDetail({ chunk }: { chunk: GroundTruthChunk }) {
       lastEnd = end;
     }
 
-    // Remaining text
     if (lastEnd < chunk.text.length) {
       parts.push(
         <span key="tail" className="text-zinc-300">
@@ -105,24 +370,34 @@ function ChunkDetail({ chunk }: { chunk: GroundTruthChunk }) {
     }
 
     return <>{parts}</>;
-  }, [chunk]);
+  }, [chunk, editingMention]);
 
   return (
     <div className="space-y-3">
-      {/* Source text with highlights */}
+      {/* Source text with clickable highlights */}
       <div className="bg-surface-0 rounded p-3 text-xs font-mono leading-relaxed max-h-[200px] overflow-y-auto border border-white/5">
         {highlightedText}
       </div>
 
       {/* Mentions */}
       <div>
-        <button
-          onClick={() => setShowMentions(!showMentions)}
-          className="text-xs font-mono text-zinc-400 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded px-1"
-          aria-expanded={showMentions}
-        >
-          {showMentions ? "▼" : "▶"} Mentions ({chunk.mentions.length})
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowMentions(!showMentions)}
+            className="text-xs font-mono text-zinc-400 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded px-1"
+            aria-expanded={showMentions}
+          >
+            {showMentions ? "▼" : "▶"} Mentions ({chunk.mentions.length})
+          </button>
+          {showMentions && (
+            <button
+              onClick={addMention}
+              className="text-xs font-mono text-cyan-400 hover:text-cyan-300 px-1.5 py-0.5 border border-cyan-500/30 rounded hover:border-cyan-400/50"
+            >
+              + Add
+            </button>
+          )}
+        </div>
         {showMentions && (
           <table className="w-full text-xs font-mono mt-2">
             <thead>
@@ -131,22 +406,21 @@ function ChunkDetail({ chunk }: { chunk: GroundTruthChunk }) {
                 <th className="text-left py-1 px-2">Type</th>
                 <th className="text-center py-1 px-2">Span</th>
                 <th className="text-center py-1 px-2">Conf</th>
+                <th className="w-16" />
               </tr>
             </thead>
             <tbody>
               {chunk.mentions.map((m, i) => (
-                <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02]">
-                  <td className="py-1.5 px-2 text-zinc-200">{m.text}</td>
-                  <td className="py-1.5 px-2">
-                    <TypeBadge type={m.mention_type} />
-                  </td>
-                  <td className="py-1.5 px-2 text-center text-zinc-500">
-                    {m.span_start != null ? `${m.span_start}:${m.span_end}` : "—"}
-                  </td>
-                  <td className="py-1.5 px-2 text-center text-zinc-400">
-                    {(m.confidence * 100).toFixed(0)}%
-                  </td>
-                </tr>
+                <MentionRow
+                  key={i}
+                  mention={m}
+                  index={i}
+                  onUpdate={updateMention}
+                  onRemove={removeMention}
+                  editing={editingMention === i}
+                  onStartEdit={() => setEditingMention(i)}
+                  onStopEdit={() => setEditingMention(null)}
+                />
               ))}
             </tbody>
           </table>
@@ -155,13 +429,23 @@ function ChunkDetail({ chunk }: { chunk: GroundTruthChunk }) {
 
       {/* Propositions */}
       <div>
-        <button
-          onClick={() => setShowProps(!showProps)}
-          className="text-xs font-mono text-zinc-400 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded px-1"
-          aria-expanded={showProps}
-        >
-          {showProps ? "▼" : "▶"} Propositions ({chunk.propositions.length})
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowProps(!showProps)}
+            className="text-xs font-mono text-zinc-400 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded px-1"
+            aria-expanded={showProps}
+          >
+            {showProps ? "▼" : "▶"} Propositions ({chunk.propositions.length})
+          </button>
+          {showProps && (
+            <button
+              onClick={addProp}
+              className="text-xs font-mono text-cyan-400 hover:text-cyan-300 px-1.5 py-0.5 border border-cyan-500/30 rounded hover:border-cyan-400/50"
+            >
+              + Add
+            </button>
+          )}
+        </div>
         {showProps && (
           <table className="w-full text-xs font-mono mt-2">
             <thead>
@@ -170,18 +454,21 @@ function ChunkDetail({ chunk }: { chunk: GroundTruthChunk }) {
                 <th className="text-left py-1 px-2">Predicate</th>
                 <th className="text-left py-1 px-2">Object</th>
                 <th className="text-center py-1 px-2">Conf</th>
+                <th className="w-16" />
               </tr>
             </thead>
             <tbody>
               {chunk.propositions.map((p, i) => (
-                <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02]">
-                  <td className="py-1.5 px-2 text-zinc-200">{p.subject}</td>
-                  <td className="py-1.5 px-2 text-cyan-400">{p.predicate}</td>
-                  <td className="py-1.5 px-2 text-zinc-200">{p.object}</td>
-                  <td className="py-1.5 px-2 text-center text-zinc-400">
-                    {(p.confidence * 100).toFixed(0)}%
-                  </td>
-                </tr>
+                <PropositionRow
+                  key={i}
+                  prop={p}
+                  index={i}
+                  onUpdate={updateProp}
+                  onRemove={removeProp}
+                  editing={editingProp === i}
+                  onStartEdit={() => setEditingProp(i)}
+                  onStopEdit={() => setEditingProp(null)}
+                />
               ))}
             </tbody>
           </table>
@@ -197,9 +484,15 @@ export function GroundTruthPanel() {
   const [gtList, setGtList] = useState<GTListEntry[]>([]);
   const [selectedGT, setSelectedGT] = useState("active");
   const [gt, setGt] = useState<GroundTruthFile | null>(null);
+  const [originalGt, setOriginalGt] = useState<GroundTruthFile | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedChunk, setSelectedChunk] = useState<number>(0);
+
+  const isDirty = useMemo(() => {
+    if (!gt || !originalGt) return false;
+    return JSON.stringify(gt) !== JSON.stringify(originalGt);
+  }, [gt, originalGt]);
 
   // Discover available ground truths
   useEffect(() => {
@@ -218,7 +511,8 @@ export function GroundTruthPanel() {
     setError(null);
     fetchGT(selectedGT).then((data) => {
       if (data) {
-        setGt(data);
+        setGt(deepClone(data));
+        setOriginalGt(deepClone(data));
         setSelectedChunk(0);
       } else {
         setError(`Could not load ground truth: ${selectedGT}`);
@@ -226,6 +520,53 @@ export function GroundTruthPanel() {
       setLoading(false);
     });
   }, [selectedGT]);
+
+  // Warn before leaving with unsaved changes
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
+  const handleChunkChange = useCallback(
+    (updated: GroundTruthChunk) => {
+      if (!gt) return;
+      const chunks = [...gt.chunks];
+      chunks[selectedChunk] = updated;
+      setGt({
+        ...gt,
+        chunks,
+        total_mentions: chunks.reduce((s, c) => s + c.mentions.length, 0),
+        total_propositions: chunks.reduce((s, c) => s + c.propositions.length, 0),
+      });
+    },
+    [gt, selectedChunk],
+  );
+
+  const handleSave = useCallback(() => {
+    if (!gt) return;
+    const exported: GroundTruthFile = {
+      ...gt,
+      manually_reviewed: true,
+    };
+    const blob = new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${selectedGT}-reviewed.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    // Mark as saved
+    setOriginalGt(deepClone(gt));
+  }, [gt, selectedGT]);
+
+  const handleReset = useCallback(() => {
+    if (!originalGt) return;
+    setGt(deepClone(originalGt));
+  }, [originalGt]);
 
   if (loading) {
     return <div className="text-zinc-500 text-xs font-mono py-4">Loading ground truth...</div>;
@@ -253,7 +594,7 @@ export function GroundTruthPanel() {
 
   return (
     <div className="space-y-4">
-      {/* Header: selector + metadata */}
+      {/* Header: selector + metadata + save controls */}
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
           <label htmlFor="gt-selector" className="text-xs text-zinc-400 font-mono">
@@ -265,7 +606,10 @@ export function GroundTruthPanel() {
           <select
             id="gt-selector"
             value={selectedGT}
-            onChange={(e) => setSelectedGT(e.target.value)}
+            onChange={(e) => {
+              if (isDirty && !confirm("You have unsaved changes. Switch anyway?")) return;
+              setSelectedGT(e.target.value);
+            }}
             aria-label="Select ground truth file"
             className="bg-surface-1 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
@@ -277,28 +621,52 @@ export function GroundTruthPanel() {
           </select>
         </div>
 
-        {/* Metadata badges */}
+        {/* Metadata */}
         <div className="flex items-center gap-3 text-xs font-mono">
           <span className={gt.manually_reviewed ? "text-emerald-400" : "text-amber-400"}>
             {gt.manually_reviewed ? "Reviewed" : "Unreviewed"}
           </span>
           <span className="text-zinc-500">{gt.reference_model}</span>
-          <span className="text-zinc-500">{gt.chunk_count} chunks</span>
           <span className="text-zinc-500">{gt.total_mentions} mentions</span>
           <span className="text-zinc-500">{gt.total_propositions} propositions</span>
         </div>
+
+        {/* Save controls */}
+        <div className="flex items-center gap-2 ml-auto">
+          {isDirty && (
+            <>
+              <span className="text-amber-400 text-xs font-mono">Unsaved changes</span>
+              <button
+                onClick={handleReset}
+                className="px-2 py-1 text-xs font-mono bg-surface-1 border border-white/10 rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+              >
+                Reset
+              </button>
+            </>
+          )}
+          <button
+            onClick={handleSave}
+            className={`px-3 py-1.5 text-xs font-mono rounded border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+              isDirty
+                ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30"
+                : "bg-surface-1 border-white/10 text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            {isDirty ? "Save & Download (reviewed)" : "Download JSON"}
+          </button>
+        </div>
       </div>
 
-      {/* Ensemble config if present */}
+      {/* Ensemble config */}
       {gt.ensemble_config && (
         <div className="bg-surface-1 border border-white/5 rounded p-3 text-xs font-mono text-zinc-500">
-          <span className="text-zinc-400">Ensemble:</span> NER models:{" "}
-          {gt.ensemble_config.ner_models.join(", ")} | SPO models:{" "}
+          <span className="text-zinc-400">Ensemble:</span> NER:{" "}
+          {gt.ensemble_config.ner_models.join(", ")} | SPO:{" "}
           {gt.ensemble_config.spo_models.join(", ")} | Threshold: {gt.ensemble_config.threshold}
         </div>
       )}
 
-      {/* Two-panel layout: chunk list + detail */}
+      {/* Two-panel layout */}
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
         {/* Left: Chunk list */}
         <div className="bg-surface-1 border border-white/5 rounded-lg overflow-y-auto max-h-[500px]">
@@ -331,7 +699,7 @@ export function GroundTruthPanel() {
           </div>
         </div>
 
-        {/* Right: Chunk detail */}
+        {/* Right: Chunk editor */}
         <div className="bg-surface-1 border border-white/5 rounded-lg p-4 overflow-y-auto max-h-[500px]">
           {currentChunk ? (
             <div>
@@ -341,7 +709,7 @@ export function GroundTruthPanel() {
                 </h4>
                 <span className="text-xs font-mono text-zinc-600">{currentChunk.chunk_id}</span>
               </div>
-              <ChunkDetail chunk={currentChunk} />
+              <ChunkEditor chunk={currentChunk} onChunkChange={handleChunkChange} />
             </div>
           ) : (
             <div className="text-zinc-500 text-xs">No chunk selected</div>
@@ -349,29 +717,12 @@ export function GroundTruthPanel() {
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <button
-          onClick={() => {
-            if (!gt) return;
-            const blob = new Blob([JSON.stringify(gt, null, 2)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `${selectedGT}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-          }}
-          className="px-3 py-1.5 text-xs font-mono bg-surface-1 border border-white/10 rounded text-zinc-300 hover:text-zinc-100 hover:border-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 transition-colors"
-        >
-          Download JSON
-        </button>
-        <span className="text-xs font-mono text-zinc-600">
-          Re-score:{" "}
-          <code className="text-zinc-400">
-            python tests/benchmark_harness.py --score --use-gt {selectedGT}
-          </code>
-        </span>
+      {/* Actions footer */}
+      <div className="flex items-center gap-3 text-xs font-mono text-zinc-600">
+        Click any row to edit. Download saves with{" "}
+        <code className="text-zinc-400">manually_reviewed: true</code>. Place the file at{" "}
+        <code className="text-zinc-400">.test-output/media-ingest/ground-truth/active.json</code> to
+        use for scoring.
       </div>
     </div>
   );
