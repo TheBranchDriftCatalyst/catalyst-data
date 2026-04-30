@@ -7,8 +7,12 @@ PipelineConfig composes multiple stages into a pipeline.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from dagster_io.chunking import ChunkConfig
 
 
 @dataclass(frozen=True)
@@ -138,6 +142,21 @@ def spo_stage_config(
         model_override=model,
         skip=skip,
     )
+
+
+def chunk_stage_config(strategy: str = "recursive", **overrides) -> ChunkConfig:
+    """Create a ChunkConfig with sensible defaults for pipeline chunking.
+
+    Args:
+        strategy: Chunking strategy ('recursive', 'section', 'speaker', 'passthrough').
+        **overrides: Any ChunkConfig field overrides (e.g. model_context_tokens=128000).
+
+    Returns:
+        ChunkConfig ready to pass to build_pipeline().
+    """
+    from dagster_io.chunking import ChunkConfig
+
+    return ChunkConfig(strategy=strategy, **overrides)
 
 
 def default_pipeline_config(

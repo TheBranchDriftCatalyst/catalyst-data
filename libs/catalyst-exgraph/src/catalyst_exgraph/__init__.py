@@ -11,7 +11,8 @@ Key features:
 - ExtractionResource: Dagster ConfigurableResource with extract_mentions/extract_assertions
 """
 
-from catalyst_exgraph.config import PipelineConfig, StageConfig
+from catalyst_exgraph.config import PipelineConfig, StageConfig, chunk_stage_config
+from catalyst_exgraph.nodes.chunk import ChunkNode
 from catalyst_exgraph.pipeline import build_pipeline
 from catalyst_exgraph.protocol import ExtractionClient, ExtractionResult, StageResult
 from catalyst_exgraph.resource import ExtractionResource
@@ -19,6 +20,7 @@ from catalyst_exgraph.stage import build_stage_graph
 from catalyst_exgraph.state import ExGraphState, ExGraphStatus
 
 __all__ = [
+    "ChunkNode",
     "ExGraphState",
     "ExGraphStatus",
     "ExtractionClient",
@@ -29,4 +31,5 @@ __all__ = [
     "StageResult",
     "build_pipeline",
     "build_stage_graph",
+    "chunk_stage_config",
 ]

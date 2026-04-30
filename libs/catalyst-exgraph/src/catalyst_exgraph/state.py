@@ -67,6 +67,11 @@ class ExGraphState(TypedDict, total=False):
     source_metadata: dict[str, Any]
     """Document/chunk metadata: {document_id, chunk_id, domain, ...}"""
 
+    # ── Chunking ────────────────────────────────────────────────────
+    chunks: list[dict[str, Any]]
+    """Text chunks produced by ChunkNode (or pre-provided by Dagster asset).
+    Each dict has: chunk_id, text, index."""
+
     # ── Stage results (keyed by stage_name) ──────────────────────────
     stages: dict[str, StageStateDict]
     """Per-stage state. Each key is a stage_name from StageConfig."""

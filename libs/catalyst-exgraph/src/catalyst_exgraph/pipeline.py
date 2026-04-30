@@ -20,7 +20,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from dagster_io.chunking import ChunkConfig
 
 from langgraph.graph import END, StateGraph
 
@@ -101,6 +104,7 @@ def build_pipeline(
     stages: list[StageConfig],
     clients: dict[str, ExtractionClient] | ExtractionClient,
     mcp_client: Any,
+    chunk_config: ChunkConfig | None = None,
 ) -> Any:
     """Build a compiled multi-stage extraction pipeline.
 
@@ -109,13 +113,16 @@ def build_pipeline(
         clients: Either a dict mapping stage_name → client (for per-stage models)
                  or a single client used for all stages.
         mcp_client: MCP contract validation client.
+        chunk_config: Optional ChunkConfig. When provided, a ChunkNode is
+                      prepended as the first node. When omitted, the pipeline
+                      expects pre-chunked input (backward compatible).
 
     Returns:
         Compiled LangGraph ready for ainvoke().
     """
     active_stages = [s for s in stages if not s.skip]
 
-    if not active_stages:
+    if not active_stages and chunk_config is None:
         graph = StateGraph(ExGraphState)
         graph.add_node("noop", _noop)
         graph.set_entry_point("noop")
@@ -129,10 +136,18 @@ def build_pipeline(
         return clients
 
     graph = StateGraph(ExGraphState)
+    node_names: list[str] = []
+
+    # Optionally prepend chunk node
+    if chunk_config is not None:
+        from catalyst_exgraph.nodes.chunk import ChunkNode
+
+        chunk_node = ChunkNode(chunk_config)
+        graph.add_node("chunk", chunk_node)
+        node_names.append("chunk")
 
     # Add stage runner nodes
     prev_name = None
-    node_names = []
     for stage in active_stages:
         node_name = f"stage_{stage.stage_name}"
         client = _get_client(stage)
@@ -140,6 +155,12 @@ def build_pipeline(
         graph.add_node(node_name, runner)
         node_names.append(node_name)
         prev_name = stage.stage_name
+
+    if not node_names:
+        graph.add_node("noop", _noop)
+        graph.set_entry_point("noop")
+        graph.add_edge("noop", END)
+        return graph.compile()
 
     # Wire edges: linear chain
     graph.set_entry_point(node_names[0])
