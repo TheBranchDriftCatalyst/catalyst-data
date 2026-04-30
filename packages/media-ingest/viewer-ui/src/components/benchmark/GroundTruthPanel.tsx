@@ -6,40 +6,11 @@ import type {
   GroundTruthProposition,
 } from "@/types/benchmark";
 import { TypeBadge, MetricLabel, TYPE_COLORS } from "./shared";
+import { GTSelector } from "./GTSelector";
 
 // ── Data fetching ────────────────────────────────────────────────────
 
-interface GTListEntry {
-  name: string;
-  label: string;
-}
-
 const ENTITY_TYPES = Object.keys(TYPE_COLORS);
-
-async function fetchGTList(): Promise<GTListEntry[]> {
-  const known = [
-    "active",
-    "ensemble-4model",
-    "ensemble-5model",
-    "gpt-4o-single",
-    "manually-reviewed",
-  ];
-  const results: GTListEntry[] = [];
-  for (const name of known) {
-    try {
-      const res = await fetch(`/viewer/ground-truth/${name}.json`, { method: "HEAD" });
-      if (res.ok) {
-        results.push({
-          name,
-          label: name.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-        });
-      }
-    } catch {
-      /* skip */
-    }
-  }
-  return results;
-}
 
 async function fetchGT(name: string): Promise<GroundTruthFile | null> {
   try {
@@ -480,9 +451,16 @@ function ChunkEditor({
 
 // ── Main Component ───────────────────────────────────────────────────
 
-export function GroundTruthPanel() {
-  const [gtList, setGtList] = useState<GTListEntry[]>([]);
-  const [selectedGT, setSelectedGT] = useState("active");
+export function GroundTruthPanel({
+  selectedGT: externalSelectedGT,
+  onSelectGT: externalOnSelectGT,
+}: {
+  selectedGT?: string;
+  onSelectGT?: (name: string) => void;
+} = {}) {
+  const [internalSelectedGT, setInternalSelectedGT] = useState("active");
+  const selectedGT = externalSelectedGT ?? internalSelectedGT;
+  const setSelectedGT = externalOnSelectGT ?? setInternalSelectedGT;
   const [gt, setGt] = useState<GroundTruthFile | null>(null);
   const [originalGt, setOriginalGt] = useState<GroundTruthFile | null>(null);
   const [loading, setLoading] = useState(false);
@@ -494,15 +472,7 @@ export function GroundTruthPanel() {
     return JSON.stringify(gt) !== JSON.stringify(originalGt);
   }, [gt, originalGt]);
 
-  // Discover available ground truths
-  useEffect(() => {
-    fetchGTList().then((list) => {
-      setGtList(list);
-      if (list.length > 0 && !list.find((l) => l.name === selectedGT)) {
-        setSelectedGT(list[0]!.name);
-      }
-    });
-  }, []);
+  // GT list discovery is handled by GTSelector component
 
   // Load selected ground truth
   useEffect(() => {
@@ -546,21 +516,45 @@ export function GroundTruthPanel() {
     [gt, selectedChunk],
   );
 
-  const handleSave = useCallback(() => {
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "fallback">("idle");
+
+  const handleSave = useCallback(async () => {
     if (!gt) return;
     const exported: GroundTruthFile = {
       ...gt,
       manually_reviewed: true,
     };
-    const blob = new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" });
+    const json = JSON.stringify(exported, null, 2);
+
+    // Try PUT to Vite dev server (writes to disk)
+    setSaveStatus("saving");
+    try {
+      const res = await fetch(`/viewer/ground-truth/${selectedGT}.json`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: json,
+      });
+      if (res.ok) {
+        setSaveStatus("saved");
+        setOriginalGt(deepClone(gt));
+        setTimeout(() => setSaveStatus("idle"), 2000);
+        return;
+      }
+    } catch {
+      // Dev server not available — fall back to download
+    }
+
+    // Fallback: download as file
+    setSaveStatus("fallback");
+    const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${selectedGT}-reviewed.json`;
+    a.download = `${selectedGT}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    // Mark as saved
     setOriginalGt(deepClone(gt));
+    setTimeout(() => setSaveStatus("idle"), 2000);
   }, [gt, selectedGT]);
 
   const handleReset = useCallback(() => {
@@ -597,28 +591,19 @@ export function GroundTruthPanel() {
       {/* Header: selector + metadata + save controls */}
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
-          <label htmlFor="gt-selector" className="text-xs text-zinc-400 font-mono">
+          <span className="text-xs text-zinc-400 font-mono">
             <MetricLabel
               label="Ground Truth"
               tooltip="Select which ground truth file to view/edit. 'active' is used for scoring."
             />
-          </label>
-          <select
-            id="gt-selector"
-            value={selectedGT}
-            onChange={(e) => {
+          </span>
+          <GTSelector
+            selected={selectedGT}
+            onChange={(name) => {
               if (isDirty && !confirm("You have unsaved changes. Switch anyway?")) return;
-              setSelectedGT(e.target.value);
+              setSelectedGT(name);
             }}
-            aria-label="Select ground truth file"
-            className="bg-surface-1 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-          >
-            {gtList.map((entry) => (
-              <option key={entry.name} value={entry.name}>
-                {entry.label}
-              </option>
-            ))}
-          </select>
+          />
         </div>
 
         {/* Metadata */}
@@ -644,8 +629,15 @@ export function GroundTruthPanel() {
               </button>
             </>
           )}
+          {saveStatus === "saved" && (
+            <span className="text-emerald-400 text-xs font-mono">Saved to disk</span>
+          )}
+          {saveStatus === "fallback" && (
+            <span className="text-amber-400 text-xs font-mono">Downloaded</span>
+          )}
           <button
             onClick={handleSave}
+            disabled={saveStatus === "saving"}
             className={`px-3 py-1.5 text-xs font-mono rounded border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
               isDirty
                 ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30"

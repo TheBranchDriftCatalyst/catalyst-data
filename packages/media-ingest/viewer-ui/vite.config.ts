@@ -1,11 +1,41 @@
-import { defineConfig } from "vite";
+import fs from "fs";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
+const GT_DIR = path.resolve(__dirname, "../../../.test-output/media-ingest/ground-truth");
+
+/** Tiny Vite plugin: handles PUT /viewer/ground-truth/*.json to save GT files during dev. */
+function gtSavePlugin(): Plugin {
+  return {
+    name: "gt-save",
+    configureServer(server) {
+      server.middlewares.use("/viewer/ground-truth", (req, res, next) => {
+        if (req.method !== "PUT") return next();
+        const filename = req.url?.replace(/^\//, "") || "";
+        if (!filename.endsWith(".json") || filename.includes("..")) {
+          res.statusCode = 400;
+          res.end("Bad filename");
+          return;
+        }
+        let body = "";
+        req.on("data", (chunk: Buffer) => (body += chunk.toString()));
+        req.on("end", () => {
+          const target = path.join(GT_DIR, filename);
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.writeFileSync(target, body, "utf-8");
+          res.statusCode = 200;
+          res.end(JSON.stringify({ saved: target }));
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "/viewer/",
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), gtSavePlugin()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

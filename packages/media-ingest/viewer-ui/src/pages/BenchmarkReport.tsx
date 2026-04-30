@@ -16,16 +16,21 @@ import { PipelineTable } from "@/components/benchmark/PipelineTable";
 import { AuditViewer } from "@/components/benchmark/AuditViewer";
 import { GroundTruthPanel } from "@/components/benchmark/GroundTruthPanel";
 import { TableControls } from "@/components/benchmark/TableControls";
+import { GTSelector } from "@/components/benchmark/GTSelector";
 
 // ── Scores Tab Content ────────────────────────────────────────────────
 function ScoresTab({
   report,
   visibleModels,
   groupBy,
+  selectedGT,
+  onSelectGT,
 }: {
   report: BenchmarkReportType;
   visibleModels: import("@/types/benchmark").ModelResult[];
   groupBy: GroupByDimension;
+  selectedGT: string;
+  onSelectGT: (name: string) => void;
 }) {
   const gt = report.ground_truth;
 
@@ -68,9 +73,10 @@ function ScoresTab({
 
   return (
     <div className="space-y-6">
-      {/* Ground truth info */}
-      <div className="bg-surface-1 border border-white/5 rounded-lg p-3 flex items-center gap-4 text-xs font-mono">
+      {/* Ground truth info + selector */}
+      <div className="bg-surface-1 border border-white/5 rounded-lg p-3 flex items-center gap-4 text-xs font-mono flex-wrap">
         <span className="text-zinc-500">Ground Truth:</span>
+        <GTSelector selected={selectedGT} onChange={onSelectGT} />
         <span className="text-zinc-300">{gt.reference_model}</span>
         <span className={gt.manually_reviewed ? "text-emerald-400" : "text-amber-400"}>
           {gt.manually_reviewed ? "Reviewed" : "Unreviewed"}
@@ -243,6 +249,7 @@ export default function BenchmarkReport() {
   >("overview");
   const [groupBy, setGroupBy] = useState<GroupByDimension>("type");
   const [hiddenModels, setHiddenModels] = useState<Set<string>>(new Set());
+  const [selectedGT, setSelectedGT] = useState("active");
 
   // Probe which report sources exist
   useEffect(() => {
@@ -464,7 +471,13 @@ export default function BenchmarkReport() {
           )}
 
           {activeTab === "scores" && (
-            <ScoresTab report={report} visibleModels={visibleModels} groupBy={groupBy} />
+            <ScoresTab
+              report={report}
+              visibleModels={visibleModels}
+              groupBy={groupBy}
+              selectedGT={selectedGT}
+              onSelectGT={setSelectedGT}
+            />
           )}
 
           {activeTab === "entities" && (
@@ -479,7 +492,9 @@ export default function BenchmarkReport() {
 
           {activeTab === "audit" && <AuditViewer modelNames={report.model_names} />}
 
-          {activeTab === "ground-truth" && <GroundTruthPanel />}
+          {activeTab === "ground-truth" && (
+            <GroundTruthPanel selectedGT={selectedGT} onSelectGT={setSelectedGT} />
+          )}
         </div>
       </div>
     </div>
