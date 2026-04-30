@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tests.shared.extraction_scoring import score_mentions, score_propositions
+from tests.shared.extraction_scoring import score_mentions, score_propositions, score_provenance
 
 if TYPE_CHECKING:
     from tests.shared.store import BenchmarkStore
@@ -57,6 +57,13 @@ def build_report_json(
         else:
             model_type = "llm"
 
+        # Score provenance completeness
+        ext = r["fixture"]
+        prov_scores = score_provenance(
+            ext.get("mentions", []),
+            ext.get("assertions", []),
+        )
+
         models.append(
             {
                 "name": r["model"],
@@ -73,6 +80,7 @@ def build_report_json(
                     "chunk_count": s.get("chunk_count", 0),
                 },
                 "pipeline": s.get("pipeline", {}),
+                "provenance": prov_scores,
             }
         )
 

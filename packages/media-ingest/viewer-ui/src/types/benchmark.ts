@@ -41,6 +41,21 @@ export interface BenchmarkReport {
   propositions: PropositionRow[];
 }
 
+export interface ProvenanceScores {
+  overall: number;
+  mention_count: number;
+  assertion_count: number;
+  mention_has_provenance: number;
+  has_document_id: number;
+  has_chunk_id: number;
+  has_span: number;
+  has_extraction_model: number;
+  has_code_location: number;
+  assertion_has_provenance: number;
+  assertion_linked_subject: number;
+  assertion_linked_object: number;
+}
+
 export interface ModelResult {
   name: string;
   type: "encoder" | "specialist" | "llm";
@@ -48,6 +63,7 @@ export interface ModelResult {
   stats: ModelStats;
   scores?: ModelScores;
   pipeline: Record<string, PipelineStage>;
+  provenance?: ProvenanceScores;
 }
 
 export interface ModelStats {

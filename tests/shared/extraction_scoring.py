@@ -13,6 +13,91 @@ Usage:
 from __future__ import annotations
 
 
+def score_provenance(mentions: list[dict], assertions: list[dict]) -> dict:
+    """Score provenance chain completeness for a model's extraction output.
+
+    Measures how many of the provenance fields are actually populated.
+    Returns per-field coverage rates (0.0-1.0) and an overall completeness score.
+    """
+    if not mentions and not assertions:
+        return {
+            "overall": 0.0,
+            "mention_count": 0,
+            "assertion_count": 0,
+            "mention_has_provenance": 0.0,
+            "has_document_id": 0.0,
+            "has_chunk_id": 0.0,
+            "has_span": 0.0,
+            "has_extraction_model": 0.0,
+            "has_code_location": 0.0,
+            "assertion_has_provenance": 0.0,
+            "assertion_linked_subject": 0.0,
+            "assertion_linked_object": 0.0,
+        }
+
+    # Mention provenance fields
+    m_total = len(mentions)
+    m_has_prov = 0
+    m_has_doc = 0
+    m_has_chunk = 0
+    m_has_span = 0
+    m_has_model = 0
+    m_has_loc = 0
+
+    for m in mentions:
+        prov = m.get("provenance") or {}
+        if isinstance(prov, dict) and prov:
+            m_has_prov += 1
+            if prov.get("source_document_id"):
+                m_has_doc += 1
+            if prov.get("chunk_id"):
+                m_has_chunk += 1
+            if prov.get("span_start") is not None and prov.get("span_end") is not None:
+                m_has_span += 1
+            if prov.get("extraction_model"):
+                m_has_model += 1
+            if prov.get("code_location"):
+                m_has_loc += 1
+
+    # Assertion provenance + linkage
+    a_total = len(assertions)
+    a_has_prov = 0
+    a_linked_subj = 0
+    a_linked_obj = 0
+
+    for a in assertions:
+        prov = a.get("provenance") or {}
+        if isinstance(prov, dict) and prov:
+            a_has_prov += 1
+        if a.get("subject_mention_id"):
+            a_linked_subj += 1
+        if a.get("object_mention_id"):
+            a_linked_obj += 1
+
+    def _rate(n: int, total: int) -> float:
+        return round(n / total, 4) if total else 0.0
+
+    fields = {
+        "mention_count": m_total,
+        "assertion_count": a_total,
+        "mention_has_provenance": _rate(m_has_prov, m_total),
+        "has_document_id": _rate(m_has_doc, m_total),
+        "has_chunk_id": _rate(m_has_chunk, m_total),
+        "has_span": _rate(m_has_span, m_total),
+        "has_extraction_model": _rate(m_has_model, m_total),
+        "has_code_location": _rate(m_has_loc, m_total),
+        "assertion_has_provenance": _rate(a_has_prov, a_total),
+        "assertion_linked_subject": _rate(a_linked_subj, a_total),
+        "assertion_linked_object": _rate(a_linked_obj, a_total),
+    }
+
+    # Overall = average of all rates
+    rates = [v for k, v in fields.items() if k not in ("mention_count", "assertion_count")]
+    fields["overall"] = round(sum(rates) / len(rates), 4) if rates else 0.0
+
+    return fields
+
+
 def _normalize(text: str) -> str:
     """Lowercase + strip for fuzzy matching."""
     return text.strip().lower()
