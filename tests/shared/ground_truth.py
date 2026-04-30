@@ -159,6 +159,8 @@ def generate_ensemble_ground_truth(
     ner_models: list[str] | None = None,
     spo_models: list[str] | None = None,
     exclude_model: str | None = None,
+    ner_threshold: int | None = None,
+    spo_threshold: int | None = None,
 ) -> dict | None:
     """Generate ground truth from multi-model consensus.
 
@@ -169,6 +171,8 @@ def generate_ensemble_ground_truth(
         exclude_model: If set, exclude this model from the ensemble (leave-one-out).
             Used during scoring to avoid tautological self-grading — a model
             should not vote on the ground truth it is scored against.
+        ner_threshold: Minimum NER votes required. Defaults to strict majority (N//2+1).
+        spo_threshold: Minimum SPO votes required. Defaults to strict majority (N//2+1).
 
     Returns:
         Ground truth dict matching the standard fixture format, or None if
@@ -181,8 +185,8 @@ def generate_ensemble_ground_truth(
     if spo_models is None:
         spo_models = SPO_ENSEMBLE_MODELS
 
-    # Load chunks (required for source text)
-    chunks = store.load_chunks()
+    # Load chunks — prefer benchmark subset (cross-domain) over pipeline cache (media-only)
+    chunks = store.load_benchmark_chunks() or store.load_chunks()
     if not chunks:
         print("  ERROR: No chunks fixture. Run test_pipeline_integration.py first.")
         return None
@@ -215,10 +219,11 @@ def generate_ensemble_ground_truth(
             f"SPO consensus will be weak."
         )
 
-    # Compute thresholds: strict majority = floor(N/2) + 1
-    # ceil(N/2) is wrong for even N (e.g., N=2 gives threshold=1, no consensus)
-    ner_threshold = len(ner_extractions) // 2 + 1
-    spo_threshold = len(spo_extractions) // 2 + 1 if spo_extractions else 1
+    # Compute thresholds: default is strict majority (N//2+1), overridable
+    if ner_threshold is None:
+        ner_threshold = len(ner_extractions) // 2 + 1
+    if spo_threshold is None:
+        spo_threshold = len(spo_extractions) // 2 + 1 if spo_extractions else 1
 
     print("\n  Ensemble ground truth configuration:")
     print(f"    NER models ({len(ner_extractions)}): {', '.join(ner_extractions.keys())}")
