@@ -360,27 +360,32 @@ def extract_validated(
             method="langgraph_validated",
         ).inc()
 
-        # Build provenance from chunk metadata (temporal + speaker data)
+        # Build provenance — ALWAYS, not just for temporal/speaker data
         chunk_meta = m.pop("_chunk_metadata", {})
         chunk_id_from_meta = m.pop("_chunk_id", "")
-        prov = None
+        doc_id = m.get("document_id", "")
+        cid = chunk_id_from_meta or m.get("chunk_id", "")
         start_s = chunk_meta.get("start_s")
         end_s = chunk_meta.get("end_s")
         speaker = chunk_meta.get("speaker")
-        if start_s is not None or speaker:
-            prov = Provenance(
-                source_document_id=m.get("document_id", ""),
-                chunk_id=chunk_id_from_meta or m.get("chunk_id", ""),
-                temporal_start_ms=int(start_s * 1000) if start_s is not None else None,
-                temporal_end_ms=int(end_s * 1000) if end_s is not None else None,
-                speaker_label=speaker,
-                extraction_method="llm",
-            )
+
+        prov = Provenance(
+            source_document_id=doc_id,
+            chunk_id=cid,
+            span_start=m.get("span_start"),
+            span_end=m.get("span_end"),
+            temporal_start_ms=int(start_s * 1000) if start_s is not None else None,
+            temporal_end_ms=int(end_s * 1000) if end_s is not None else None,
+            speaker_label=speaker,
+            extraction_method="llm",
+            extraction_model=_llm_model,
+            code_location=code_location,
+        )
 
         mention_models.append(
             Mention(
-                document_id=m.get("document_id", ""),
-                chunk_id=chunk_id_from_meta or m.get("chunk_id", ""),
+                document_id=doc_id,
+                chunk_id=cid,
                 text=m.get("text", ""),
                 mention_type=mention_type,
                 span_start=m.get("span_start"),
@@ -391,29 +396,47 @@ def extract_validated(
             )
         )
 
+    # Build mention lookup for assertion ↔ mention linkage
+    # Key: (chunk_id, normalized_text) → mention_id
+    _mention_index: dict[tuple[str, str], str] = {}
+    for mm in mention_models:
+        _mention_index[(mm.chunk_id, mm.text.strip().lower())] = mm.mention_id
+
     assertion_models = []
     for a in all_assertions:
         chunk_meta = a.pop("_chunk_metadata", {})
         chunk_id_from_meta = a.pop("_chunk_id", "")
-        a_prov = None
+        a_doc_id = a.get("document_id", "")
+        a_cid = chunk_id_from_meta or ""
         a_start_s = chunk_meta.get("start_s")
         a_end_s = chunk_meta.get("end_s")
         a_speaker = chunk_meta.get("speaker")
-        if a_start_s is not None or a_speaker:
-            a_prov = Provenance(
-                source_document_id=a.get("document_id", ""),
-                chunk_id=chunk_id_from_meta,
-                temporal_start_ms=int(a_start_s * 1000) if a_start_s is not None else None,
-                temporal_end_ms=int(a_end_s * 1000) if a_end_s is not None else None,
-                speaker_label=a_speaker,
-                extraction_method="llm",
-            )
+
+        a_prov = Provenance(
+            source_document_id=a_doc_id,
+            chunk_id=a_cid,
+            temporal_start_ms=int(a_start_s * 1000) if a_start_s is not None else None,
+            temporal_end_ms=int(a_end_s * 1000) if a_end_s is not None else None,
+            speaker_label=a_speaker,
+            extraction_method="llm",
+            extraction_model=_llm_model,
+            code_location=code_location,
+        )
+
+        subj_text = a.get("subject") or a.get("subject_text") or ""
+        obj_text = a.get("object") or a.get("object_text") or ""
+
+        # Link to mention IDs if matching mentions exist in the same chunk
+        subj_mid = _mention_index.get((a_cid, subj_text.strip().lower()), "")
+        obj_mid = _mention_index.get((a_cid, obj_text.strip().lower()), "")
 
         assertion_models.append(
             Assertion(
-                subject_text=a.get("subject", a.get("subject_text", "")),
+                subject_text=subj_text,
+                subject_mention_id=subj_mid,
                 predicate=a.get("predicate", ""),
-                object_text=a.get("object", a.get("object_text", "")),
+                object_text=obj_text,
+                object_mention_id=obj_mid,
                 confidence=a.get("confidence", 1.0),
                 negated=a.get("negated", False),
                 hedged=a.get("hedged", False),

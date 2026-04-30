@@ -209,17 +209,26 @@ class ChunkingResource(ConfigurableResource):
             "strategy": "recursive",
         }
 
-        return [
-            TextChunk(
-                chunk_id=f"{document_id}:chunk-{i}",
-                document_id=document_id,
-                text=f"{title}\n\n{text}" if (self.prepend_title and title) else text,
-                index=i,
-                total_chunks=total,
-                metadata=base_meta,
+        # Compute character offsets so spans can map back to the original document
+        full_text = f"{title}\n\n{content}" if (self.prepend_title and title) else content
+        chunks = []
+        for i, text in enumerate(raw_chunks):
+            char_offset = full_text.find(text)
+            chunk_meta = {
+                **base_meta,
+                "chunk_char_offset": char_offset if char_offset >= 0 else None,
+            }
+            chunks.append(
+                TextChunk(
+                    chunk_id=f"{document_id}:chunk-{i}",
+                    document_id=document_id,
+                    text=f"{title}\n\n{text}" if (self.prepend_title and title) else text,
+                    index=i,
+                    total_chunks=total,
+                    metadata=chunk_meta,
+                )
             )
-            for i, text in enumerate(raw_chunks)
-        ]
+        return chunks
 
     def passthrough(
         self,

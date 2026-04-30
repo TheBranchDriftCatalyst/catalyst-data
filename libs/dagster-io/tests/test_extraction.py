@@ -63,7 +63,7 @@ def test_extract_validated_returns_domain_models():
             return mock_result
 
         mock_graph.ainvoke = fake_ainvoke
-        mock_build.return_value = mock_graph
+        mock_build.return_value = (mock_graph, MagicMock())
 
         chunks = [FakeChunk("Biden visited Israel")]
         mentions, assertions = extract_validated(chunks, "test")
@@ -98,7 +98,7 @@ def test_extract_validated_handles_unknown_entity_type():
             return mock_result
 
         mock_graph.ainvoke = fake_ainvoke
-        mock_build.return_value = mock_graph
+        mock_build.return_value = (mock_graph, MagicMock())
 
         mentions, _ = extract_validated([FakeChunk("test")], "test")
 
@@ -128,7 +128,7 @@ def test_extract_validated_new_entity_types():
             return mock_result
 
         mock_graph.ainvoke = fake_ainvoke
-        mock_build.return_value = mock_graph
+        mock_build.return_value = (mock_graph, MagicMock())
 
         mentions, _ = extract_validated([FakeChunk("test")], "test")
 
@@ -159,7 +159,7 @@ def test_extract_validated_multiple_chunks():
     with patch("dagster_io.extraction._build_graph") as mock_build:
         mock_graph = MagicMock()
         mock_graph.ainvoke = fake_ainvoke
-        mock_build.return_value = mock_graph
+        mock_build.return_value = (mock_graph, MagicMock())
 
         chunks = [FakeChunk(f"text {i}") for i in range(5)]
         mentions, _ = extract_validated(chunks, "test", max_concurrency=2)
@@ -195,7 +195,7 @@ def test_extract_validated_provenance_from_chunk_metadata():
             return mock_result
 
         mock_graph.ainvoke = fake_ainvoke
-        mock_build.return_value = mock_graph
+        mock_build.return_value = (mock_graph, MagicMock())
 
         chunk = FakeChunk(
             "Piers Morgan interviews Nick Fuentes",
@@ -210,7 +210,7 @@ def test_extract_validated_provenance_from_chunk_metadata():
         )
         mentions, assertions = extract_validated([chunk], "media_ingest")
 
-    # Mention should carry provenance from chunk metadata
+    # Mention should carry full provenance from chunk metadata
     assert len(mentions) == 1
     m = mentions[0]
     assert m.provenance is not None
@@ -218,6 +218,10 @@ def test_extract_validated_provenance_from_chunk_metadata():
     assert m.provenance.temporal_end_ms == 3660000
     assert m.provenance.speaker_label == "SPEAKER_00"
     assert m.provenance.extraction_method == "llm"
+    assert m.provenance.code_location == "media_ingest"
+    assert m.provenance.extraction_model != ""  # should be populated from LLM_MODEL
+    assert m.provenance.span_start == 0
+    assert m.provenance.span_end == 12
     assert m.chunk_id == "media-video-123:chunk-42"
 
     # Assertion should also carry provenance
@@ -226,13 +230,26 @@ def test_extract_validated_provenance_from_chunk_metadata():
     assert a.provenance is not None
     assert a.provenance.temporal_start_ms == 3600500
     assert a.provenance.speaker_label == "SPEAKER_00"
+    assert a.provenance.code_location == "media_ingest"
 
 
-def test_extract_validated_no_metadata_no_provenance():
-    """Chunks without metadata produce mentions with no provenance (backward compat)."""
+def test_text_documents_always_get_provenance():
+    """Even text documents without temporal/speaker data should get provenance.
+
+    Scenario: A leaked document is extracted — no audio, no speaker.
+    Then: The mention still has provenance with document_id, chunk_id,
+    span positions, extraction model, and code location.
+    """
     mock_result = {
         "accepted_mentions": [
-            {"text": "Biden", "mention_type": "PERSON", "document_id": "doc-1", "chunk_id": "c0"},
+            {
+                "text": "Apple Inc",
+                "mention_type": "ORG",
+                "span_start": 0,
+                "span_end": 9,
+                "document_id": "leak-456",
+                "chunk_id": "leak-456:chunk-2",
+            },
         ],
         "accepted_propositions": [],
         "status": "completed",
@@ -247,13 +264,114 @@ def test_extract_validated_no_metadata_no_provenance():
             return mock_result
 
         mock_graph.ainvoke = fake_ainvoke
-        mock_build.return_value = mock_graph
+        mock_build.return_value = (mock_graph, MagicMock())
 
-        chunk = FakeChunk("Biden spoke", metadata={})  # no temporal data
-        mentions, _ = extract_validated([chunk], "test")
+        chunk = FakeChunk("Apple Inc leaked docs", document_id="leak-456", chunk_id="leak-456:chunk-2", metadata={})
+        mentions, _ = extract_validated([chunk], "open_leaks")
 
     assert len(mentions) == 1
-    assert mentions[0].provenance is None
+    m = mentions[0]
+    assert m.provenance is not None, "Text documents must always have provenance"
+    assert m.provenance.source_document_id == "leak-456"
+    assert m.provenance.chunk_id == "leak-456:chunk-2"
+    assert m.provenance.span_start == 0
+    assert m.provenance.span_end == 9
+    assert m.provenance.code_location == "open_leaks"
+    assert m.provenance.temporal_start_ms is None  # no temporal data, and that's OK
+    assert m.provenance.speaker_label is None
+
+
+def test_assertions_link_to_mention_ids():
+    """When an assertion's subject/object matches an extracted mention in the same
+    chunk, the assertion's subject_mention_id and object_mention_id should be populated.
+
+    Scenario: "Apple acquired Beats" is extracted as an assertion.
+    Given: "Apple" and "Beats" were extracted as mentions from the same chunk.
+    Then: The assertion links to those mention IDs.
+    """
+    mock_result = {
+        "accepted_mentions": [
+            {
+                "text": "Apple",
+                "mention_type": "ORG",
+                "span_start": 0,
+                "span_end": 5,
+                "document_id": "d1",
+                "chunk_id": "d1:c0",
+            },
+            {
+                "text": "Beats",
+                "mention_type": "ORG",
+                "span_start": 15,
+                "span_end": 20,
+                "document_id": "d1",
+                "chunk_id": "d1:c0",
+            },
+        ],
+        "accepted_propositions": [
+            {"subject": "Apple", "predicate": "acquired", "object": "Beats", "confidence": 1.0},
+        ],
+        "status": "completed",
+        "mention_retry_count": 0,
+        "proposition_retry_count": 0,
+    }
+
+    with patch("dagster_io.extraction._build_graph") as mock_build:
+        mock_graph = MagicMock()
+
+        async def fake_ainvoke(state):
+            return mock_result
+
+        mock_graph.ainvoke = fake_ainvoke
+        mock_build.return_value = (mock_graph, MagicMock())
+
+        mentions, assertions = extract_validated([FakeChunk("Apple acquired Beats", chunk_id="d1:c0")], "test")
+
+    assert len(assertions) == 1
+    a = assertions[0]
+    assert a.subject_mention_id != "", "subject_mention_id should link to the Apple mention"
+    assert a.object_mention_id != "", "object_mention_id should link to the Beats mention"
+
+    # Verify the IDs match actual mention objects
+    mention_ids = {m.mention_id for m in mentions}
+    assert a.subject_mention_id in mention_ids
+    assert a.object_mention_id in mention_ids
+
+
+def test_assertion_linkage_handles_missing_mentions():
+    """When an assertion references entities not found as mentions,
+    mention IDs should be empty (not error).
+
+    Scenario: SPO triple references an entity the NER stage missed.
+    Then: The assertion is still created, but without mention linkage.
+    """
+    mock_result = {
+        "accepted_mentions": [
+            {"text": "Apple", "mention_type": "ORG", "document_id": "d1", "chunk_id": "d1:c0"},
+        ],
+        "accepted_propositions": [
+            {"subject": "Apple", "predicate": "acquired", "object": "Unknown Corp", "confidence": 0.5},
+        ],
+        "status": "completed",
+        "mention_retry_count": 0,
+        "proposition_retry_count": 0,
+    }
+
+    with patch("dagster_io.extraction._build_graph") as mock_build:
+        mock_graph = MagicMock()
+
+        async def fake_ainvoke(state):
+            return mock_result
+
+        mock_graph.ainvoke = fake_ainvoke
+        mock_build.return_value = (mock_graph, MagicMock())
+
+        _, assertions = extract_validated([FakeChunk("Apple acquired Unknown Corp", chunk_id="d1:c0")], "test")
+
+    assert len(assertions) == 1
+    a = assertions[0]
+    assert a.subject_mention_id != "", "subject 'Apple' was extracted as a mention"
+    assert a.object_mention_id == "", "object 'Unknown Corp' was NOT extracted as a mention"
 
 
 def test_extract_validated_failed_chunk_raises():
@@ -265,7 +383,7 @@ def test_extract_validated_failed_chunk_raises():
     with patch("dagster_io.extraction._build_graph") as mock_build:
         mock_graph = MagicMock()
         mock_graph.ainvoke = failing_ainvoke
-        mock_build.return_value = mock_graph
+        mock_build.return_value = (mock_graph, MagicMock())
 
         import pytest
 
