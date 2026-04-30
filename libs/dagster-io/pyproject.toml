@@ -30,6 +30,9 @@ huggingface = [
     "langchain-huggingface>=0.3",
     "sentence-transformers>=3.3",
 ]
+tokencount = [
+    "tiktoken>=0.7",
+]
 dev = [
     "pytest>=8.3",
     "ruff>=0.9",

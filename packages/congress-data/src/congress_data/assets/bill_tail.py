@@ -466,6 +466,8 @@ def bill_chunks(
         **(bill_document.metadata or {}),
     }
 
+    # TODO: derive ChunkConfig from the LLM resource's model context window
+    # so chunk sizes adapt to whichever model is configured for extraction.
     chunks = chunk_bill_text(
         document_id=bill_document.id,
         title=bill_document.title,

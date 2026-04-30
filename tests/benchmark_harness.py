@@ -35,7 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tests.benchmark_config import ALL_MODELS, LOCAL_MODELS, ModelConfig
+from tests.benchmark_config import ALL_MODELS, LOCAL_MODELS, BenchmarkConfig, ModelConfig
 from tests.shared.extraction_scoring import (
     print_benchmark_report,
     score_mentions,
@@ -224,6 +224,7 @@ def _interactive_prompt() -> argparse.Namespace:
         score=False,
         report=False,
         compare_runs=None,
+        chunk_size=None,
     )
 
     if raw:
@@ -496,6 +497,12 @@ examples:
     config.add_argument("--exgraph", action="store_true", help="Use exgraph v2 pipeline")
     config.add_argument("--label", type=str, metavar="NAME", help="Label for this run (used in runs/ dir name)")
     config.add_argument(
+        "--chunk-size",
+        type=int,
+        metavar="TOKENS",
+        help="Override chunk size in tokens (builds a ChunkConfig with this target)",
+    )
+    config.add_argument(
         "--models",
         type=str,
         metavar="LIST",
@@ -614,10 +621,12 @@ examples:
     else:
         models = ALL_MODELS
 
+    chunk_size_str = f"{args.chunk_size} tokens" if getattr(args, "chunk_size", None) else "default"
     print(f"\n{'=' * 70}")
     print("  Extraction Benchmark Harness")
     print(f"  Models: {len(models)}")
     print(f"  Timeout: {args.timeout}s | Regen: {args.regen} | Audit: {args.audit_log}")
+    print(f"  Chunk size: {chunk_size_str}")
     print(f"  Pipeline: {'exgraph v2' if os.environ.get('EXGRAPH_ENABLED') == 'true' else 'v1 (legacy)'}")
     print(f"{'=' * 70}\n")
 
@@ -727,14 +736,13 @@ examples:
     run.save_report(report)
     store.save_top_level_report(report)
 
-    # Save run config
+    # Save run config (full snapshot via BenchmarkConfig)
+    bench_config = BenchmarkConfig.from_args(args, models)
     run.save_run_config(
         {
+            **bench_config.to_dict(),
             "pipeline": pipeline_label,
-            "models": [cfg.name for cfg in models],
-            "timeout": args.timeout,
             "regen": args.regen,
-            "audit_log": args.audit_log,
             "exgraph_enabled": os.environ.get("EXGRAPH_ENABLED", "false"),
         }
     )

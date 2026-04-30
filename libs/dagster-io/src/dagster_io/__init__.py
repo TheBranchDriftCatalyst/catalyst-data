@@ -2,7 +2,15 @@
 
 from dagster_io.append_io_manager import AppendIOManager
 from dagster_io.asset_factories import LLM_ASSET_K8S_CONFIG
-from dagster_io.chunking import ChunkingResource, TextChunk, chunk_document, chunk_text
+from dagster_io.chunking import (
+    PRESET_CONFIGS,
+    ChunkConfig,
+    ChunkingResource,
+    TextChunk,
+    TokenCounter,
+    chunk_document,
+    chunk_text,
+)
 from dagster_io.concordance import ConcordanceEngine, CrossSourceAligner
 from dagster_io.document import Document
 from dagster_io.embedding_config import EmbeddingConfig, EmbeddingConfigResource
@@ -87,6 +95,9 @@ __all__ = [
     "EmbeddingResource",
     "ChunkingResource",
     # Chunking
+    "ChunkConfig",
+    "TokenCounter",
+    "PRESET_CONFIGS",
     "TextChunk",
     "chunk_document",
     "chunk_text",

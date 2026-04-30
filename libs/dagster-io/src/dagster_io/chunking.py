@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from dataclasses import dataclass
 
 from dagster import ConfigurableResource
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -26,6 +27,70 @@ from dagster_io.text import normalize_text
 logger = get_logger(__name__)
 
 DEFAULT_SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
+
+
+# ---------------------------------------------------------------------------
+# Context-aware chunk sizing
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ChunkConfig:
+    """Model-aware chunk sizing configuration.
+
+    Computes a target chunk size from the model's context window minus
+    prompt overhead and output reserve, then scales by ``context_fraction``.
+    """
+
+    model_context_tokens: int = 4096
+    prompt_overhead_tokens: int = 1500  # system prompt + schema + few-shot
+    output_reserve_tokens: int = 2000  # max expected extraction output
+    context_fraction: float = 0.25  # use 25% of remaining context
+    min_chunk_tokens: int = 100  # floor
+    max_chunk_tokens: int = 8000  # ceiling (even for 128K models)
+    overlap_tokens: int = 50
+    strategy: str = "recursive"  # recursive|section|speaker|passthrough
+
+    @property
+    def target_tokens(self) -> int:
+        available = self.model_context_tokens - self.prompt_overhead_tokens - self.output_reserve_tokens
+        target = int(available * self.context_fraction)
+        return max(self.min_chunk_tokens, min(target, self.max_chunk_tokens))
+
+    @property
+    def target_chars(self) -> int:
+        return self.target_tokens * 4  # conservative estimate, refined by TokenCounter
+
+
+class TokenCounter:
+    """Count tokens using tiktoken when available, otherwise fall back to char/4."""
+
+    def __init__(self, model: str = "gpt-4o"):
+        self._encoder = None
+        try:
+            import tiktoken
+
+            self._encoder = tiktoken.encoding_for_model(model)
+        except (ImportError, KeyError):
+            pass
+
+    def count(self, text: str) -> int:
+        if self._encoder:
+            return len(self._encoder.encode(text))
+        return len(text) // 4
+
+    def chars_for_tokens(self, n_tokens: int) -> int:
+        return n_tokens * 4  # approximate for char budget
+
+
+PRESET_CONFIGS: dict[str, ChunkConfig] = {
+    "small-local": ChunkConfig(model_context_tokens=4096),
+    "medium-local": ChunkConfig(model_context_tokens=8192),
+    "large-local": ChunkConfig(model_context_tokens=32768),
+    "cloud-openai": ChunkConfig(model_context_tokens=128000),
+    "cloud-anthropic": ChunkConfig(model_context_tokens=200000),
+    "encoder": ChunkConfig(model_context_tokens=2048, context_fraction=0.5, max_chunk_tokens=512),
+}
 
 
 class TextChunk(BaseModel):
@@ -201,10 +266,20 @@ def chunk_text(
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
     separators: list[str] | None = None,
+    config: ChunkConfig | None = None,
 ) -> list[str]:
-    """Split text into overlapping chunks via LangChain RecursiveCharacterTextSplitter."""
+    """Split text into overlapping chunks via LangChain RecursiveCharacterTextSplitter.
+
+    When *config* is provided, ``chunk_size`` and ``chunk_overlap`` are derived
+    from the config (target_chars / overlap_tokens * 4) unless explicitly
+    overridden by the caller.
+    """
     if not text or not text.strip():
         return []
+
+    if config is not None:
+        chunk_size = config.target_chars
+        chunk_overlap = config.overlap_tokens * 4
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,

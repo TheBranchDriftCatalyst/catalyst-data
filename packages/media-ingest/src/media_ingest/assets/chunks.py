@@ -88,9 +88,11 @@ def _split_on_pauses(words: list[dict], text: str, threshold: float = PAUSE_THRE
     ]
 
 
-def _text_split_fallback(text: str, start: float, end: float, chunking: ChunkingResource) -> list[SubSegment]:
+def _text_split_fallback(
+    text: str, start: float, end: float, chunking: ChunkingResource, fallback_size: int | None = None
+) -> list[SubSegment]:
     """Last-resort text splitter with proportional timestamp estimation."""
-    pieces = chunking.split_text(text, chunk_size=FALLBACK_CHUNK_SIZE, chunk_overlap=0)
+    pieces = chunking.split_text(text, chunk_size=fallback_size or FALLBACK_CHUNK_SIZE, chunk_overlap=0)
     n = len(pieces)
     duration = end - start
     return [
@@ -110,25 +112,31 @@ def _segment_to_sub_segments(
     end: float,
     words: list[dict],
     chunking: ChunkingResource,
+    max_chars: int | None = None,
 ) -> list[SubSegment]:
     """Convert a single speaker turn into one or more SubSegments.
 
     Applies the three-tier strategy:
-      1. Fits in MAX_CHUNK_CHARS → single SubSegment
+      1. Fits in max_chars → single SubSegment
       2. Split at speech pauses → multiple SubSegments
       3. Still oversized → text splitter fallback per sub-segment
+
+    When ``max_chars`` is None the module-level default (1500) is used.
     """
-    if len(text) <= MAX_CHUNK_CHARS:
+    limit = max_chars if max_chars is not None else MAX_CHUNK_CHARS
+    fallback = limit // 2 or FALLBACK_CHUNK_SIZE
+
+    if len(text) <= limit:
         return [SubSegment(text=text, start=start, end=end, strategy="speaker_turn")]
 
     result: list[SubSegment] = []
     for sub in _split_on_pauses(words, text):
         if not sub.text:
             continue
-        if len(sub.text) <= MAX_CHUNK_CHARS:
+        if len(sub.text) <= limit:
             result.append(sub)
         else:
-            result.extend(_text_split_fallback(sub.text, sub.start, sub.end, chunking))
+            result.extend(_text_split_fallback(sub.text, sub.start, sub.end, chunking, fallback_size=fallback))
     return result
 
 
@@ -141,6 +149,7 @@ def _speaker_turn_chunks(
     title: str,
     chunking: ChunkingResource,
     metadata: dict,
+    max_chars: int | None = None,
 ) -> list[TextChunk]:
     """Build TextChunks from speaker-attributed segments."""
     chunks: list[TextChunk] = []
@@ -157,6 +166,7 @@ def _speaker_turn_chunks(
             end=seg.get("end", 0),
             words=seg.get("words", []),
             chunking=chunking,
+            max_chars=max_chars,
         )
 
         for sub in sub_segs:

@@ -20,6 +20,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dagster_io.chunking import ChunkConfig
 
 
 @dataclass
@@ -285,3 +289,68 @@ SPO_ENSEMBLE_MODELS = [
     "claude-sonnet-4-20250514",  # best Anthropic
     "gpt-4o",  # best OpenAI
 ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BenchmarkConfig — unified, serializable benchmark parameters
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class BenchmarkConfig:
+    """Unified benchmark configuration — serializable to run-config.json."""
+
+    chunk_config: ChunkConfig
+    models: list[ModelConfig]
+    ner_ensemble: list[str]
+    spo_ensemble: list[str]
+    ensemble_threshold: str  # "majority"
+    exgraph_enabled: bool = True
+    timeout_s: int = 300
+    audit_log: bool = False
+    label: str = ""
+
+    @classmethod
+    def from_args(cls, args, models: list[ModelConfig]) -> BenchmarkConfig:
+        """Build from argparse namespace."""
+        from dagster_io.chunking import ChunkConfig
+
+        chunk_tokens = getattr(args, "chunk_size", None)
+        chunk_config = (
+            ChunkConfig(model_context_tokens=chunk_tokens * 4 if chunk_tokens else 4096)
+            if chunk_tokens
+            else ChunkConfig()
+        )
+
+        return cls(
+            chunk_config=chunk_config,
+            models=models,
+            ner_ensemble=NER_ENSEMBLE_MODELS,
+            spo_ensemble=SPO_ENSEMBLE_MODELS,
+            ensemble_threshold="majority",
+            exgraph_enabled=getattr(args, "exgraph", False),
+            timeout_s=getattr(args, "timeout", 300),
+            audit_log=getattr(args, "audit_log", False),
+            label=getattr(args, "label", "") or "",
+        )
+
+    def to_dict(self) -> dict:
+        """Serialize for run-config.json."""
+        return {
+            "chunk_config": {
+                "target_tokens": self.chunk_config.target_tokens,
+                "target_chars": self.chunk_config.target_chars,
+                "model_context_tokens": self.chunk_config.model_context_tokens,
+                "context_fraction": self.chunk_config.context_fraction,
+                "strategy": self.chunk_config.strategy,
+            },
+            "models": [m.name for m in self.models],
+            "model_count": len(self.models),
+            "ner_ensemble": self.ner_ensemble,
+            "spo_ensemble": self.spo_ensemble,
+            "ensemble_threshold": self.ensemble_threshold,
+            "exgraph_enabled": self.exgraph_enabled,
+            "timeout_s": self.timeout_s,
+            "audit_log": self.audit_log,
+            "label": self.label,
+        }

@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from dagster_io import TextChunk
+from dagster_io.chunking import ChunkConfig
 from dagster_io.logging import get_logger
 from dagster_io.text import normalize_text
 
@@ -102,12 +103,14 @@ def _xml_subsection_split(
     section_elem: ET.Element,
     section_number: str,
     section_title: str,
+    config: ChunkConfig | None = None,
 ) -> list[ChunkCandidate]:
     """Split an oversized XML section at <subsection> boundaries.
 
     Groups adjacent small subsections up to MAX_SUBSECTION_CHARS.
     Falls back to text_split_fallback for giant <quoted-block> content.
     """
+    max_sub_chars = config.target_chars if config else MAX_SUBSECTION_CHARS
     subsections = section_elem.findall("subsection")
     if not subsections:
         # No subsection children — text_split_fallback
@@ -116,7 +119,7 @@ def _xml_subsection_split(
             section_number=section_number,
             section_title=section_title,
         )
-        return _text_split_fallback(raw.text, raw)
+        return _text_split_fallback(raw.text, raw, config=config)
 
     chunks: list[ChunkCandidate] = []
     buffer_text = ""
@@ -147,7 +150,7 @@ def _xml_subsection_split(
         ss_text = _xml_get_text(ss)
 
         combined = (buffer_text + "\n\n" + ss_text).strip() if buffer_text else ss_text
-        if len(combined) <= MAX_SUBSECTION_CHARS:
+        if len(combined) <= max_sub_chars:
             buffer_text = combined
             buffer_labels.append(label)
         else:
@@ -164,14 +167,14 @@ def _xml_subsection_split(
                         },
                     )
                 )
-            if len(ss_text) > MAX_SUBSECTION_CHARS:
+            if len(ss_text) > max_sub_chars:
                 # Individual subsection too large — text_split_fallback
                 raw = RawSection(
                     text=ss_text,
                     section_number=section_number,
                     section_title=section_title,
                 )
-                chunks.extend(_text_split_fallback(raw.text, raw, subsection=label))
+                chunks.extend(_text_split_fallback(raw.text, raw, subsection=label, config=config))
                 buffer_text = ""
                 buffer_labels = []
             else:
@@ -206,12 +209,13 @@ def _xml_subsection_split(
     return chunks
 
 
-def _xml_section_to_chunks(section_elem: ET.Element) -> list[ChunkCandidate]:
+def _xml_section_to_chunks(section_elem: ET.Element, config: ChunkConfig | None = None) -> list[ChunkCandidate]:
     """Apply the tiered strategy to an XML <section> element."""
+    max_chars = config.target_chars if config else MAX_CHUNK_CHARS
     section_number, section_title = _xml_get_header(section_elem)
     full_text = _xml_get_text(section_elem)
 
-    if len(full_text) <= MAX_CHUNK_CHARS:
+    if len(full_text) <= max_chars:
         return [
             ChunkCandidate(
                 text=full_text,
@@ -223,10 +227,10 @@ def _xml_section_to_chunks(section_elem: ET.Element) -> list[ChunkCandidate]:
             )
         ]
 
-    return _xml_subsection_split(section_elem, section_number, section_title)
+    return _xml_subsection_split(section_elem, section_number, section_title, config=config)
 
 
-def _parse_xml(xml_content: str) -> tuple[str | None, list[ChunkCandidate]]:
+def _parse_xml(xml_content: str, config: ChunkConfig | None = None) -> tuple[str | None, list[ChunkCandidate]]:
     """Parse GPO Formatted XML into preamble + section chunks.
 
     Returns (preamble_text_or_None, list_of_ChunkCandidate).
@@ -243,6 +247,7 @@ def _parse_xml(xml_content: str) -> tuple[str | None, list[ChunkCandidate]]:
     if legis_body is None:
         raise ValueError("No <legis-body> element found in bill XML")
 
+    max_chars = config.target_chars if config else MAX_CHUNK_CHARS
     candidates: list[ChunkCandidate] = []
 
     # Walk direct children of legis-body
@@ -251,7 +256,7 @@ def _parse_xml(xml_content: str) -> tuple[str | None, list[ChunkCandidate]]:
         tag = child.tag
 
         if tag == "section":
-            candidates.extend(_xml_section_to_chunks(child))
+            candidates.extend(_xml_section_to_chunks(child, config=config))
 
         elif tag in ("title", "subtitle", "chapter", "part"):
             # These are container elements — process their child sections
@@ -265,7 +270,7 @@ def _parse_xml(xml_content: str) -> tuple[str | None, list[ChunkCandidate]]:
                 # Process each child section/sub-container recursively
                 for subchild in child:
                     if subchild.tag == "section":
-                        section_chunks = _xml_section_to_chunks(subchild)
+                        section_chunks = _xml_section_to_chunks(subchild, config=config)
                         # Tag with parent container info
                         for c in section_chunks:
                             c.metadata["parent_title"] = container_label
@@ -275,7 +280,7 @@ def _parse_xml(xml_content: str) -> tuple[str | None, list[ChunkCandidate]]:
                         sub_enum, sub_header = _xml_get_header(subchild)
                         sub_label = f"{subchild.tag.upper()} {sub_enum}: {sub_header}"
                         for subsec in subchild.findall(".//section"):
-                            section_chunks = _xml_section_to_chunks(subsec)
+                            section_chunks = _xml_section_to_chunks(subsec, config=config)
                             for c in section_chunks:
                                 c.metadata["parent_title"] = f"{container_label} > {sub_label}"
                             candidates.extend(section_chunks)
@@ -283,7 +288,7 @@ def _parse_xml(xml_content: str) -> tuple[str | None, list[ChunkCandidate]]:
                 # Container with no section children — treat as a section itself
                 full_text = _xml_get_text(child)
                 if full_text:
-                    if len(full_text) <= MAX_CHUNK_CHARS:
+                    if len(full_text) <= max_chars:
                         candidates.append(
                             ChunkCandidate(
                                 text=full_text,
@@ -302,7 +307,7 @@ def _parse_xml(xml_content: str) -> tuple[str | None, list[ChunkCandidate]]:
                             section_title=container_header or None,
                             header_type=tag,
                         )
-                        candidates.extend(_text_split_fallback(raw.text, raw))
+                        candidates.extend(_text_split_fallback(raw.text, raw, config=config))
 
     return preamble, candidates
 
@@ -350,17 +355,18 @@ def _parse_sections_regex(text: str) -> tuple[str | None, list[RawSection]]:
     return preamble, sections
 
 
-def _regex_subsection_split(section: RawSection) -> list[ChunkCandidate]:
+def _regex_subsection_split(section: RawSection, config: ChunkConfig | None = None) -> list[ChunkCandidate]:
     """Split an oversized section at (a), (b), (c) subsection boundaries.
 
     Groups adjacent small subsections together up to MAX_SUBSECTION_CHARS.
     Falls back to text_split_fallback if no subsection markers are found.
     """
+    max_sub_chars = config.target_chars if config else MAX_SUBSECTION_CHARS
     text = section.text
     matches = list(SUBSECTION_RE.finditer(text))
 
     if not matches:
-        return _text_split_fallback(text, section)
+        return _text_split_fallback(text, section, config=config)
 
     parts: list[tuple[str, str]] = []
     for i, m in enumerate(matches):
@@ -382,7 +388,7 @@ def _regex_subsection_split(section: RawSection) -> list[ChunkCandidate]:
 
     for label, part_text in parts:
         combined = (buffer_text + "\n" + part_text).strip() if buffer_text else part_text
-        if len(combined) <= MAX_SUBSECTION_CHARS:
+        if len(combined) <= max_sub_chars:
             buffer_text = combined
             buffer_labels.append(label)
         else:
@@ -398,8 +404,8 @@ def _regex_subsection_split(section: RawSection) -> list[ChunkCandidate]:
                         },
                     )
                 )
-            if len(part_text) > MAX_SUBSECTION_CHARS:
-                chunks.extend(_text_split_fallback(part_text, section, subsection=label))
+            if len(part_text) > max_sub_chars:
+                chunks.extend(_text_split_fallback(part_text, section, subsection=label, config=config))
                 buffer_text = ""
                 buffer_labels = []
             else:
@@ -422,9 +428,10 @@ def _regex_subsection_split(section: RawSection) -> list[ChunkCandidate]:
     return chunks
 
 
-def _regex_section_to_chunks(section: RawSection) -> list[ChunkCandidate]:
+def _regex_section_to_chunks(section: RawSection, config: ChunkConfig | None = None) -> list[ChunkCandidate]:
     """Apply the tiered strategy to a regex-parsed section."""
-    if len(section.text) <= MAX_CHUNK_CHARS:
+    max_chars = config.target_chars if config else MAX_CHUNK_CHARS
+    if len(section.text) <= max_chars:
         return [
             ChunkCandidate(
                 text=section.text,
@@ -436,7 +443,7 @@ def _regex_section_to_chunks(section: RawSection) -> list[ChunkCandidate]:
             )
         ]
 
-    return _regex_subsection_split(section)
+    return _regex_subsection_split(section, config=config)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -448,11 +455,14 @@ def _text_split_fallback(
     text: str,
     section: RawSection,
     subsection: str | None = None,
+    config: ChunkConfig | None = None,
 ) -> list[ChunkCandidate]:
     """Last-resort recursive character splitter."""
+    fb_size = (config.target_chars // 2) if config else FALLBACK_CHUNK_SIZE
+    fb_overlap = (config.overlap_tokens * 4) if config else FALLBACK_CHUNK_OVERLAP
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=FALLBACK_CHUNK_SIZE,
-        chunk_overlap=FALLBACK_CHUNK_OVERLAP,
+        chunk_size=fb_size,
+        chunk_overlap=fb_overlap,
         separators=["\n\n", "\n", ". ", " ", ""],
         length_function=len,
     )
@@ -478,11 +488,12 @@ def chunk_bill_text(
     text: str,
     bill_metadata: dict | None = None,
     xml_content: str | None = None,
+    config: ChunkConfig | None = None,
 ) -> list[TextChunk]:
     """Section-aware chunking for congressional bill text.
 
     Applies a three-tier strategy that preserves legislative structure:
-      1. section_split       — whole sections kept intact (< 4000 chars)
+      1. section_split       — whole sections kept intact (< target_chars)
       2. subsection_split    — oversized sections split at subsection boundaries
       3. text_split_fallback — recursive char split for giant blocks
 
@@ -490,12 +501,17 @@ def chunk_bill_text(
     precise structural boundaries.  Falls back to plain text regex parsing
     when XML is not available.
 
+    When ``config`` is provided, chunk size thresholds are derived from the
+    model's context window via ChunkConfig.  Otherwise the module-level
+    defaults (4000 chars / 2000 fallback) are used.
+
     Args:
         document_id: Parent document ID (e.g. "congress-bill-hr1-119").
         title: Bill title (prepended to each chunk).
         text: Full bill text content (plain text).
         bill_metadata: Extra metadata to attach to every chunk.
         xml_content: GPO Formatted XML content (preferred over plain text).
+        config: Optional ChunkConfig for model-aware sizing.
 
     Returns:
         List of TextChunk objects ready for embedding/extraction.
@@ -520,7 +536,7 @@ def chunk_bill_text(
     # ── Try XML parsing first ──────────────────────────────────────────────
     if xml_content:
         try:
-            preamble, xml_candidates = _parse_xml(xml_content)
+            preamble, xml_candidates = _parse_xml(xml_content, config=config)
             parse_mode = "xml"
 
             if preamble:
@@ -560,7 +576,7 @@ def chunk_bill_text(
             )
 
         for section in sections:
-            candidates.extend(_regex_section_to_chunks(section))
+            candidates.extend(_regex_section_to_chunks(section, config=config))
 
     if not candidates:
         return []
