@@ -1,5 +1,5 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@thebranchdriftcatalyst/catalyst-ui";
-import type { ModelResult, ModelScores } from "@/types/benchmark";
+import type { ModelResult, ModelScores, ProvenanceScores } from "@/types/benchmark";
 
 // ── Metric Tooltip Definitions ────────────────────────────────────────
 export const METRIC_TOOLTIPS: Record<string, string> = {
@@ -60,6 +60,17 @@ export const METRIC_TOOLTIPS: Record<string, string> = {
   predicate: "The relationship/verb connecting subject to object.",
   object: "The object of the extracted triple.",
   prop_model_count: "Number of models that extracted this triple.",
+  // Provenance completeness
+  provenance_overall:
+    "Average completeness across all provenance fields. 1.0 = every extraction has full traceability back to source document, chunk, span, model, and code location.",
+  provenance_has_span:
+    "Fraction of mentions with valid span_start/span_end character positions in the chunk text. Higher = better span alignment.",
+  provenance_linked_subject:
+    "Fraction of assertions where subject_mention_id links to an actual extracted mention. Measures NER\u2192SPO linkage completeness.",
+  provenance_linked_object:
+    "Fraction of assertions where object_mention_id links to an actual extracted mention.",
+  provenance_has_model:
+    "Fraction of extractions that record which LLM model produced them. Should be 1.0 after the provenance fix.",
   // Pipeline stages
   extract_mentions: "LLM call to extract named entities from text chunks.",
   validate_mentions: "MCP schema validation of extracted mentions.",
@@ -331,6 +342,56 @@ export function ScoreBarChart({
                 />
               </div>
               <div className="w-16 text-xs text-zinc-300 font-mono text-right">{fmt(val)}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Provenance Bar Chart ────────────────────────────────────────────
+
+export function ProvenanceBarChart({
+  models,
+  metricKey,
+  label,
+  tooltip,
+}: {
+  models: ModelResult[];
+  metricKey: keyof ProvenanceScores;
+  label: string;
+  tooltip?: string;
+}) {
+  const withProv = models.filter((m) => m.provenance != null);
+  if (withProv.length === 0) return null;
+
+  const sorted = [...withProv].sort(
+    (a, b) => (b.provenance![metricKey] as number) - (a.provenance![metricKey] as number),
+  );
+
+  return (
+    <div className="bg-surface-1 border border-white/5 rounded-lg p-4">
+      <h3 className="text-xs font-mono text-zinc-300 uppercase tracking-wider mb-3">
+        {tooltip ? <MetricLabel label={label} tooltip={tooltip} /> : label}
+      </h3>
+      <div className="space-y-1.5">
+        {sorted.map((m) => {
+          const val = m.provenance![metricKey] as number;
+          const pct = val * 100;
+          const barColor = pct >= 90 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-red-500";
+          return (
+            <div key={m.name} className="flex items-center gap-2">
+              <div className="w-28 text-xs text-zinc-400 font-mono truncate">{m.name}</div>
+              <div className="flex-1 h-4 bg-surface-0 rounded overflow-hidden">
+                <div
+                  className={`h-full ${barColor} rounded transition-all`}
+                  style={{ width: `${Math.max(pct, 2)}%` }}
+                />
+              </div>
+              <div className="w-16 text-xs text-zinc-300 font-mono text-right">
+                {(val * 100).toFixed(1)}%
+              </div>
             </div>
           );
         })}

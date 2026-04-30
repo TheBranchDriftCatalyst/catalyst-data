@@ -4,6 +4,7 @@ import {
   StatCard,
   PerformanceChart,
   ScoreBarChart,
+  ProvenanceBarChart,
   METRIC_TOOLTIPS,
 } from "@/components/benchmark/shared";
 import type { GroupByDimension } from "@/components/benchmark/shared";
@@ -171,9 +172,44 @@ function ScoresTab({
         </p>
       )}
 
+      {/* Provenance completeness */}
+      {visibleModels.some((m) => m.provenance) && (
+        <div>
+          <h3 className="text-xs font-mono text-zinc-300 uppercase tracking-wider mb-3">
+            Provenance Chain Completeness
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ProvenanceBarChart
+              models={visibleModels}
+              metricKey="overall"
+              label="Overall Provenance"
+              tooltip={METRIC_TOOLTIPS.provenance_overall}
+            />
+            <ProvenanceBarChart
+              models={visibleModels}
+              metricKey="has_span"
+              label="Span Positions"
+              tooltip={METRIC_TOOLTIPS.provenance_has_span}
+            />
+            <ProvenanceBarChart
+              models={visibleModels}
+              metricKey="assertion_linked_subject"
+              label="Assertion → Subject Linked"
+              tooltip={METRIC_TOOLTIPS.provenance_linked_subject}
+            />
+            <ProvenanceBarChart
+              models={visibleModels}
+              metricKey="assertion_linked_object"
+              label="Assertion → Object Linked"
+              tooltip={METRIC_TOOLTIPS.provenance_linked_object}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Full precision/recall table */}
       <div>
-        <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-mono text-zinc-300 uppercase tracking-wider mb-3">
           Precision / Recall / F1 Breakdown
         </h3>
         <ScoresTable models={visibleModels} groupBy={groupBy} />

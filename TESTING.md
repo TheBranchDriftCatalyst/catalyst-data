@@ -341,6 +341,7 @@ task bench:clean
 | `--ner-models LIST` | Override ensemble NER panel (comma-separated) |
 | `--spo-models LIST` | Override ensemble SPO panel (comma-separated) |
 | `--gt-model MODEL` | Model for single-model GT generation (default: gpt-4o) |
+| `--chunk-size TOKENS` | Override chunk size in tokens for A/B testing |
 
 ### Task Commands
 
@@ -406,6 +407,15 @@ Both **strict** (text + type must match) and **relaxed** (text only) variants ar
 - **Tokens/sec** -- generation throughput
 - **Per-chunk Latency** -- `duration / chunk_count`
 - **Quality/Speed Ratio** -- `F1 / duration` (best bang for buck)
+
+**Provenance Completeness (no ground truth needed):**
+- **Overall** -- average of all field coverage rates (0-1)
+- **has_provenance** -- fraction of mentions/assertions with a Provenance object
+- **has_span** -- fraction with valid span_start/span_end positions
+- **has_extraction_model** -- fraction recording which LLM produced the extraction
+- **has_code_location** -- fraction recording which Dagster pipeline ran it
+- **assertion_linked_subject** -- fraction of assertions where subject links to a Mention ID
+- **assertion_linked_object** -- fraction of assertions where object links to a Mention ID
 
 **Pipeline Metrics (from MCP validation audit trail):**
 - Per-stage call counts (extract, validate, repair)
