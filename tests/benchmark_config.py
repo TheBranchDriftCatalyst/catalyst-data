@@ -33,6 +33,7 @@ class ModelConfig:
     api_key: str = "unused"
     max_tokens: int = 4096
     timeout: int = 300  # 5 minutes per model
+    context_window: int = 4096  # max input tokens the model accepts
     tags: list[str] = field(default_factory=list)
 
 
@@ -71,18 +72,21 @@ ENCODER_MODELS = [
         name="gliner-medium",
         model="gliner",  # triggers GLiNERClient in _build_graph()
         base_url="",  # not used — runs in-process
+        context_window=512,
         tags=["encoder", "extraction-specialist", "300m"],
     ),
     ModelConfig(
         name="gliner-large",
         model="gliner-large",  # resolved via GLINER_MODEL env var in subprocess
         base_url="",
+        context_window=512,
         tags=["encoder", "extraction-specialist", "600m"],
     ),
     ModelConfig(
         name="gliner-pii",
         model="gliner-pii",  # PII + general NER — detects phone, email, SSN + standard entities
         base_url="",
+        context_window=512,
         tags=["encoder", "extraction-specialist", "300m"],
     ),
     ModelConfig(
@@ -103,6 +107,7 @@ TIER1_MODELS = [
         name="gemma3-12b",
         model="gemma3:12b",
         base_url=OLLAMA_BASE,
+        context_window=8192,
         tags=["ollama", "12b", "tier1"],
     ),
     # DeepSeek-R1 7B — LLMStructBench 0.67 but reasoning models are too slow
@@ -129,6 +134,7 @@ TIER2_MODELS = [
         name="mistral-7b",
         model="mistral:latest",
         base_url=OLLAMA_BASE,
+        context_window=8192,
         tags=["ollama", "7b", "tier2"],
     ),
     # Our benchmark: 22 mentions, 12 assertions (best balanced), 95s
@@ -136,6 +142,7 @@ TIER2_MODELS = [
         name="qwen2.5-7b",
         model="qwen2.5:7b-instruct",
         base_url=OLLAMA_BASE,
+        context_window=8192,
         tags=["ollama", "7b", "tier2"],
     ),
     # Our benchmark: 17 mentions, 29 assertions (best SPO), 88s
@@ -143,6 +150,7 @@ TIER2_MODELS = [
         name="llama3.1-8b",
         model="llama3.1:8b",
         base_url=OLLAMA_BASE,
+        context_window=8192,
         tags=["ollama", "8b", "tier2"],
     ),
     # Our benchmark: fastest (38s, 116 tok/s), decent quality at 3B
@@ -164,6 +172,7 @@ TIER2_MODELS = [
         name="gemma3-4b",
         model="gemma3:4b",
         base_url=OLLAMA_BASE,
+        context_window=8192,
         tags=["ollama", "4b", "tier2"],
     ),
 ]
@@ -200,6 +209,7 @@ CLOUD_MODELS = [
         base_url=LITELLM_BASE,
         structured_method="function_calling",
         api_key=LITELLM_KEY,
+        context_window=128000,
         tags=["cloud", "openai", "baseline"],
     ),
     ModelConfig(
@@ -208,6 +218,7 @@ CLOUD_MODELS = [
         base_url=LITELLM_BASE,
         structured_method="function_calling",
         api_key=LITELLM_KEY,
+        context_window=128000,
         tags=["cloud", "openai", "baseline"],
     ),
     ModelConfig(
@@ -216,6 +227,7 @@ CLOUD_MODELS = [
         base_url=LITELLM_BASE,
         structured_method="function_calling",
         api_key=LITELLM_KEY,
+        context_window=200000,
         tags=["cloud", "anthropic", "baseline"],
     ),
     # claude-haiku-3.5 — disabled: LiteLLM deployment unavailable
