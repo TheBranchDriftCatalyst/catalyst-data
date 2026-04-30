@@ -118,7 +118,7 @@ def _compute_scores(
         "mention_relaxed_recall": m_scores["relaxed_recall"],
         "mention_relaxed_f1": m_scores["relaxed_f1"],
         "mention_type_accuracy": m_scores["type_accuracy"],
-        "mention_span_accuracy": m_scores["span_accuracy"],
+        "mention_span_accuracy": m_scores["span_accuracy"] if m_scores["span_accuracy"] is not None else 0.0,
         "proposition_strict_precision": p_scores["strict_precision"],
         "proposition_strict_recall": p_scores["strict_recall"],
         "proposition_strict_f1": p_scores["strict_f1"],
@@ -126,7 +126,9 @@ def _compute_scores(
         "proposition_relaxed_recall": p_scores["relaxed_recall"],
         "proposition_relaxed_f1": p_scores["relaxed_f1"],
         # Hallucination
-        "hallucination_rate": round(1.0 - m_scores["span_accuracy"], 3),
+        "hallucination_rate": round(1.0 - m_scores["span_accuracy"], 3)
+        if m_scores["span_accuracy"] is not None
+        else None,
         # Efficiency
         "quality_speed_ratio": round(m_scores["strict_f1"] / max(duration, 0.1), 4),
         "per_chunk_latency": round(duration / max(chunk_count, 1), 2),
