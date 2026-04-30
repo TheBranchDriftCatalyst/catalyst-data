@@ -1,11 +1,9 @@
-from media_ingest.assets.assertions import media_assertions
 from media_ingest.assets.chunks import media_chunks
 from media_ingest.assets.diarization import media_diarization, media_segment_merge
 from media_ingest.assets.discovery import media_files
 from media_ingest.assets.documents import media_documents
-from media_ingest.assets.embeddings import media_embeddings
 from media_ingest.assets.entity_candidates import media_entity_candidates
-from media_ingest.assets.mentions import media_mentions
+from media_ingest.assets.gold import media_gold_assets
 from media_ingest.assets.metadata import media_metadata
 from media_ingest.assets.speaker_embeddings import media_speaker_embeddings
 from media_ingest.assets.speaker_profiles import media_speaker_profiles
@@ -23,9 +21,7 @@ __all__ = [
     "media_diarization",
     "media_segment_merge",
     "media_chunks",
-    "media_mentions",
-    "media_assertions",
-    "media_embeddings",
+    "media_gold_assets",
     "media_entity_candidates",
     # Speaker identity (CD-34j.1)
     "media_speaker_embeddings",

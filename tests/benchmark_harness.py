@@ -64,6 +64,7 @@ def _run_model(cfg: ModelConfig, timeout: int, save_audit: bool, store: Benchmar
         "OPENAI_API_KEY": api_key,
         "LLM_STRUCTURED_METHOD": cfg.structured_method,
         "LLM_MAX_TOKENS": str(cfg.max_tokens),
+        "LLM_CONTEXT_WINDOW": str(cfg.context_window),
         "LLM_TIMEOUT": str(timeout),
         "SAVE_AUDIT_LOG": "true" if save_audit else "",
         "PROMPT_REGISTRY_DIR": str(ROOT / "k8s" / "shared" / "prompts"),

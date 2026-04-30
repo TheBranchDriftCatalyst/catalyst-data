@@ -33,20 +33,20 @@ _run_status_sensors = make_run_status_sensor("congress_data")
 
 # ── Head assets (unpartitioned) ──────────────────────────────────────────────
 
-# ── Bill tail assets (partitioned on congress_bill) ──────────────────────────
+# ── Bill tail assets (partitioned on congress_bill — bronze/silver) ──────────
 from congress_data.assets.bill_tail import (
     bill_actions,
     bill_amendments,
-    bill_assertions,
     bill_chunks,
     bill_cosponsors,
     bill_detail,
     bill_document,
-    bill_embeddings,
     bill_full_text,
-    bill_mentions,
     bill_text_versions,
 )
+
+# ── Gold extraction assets (factory-generated) ──────────────────────────────
+from congress_data.assets.gold import bill_gold_assets, member_gold_assets
 from congress_data.assets.head import (
     bills_list_incremental,
     bills_manifest,
@@ -54,15 +54,13 @@ from congress_data.assets.head import (
     members_manifest,
 )
 
-# ── Member tail assets (partitioned on congress_member) ──────────────────────
+# ── Member tail assets (partitioned on congress_member — bronze/silver) ──────
 from congress_data.assets.member_tail import (
     member_chunks,
     member_committee_assignments,
     member_cosponsored,
     member_detail,
     member_document,
-    member_embeddings,
-    member_mentions,
     member_sponsored,
 )
 
@@ -93,9 +91,7 @@ defs = Definitions(
         bill_full_text,
         bill_document,
         bill_chunks,
-        bill_mentions,
-        bill_assertions,
-        bill_embeddings,
+        *bill_gold_assets,
         # TAIL per-member (partitioned on congress_member)
         member_detail,
         member_committee_assignments,
@@ -103,8 +99,7 @@ defs = Definitions(
         member_cosponsored,
         member_document,
         member_chunks,
-        member_mentions,
-        member_embeddings,
+        *member_gold_assets,
     ],
     sensors=[
         congress_bill_sensor,

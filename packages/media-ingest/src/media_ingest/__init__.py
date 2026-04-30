@@ -41,14 +41,12 @@ _k8s_executor = make_k8s_executor("media_ingest")
 _run_status_sensors = make_run_status_sensor("media_ingest")
 
 from media_ingest.assets import (
-    media_assertions,
     media_chunks,
     media_diarization,
     media_documents,
-    media_embeddings,
     media_entity_candidates,
     media_files,
-    media_mentions,
+    media_gold_assets,
     media_metadata,
     media_segment_merge,
     media_speaker_embeddings,
@@ -71,9 +69,7 @@ defs = Definitions(
         media_diarization,
         media_segment_merge,
         media_chunks,
-        media_mentions,
-        media_assertions,
-        media_embeddings,
+        *media_gold_assets,
         media_entity_candidates,
         # Speaker identity (CD-34j.1)
         media_speaker_embeddings,

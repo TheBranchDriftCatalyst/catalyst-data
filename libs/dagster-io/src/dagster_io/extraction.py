@@ -198,9 +198,20 @@ def _build_graph_v2():
         ner_config = StageConfig(**{**ner_config.__dict__, "prompt_dir": prompt_dir})
         spo_config = StageConfig(**{**spo_config.__dict__, "prompt_dir": prompt_dir})
 
-    pipeline = build_pipeline([ner_config, spo_config], client, mcp_client)
+    # Build ChunkConfig from context window env var
+    from dagster_io.chunking import ChunkConfig
 
-    logger.info("_build_graph_v2: using catalyst-exgraph pipeline (model=%s, encoder=%s)", _llm_model_name, is_encoder)
+    context_window = int(os.environ.get("LLM_CONTEXT_WINDOW", "4096"))
+    chunk_config = ChunkConfig(model_context_tokens=context_window)
+
+    pipeline = build_pipeline([ner_config, spo_config], client, mcp_client, chunk_config=chunk_config)
+
+    logger.info(
+        "_build_graph_v2: using catalyst-exgraph pipeline (model=%s, encoder=%s, context_window=%d)",
+        _llm_model_name,
+        is_encoder,
+        context_window,
+    )
     return _LegacyAdapter(pipeline), client
 
 
@@ -427,6 +438,9 @@ def extract_validated(
 
     # Stash stats for callers that need them (e.g. benchmark tests).
     # Does not change the return signature — production assets are unaffected.
+    # Include chunk_config info if exgraph pipeline was used
+    _context_window = int(os.environ.get("LLM_CONTEXT_WINDOW", "4096"))
+
     extract_validated.last_stats = {
         "chunk_count": len(chunks),
         "mention_count": len(mention_models),
@@ -436,6 +450,7 @@ def extract_validated(
         "errors": errors,
         "pipeline": pipeline_breakdown,
         "audit_events": all_audit_events,
+        "context_window": _context_window,
     }
 
     return mention_models, assertion_models

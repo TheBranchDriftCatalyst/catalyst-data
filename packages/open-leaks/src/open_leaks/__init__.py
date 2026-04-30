@@ -26,13 +26,11 @@ from open_leaks.assets import (
     epstein_court_docs,
     icij_offshore_entities,
     icij_offshore_relationships,
-    leak_assertions,
     leak_chunks,
     leak_documents,
-    leak_embeddings,
     leak_entity_candidates,
+    leak_gold_assets,
     leak_graph,
-    leak_mentions,
     wikileaks_cables,
 )
 
@@ -46,12 +44,9 @@ defs = Definitions(
         # Silver
         leak_documents,
         leak_chunks,
-        # Gold (LangGraph validated)
-        leak_mentions,
+        # Gold (factory-generated: leak_mentions, leak_assertions, leak_embeddings)
+        *leak_gold_assets,
         leak_entity_candidates,
-        leak_assertions,
-        # Gold
-        leak_embeddings,
         leak_graph,
     ],
     sensors=[

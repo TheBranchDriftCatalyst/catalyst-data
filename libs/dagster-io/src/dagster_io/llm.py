@@ -115,6 +115,7 @@ class LLMResource(ConfigurableResource):
     model: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
     temperature: float = float(os.environ.get("LLM_TEMPERATURE", "0.0"))
     max_tokens: int = int(os.environ.get("LLM_MAX_TOKENS", "16384"))
+    context_window: int = int(os.environ.get("LLM_CONTEXT_WINDOW", "4096"))
 
     _chat_model: ChatOpenAI = PrivateAttr()
 

@@ -2,6 +2,7 @@
 
 from dagster_io.append_io_manager import AppendIOManager
 from dagster_io.asset_factories import LLM_ASSET_K8S_CONFIG
+from dagster_io.asset_factory import EMBEDDING_ASSET_K8S_CONFIG, PipelineConfig, extraction_assets
 from dagster_io.chunking import (
     PRESET_CONFIGS,
     ChunkConfig,
@@ -130,6 +131,10 @@ __all__ = [
     "normalize_predicate",
     # Asset config
     "LLM_ASSET_K8S_CONFIG",
+    "EMBEDDING_ASSET_K8S_CONFIG",
+    # Asset factory
+    "PipelineConfig",
+    "extraction_assets",
     # Concordance
     "ConcordanceEngine",
     "CrossSourceAligner",
