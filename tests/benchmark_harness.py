@@ -493,6 +493,18 @@ examples:
         help="Override chunk size in tokens (builds a ChunkConfig with this target)",
     )
     config.add_argument(
+        "--sample-per-domain",
+        type=int,
+        metavar="N",
+        default=None,
+        help=(
+            "Cap the number of chunks loaded from each medallion domain "
+            "(media-ingest, congress-data, open-leaks). Default 50 in extraction "
+            "tests. Pass 0 to disable the cap (use the full corpus — note open-leaks "
+            "produces 3.6M+ chunks). Sets BENCH_SAMPLE_PER_DOMAIN for downstream subprocess."
+        ),
+    )
+    config.add_argument(
         "--models",
         type=str,
         metavar="LIST",
@@ -517,6 +529,13 @@ examples:
     config.add_argument("--compare-runs", type=str, metavar="RUN1,RUN2", help=argparse.SUPPRESS)
 
     args = parser.parse_args()
+
+    # Propagate --sample-per-domain to the test_extraction_e2e fixture and any
+    # subprocess we launch (the per-video extraction script reads from medallion
+    # paths directly so it doesn't need this, but the in-process extraction
+    # fixture in test_extraction_e2e does).
+    if args.sample_per_domain is not None:
+        os.environ["BENCH_SAMPLE_PER_DOMAIN"] = str(args.sample_per_domain)
 
     # Map deprecated flags
     if args.generate_ground_truth:

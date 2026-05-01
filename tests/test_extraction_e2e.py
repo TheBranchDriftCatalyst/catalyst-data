@@ -62,14 +62,21 @@ def extraction_result():
     from dagster_io import TextChunk
     from dagster_io.extraction import extract_validated
 
-    medallion_chunks = load_chunks()
+    # Stratified per-domain sample so a cross-domain run doesn't try to LLM-extract
+    # against open-leaks's 3.6M-chunk corpus. Override with BENCH_SAMPLE_PER_DOMAIN=0
+    # to disable the cap (full corpus extraction).
+    sample_n: int | None = int(os.environ.get("BENCH_SAMPLE_PER_DOMAIN", "50"))
+    if sample_n == 0:
+        sample_n = None
+    medallion_chunks = load_chunks(sample_per_domain=sample_n)
     if not medallion_chunks:
         pytest.skip(
             "no chunks found at .test-output/<domain>/<layer>/.../*chunks/.../data.jsonl — "
             "run `task bench:chunks:regen` first"
         )
     eval_chunks = [TextChunk(**c) for c in medallion_chunks]
-    print(f"\n  Using medallion chunks: {len(eval_chunks)} from .test-output/")
+    cap = f"{sample_n}/domain" if sample_n is not None else "full"
+    print(f"\n  Using medallion chunks: {len(eval_chunks)} from .test-output/ (cap={cap})")
 
     print(f"  Running validated extraction (model={model}, concurrency=1)...")
     start = time.monotonic()

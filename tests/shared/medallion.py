@@ -29,21 +29,51 @@ _PATTERNS = (
 )
 
 
-def load_chunks(doc_ids: list[str] | None = None) -> list[dict]:
+def _domain_of(jsonl_path: Path) -> str:
+    """Extract the domain from a medallion path. The first path component
+    relative to ``.test-output/`` is the domain dir (e.g. ``open-leaks``)."""
+    try:
+        rel = jsonl_path.relative_to(_OUT_ROOT)
+        return rel.parts[0] if rel.parts else "unknown"
+    except ValueError:
+        return "unknown"
+
+
+def load_chunks(
+    doc_ids: list[str] | None = None,
+    sample_per_domain: int | None = None,
+) -> list[dict]:
     """Load chunks from any ``*_chunks`` asset across all domains.
 
-    ``doc_ids`` filters by each chunk's ``document_id`` field (works uniformly
-    for partitioned and unpartitioned outputs). Returns ``[]`` if nothing has
-    been materialized yet.
+    Args:
+        doc_ids: Filter by each chunk's ``document_id`` field. Works uniformly
+            for partitioned and unpartitioned outputs.
+        sample_per_domain: Cap rows per domain (path-based, not metadata-based,
+            so it's robust when a domain's chunks lack a ``metadata.domain`` tag).
+            Useful for benchmark extraction — open-leaks materializes 3.6M+
+            chunks so a full extraction pass is intractable. Default ``None``
+            (no cap). The harness defaults to a small per-domain cap so a
+            cross-domain run completes in reasonable time.
+
+    Returns ``[]`` if nothing has been materialized yet.
     """
+    per_domain_count: dict[str, int] = {}
     merged: list[dict] = []
+
     for pattern in _PATTERNS:
         for jsonl in _OUT_ROOT.glob(pattern):
-            for line in jsonl.read_text().splitlines():
-                if not line.strip():
-                    continue
-                row = json.loads(line)
-                if doc_ids and row.get("document_id") not in doc_ids:
-                    continue
-                merged.append(row)
+            domain = _domain_of(jsonl)
+            if sample_per_domain is not None and per_domain_count.get(domain, 0) >= sample_per_domain:
+                continue
+            with open(jsonl) as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    if doc_ids and row.get("document_id") not in doc_ids:
+                        continue
+                    merged.append(row)
+                    per_domain_count[domain] = per_domain_count.get(domain, 0) + 1
+                    if sample_per_domain is not None and per_domain_count[domain] >= sample_per_domain:
+                        break
     return merged
