@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections import Counter
 from dataclasses import dataclass
 
 from dagster import ConfigurableResource
@@ -27,6 +28,52 @@ from dagster_io.text import normalize_text
 logger = get_logger(__name__)
 
 DEFAULT_SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
+
+
+# ---------------------------------------------------------------------------
+# Speaker-segment chunking helpers (used by ChunkingResource.chunk_speaker_segments)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _SubSegment:
+    """A slice of a speaker turn with text and precise timestamps."""
+
+    text: str
+    start: float
+    end: float
+    strategy: str
+
+
+def _speaker_sub_segment_from_words(words: list[dict]) -> _SubSegment:
+    """Build a _SubSegment from a contiguous word slice."""
+    return _SubSegment(
+        text="".join(w.get("word", "") for w in words).strip(),
+        start=words[0].get("start", 0),
+        end=words[-1].get("end", 0),
+        strategy="speech_pause_split",
+    )
+
+
+def _speaker_split_on_pauses(words: list[dict], text: str, threshold: float = 1.0) -> list[_SubSegment]:
+    """Split a word sequence at natural speech pauses (gaps >= threshold).
+
+    Returns _SubSegments with exact word-level timestamps. Falls back to the
+    full text as a single _SubSegment when the input has no qualifying pauses.
+    """
+    if not words:
+        return [_SubSegment(text=text, start=0, end=0, strategy="speech_pause_split")]
+
+    split_at = [i for i in range(1, len(words)) if words[i].get("start", 0) - words[i - 1].get("end", 0) >= threshold]
+    if not split_at:
+        return [_speaker_sub_segment_from_words(words)]
+
+    boundaries = [0, *split_at, len(words)]
+    return [
+        _speaker_sub_segment_from_words(words[boundaries[i] : boundaries[i + 1]])
+        for i in range(len(boundaries) - 1)
+        if words[boundaries[i] : boundaries[i + 1]]
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +275,111 @@ class ChunkingResource(ConfigurableResource):
                     metadata=chunk_meta,
                 )
             )
+        return chunks
+
+    def chunk_speaker_segments(
+        self,
+        segments: list[dict],
+        document_id: str,
+        title: str,
+        metadata: dict | None = None,
+        max_chars: int | None = None,
+        pause_threshold_s: float = 1.0,
+        fallback_chunk_size: int | None = None,
+    ) -> list[TextChunk]:
+        """Build TextChunks from speaker-attributed audio segments.
+
+        Three-tier strategy:
+          1. ``speaker_turn``       — whole turn fits in ``max_chars``
+          2. ``speech_pause_split`` — oversize turn split at >= ``pause_threshold_s`` word gaps
+          3. ``text_split_fallback`` — last-resort RecursiveCharacterTextSplitter
+
+        This is the audio-domain counterpart to ``chunk_document``. It keeps
+        speaker-turn boundaries intact whenever possible so downstream LLM
+        extraction sees coherent conversational units. Future audio chunking
+        strategies (VAD-window, sentence-boundary, etc.) can be added as
+        sibling methods on this resource without changing the asset signature.
+
+        Args:
+            segments: dicts with ``{text, start, end, words[], speaker}``.
+            document_id, title: passed through to each TextChunk.
+            metadata: base metadata applied to every chunk; per-chunk
+                ``speaker``, ``start_s``, ``end_s``, ``strategy`` are added on top.
+            max_chars: oversize threshold; defaults to ``self.chunk_size`` so the
+                Dagster UI launchpad ``chunk_size`` setting controls audio chunking
+                the same way it controls text chunking.
+            pause_threshold_s: minimum word-gap (seconds) to split at in tier 2.
+            fallback_chunk_size: chunk_size for tier 3 splitter; defaults to
+                ``max_chars // 2``.
+        """
+        limit = max_chars if max_chars is not None else self.chunk_size
+        fallback = fallback_chunk_size or (limit // 2) or 800
+        base_meta = {**(metadata or {})}
+
+        chunks: list[TextChunk] = []
+        for seg in segments:
+            text = (seg.get("text") or "").strip()
+            if not text:
+                continue
+
+            speaker = seg.get("speaker", "UNKNOWN")
+            seg_start = seg.get("start", 0)
+            seg_end = seg.get("end", 0)
+            words = seg.get("words", [])
+
+            if len(text) <= limit:
+                sub_segs: list[_SubSegment] = [
+                    _SubSegment(text=text, start=seg_start, end=seg_end, strategy="speaker_turn")
+                ]
+            else:
+                sub_segs = []
+                for sub in _speaker_split_on_pauses(words, text, threshold=pause_threshold_s):
+                    if not sub.text:
+                        continue
+                    if len(sub.text) <= limit:
+                        sub_segs.append(sub)
+                    else:
+                        pieces = self.split_text(sub.text, chunk_size=fallback, chunk_overlap=0)
+                        n = max(len(pieces), 1)
+                        duration = sub.end - sub.start
+                        for i, piece in enumerate(pieces):
+                            sub_segs.append(
+                                _SubSegment(
+                                    text=piece,
+                                    start=sub.start + duration * (i / n),
+                                    end=sub.start + duration * ((i + 1) / n),
+                                    strategy="text_split_fallback",
+                                )
+                            )
+
+            for sub in sub_segs:
+                full_text = f"{title}\n\n{sub.text}" if (self.prepend_title and title) else sub.text
+                chunks.append(
+                    TextChunk(
+                        chunk_id=f"{document_id}:chunk-{len(chunks)}",
+                        document_id=document_id,
+                        text=full_text,
+                        index=len(chunks),
+                        total_chunks=0,
+                        metadata={
+                            **base_meta,
+                            "speaker": speaker,
+                            "start_s": sub.start,
+                            "end_s": sub.end,
+                            "strategy": sub.strategy,
+                        },
+                    )
+                )
+
+        # Backfill total_chunks + recompute content_hash on the (now-final) text
+        for c in chunks:
+            c.total_chunks = len(chunks)
+            c.content_hash = hashlib.sha256(c.text.encode()).hexdigest()
+
+        if chunks:
+            for strat, count in Counter(c.metadata.get("strategy") for c in chunks).items():
+                CHUNKS_CREATED.labels(strategy=str(strat)).inc(count)
+
         return chunks
 
     def passthrough(
