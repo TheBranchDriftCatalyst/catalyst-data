@@ -1,0 +1,28 @@
+# Audio fixture manifest — maps source video files to stable doc_ids.
+# Used by scripts/regen_audio_fixtures.py to populate the per-video
+# pipeline-cache (transcription + diarization).
+#
+# Each entry: { doc_id, file (relative to this dir), title (optional) }.
+# doc_id is what shows up as the subdir name in pipeline-cache/<doc_id>/
+videos:
+  - doc_id: 4-9-26-full-show-video
+    file: '4⧸9⧸26 Full Show Video.mp4'
+    title: '4/9/26 Full Show Video'
+  - doc_id: inside-the-aipac-pipeline
+    file: 'Inside The AIPAC Pipeline.mp4'
+    title: 'Inside The AIPAC Pipeline'
+  - doc_id: joe-rogan-experience-2284-ian-carroll
+    file: 'Joe Rogan Experience #2284 - Ian Carroll.mp4'
+    title: 'Joe Rogan Experience #2284 - Ian Carroll'
+  - doc_id: saagar-x-joe-kent-resignation-israeli-nukes-epstein-charlie-kirk-mike-huckabee
+    file: 'Saagar X Joe Kent： RESIGNATION, Israeli NUKES, Epstein, Charlie Kirk, Mike Huckabee.mp4'
+    title: 'Saagar X Joe Kent: RESIGNATION, Israeli NUKES, Epstein, Charlie Kirk, Mike Huckabee'
+  - doc_id: sarah-paine-the-war-for-india-lecture-interview
+    file: 'Sarah Paine — The war for India (lecture & interview).mp4'
+    title: 'Sarah Paine — The war for India (lecture & interview)'
+  - doc_id: unmasking-benjamin-netanyahu-the-story-you-havent-heard
+    file: 'Unmasking Benjamin Netanyahu： The Story You Haven’t Heard.mp4'
+    title: "Unmasking Benjamin Netanyahu: The Story You Haven't Heard"
+  - doc_id: demo-video
+    file: 'demo_video.mp4'
+    title: 'demo_video'

@@ -192,6 +192,27 @@ tasks:
         echo "==============================================================="
         pytest tests/test_pipeline_integration.py::test_transcription_produces_segments tests/test_pipeline_integration.py::test_diarization_finds_speakers -v -s
 
+  bench:fixtures:regen:
+    desc: "Regenerate per-video audio cache (transcription + diarization) for every video in tests/fixtures/media-ingest/audio_manifest.yaml. Same code path as production, results land in pipeline-cache/<doc_id>/ subdirs."
+    env:
+      PYTHONPATH: "."
+    cmds:
+      - |
+        echo ""
+        echo "==============================================================="
+        echo "  Multi-video audio fixture regen"
+        echo "  Backend: ${WHISPER_BACKEND:-faster-whisper}  Model: ${WHISPER_MODEL:-base}"
+        echo "  HF_TOKEN: $([ -n "$HF_TOKEN" ] && echo "set" || echo "MISSING (diarization will fail — set HF_TOKEN)")"
+        echo "==============================================================="
+        python scripts/regen_audio_fixtures.py {{.CLI_ARGS}}
+
+  bench:chunks:regen:
+    desc: "Regenerate per-video benchmark_chunks fixtures from cached audio. Defaults to no title-prefix + min-80-char filter so chunks carry real content (not intro filler / repeated titles). Override with `task bench:chunks:regen -- --min-chunk-chars 0` to keep everything."
+    env:
+      PYTHONPATH: "."
+    cmds:
+      - python scripts/regen_benchmark_chunks.py --no-prepend-title --min-chunk-chars 80 {{.CLI_ARGS}}
+
   bench:clean:
     desc: "Clean benchmark artifacts (standard tier: extractions + GT + runs + reports)"
     env:

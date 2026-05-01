@@ -1,8 +1,23 @@
-"""Stage 2.5: Transcode media to AV1 using Intel QSV hardware encoding.
+"""Stage 2.5: Transcode media for storage / fixture compression.
 
-Sits between media_metadata and media_documents. Replaces original files
-in-place with ultra-compressed AV1 versions. Recompresses even AV1 files
-that are still over the target bitrate. Audio streams copied losslessly.
+Sits between media_metadata and media_documents in production. Replaces
+original files in-place with ultra-compressed versions.
+
+Three encoder backends (mirrors the whisper backend pattern in transcription.py):
+
+- ``qsv``              — Intel QSV AV1 hardware encoder (av1_qsv). Production
+                         k8s with i915 GPU. Fast, audio copied losslessly.
+- ``svt-av1``          — SVT-AV1 software AV1 encoder (libsvtav1). CI / fallback.
+                         Best size, slowest. Can re-encode audio to mono 16kHz
+                         Opus for fixture-size reduction.
+- ``videotoolbox-hevc`` — Apple VideoToolbox HEVC hardware encoder. Mac dev /
+                          fixture compression on Apple Silicon. ~10-20x faster
+                          than libsvtav1 with ~1.3-1.5x larger output. Output
+                          is HEVC, not AV1 — fine for fixtures since downstream
+                          ffmpeg-decodes audio either way.
+
+The helper ``_transcode_video`` dispatches on backend so the asset and the
+fixture-compression CLI share one entry point.
 """
 
 import os
@@ -10,7 +25,12 @@ import subprocess
 import time
 from typing import Any
 
-from dagster import AssetExecutionContext, MetadataValue, Output, asset
+from dagster import (
+    AssetExecutionContext,  # re-exported for asset signature
+    MetadataValue,
+    Output,
+    asset,
+)
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import (
@@ -70,26 +90,47 @@ def _needs_transcode(file_info: dict, target_bitrate: int = TARGET_MAX_BITRATE) 
     return False, "AV1 already at target bitrate"
 
 
-def _transcode_to_av1(
+def _run_ffmpeg_replace(input_path: str, cmd: list[str], temp_output: str) -> dict[str, Any]:
+    """Run an ffmpeg command, swap the temp output over the original on success.
+
+    Centralizes timing, size accounting, and error handling shared by the QSV
+    and SVT-AV1 backends.
+    """
+    size_before = os.path.getsize(input_path)
+    start = time.monotonic()
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+    duration = time.monotonic() - start
+
+    if result.returncode != 0:
+        if os.path.exists(temp_output):
+            os.unlink(temp_output)
+        return {
+            "error": result.stderr[-500:] if result.stderr else "ffmpeg failed",
+            "duration_s": round(duration, 1),
+        }
+
+    size_after = os.path.getsize(temp_output)
+    os.replace(temp_output, input_path)
+
+    ratio = size_before / size_after if size_after > 0 else 0
+    saved_mb = (size_before - size_after) / (1024 * 1024)
+    return {
+        "size_before": size_before,
+        "size_after": size_after,
+        "compression_ratio": round(ratio, 2),
+        "saved_mb": round(saved_mb, 1),
+        "duration_s": round(duration, 1),
+    }
+
+
+def _transcode_to_av1_qsv(
     input_path: str,
-    context: AssetExecutionContext,
     preset: str = "veryfast",
     global_quality: int = 35,
 ) -> dict[str, Any]:
-    """Transcode a video file to AV1 using QSV, replacing the original.
-
-    Args:
-        input_path: Path to the source video file
-        preset: Encoding speed preset (veryfast, faster, fast, medium, slow)
-        global_quality: Quality level (lower = better, 25-40 typical, 35 = ultra compressed)
-
-    Returns:
-        dict with transcode results (output_path, size_before, size_after, ratio, duration)
-    """
-    size_before = os.path.getsize(input_path)
-    base, ext = os.path.splitext(input_path)
+    """Intel QSV hardware AV1 encode (production)."""
+    base, _ = os.path.splitext(input_path)
     temp_output = f"{base}_av1_temp.mkv"
-
     cmd = [
         "ffmpeg",
         "-y",
@@ -106,47 +147,146 @@ def _transcode_to_av1(
         "-global_quality",
         str(global_quality),
         "-c:a",
-        "copy",  # preserve audio losslessly
+        "copy",
         "-c:s",
-        "copy",  # preserve subtitles
+        "copy",
         "-map",
-        "0",  # keep all streams
+        "0",
         temp_output,
     ]
+    return _run_ffmpeg_replace(input_path, cmd, temp_output)
 
-    start = time.monotonic()
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=7200,  # 2 hour timeout per file
-    )
-    duration = time.monotonic() - start
 
-    if result.returncode != 0:
-        # Clean up temp file on failure
-        if os.path.exists(temp_output):
-            os.unlink(temp_output)
-        return {
-            "error": result.stderr[-500:] if result.stderr else "ffmpeg failed",
-            "duration_s": round(duration, 1),
-        }
+def _transcode_to_av1_svt(
+    input_path: str,
+    svt_preset: int = 8,
+    crf: int = 50,
+    audio_bitrate: str = "64k",
+    audio_mono_16k: bool = False,
+    scale_height: int | None = None,
+    max_duration_s: float | None = None,
+) -> dict[str, Any]:
+    """SVT-AV1 software AV1 encode (Mac / CI / fixture downsizing).
 
-    size_after = os.path.getsize(temp_output)
+    Args:
+        svt_preset: 0-13. Lower = slower + smaller. 8 is a good speed/size
+            tradeoff for talking-head content.
+        crf: Constant Rate Factor. 30-63 range. Higher = smaller. 50 is
+            aggressive (good for fixtures); 35 keeps near-source quality.
+        audio_bitrate: Opus bitrate for re-encoded audio.
+        audio_mono_16k: Downmix to mono 16kHz (matches what Whisper consumes —
+            useful for fixtures where video is decorative).
+        scale_height: If set, downscale video to this height preserving aspect
+            (e.g. 480 for 480p). Width auto-rounds to even number for codec.
+        max_duration_s: If set, trim output to this many seconds from start.
+    """
+    base, _ = os.path.splitext(input_path)
+    temp_output = f"{base}_av1_temp.mp4"
 
-    # Replace original with transcoded version
-    os.replace(temp_output, input_path)
+    cmd = ["ffmpeg", "-y"]
+    if max_duration_s:
+        cmd += ["-t", str(max_duration_s)]
+    cmd += ["-i", input_path]
+    if scale_height:
+        # -2 keeps aspect ratio with even width (codec requirement)
+        cmd += ["-vf", f"scale=-2:{scale_height}"]
+    cmd += [
+        "-c:v",
+        "libsvtav1",
+        "-preset",
+        str(svt_preset),
+        "-crf",
+        str(crf),
+        "-pix_fmt",
+        "yuv420p10le",
+    ]
+    if audio_mono_16k:
+        cmd += ["-c:a", "libopus", "-b:a", audio_bitrate, "-ac", "1", "-ar", "16000"]
+    else:
+        cmd += ["-c:a", "libopus", "-b:a", audio_bitrate]
+    cmd += ["-movflags", "+faststart", temp_output]
 
-    ratio = size_before / size_after if size_after > 0 else 0
-    saved_mb = (size_before - size_after) / (1024 * 1024)
+    return _run_ffmpeg_replace(input_path, cmd, temp_output)
 
-    return {
-        "size_before": size_before,
-        "size_after": size_after,
-        "compression_ratio": round(ratio, 2),
-        "saved_mb": round(saved_mb, 1),
-        "duration_s": round(duration, 1),
-    }
+
+def _transcode_to_hevc_videotoolbox(
+    input_path: str,
+    quality: int | None = 60,
+    bitrate: str | None = None,
+    audio_bitrate: str = "64k",
+    audio_mono_16k: bool = False,
+    scale_height: int | None = None,
+    max_duration_s: float | None = None,
+) -> dict[str, Any]:
+    """Apple VideoToolbox HEVC hardware encode (Mac fixture compression).
+
+    Two rate-control modes:
+
+    - **Bitrate target** (``bitrate="200k"``): predictable output size. Best
+      for fixtures where you want a hard ceiling. Pass ``bitrate`` and leave
+      ``quality=None`` (or it'll be ignored).
+    - **Quality** (``quality=60``, default): VT internal quality 0-100. Lower
+      = smaller, but VT's quality scale is opaque and tends to produce
+      bigger files than expected even at low values. Use bitrate for
+      predictable fixture sizes.
+
+    Args:
+        quality: VideoToolbox quality 0-100 (used if bitrate is None).
+        bitrate: Target video bitrate as ffmpeg string (e.g. "200k", "1M").
+            Takes precedence over quality when set.
+        audio_bitrate: Opus bitrate for re-encoded audio.
+        audio_mono_16k: Downmix to mono 16kHz (matches Whisper input).
+        scale_height: Downscale to this height preserving aspect.
+        max_duration_s: Trim output to this many seconds from start.
+    """
+    base, _ = os.path.splitext(input_path)
+    temp_output = f"{base}_hevc_temp.mp4"
+
+    cmd = ["ffmpeg", "-y"]
+    if max_duration_s:
+        cmd += ["-t", str(max_duration_s)]
+    cmd += ["-i", input_path]
+    if scale_height:
+        cmd += ["-vf", f"scale=-2:{scale_height}"]
+    cmd += [
+        "-c:v",
+        "hevc_videotoolbox",
+        "-tag:v",
+        "hvc1",  # QuickTime/web playback compat
+    ]
+    if bitrate:
+        # Hard cap with maxrate + bufsize for predictable fixture sizes.
+        cmd += ["-b:v", bitrate, "-maxrate", bitrate, "-bufsize", "1M"]
+    else:
+        cmd += ["-q:v", str(quality if quality is not None else 60)]
+    if audio_mono_16k:
+        cmd += ["-c:a", "libopus", "-b:a", audio_bitrate, "-ac", "1", "-ar", "16000"]
+    else:
+        cmd += ["-c:a", "libopus", "-b:a", audio_bitrate]
+    cmd += ["-movflags", "+faststart", temp_output]
+
+    return _run_ffmpeg_replace(input_path, cmd, temp_output)
+
+
+def _transcode_video(
+    input_path: str,
+    backend: str = "qsv",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Dispatcher: backend="qsv" | "svt-av1" | "videotoolbox-hevc".
+
+    Returns dict with size_before, size_after, compression_ratio, saved_mb,
+    duration_s — or {"error": ...} on ffmpeg failure.
+    """
+    if backend == "svt-av1":
+        return _transcode_to_av1_svt(input_path, **kwargs)
+    if backend == "videotoolbox-hevc":
+        return _transcode_to_hevc_videotoolbox(input_path, **kwargs)
+    return _transcode_to_av1_qsv(input_path, **kwargs)
+
+
+# Backward-compat alias (older callers used the AV1-named dispatcher).
+_transcode_to_av1 = _transcode_video
 
 
 @asset(
@@ -207,7 +347,7 @@ def media_transcode(
             context.log.info(f"Transcoding [{i + 1}/{len(to_transcode)}]: {fname} ({size_mb:.1f} MiB)")
             logger.info("Transcoding file=%s path=%s", fname, path)
 
-            result = _transcode_to_av1(path, context)
+            result = _transcode_to_av1(path)
 
             if "error" in result:
                 context.log.warning(f"Transcode failed for {fname}: {result['error'][:200]}")
