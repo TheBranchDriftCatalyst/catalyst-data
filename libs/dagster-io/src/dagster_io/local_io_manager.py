@@ -1,11 +1,21 @@
-"""Filesystem IO manager that mirrors MinioIOManager's JSON/JSONL format.
+"""Filesystem IO managers — drop-in local-dev/test replacements for the MinIO managers.
 
-Writes human-readable files to a local directory so you can inspect
-intermediate pipeline outputs. Drop-in replacement for MinioIOManager
-in local/test contexts.
+Three classes mirror the S3-backed managers in ``dagster_io.io_manager`` and
+``dagster_io.append_io_manager``. They write to ``{base_dir}/<medallion path>/``
+on disk in the same JSON/JSONL format MinIO uses, so an integration test or a
+``dagster dev`` session bound to ``LocalJsonIOManager`` can re-run the same asset
+graph with no S3 dependency:
 
-Directory structure matches the S3 medallion layout:
-  {base_dir}/{layer}/{code_location}/{group}/{asset_name}/[{partition}/]data.{json,jsonl}
+    LocalJsonIOManager       ↔ MinioIOManager           (overwrite-in-place)
+    LocalOptionalIOManager   ↔ OptionalMinioIOManager   (returns None on missing)
+    LocalAppendIOManager     ↔ AppendIOManager          (events-{run_id}.jsonl)
+
+Path layout matches prod exactly:
+    {base_dir}/{layer}/{code_location}/{group}/{asset_name}/[{partition}/]data.{json,jsonl}
+
+The ``model_tag`` field on ``LocalJsonIOManager`` injects ``model={tag}/`` into
+gold/platinum paths so benchmark runs across LLM models don't overwrite each
+other (e.g. ``gold/.../media_mentions/model=mistral_latest/<doc_id>/data.jsonl``).
 """
 
 from __future__ import annotations
@@ -34,7 +44,7 @@ def _to_serializable(obj: Any) -> Any:
         return {k: _to_serializable(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_to_serializable(v) for v in obj]
-    if isinstance(obj, (datetime,)):
+    if isinstance(obj, datetime):
         return obj.isoformat()
     if isinstance(obj, bytes):
         return f"<bytes len={len(obj)}>"
@@ -44,18 +54,14 @@ def _to_serializable(obj: Any) -> Any:
 class LocalJsonIOManager(ConfigurableIOManager):
     """Filesystem IO manager using JSON/JSONL — same medallion paths as MinioIOManager.
 
-    Adds an optional ``model_tag`` dimension for benchmark comparisons. When set,
-    gold/platinum layer outputs get a ``model={tag}`` segment in the path so
-    extraction results from different LLM models don't overwrite each other.
-
     Path layout:
         {base_dir}/{layer}/{code_location}/{group}/{asset}/[model={tag}/][{partition}/]data.jsonl
 
     Usage:
-        # Without model tagging (same as MinioIOManager):
+        # Standard (mirrors MinioIOManager):
         resources={"io_manager": LocalJsonIOManager(base_dir=".test-output/media-ingest")}
 
-        # With model tagging for benchmark runs:
+        # With model tagging for cross-model benchmark runs:
         resources={"io_manager": LocalJsonIOManager(
             base_dir=".test-output/media-ingest",
             model_tag="mistral:latest",
@@ -65,40 +71,28 @@ class LocalJsonIOManager(ConfigurableIOManager):
     base_dir: str = "/tmp/dagster-local"
     model_tag: str = ""  # set to LLM_MODEL value to key gold-layer outputs by model
 
-    # Layers where model_tag is injected into the path
     _MODEL_KEYED_LAYERS: ClassVar[set[str]] = {"gold", "platinum"}
 
     def _prefix(self, context: OutputContext | InputContext) -> str:
         prefix = build_output_prefix(context) if isinstance(context, OutputContext) else build_input_prefix(context)
-
-        # Inject model tag for gold/platinum layers
         if self.model_tag:
             layer = prefix.split("/")[0] if "/" in prefix else ""
             if layer in self._MODEL_KEYED_LAYERS:
-                # Insert model={tag} after the asset name, before partition
-                # e.g. gold/media_ingest/media/media_mentions/model=mistral/data.jsonl
                 safe_tag = self.model_tag.replace("/", "_").replace(":", "_")
                 prefix = self._inject_model_segment(prefix, safe_tag)
         return prefix
 
     @staticmethod
     def _inject_model_segment(prefix: str, tag: str) -> str:
-        """Insert model={tag} into the path after the asset name segment.
-
-        Input:  gold/media_ingest/media/media_mentions/119-hres-1
-        Output: gold/media_ingest/media/media_mentions/model=mistral_latest/119-hres-1
-        """
+        """Insert ``model={tag}`` after the asset-name segment (index 3)."""
         parts = prefix.split("/")
-        # Layout: layer/code_location/group/asset/[partition...]
-        # Insert after index 3 (the asset name)
         if len(parts) >= 4:
             return "/".join(parts[:4] + [f"model={tag}"] + parts[4:])
         return f"{prefix}/model={tag}"
 
-    def _detect_format(self, obj: Any, type_hint: type | None) -> str:
+    @staticmethod
+    def _detect_format(obj: Any) -> str:
         if isinstance(obj, list):
-            if obj and isinstance(obj[0], (BaseModel, dict)):
-                return "jsonl"
             return "jsonl"
         if isinstance(obj, (BaseModel, dict)):
             return "json"
@@ -110,7 +104,7 @@ class LocalJsonIOManager(ConfigurableIOManager):
         out_dir.mkdir(parents=True, exist_ok=True)
 
         type_hint = context.dagster_type.typing_type if context.dagster_type else None
-        fmt = self._detect_format(obj, type_hint)
+        fmt = self._detect_format(obj)
 
         if fmt == "jsonl":
             path = out_dir / "data.jsonl"
@@ -119,20 +113,17 @@ class LocalJsonIOManager(ConfigurableIOManager):
                 for item in items:
                     f.write(json.dumps(_to_serializable(item), default=str) + "\n")
             count = len(items)
-
         elif fmt == "json":
             path = out_dir / "data.json"
             with open(path, "w") as f:
                 json.dump(_to_serializable(obj), f, indent=2, default=str)
             count = 1
-
         else:
             path = out_dir / "data.pkl"
             with open(path, "wb") as f:
                 pickle.dump(obj, f)
             count = 1
 
-        # Write metadata sidecar (same as MinioIOManager)
         meta = {
             "format": fmt,
             "type": str(type_hint) if type_hint else "unknown",
@@ -157,14 +148,10 @@ class LocalJsonIOManager(ConfigurableIOManager):
         prefix = self._prefix(context)
         in_dir = Path(self.base_dir) / prefix
 
-        # Try formats in order: jsonl → json → pkl
         jsonl_path = in_dir / "data.jsonl"
         if jsonl_path.exists():
-            with open(jsonl_path) as f:
-                rows = [json.loads(line) for line in f if line.strip()]
+            rows = [json.loads(line) for line in jsonl_path.read_text().splitlines() if line.strip()]
             logger.info("LocalJsonIOManager: loaded %d rows from %s", len(rows), jsonl_path)
-
-            # Reconstruct Pydantic models if type hint is available
             type_hint = context.dagster_type.typing_type if context.dagster_type else None
             if type_hint:
                 origin = typing.get_origin(type_hint)
@@ -179,7 +166,6 @@ class LocalJsonIOManager(ConfigurableIOManager):
             with open(json_path) as f:
                 data = json.load(f)
             logger.info("LocalJsonIOManager: loaded JSON from %s", json_path)
-
             type_hint = context.dagster_type.typing_type if context.dagster_type else None
             if type_hint and isinstance(type_hint, type) and issubclass(type_hint, BaseModel):
                 return type_hint.model_validate(data)
@@ -191,3 +177,57 @@ class LocalJsonIOManager(ConfigurableIOManager):
                 return pickle.load(f)  # noqa: S301
 
         raise FileNotFoundError(f"No data found at {in_dir} (tried .jsonl, .json, .pkl)")
+
+
+class LocalOptionalIOManager(LocalJsonIOManager):
+    """Same as ``LocalJsonIOManager``, but returns ``None`` when an upstream
+    input file doesn't exist instead of raising. Filesystem analog of
+    ``OptionalMinioIOManager``.
+    """
+
+    def load_input(self, context: InputContext) -> Any:
+        try:
+            return super().load_input(context)
+        except FileNotFoundError:
+            logger.info(
+                "LocalOptionalIOManager: %s not materialized — returning None",
+                context.asset_key.to_user_string(),
+            )
+            return None
+
+
+class LocalAppendIOManager(ConfigurableIOManager):
+    """Append-only filesystem IO manager. Filesystem analog of ``AppendIOManager``.
+
+    Each ``handle_output`` writes a new ``events-{run_id}.jsonl`` under the
+    asset's medallion path; ``load_input`` globs all event files and merges.
+    """
+
+    base_dir: str = "/tmp/dagster-local"
+
+    def handle_output(self, context: OutputContext, obj: Any) -> None:
+        if obj is None:
+            context.log.warning("LocalAppendIOManager: skipping — output is None")
+            return
+
+        prefix = build_output_prefix(context)
+        out_dir = Path(self.base_dir) / prefix
+        out_dir.mkdir(parents=True, exist_ok=True)
+        run_id = context.run_id or "no-run-id"
+        path = out_dir / f"events-{run_id}.jsonl"
+
+        items = obj if isinstance(obj, list) else [obj]
+        with open(path, "w") as f:
+            for item in items:
+                f.write(json.dumps(_to_serializable(item), default=str) + "\n")
+        logger.info("LocalAppendIOManager: appended %d items to %s", len(items), path)
+
+    def load_input(self, context: InputContext) -> Any:
+        prefix = build_input_prefix(context)
+        in_dir = Path(self.base_dir) / prefix
+        rows: list[Any] = []
+        if in_dir.exists():
+            for events_file in sorted(in_dir.glob("events-*.jsonl")):
+                rows.extend(json.loads(line) for line in events_file.read_text().splitlines() if line.strip())
+        logger.info("LocalAppendIOManager: loaded %d rows from %s", len(rows), in_dir)
+        return rows

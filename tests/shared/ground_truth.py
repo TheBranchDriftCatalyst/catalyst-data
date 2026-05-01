@@ -185,10 +185,12 @@ def generate_ensemble_ground_truth(
     if spo_models is None:
         spo_models = SPO_ENSEMBLE_MODELS
 
-    # Load chunks — prefer benchmark subset (cross-domain) over pipeline cache (media-only)
-    chunks = store.load_benchmark_chunks() or store.load_chunks()
+    # Load chunks from the medallion tree (populated by test_pipeline_integration.py)
+    from tests.shared.medallion import load_chunks
+
+    chunks = load_chunks()
     if not chunks:
-        print("  ERROR: No chunks fixture. Run test_pipeline_integration.py first.")
+        print("  ERROR: No chunks materialized. Run task bench:chunks:regen first.")
         return None
 
     # Load available extraction fixtures

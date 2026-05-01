@@ -14,8 +14,8 @@ from dagster_io import (
     ChunkingResource,
     EmbeddingResource,
     LLMResource,
-    MinioIOManager,
     make_run_status_sensor,
+    select_io_managers,
 )
 from dagster_io.executor import make_in_process_executor
 
@@ -54,7 +54,11 @@ defs = Definitions(
     ],
     executor=_executor,
     resources={
-        "io_manager": MinioIOManager(),
+        **{
+            k: v
+            for k, v in select_io_managers(default_local_dir=".test-output/open-leaks").items()
+            if k == "io_manager"
+        },
         "chunking": ChunkingResource(),
         "llm": LLMResource(),
         "embeddings": EmbeddingResource(),

@@ -19,12 +19,10 @@ start_metrics_server()
 from dagster import Definitions
 
 from dagster_io import (
-    AppendIOManager,
     ChunkingResource,
     EmbeddingResource,
-    MinioIOManager,
-    OptionalMinioIOManager,
     make_run_status_sensor,
+    select_io_managers,
 )
 from dagster_io.executor import make_in_process_executor
 
@@ -116,9 +114,8 @@ defs = Definitions(
     ],
     executor=_executor,
     resources={
-        "io_manager": MinioIOManager(),
-        "optional_io_manager": OptionalMinioIOManager(),
-        "append_io_manager": AppendIOManager(),
+        # IO backend: MinIO in prod, Local* when DAGSTER_IO_BACKEND=local.
+        **select_io_managers(default_local_dir=".test-output/congress-data"),
         "chunking": ChunkingResource(),
         "embeddings": EmbeddingResource(),
     },

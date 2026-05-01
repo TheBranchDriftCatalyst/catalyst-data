@@ -1,0 +1,6 @@
+# Bill partitions iterated by `task bench:chunks:regen:congress`.
+# Add additional bill_ids to grow the benchmark corpus. Each must be a
+# valid Congress.gov partition key (format: <congress>-<bill_type>-<number>).
+# Materialization requires CONGRESS_API_KEY (live API call).
+bills:
+  - "119-hres-1"

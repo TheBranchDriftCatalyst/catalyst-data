@@ -95,6 +95,16 @@ tasks:
 
   # ── Pipeline Operations ──────────────────────────────────────────────────
 
+  dev:
+    desc: "Run dagster dev with all 3 code locations using LocalJsonIOManager (mirrors integration test layout — outputs land in .test-output/<domain>/...). Materialize anything in the UI without S3."
+    env:
+      PYTHONPATH: "packages/media-ingest/src:packages/congress-data/src:packages/open-leaks/src:libs/dagster-io/src:libs/catalyst-contracts-core/src:libs/catalyst-langgraph-aio/src"
+      DAGSTER_IO_BACKEND: local
+      OTEL_METRICS_EXPORTER: none
+      OTEL_TRACES_EXPORTER: none
+    cmds:
+      - dagster dev -m media_ingest -m congress_data -m open_leaks {{.CLI_ARGS}}
+
   dagster:materialize:congress:
     desc: Kick off congress discovery + sensor pipeline
     cmds:
@@ -179,9 +189,10 @@ tasks:
       - npm run dev
 
   bench:pipeline:warm:
-    desc: "Pre-warm audio pipeline cache (transcription + diarization). Visible progress; run before bench so the harness's captured subprocess doesn't hide the slow Whisper/pyannote work."
+    desc: "Pre-warm the audio pipeline cache (transcription + diarization) on the demo video. Run before bench so the harness's captured subprocess doesn't hide the slow Whisper/pyannote work."
     env:
       PYTHONPATH: "."
+      DAGSTER_CODE_LOCATION: media_ingest
     cmds:
       - |
         echo ""
@@ -190,10 +201,10 @@ tasks:
         echo "  Backend: ${WHISPER_BACKEND:-faster-whisper}  Model: ${WHISPER_MODEL:-base}"
         echo "  Set WHISPER_BACKEND=mlx-whisper for Metal (Apple Silicon)"
         echo "==============================================================="
-        pytest tests/test_pipeline_integration.py::test_transcription_produces_segments tests/test_pipeline_integration.py::test_diarization_finds_speakers -v -s
+        pytest packages/media-ingest/tests/integration/test_pipeline_integration.py::test_transcription_produces_segments packages/media-ingest/tests/integration/test_pipeline_integration.py::test_diarization_finds_speakers -v -s
 
   bench:fixtures:regen:
-    desc: "Regenerate per-video audio cache (transcription + diarization) for every video in tests/fixtures/media-ingest/audio_manifest.yaml. Same code path as production, results land in pipeline-cache/<doc_id>/ subdirs."
+    desc: "Regenerate per-video audio cache (transcription + diarization) for every video in packages/media-ingest/tests/fixtures/audio_manifest.yaml. Same code path as production, results land in pipeline-cache/<doc_id>/ subdirs."
     env:
       PYTHONPATH: "."
     cmds:
@@ -207,11 +218,35 @@ tasks:
         python scripts/regen_audio_fixtures.py {{.CLI_ARGS}}
 
   bench:chunks:regen:
-    desc: "Regenerate per-video benchmark_chunks fixtures from cached audio. Defaults to no title-prefix + min-80-char filter so chunks carry real content (not intro filler / repeated titles). Override with `task bench:chunks:regen -- --min-chunk-chars 0` to keep everything."
+    desc: "Materialize the production *_chunks Dagster assets across all 3 domains via LocalJsonIOManager. Output lands at .test-output/<domain>/<layer>/.../*_chunks/<partition>/data.jsonl — same medallion paths MinioIOManager writes in prod. Per-domain targets: bench:chunks:regen:{media,congress,leaks}."
+    cmds:
+      - task: bench:chunks:regen:media
+      - task: bench:chunks:regen:congress
+      - task: bench:chunks:regen:leaks
+
+  bench:chunks:regen:media:
+    desc: "Materialize media_chunks for every video in audio_manifest.yaml. Pre-seeds segment_merge from cached diarization (CPU-only, no GPU re-transcription)."
     env:
       PYTHONPATH: "."
+      DAGSTER_CODE_LOCATION: media_ingest
     cmds:
-      - python scripts/regen_benchmark_chunks.py --no-prepend-title --min-chunk-chars 80 {{.CLI_ARGS}}
+      - pytest packages/media-ingest/tests/integration/test_chunks_cpu.py -v -s {{.CLI_ARGS}}
+
+  bench:chunks:regen:congress:
+    desc: "Materialize bill_chunks for the congress bill_manifest.yaml partitions. Materializes the full bronze→silver chain (requires CONGRESS_API_KEY)."
+    env:
+      PYTHONPATH: "."
+      DAGSTER_CODE_LOCATION: congress_data
+    cmds:
+      - pytest packages/congress-data/tests/integration/test_pipeline.py -v -s -k test_bill_chunks {{.CLI_ARGS}}
+
+  bench:chunks:regen:leaks:
+    desc: "Materialize leak_chunks (unpartitioned, deterministic — no creds required)."
+    env:
+      PYTHONPATH: "."
+      DAGSTER_CODE_LOCATION: open_leaks
+    cmds:
+      - pytest packages/open-leaks/tests/integration/test_chunks.py -v -s {{.CLI_ARGS}}
 
   bench:clean:
     desc: "Clean benchmark artifacts (standard tier: extractions + GT + runs + reports)"
@@ -251,6 +286,16 @@ tasks:
         python -c "from tests.shared.store import BenchmarkStore; r = BenchmarkStore().clean_all('nuclear'); print(f'Cleaned: {r}')"
 
   # ── Dev ──────────────────────────────────────────────────────────────────
+
+  stats:
+    desc: "Open the repo-stats notebook (AI-bloat detection + churn graphs)"
+    cmds:
+      - jupyter lab scripts/repo_stats.ipynb
+
+  stats:run:
+    desc: "Execute the repo-stats notebook headlessly and write the rendered copy to /tmp"
+    cmds:
+      - jupyter nbconvert --to notebook --execute scripts/repo_stats.ipynb --output /tmp/repo_stats_executed.ipynb
 
   dev:congress:
     desc: Run congress-data code server locally

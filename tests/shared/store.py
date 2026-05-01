@@ -241,23 +241,6 @@ class BenchmarkStore:
     # Pipeline Cache (cached artifacts -- expensive to regenerate)
     # ═════════════════════════════════════════════════════════════════
 
-    def load_chunks(self) -> list[dict] | None:
-        """Load full pipeline chunks if previously cached (legacy/back-compat).
-
-        Chunks are no longer cached as part of the standard flow; they are
-        recomputed from cached segmentation each run. This method still reads
-        any pre-existing chunks.json so older trees keep loading, but
-        ``save_chunks`` is no longer called by the harness.
-        """
-        for p in (
-            self.pipeline_cache_dir / "chunks.json",
-            self.pipeline_cache_dir / "3_chunks.json",  # pre-collapse stage prefix
-            self._legacy_fixtures / "chunks.json",
-        ):
-            if p.exists():
-                return json.loads(p.read_text())
-        return None
-
     def load_benchmark_documents(self) -> list[dict] | None:
         """Load raw benchmark documents from per-domain fixture directories.
 
@@ -271,29 +254,6 @@ class BenchmarkStore:
             if p.exists():
                 merged.extend(json.loads(p.read_text()))
         return merged if merged else None
-
-    def load_benchmark_chunks(self) -> list[dict] | None:
-        """Load curated benchmark chunks from all domain fixture directories.
-
-        Merges chunks from tests/fixtures/{media-ingest,congress-data,open-leaks}/
-        benchmark_chunks.json into a single list. Falls back to the legacy
-        single-file tests/fixtures/benchmark_chunks.json if domain dirs don't exist.
-        """
-        # New: per-domain fixture dirs
-        domain_dirs = ["media-ingest", "congress-data", "open-leaks"]
-        merged = []
-        for d in domain_dirs:
-            p = self._repo_fixtures / d / "benchmark_chunks.json"
-            if p.exists():
-                merged.extend(json.loads(p.read_text()))
-        if merged:
-            return merged
-
-        # Fallback: legacy single file
-        legacy = self._repo_fixtures / "benchmark_chunks.json"
-        if legacy.exists():
-            return json.loads(legacy.read_text())
-        return None
 
     def _pipeline_cache_root(self, doc_id: str | None) -> Path:
         """Resolve the cache root for a stage artifact, with per-document subdirs.
@@ -578,12 +538,6 @@ class BenchmarkStore:
         # Ground truth (cached artifact)
         if name == "ground_truth_media_ingest":
             return self.load_ground_truth("active")
-
-        # Chunks: legacy read-only fallback (see load_chunks docstring)
-        if name == "chunks":
-            return self.load_chunks()
-        if name == "benchmark_chunks":
-            return self.load_benchmark_chunks()
 
         # Extraction artifacts (cached)
         if name.startswith("extraction_"):

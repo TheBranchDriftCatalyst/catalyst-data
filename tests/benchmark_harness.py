@@ -41,6 +41,7 @@ from tests.shared.extraction_scoring import (
     print_benchmark_report,
 )
 from tests.shared.ground_truth import generate_ensemble_ground_truth
+from tests.shared.medallion import load_chunks
 from tests.shared.report import build_report_json
 from tests.shared.store import BenchmarkStore
 
@@ -335,7 +336,7 @@ def _save_incremental_report(results: list[dict], store: BenchmarkStore) -> None
     """Save the benchmark report after each model so cancelled runs keep partial results."""
     try:
         gt = store.load_ground_truth("active")
-        chunks_data = store.load_chunks()
+        chunks_data = load_chunks()
         chunk_texts = {c["chunk_id"]: c["text"] for c in chunks_data} if chunks_data else None
         report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts, store=store)
         store.save_top_level_report(report)
@@ -415,7 +416,7 @@ def _score_latest(store: BenchmarkStore) -> None:
         gt_mentions.extend(chunk["mentions"])
         gt_propositions.extend(chunk["propositions"])
 
-    chunks_data = store.load_chunks()
+    chunks_data = load_chunks()
     chunk_texts = {c["chunk_id"]: c["text"] for c in chunks_data} if chunks_data else None
 
     results = []
@@ -480,7 +481,7 @@ examples:
     config.add_argument(
         "--all-videos",
         action="store_true",
-        help="Run each model across every video in tests/fixtures/media-ingest/audio_manifest.yaml "
+        help="Run each model across every video in packages/media-ingest/tests/fixtures/audio_manifest.yaml "
         "(multi-video mode). Uses cached transcription/diarization, runs chunker + extraction per video. "
         "Default: single-video pytest fixture path.",
     )
@@ -619,7 +620,7 @@ examples:
     # ── Catalyst data corpus footprint ──────────────────────────────────
     # Inventory the audio cache + manifest so the user sees what they're benchmarking against
     # before the slow per-model loop kicks off.
-    manifest_path = ROOT / "tests" / "fixtures" / "media-ingest" / "audio_manifest.yaml"
+    manifest_path = ROOT / "packages" / "media-ingest" / "tests" / "fixtures" / "audio_manifest.yaml"
     manifest_videos: list[dict] = []
     if manifest_path.exists():
         try:
@@ -633,7 +634,7 @@ examples:
         if store.pipeline_cache_dir.exists()
         else []
     )
-    benchmark_chunks = store.load_benchmark_chunks() or []
+    benchmark_chunks = load_chunks()
 
     n_local = sum(1 for m in models if "cloud" not in m.tags)
     n_cloud = sum(1 for m in models if "cloud" in m.tags)
@@ -804,7 +805,7 @@ examples:
 
     # Load ground truth and compute scores
     gt = store.load_ground_truth("active")
-    chunks_data = store.load_chunks()
+    chunks_data = load_chunks()
     chunk_texts = {c["chunk_id"]: c["text"] for c in chunks_data} if chunks_data else None
 
     if gt:

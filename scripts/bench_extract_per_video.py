@@ -6,13 +6,15 @@ set. Reads LLM_MODEL / LLM_BASE_URL / LLM_API_KEY / LLM_STRUCTURED_METHOD
 from env (set by the harness's ``_run_model`` per-model env block).
 
 For each video in the manifest:
-  1. Load cached transcription + diarization (per-doc-id pipeline-cache)
-  2. Run ChunkingResource.chunk_speaker_segments to produce TextChunks
-  3. Run dagster_io.extraction.extract_validated against those chunks
-  4. Save extraction artifact at runs/<run-id>/extractions/<doc_id>/extraction_<model>.json
+  1. Load chunks from the medallion tree at
+     ``.test-output/media-ingest/gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl``
+     (populated by ``task bench:chunks:regen`` — the integration test that
+     materializes the production ``media_chunks`` Dagster asset).
+  2. Run dagster_io.extraction.extract_validated against those chunks.
+  3. Save extraction artifact at runs/<run-id>/extractions/<doc_id>/extraction_<model>.json.
 
-If audio cache for a doc_id is missing, the video is skipped with a warning
-(re-run ``task bench:fixtures:regen`` to regenerate).
+If chunks are missing for a doc_id, the video is skipped with a warning
+(re-run ``task bench:chunks:regen`` to regenerate).
 
 Stdout is consumed by the harness — keep formatting predictable. Per-video
 lines look like::
@@ -26,6 +28,7 @@ continues.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -38,37 +41,26 @@ sys.path.insert(0, str(ROOT))
 import yaml  # noqa: E402
 from tests.shared.store import BenchmarkStore  # noqa: E402
 
-from dagster_io import ChunkingResource, TextChunk  # noqa: E402
+from dagster_io import TextChunk  # noqa: E402
 from dagster_io.extraction import extract_validated  # noqa: E402
 
-FIXTURE_DIR = ROOT / "tests" / "fixtures" / "media-ingest"
+FIXTURE_DIR = ROOT / "packages" / "media-ingest" / "tests" / "fixtures"
 MANIFEST = FIXTURE_DIR / "audio_manifest.yaml"
+MEDALLION_CHUNKS_ROOT = ROOT / ".test-output" / "media-ingest" / "gold" / "media_ingest" / "media" / "media_chunks"
 
 
-def _build_chunks_from_diarization(diarization: dict, doc_id: str) -> list[TextChunk]:
-    """Run the production speaker-segment chunker on cached diarization output."""
-    chunking = ChunkingResource()
-    return chunking.chunk_speaker_segments(
-        diarization["segments"],
-        document_id=doc_id,
-        title=diarization.get("title", doc_id),
-        metadata={
-            "source": "media_ingest",
-            "language": diarization.get("language", "unknown"),
-            "speaker_count": diarization.get("speaker_count", 0),
-        },
-    )
+def _load_chunks(doc_id: str) -> list[TextChunk]:
+    """Read chunks for a doc from the medallion tree written by media_chunks asset."""
+    p = MEDALLION_CHUNKS_ROOT / doc_id / "data.jsonl"
+    if not p.exists():
+        return []
+    return [TextChunk(**json.loads(line)) for line in p.read_text().splitlines() if line.strip()]
 
 
 def _run_video(doc_id: str, store: BenchmarkStore, model: str, run_label: str | None) -> dict | None:
-    diarization = store.load_pipeline_artifact("diarization", doc_id=doc_id)
-    if not diarization:
-        print(f"  ⚠️  {doc_id}: no diarization cache (run task bench:fixtures:regen)", flush=True)
-        return None
-
-    chunks = _build_chunks_from_diarization(diarization, doc_id)
+    chunks = _load_chunks(doc_id)
     if not chunks:
-        print(f"  ⚠️  {doc_id}: chunker produced 0 chunks", flush=True)
+        print(f"  ⚠️  {doc_id}: no chunks at {MEDALLION_CHUNKS_ROOT}/{doc_id} (run task bench:chunks:regen)", flush=True)
         return None
 
     start = time.monotonic()

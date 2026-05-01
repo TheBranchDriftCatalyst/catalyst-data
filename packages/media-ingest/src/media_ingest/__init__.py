@@ -31,9 +31,8 @@ from dagster_io import (
     ChunkingResource,
     EmbeddingResource,
     LLMResource,
-    MinioIOManager,
-    OptionalMinioIOManager,
     make_run_status_sensor,
+    select_io_managers,
 )
 from dagster_io.executor import make_k8s_executor
 
@@ -87,10 +86,18 @@ defs = Definitions(
     ],
     executor=_k8s_executor,
     resources={
-        "io_manager": MinioIOManager(),
-        "optional_io_manager": OptionalMinioIOManager(),
+        # IO backend: MinIO in prod, LocalJsonIOManager when DAGSTER_IO_BACKEND=local
+        # (mirrors the integration test layout — same medallion paths on disk).
+        **{
+            k: v
+            for k, v in select_io_managers(default_local_dir=".test-output/media-ingest").items()
+            if k in ("io_manager", "optional_io_manager")
+        },
         "chunking": ChunkingResource(),
         "llm": LLMResource(),
+        # Both keys point at the same resource: media_chunks asset signature uses
+        # ``embedding`` (singular); other media assets use ``embeddings`` (plural).
+        "embedding": EmbeddingResource(),
         "embeddings": EmbeddingResource(),
     },
 )

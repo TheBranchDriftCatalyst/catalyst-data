@@ -30,17 +30,27 @@ import pytest
 from congress_data.assets.bill_tail import (
     bill_actions,
     bill_amendments,
-    bill_assertions,
     bill_chunks,
     bill_cosponsors,
     bill_detail,
     bill_document,
-    bill_embeddings,
     bill_full_text,
-    bill_mentions,
     bill_text_versions,
 )
 from dagster import materialize
+
+# Gold assets (mentions/assertions/embeddings) are factory-generated via
+# congress_data.assets.gold.bill_gold_assets. They aren't module-level names
+# on bill_tail; the gold integration tests reach into the factory list lazily.
+try:
+    from congress_data.assets.gold import bill_gold_assets
+
+    _gold_by_name = {a.key.path[-1]: a for a in bill_gold_assets}
+    bill_mentions = _gold_by_name.get("bill_mentions")
+    bill_assertions = _gold_by_name.get("bill_assertions")
+    bill_embeddings = _gold_by_name.get("bill_embeddings")
+except Exception:
+    bill_mentions = bill_assertions = bill_embeddings = None
 
 os.environ.setdefault("DAGSTER_CODE_LOCATION", "congress_data")
 

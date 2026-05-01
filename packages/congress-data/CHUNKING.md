@@ -24,6 +24,9 @@ the XML tree directly. This provides exact structural boundaries:
 - `<quoted-block>` for inline amendment text
 - `<title>`, `<subtitle>`, `<chapter>`, `<part>` for container hierarchy
 
+<!-- TODO: might send this through another llm in order to be a BilLReaderGraph... 
+ that could help downstream extraction cause we can progressively summarize and do stuff -->
+
 ### B. Plain text regex (fallback)
 
 When XML is not available, the chunker falls back to regex-based parsing of

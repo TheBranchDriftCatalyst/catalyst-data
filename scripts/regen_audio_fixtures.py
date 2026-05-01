@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate per-video audio cache (transcription + diarization).
 
-Reads tests/fixtures/media-ingest/audio_manifest.yaml, runs the production
+Reads packages/media-ingest/tests/fixtures/audio_manifest.yaml, runs the production
 transcription dispatcher (_select_backend) + diarization pipeline (_run_diarization
 + _assign_speakers) on each video, and saves outputs to per-doc-id subdirs:
 
@@ -49,7 +49,7 @@ from media_ingest.assets.transcription import _select_backend, _validate_transcr
 from media_ingest.config import MediaIngestConfig  # noqa: E402
 from tests.shared.store import BenchmarkStore  # noqa: E402
 
-FIXTURE_DIR = ROOT / "tests" / "fixtures" / "media-ingest"
+FIXTURE_DIR = ROOT / "packages" / "media-ingest" / "tests" / "fixtures"
 MANIFEST = FIXTURE_DIR / "audio_manifest.yaml"
 
 

@@ -105,9 +105,11 @@ class TestGroundTruth:
             )
             return
 
-        chunks = _store.load_chunks()
+        from tests.shared.medallion import load_chunks
+
+        chunks = load_chunks()
         if not chunks:
-            pytest.skip("No chunks fixture. Run test_pipeline_integration.py first.")
+            pytest.skip("No chunks materialized. Run `task bench:chunks:regen` first.")
             return
 
         # Build per-chunk ground truth from extraction output

@@ -4,6 +4,8 @@
 
 ## TL;DR
 
+<!-- NOTES: general need to add a section on chunking strategies and how thats extremely important.  different strats for different domains/content types -->
+
 We built a benchmark harness that runs 12 extraction models (encoders, specialists, and local LLMs from 300M to 12B parameters) against 7 real-world text chunks from 3 domains, validates every extraction through an MCP contract pipeline, and surfaces the results in a React dashboard with Gantt chart audit trails. The key finding: GLiNER encoder models extract 50x faster than local LLMs with comparable or better entity coverage, but only LLMs can extract subject-predicate-object propositions. The biggest surprise was that span offset errors (SPAN_MISMATCH) are the dominant validation failure mode -- and they are entirely fixable with deterministic text search, not more LLM calls.
 
 ---
@@ -255,6 +257,8 @@ def _ner_consensus(all_model_mentions, source_text, threshold):
 This produces ground truth that is robust to any single model's blind spots. The entity matrix in the viewer SPA shows this consensus visually: entities detected by 11/12 models (like "Israel", "Taiwan", "Kevin McCumber") are high-confidence. Entities found by only 1-2 models are either model-specific hallucinations or genuine long-tail entities that most models miss.
 
 The current report shows 197 unique entities. Of those, the top entities by consensus (11 out of 12 models agreeing) include geopolitical entities (Israel, Taiwan, China), people (Kevin McCumber, William McFarland, Catherine Szpindor), and organizations (House of Representatives).
+
+<!-- TODO: need to add a note here about the leave one out scoring strategy -->
 
 ---
 

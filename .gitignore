@@ -21,16 +21,10 @@ tests/demo_video.mp4
 # AV1/HEVC), regenerable by re-downloading from metube via audio_manifest.yaml
 # and running scripts/compress_fixtures.py. The audio_manifest.yaml IS committed
 # (small YAML pinning doc_id → filename → source URL).
-tests/fixtures/media-ingest/*.mp4
-tests/fixtures/media-ingest/*.mkv
-tests/fixtures/media-ingest/*.webm
-tests/fixtures/media-ingest/*.mov
-
-# Generated per-video chunks output (regenerable via task bench:chunks:regen).
-# Lives here for fast benchmark iteration; not committed because it's
-# deterministically derivable from audio_manifest.yaml + cached audio.
-tests/fixtures/media-ingest/per_video_chunks/
-tests/fixtures/media-ingest/benchmark_chunks.json
+packages/media-ingest/tests/fixtures/*.mp4
+packages/media-ingest/tests/fixtures/*.mkv
+packages/media-ingest/tests/fixtures/*.webm
+packages/media-ingest/tests/fixtures/*.mov
 
 # Legacy test scratch
 packages/media-ingest/tests/.output/
@@ -38,6 +32,9 @@ packages/media-ingest/tests/.output/
 .env
 .env.*
 .envrc
+.envrc.cluster
+.envrc.local
+**/.envrc
 .coverage
 *.executed.ipynb
 .DS_Store

@@ -23,8 +23,10 @@ from dagster_io.extraction_schemas import (
     normalize_predicate,
     parse_mention_type,
 )
+from dagster_io.io_backend import select_io_managers
 from dagster_io.io_manager import MinioIOManager, OptionalMinioIOManager
 from dagster_io.llm import EmbeddingResource, LLMResource
+from dagster_io.local_io_manager import LocalAppendIOManager, LocalJsonIOManager, LocalOptionalIOManager
 from dagster_io.logging import configure_logging, get_logger
 from dagster_io.manifest import AssetManifest, MaterializationRecord
 from dagster_io.metrics import (
@@ -89,6 +91,10 @@ __all__ = [
     "MinioIOManager",
     "OptionalMinioIOManager",
     "AppendIOManager",
+    "LocalJsonIOManager",
+    "LocalOptionalIOManager",
+    "LocalAppendIOManager",
+    "select_io_managers",
     # Run-status sensor factory
     "make_run_status_sensor",
     # Resources

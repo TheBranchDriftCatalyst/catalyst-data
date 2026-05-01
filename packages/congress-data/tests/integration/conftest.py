@@ -17,11 +17,12 @@ from pathlib import Path
 
 import pytest
 from dagster import DagsterInstance
-from tests.shared.local_io_manager import LocalJsonIOManager
 
-from dagster_io import ChunkingResource
+from dagster_io import ChunkingResource, LocalJsonIOManager
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = (
+    Path(__file__).resolve().parents[4]
+)  # TODO: this pattern is gonna be all over perhaps we should centralize it somewhere or create a ENV var
 TEST_OUTPUT_ROOT = Path(os.environ.get("TEST_OUTPUT_ROOT", str(REPO_ROOT / ".test-output")))
 DEFAULT_OUTPUT_DIR = TEST_OUTPUT_ROOT / "congress-data"
 

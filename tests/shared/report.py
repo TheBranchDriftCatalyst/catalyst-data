@@ -10,9 +10,7 @@ Usage:
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.shared.extraction_scoring import compute_model_scores, score_provenance
@@ -27,7 +25,6 @@ def build_report_json(
     ground_truth: dict | None = None,
     chunks: list[dict] | None = None,
     chunk_texts: dict[str, str] | None = None,
-    benchmark_chunks_path: Path | None = None,
     store: BenchmarkStore | None = None,
 ) -> dict:
     """Build a structured JSON report for the viewer-ui SPA.
@@ -37,14 +34,15 @@ def build_report_json(
         ground_truth: Ground truth dict (optional). If provided, models are scored.
         chunks: Full chunk list (optional, for chunk domain info).
         chunk_texts: {chunk_id: text} mapping for span accuracy scoring.
-        benchmark_chunks_path: Path to benchmark_chunks.json for domain labels.
-            Falls back to tests/fixtures/benchmark_chunks.json.
         store: BenchmarkStore for leave-one-out GT regeneration. If None,
             ensemble models are scored against the same GT (legacy behavior).
 
     Returns:
         Report dict ready for JSON serialization.
     """
+    from tests.shared.medallion import load_chunks
+
+    medallion_chunks = load_chunks()
     # ── Models summary ───────────────────────────────────────────────
     models = []
     for r in results:
@@ -85,12 +83,9 @@ def build_report_json(
         )
 
     # ── Chunk domains ────────────────────────────────────────────────
-    if benchmark_chunks_path is None:
-        benchmark_chunks_path = Path(__file__).resolve().parents[1] / "fixtures" / "benchmark_chunks.json"
-    chunk_domains: dict[str, str] = {}
-    if benchmark_chunks_path.exists():
-        for c in json.loads(benchmark_chunks_path.read_text()):
-            chunk_domains[c.get("chunk_id", "")] = c.get("metadata", {}).get("domain", "unknown")
+    chunk_domains: dict[str, str] = {
+        c.get("chunk_id", ""): c.get("metadata", {}).get("domain", "unknown") for c in medallion_chunks
+    }
 
     # ── Entity matrix ────────────────────────────────────────────────
     entity_rows: dict[str, dict] = {}
@@ -176,10 +171,9 @@ def build_report_json(
 
     # Domain summary
     domain_counts: dict[str, int] = {}
-    if benchmark_chunks_path.exists():
-        for c in json.loads(benchmark_chunks_path.read_text()):
-            d = c.get("metadata", {}).get("domain", "unknown")
-            domain_counts[d] = domain_counts.get(d, 0) + 1
+    for c in medallion_chunks:
+        d = c.get("metadata", {}).get("domain", "unknown")
+        domain_counts[d] = domain_counts.get(d, 0) + 1
 
     # ── Ground truth scoring ────────────────────────────────────────
     ground_truth_meta: dict = {"available": False}

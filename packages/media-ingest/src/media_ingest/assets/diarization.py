@@ -29,7 +29,7 @@ from media_ingest.partitions import media_partitions
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
-WHISPER_MODEL_CACHE = "/data/whisper-models"
+WHISPER_MODEL_CACHE = os.environ.get("WHISPER_MODEL_CACHE", "/data/whisper-models")
 
 # Diarization runs on Intel XPU (GPU) when available, needs HF token
 DIARIZATION_K8S_CONFIG = {

@@ -1,7 +1,7 @@
 """Fixtures for media-ingest pipeline integration tests.
 
-Runs real assets against a local filesystem IO manager.
-All outputs go to TEST_OUTPUT_ROOT/media-ingest/ (default: .test-output/media-ingest/).
+Runs real assets against a local filesystem IO manager. All outputs go to
+``TEST_OUTPUT_ROOT/media-ingest/`` (default: ``.test-output/media-ingest/``).
 
 Usage:
     DAGSTER_CODE_LOCATION=media_ingest pytest packages/media-ingest/tests/integration/ -v -s
@@ -16,15 +16,16 @@ import shutil
 from pathlib import Path
 
 import pytest
-from tests.shared.local_io_manager import LocalJsonIOManager
 
-from dagster_io import ChunkingResource
+from dagster_io import ChunkingResource, LocalJsonIOManager
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TEST_OUTPUT_ROOT = Path(os.environ.get("TEST_OUTPUT_ROOT", str(REPO_ROOT / ".test-output")))
 DEFAULT_OUTPUT_DIR = TEST_OUTPUT_ROOT / "media-ingest"
-DEMO_VIDEO = REPO_ROOT / "tests" / "demo_video.mp4"
-FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures"
+DOMAIN_FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures"
+DEMO_VIDEO = DOMAIN_FIXTURE_DIR / "demo_video.mp4"
+AUDIO_MANIFEST = DOMAIN_FIXTURE_DIR / "audio_manifest.yaml"
+MODEL_CACHE = DEFAULT_OUTPUT_DIR / "model_cache"
 
 
 def _safe_addoption(parser, *args, **kwargs):
@@ -75,7 +76,11 @@ def test_resources(local_io_manager) -> dict:
         from dagster_io import EmbeddingResource, LLMResource
 
         resources["llm"] = LLMResource()
-        resources["embeddings"] = EmbeddingResource()
+        # Both keys point at the same EmbeddingResource — media_chunks uses
+        # ``embedding`` (singular), other assets use ``embeddings`` (plural).
+        emb = EmbeddingResource()
+        resources["embedding"] = emb
+        resources["embeddings"] = emb
     return resources
 
 
