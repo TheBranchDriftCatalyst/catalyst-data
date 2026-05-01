@@ -23,14 +23,10 @@ function ScoresTab({
   report,
   visibleModels,
   groupBy,
-  selectedGT,
-  onSelectGT,
 }: {
   report: BenchmarkReportType;
   visibleModels: import("@/types/benchmark").ModelResult[];
   groupBy: GroupByDimension;
-  selectedGT: string;
-  onSelectGT: (name: string) => void;
 }) {
   const gt = report.ground_truth;
 
@@ -73,10 +69,9 @@ function ScoresTab({
 
   return (
     <div className="space-y-6">
-      {/* Ground truth info + selector */}
-      <div className="bg-surface-1 border border-white/5 rounded-lg p-3 flex items-center gap-4 text-xs font-mono flex-wrap">
-        <span className="text-zinc-500">Ground Truth:</span>
-        <GTSelector selected={selectedGT} onChange={onSelectGT} />
+      {/* Ground truth info (selector is in global controls bar) */}
+      <div className="bg-surface-1 border border-white/5 rounded-lg p-3 flex items-center gap-4 text-xs font-mono">
+        <span className="text-zinc-500">Scoring against:</span>
         <span className="text-zinc-300">{gt.reference_model}</span>
         <span className={gt.manually_reviewed ? "text-emerald-400" : "text-amber-400"}>
           {gt.manually_reviewed ? "Reviewed" : "Unreviewed"}
@@ -335,28 +330,12 @@ export default function BenchmarkReport() {
     <div className="h-full overflow-y-auto">
       <div className="max-w-[1400px] mx-auto p-6 space-y-6">
         {/* Header */}
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-xl font-mono text-zinc-100">Extraction Benchmark Report</h1>
-            <p className="text-xs text-zinc-500 font-mono mt-1">
-              Generated {new Date(report.generated_at).toLocaleString()} — {report.model_count}{" "}
-              models, {report.entity_count} unique entities, {report.proposition_count} propositions
-            </p>
-          </div>
-          {availableSources.length > 1 && (
-            <select
-              value={reportSource}
-              onChange={(e) => setReportSource(e.target.value)}
-              aria-label="Select report version to view"
-              className="bg-surface-1 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
-              {availableSources.map((src) => (
-                <option key={src.url} value={src.url}>
-                  {src.label}
-                </option>
-              ))}
-            </select>
-          )}
+        <div>
+          <h1 className="text-xl font-mono text-zinc-100">Extraction Benchmark Report</h1>
+          <p className="text-xs text-zinc-500 font-mono mt-1">
+            Generated {new Date(report.generated_at).toLocaleString()} — {report.model_count}{" "}
+            models, {report.entity_count} unique entities, {report.proposition_count} propositions
+          </p>
         </div>
 
         {/* Stat Cards */}
@@ -391,6 +370,38 @@ export default function BenchmarkReport() {
           />
         </div>
 
+        {/* Global Controls */}
+        <div className="flex items-center gap-4 flex-wrap bg-surface-1 border border-white/5 rounded-lg px-4 py-2">
+          {availableSources.length > 1 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-zinc-500 font-mono uppercase">Report</span>
+              <select
+                value={reportSource}
+                onChange={(e) => setReportSource(e.target.value)}
+                aria-label="Select report version"
+                className="bg-surface-0 border border-white/10 rounded px-2 py-0.5 text-xs font-mono text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+              >
+                {availableSources.map((src) => (
+                  <option key={src.url} value={src.url}>
+                    {src.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-zinc-500 font-mono uppercase">Ground Truth</span>
+            <GTSelector selected={selectedGT} onChange={setSelectedGT} />
+          </div>
+          <TableControls
+            models={report.models}
+            groupBy={groupBy}
+            onGroupByChange={setGroupBy}
+            hiddenModels={hiddenModels}
+            onHiddenModelsChange={setHiddenModels}
+          />
+        </div>
+
         {/* Tabs */}
         <div
           className="flex gap-1 border-b border-white/5 pb-0"
@@ -422,16 +433,7 @@ export default function BenchmarkReport() {
           id={`tabpanel-${activeTab}`}
           aria-labelledby={activeTab}
         >
-          {/* Shared controls for model tables */}
-          {(activeTab === "overview" || activeTab === "scores" || activeTab === "pipeline") && (
-            <TableControls
-              models={report.models}
-              groupBy={groupBy}
-              onGroupByChange={setGroupBy}
-              hiddenModels={hiddenModels}
-              onHiddenModelsChange={setHiddenModels}
-            />
-          )}
+          {/* Controls are in the global bar above tabs */}
 
           {activeTab === "overview" && (
             <div className="space-y-6">
@@ -471,13 +473,7 @@ export default function BenchmarkReport() {
           )}
 
           {activeTab === "scores" && (
-            <ScoresTab
-              report={report}
-              visibleModels={visibleModels}
-              groupBy={groupBy}
-              selectedGT={selectedGT}
-              onSelectGT={setSelectedGT}
-            />
+            <ScoresTab report={report} visibleModels={visibleModels} groupBy={groupBy} />
           )}
 
           {activeTab === "entities" && (

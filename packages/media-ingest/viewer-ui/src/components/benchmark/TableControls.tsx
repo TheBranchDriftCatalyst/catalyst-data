@@ -40,7 +40,7 @@ export function TableControls({
   };
 
   return (
-    <div className="flex items-center gap-3 mb-3">
+    <div className="flex items-center gap-3">
       <div className="flex items-center gap-1.5">
         <label className="text-[11px] text-zinc-500 font-mono uppercase" htmlFor="group-by-select">
           Group by
