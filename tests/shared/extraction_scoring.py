@@ -286,6 +286,48 @@ def score_propositions(
     }
 
 
+def compute_model_scores(
+    fixture: dict,
+    gt_mentions: list[dict],
+    gt_propositions: list[dict],
+    chunk_texts: dict[str, str] | None = None,
+) -> dict:
+    """Compute the full score dict for one model against ground truth.
+
+    Returns the canonical score dict used by the benchmark report JSON and
+    CLI output.  Both ``build_report_json`` and the benchmark harness
+    delegate here so the metrics are defined in exactly one place.
+    """
+    m_scores = score_mentions(fixture.get("mentions", []), gt_mentions, chunk_texts=chunk_texts)
+    p_scores = score_propositions(fixture.get("assertions", []), gt_propositions)
+    stats = fixture.get("stats", {})
+
+    duration = stats.get("duration_s", 0)
+    chunk_count = stats.get("chunk_count", 1)
+
+    return {
+        "mention_strict_precision": round(m_scores["strict_precision"], 4),
+        "mention_strict_recall": round(m_scores["strict_recall"], 4),
+        "mention_strict_f1": round(m_scores["strict_f1"], 4),
+        "mention_relaxed_precision": round(m_scores["relaxed_precision"], 4),
+        "mention_relaxed_recall": round(m_scores["relaxed_recall"], 4),
+        "mention_relaxed_f1": round(m_scores["relaxed_f1"], 4),
+        "mention_type_accuracy": round(m_scores["type_accuracy"], 4),
+        "mention_span_accuracy": round(m_scores["span_accuracy"], 4) if m_scores["span_accuracy"] is not None else 0.0,
+        "proposition_strict_precision": round(p_scores["strict_precision"], 4),
+        "proposition_strict_recall": round(p_scores["strict_recall"], 4),
+        "proposition_strict_f1": round(p_scores["strict_f1"], 4),
+        "proposition_relaxed_precision": round(p_scores["relaxed_precision"], 4),
+        "proposition_relaxed_recall": round(p_scores["relaxed_recall"], 4),
+        "proposition_relaxed_f1": round(p_scores["relaxed_f1"], 4),
+        "hallucination_rate": round(1.0 - m_scores["span_accuracy"], 4)
+        if m_scores["span_accuracy"] is not None
+        else None,
+        "quality_speed_ratio": round(m_scores["strict_f1"] / max(duration, 0.1), 4),
+        "per_chunk_latency": round(duration / max(chunk_count, 1), 4),
+    }
+
+
 def print_scores(
     mention_scores: dict,
     proposition_scores: dict,

@@ -1,6 +1,7 @@
 """Shared test utilities for catalyst-data integration tests."""
 
 from .extraction_scoring import (
+    compute_model_scores,
     print_benchmark_report,
     print_comparison_table,
     print_scores,
@@ -18,6 +19,7 @@ __all__ = [
     "LocalJsonIOManager",
     "RunStore",
     "build_report_json",
+    "compute_model_scores",
     "generate_ensemble_ground_truth",
     "print_benchmark_report",
     "print_comparison_table",

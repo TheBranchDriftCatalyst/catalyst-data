@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tests.shared.extraction_scoring import score_mentions, score_propositions, score_provenance
+from tests.shared.extraction_scoring import compute_model_scores, score_provenance
 
 if TYPE_CHECKING:
     from tests.shared.store import BenchmarkStore
@@ -207,33 +207,9 @@ def build_report_json(
                         score_gt_mentions.extend(chunk.get("mentions", []))
                         score_gt_propositions.extend(chunk.get("propositions", []))
 
-            m_scores = score_mentions(ext.get("mentions", []), score_gt_mentions, chunk_texts=chunk_texts)
-            p_scores = score_propositions(ext.get("assertions", []), score_gt_propositions)
-            model_entry["scores"] = {
-                "mention_strict_precision": round(m_scores["strict_precision"], 4),
-                "mention_strict_recall": round(m_scores["strict_recall"], 4),
-                "mention_strict_f1": round(m_scores["strict_f1"], 4),
-                "mention_relaxed_precision": round(m_scores["relaxed_precision"], 4),
-                "mention_relaxed_recall": round(m_scores["relaxed_recall"], 4),
-                "mention_relaxed_f1": round(m_scores["relaxed_f1"], 4),
-                "mention_type_accuracy": round(m_scores["type_accuracy"], 4),
-                "mention_span_accuracy": round(m_scores["span_accuracy"], 4)
-                if m_scores["span_accuracy"] is not None
-                else 0.0,
-                "proposition_strict_precision": round(p_scores["strict_precision"], 4),
-                "proposition_strict_recall": round(p_scores["strict_recall"], 4),
-                "proposition_strict_f1": round(p_scores["strict_f1"], 4),
-                "proposition_relaxed_precision": round(p_scores["relaxed_precision"], 4),
-                "proposition_relaxed_recall": round(p_scores["relaxed_recall"], 4),
-                "proposition_relaxed_f1": round(p_scores["relaxed_f1"], 4),
-                "hallucination_rate": round(1.0 - m_scores["span_accuracy"], 4)
-                if m_scores["span_accuracy"] is not None
-                else None,
-                "quality_speed_ratio": round(m_scores["strict_f1"] / max(model_entry["stats"]["duration_s"], 0.1), 4),
-                "per_chunk_latency": round(
-                    model_entry["stats"]["duration_s"] / max(model_entry["stats"]["chunk_count"], 1), 4
-                ),
-            }
+            model_entry["scores"] = compute_model_scores(
+                ext, score_gt_mentions, score_gt_propositions, chunk_texts=chunk_texts
+            )
 
     return {
         "generated_at": datetime.now(UTC).isoformat(),

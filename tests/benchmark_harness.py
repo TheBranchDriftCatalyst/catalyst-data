@@ -37,9 +37,8 @@ sys.path.insert(0, str(ROOT))
 
 from tests.benchmark_config import ALL_MODELS, LOCAL_MODELS, BenchmarkConfig, ModelConfig
 from tests.shared.extraction_scoring import (
+    compute_model_scores,
     print_benchmark_report,
-    score_mentions,
-    score_propositions,
 )
 from tests.shared.ground_truth import generate_ensemble_ground_truth
 from tests.shared.report import build_report_json
@@ -94,47 +93,6 @@ def _run_model(cfg: ModelConfig, timeout: int, save_audit: bool, store: Benchmar
         return store.load_fixture(f"extraction_{cfg.model}")
     except subprocess.TimeoutExpired:
         return None
-
-
-def _compute_scores(
-    fixture: dict,
-    gt_mentions: list,
-    gt_propositions: list,
-    chunk_texts: dict[str, str] | None = None,
-) -> dict:
-    """Compute all metrics for one model against ground truth."""
-    m_scores = score_mentions(fixture.get("mentions", []), gt_mentions, chunk_texts=chunk_texts)
-    p_scores = score_propositions(fixture.get("assertions", []), gt_propositions)
-    stats = fixture.get("stats", {})
-
-    duration = stats.get("duration_s", 0)
-    chunk_count = stats.get("chunk_count", 1)
-
-    return {
-        # F1 / Precision / Recall
-        "mention_strict_precision": m_scores["strict_precision"],
-        "mention_strict_recall": m_scores["strict_recall"],
-        "mention_strict_f1": m_scores["strict_f1"],
-        "mention_relaxed_precision": m_scores["relaxed_precision"],
-        "mention_relaxed_recall": m_scores["relaxed_recall"],
-        "mention_relaxed_f1": m_scores["relaxed_f1"],
-        "mention_type_accuracy": m_scores["type_accuracy"],
-        "mention_span_accuracy": m_scores["span_accuracy"] if m_scores["span_accuracy"] is not None else 0.0,
-        "proposition_strict_precision": p_scores["strict_precision"],
-        "proposition_strict_recall": p_scores["strict_recall"],
-        "proposition_strict_f1": p_scores["strict_f1"],
-        "proposition_relaxed_precision": p_scores["relaxed_precision"],
-        "proposition_relaxed_recall": p_scores["relaxed_recall"],
-        "proposition_relaxed_f1": p_scores["relaxed_f1"],
-        # Hallucination
-        "hallucination_rate": round(1.0 - m_scores["span_accuracy"], 3)
-        if m_scores["span_accuracy"] is not None
-        else None,
-        # Efficiency
-        "quality_speed_ratio": round(m_scores["strict_f1"] / max(duration, 0.1), 4),
-        "per_chunk_latency": round(duration / max(chunk_count, 1), 2),
-        "tokens_per_sec": stats.get("tokens_per_sec", 0),
-    }
 
 
 def _run_ensemble_gt(
@@ -442,9 +400,9 @@ def _score_latest(store: BenchmarkStore) -> None:
         ext = run.load_extraction(model) or store.load_extraction(model)
         if not ext:
             continue
-        scores = _compute_scores(ext, gt_mentions, gt_propositions, chunk_texts)
+        scores = compute_model_scores(ext, gt_mentions, gt_propositions, chunk_texts)
         results.append({"model": model, "fixture": ext, "tags": [], "scores": scores})
-        print(f"  {model}: strict_f1={scores['mention_strict_f1']:.3f}")
+        print(f"  {model}: strict_f1={scores['mention_strict_f1']:.4f}")
 
     report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts, store=store)
     run.save_report(report)
@@ -728,7 +686,7 @@ examples:
             gt_propositions.extend(chunk["propositions"])
 
         for r in results:
-            r["scores"] = _compute_scores(r["fixture"], gt_mentions, gt_propositions, chunk_texts)
+            r["scores"] = compute_model_scores(r["fixture"], gt_mentions, gt_propositions, chunk_texts)
 
     # Build and save report
     report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts, store=store)

@@ -47,7 +47,6 @@ from tests.shared.extraction_scoring import (
     validate_ground_truth,
 )
 from tests.shared.ground_truth import generate_ensemble_ground_truth
-from tests.shared.report import build_report_json
 from tests.shared.store import BenchmarkStore
 
 # Shared store instance for this module
@@ -76,18 +75,6 @@ def _load_fixture(name: str) -> dict | list | None:
 def _save_fixture(name: str, data):
     """Save a fixture by name. Thin wrapper around BenchmarkStore for backward compat."""
     _store.save_fixture(name, data)
-
-
-def _save_incremental_report(results: list[dict]) -> None:
-    """Save the benchmark report after each model so cancelled runs keep partial results."""
-    try:
-        gt = _store.load_ground_truth("active")
-        chunks_data = _store.load_chunks()
-        chunk_texts = {c["chunk_id"]: c["text"] for c in chunks_data} if chunks_data else None
-        report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts, store=_store)
-        _store.save_top_level_report(report)
-    except Exception:
-        pass  # best effort -- don't fail the run
 
 
 # ═══════════════════════════════════════════════════════════════════════════
