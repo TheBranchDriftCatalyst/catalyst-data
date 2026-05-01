@@ -1,15 +1,17 @@
-"""Gold: Speaker-aware text chunking for embedding + extraction.
+"""Gold: Multi-speaker windowed chunking + semantic refinement.
 
-Thin Dagster asset wrapping ``ChunkingResource.chunk_speaker_segments`` (in
-``dagster_io.chunking``). The chunking strategy itself lives in the resource
-so the Dagster UI launchpad ``chunk_size`` setting controls audio chunking
-the same way it controls text chunking, and so future strategy variants (VAD
-windows, sentence-boundary, etc.) can be added as resource methods without
-touching this asset.
+Thin Dagster asset wrapping ``ChunkingResource.chunk_with_semantic_refinement``
+in ``dagster_io.chunking``. The chunker:
 
-See CHUNKING.md and ``dagster_io.chunking.ChunkingResource.chunk_speaker_segments``
-for the three-tier strategy details (speaker_turn → speech_pause_split →
-text_split_fallback).
+1. Groups consecutive speaker turns into ~chunk_size windows with inline
+   ``[SPEAKER_X]`` tags so the LLM sees who said what.
+2. Embeds each window via ``EmbeddingResource``.
+3. Merges adjacent windows whose cosine similarity is above the 75th-percentile
+   threshold (collapses topically-continuous neighbors into longer windows).
+
+Production AND benchmark use this same entry point so chunking is in lockstep
+across both. See CHUNKING.md for tuning. When ``EmbeddingResource`` isn't
+available (e.g. unit-test envs), refinement is skipped automatically.
 """
 
 from collections import Counter
@@ -17,7 +19,7 @@ from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
 
-from dagster_io import ChunkingResource, TextChunk
+from dagster_io import ChunkingResource, EmbeddingResource, TextChunk
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -29,7 +31,7 @@ tracer = get_tracer(__name__)
 CHUNKS_K8S_CONFIG = {
     "dagster-k8s/config": {
         "container_config": {
-            "resources": {"requests": {"cpu": "250m", "memory": "512Mi"}, "limits": {"cpu": "1", "memory": "2Gi"}}
+            "resources": {"requests": {"cpu": "250m", "memory": "1Gi"}, "limits": {"cpu": "1", "memory": "2Gi"}}
         }
     }
 }
@@ -37,7 +39,7 @@ CHUNKS_K8S_CONFIG = {
 
 @asset(
     group_name="media_ingest",
-    description="Speaker-aware chunking — preserves turn boundaries, splits monologues at speech pauses.",
+    description="Multi-speaker windowed chunking with semantic refinement (merges topically-continuous neighbors).",
     compute_kind="python",
     metadata={"layer": "gold"},
     partitions_def=media_partitions,
@@ -46,11 +48,14 @@ CHUNKS_K8S_CONFIG = {
 def media_chunks(
     context: AssetExecutionContext,
     chunking: ChunkingResource,
+    embedding: EmbeddingResource,
     media_segment_merge: dict[str, Any],
 ) -> Output[list[TextChunk]]:
     partition_key = context.partition_key
     with trace_operation(
-        "media_chunks", tracer, {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key}
+        "media_chunks",
+        tracer,
+        {"code_location": "media_ingest", "layer": "gold", "partition_key": partition_key},
     ):
         t = media_segment_merge
         segments = t.get("segments", [])
@@ -64,10 +69,14 @@ def media_chunks(
                 return Output([], metadata={"document_id": doc_id, "chunk_count": 0, "skipped": True})
             chunks = chunking.chunk_document(doc_id, title, text, chunk_overlap=0)
         else:
-            chunks = chunking.chunk_speaker_segments(
+            # Hybrid: multi-speaker windowing + semantic refinement. Same code
+            # path the benchmark fixtures regenerate against, so prod and
+            # benchmark drift is structurally impossible.
+            chunks = chunking.chunk_with_semantic_refinement(
                 segments,
-                doc_id,
-                title,
+                document_id=doc_id,
+                title=title,
+                embedder=embedding,  # has .embed(texts) -> list[list[float]]
                 metadata={
                     "source": "media_ingest",
                     "language": t.get("language", "unknown"),

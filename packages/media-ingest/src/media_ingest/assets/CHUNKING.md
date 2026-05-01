@@ -104,6 +104,53 @@ Then `media_chunks` picks one:
 chunks = chunking.chunk_vad_windows(segments, doc_id, title, ...)
 ```
 
+## Multi-video benchmark fixtures
+
+When iterating chunker config (`max_chars`, `pause_threshold_s`,
+`fallback_chunk_size`) against the multi-video benchmark workflow, regenerate
+per-video chunk fixtures from cached audio:
+
+```bash
+task bench:chunks:regen
+```
+
+This calls `scripts/regen_benchmark_chunks.py`, which iterates
+`tests/fixtures/media-ingest/audio_manifest.yaml`, runs
+`ChunkingResource.chunk_speaker_segments` against each video's cached
+diarization, and writes:
+
+- `tests/fixtures/media-ingest/per_video_chunks/<doc_id>/benchmark_chunks.json` —
+  per-video source of truth.
+- `tests/fixtures/media-ingest/benchmark_chunks.json` — merged file consumed
+  by `BenchmarkStore.load_benchmark_chunks()`.
+
+The chunker is millisecond-fast per video, so regen is cheap. The slow audio
+stages (transcription + diarization) are not touched — `bench:chunks:regen`
+reads cached `pipeline-cache/<doc_id>/1_diarization.json` for each video.
+
+**Caveat**: `regen_benchmark_chunks.py --max-chunks-per-video N` truncates
+each video's chunks to the first N. This is a placeholder curation strategy
+that biases toward video intros and is **discouraged** for evaluation runs.
+Proper curation (semantic sampling, domain-stratified selection) is part of
+the deferred work tracked under beads tasks **CD-uu76** (embedding-derived
+chunking POC) and **CD-6ef7** (per-domain chunking strategies via LangChain
+splitters).
+
+## Future work
+
+- **CD-uu76** — Embedding-derived chunking POC. Histogram adjacent-chunk
+  cosine similarity on existing cached chunks; if signal is present, add
+  `chunking.refine_with_semantic(chunks, embedder, ...)` as an opt-in
+  post-pass refinement layer (not a replacement for `chunk_speaker_segments`,
+  since speaker provenance is load-bearing for downstream extraction).
+- **CD-6ef7** — Per-domain chunking strategies via LangChain splitters. Adds
+  `chunk_markdown_headers` (for congress bills), `chunk_semantic` (for leak
+  cables), and `chunk_by_tokens` (tiktoken-based token-budget) as sibling
+  methods on `ChunkingResource`. Includes the per-subtype chunks asset
+  factory pattern: `congress_bill_chunks`, `congress_member_chunks`, etc.
+  with thin downstream collector instead of one mega-asset with a `by_type`
+  dict config.
+
 ## Testing
 
 - **Unit**: `pytest packages/media-ingest/tests/test_speaker_chunks.py` — 12 cases

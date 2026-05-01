@@ -382,6 +382,335 @@ class ChunkingResource(ConfigurableResource):
 
         return chunks
 
+    def chunk_multi_speaker_segments(
+        self,
+        segments: list[dict],
+        document_id: str,
+        title: str,
+        metadata: dict | None = None,
+        target_chars: int | None = None,
+        pause_threshold_s: float = 1.0,
+        fallback_chunk_size: int | None = None,
+        inline_speaker_tags: bool = True,
+    ) -> list[TextChunk]:
+        """Group consecutive speaker turns into multi-speaker windows of ~target_chars.
+
+        Unlike ``chunk_speaker_segments`` (one chunk per speaker turn), this
+        method packs N consecutive turns into one chunk until the target size
+        is hit, then starts a new chunk. Inline speaker tags (``[SPEAKER_X] ``)
+        preserve who-said-what for the LLM.
+
+        Why: single-turn chunks (80–200 chars) starve the LLM of conversational
+        context; coreference and SPO extraction both fail when each chunk is
+        one disembodied utterance. Multi-speaker windowing keeps the natural
+        conversation flow + gives the LLM enough surrounding context to do
+        cross-turn entity resolution.
+
+        When a *single* speaker turn exceeds target_chars, the method falls
+        back to the speech-pause split logic from ``chunk_speaker_segments``
+        for that one turn (so a 5-minute monologue gets broken into pause-
+        aligned sub-chunks while still emitted as separate chunks).
+
+        Args:
+            segments: dicts with ``{text, start, end, words[], speaker}`` —
+                same input shape as ``chunk_speaker_segments``.
+            target_chars: target window size; defaults to ``self.chunk_size``.
+            pause_threshold_s: word-gap threshold for splitting oversize single
+                turns (forwarded to the single-turn fallback).
+            fallback_chunk_size: tier-3 splitter size; defaults to
+                ``target_chars // 2``.
+            inline_speaker_tags: when True, prefix each turn's text with
+                ``[SPEAKER_X] `` so the LLM sees who said what. Set False if
+                you want bare concatenated text (e.g. for embedding-only flows).
+
+        Output ``TextChunk`` metadata adds: ``speakers`` (list of all speakers
+        in this chunk), ``primary_speaker`` (most-spoken-by-char-count),
+        ``start_s``/``end_s`` (first turn start, last turn end), ``turn_count``,
+        ``strategy`` ∈ {``multi_speaker_window``, ``multi_speaker_split``,
+        ``text_split_fallback``}.
+        """
+        limit = target_chars if target_chars is not None else self.chunk_size
+        fallback = fallback_chunk_size or (limit // 2) or 800
+        base_meta = {**(metadata or {})}
+
+        # Pre-format each turn's text (with inline speaker tag) so the buffer
+        # accounting matches what the chunk will actually contain.
+        def _format_turn(seg: dict) -> str:
+            text = (seg.get("text") or "").strip()
+            if not text:
+                return ""
+            if inline_speaker_tags:
+                speaker = seg.get("speaker") or "UNKNOWN"
+                return f"[{speaker}] {text}"
+            return text
+
+        chunks: list[TextChunk] = []
+
+        def _emit(buffer_turns: list[dict], strategy: str = "multi_speaker_window") -> None:
+            """Emit one chunk from the accumulated turns and reset the buffer."""
+            if not buffer_turns:
+                return
+            text_parts = [_format_turn(t) for t in buffer_turns if (t.get("text") or "").strip()]
+            if not text_parts:
+                return
+            chunk_text = "\n".join(text_parts)
+            full_text = f"{title}\n\n{chunk_text}" if (self.prepend_title and title) else chunk_text
+
+            speakers_in_chunk = sorted({t.get("speaker") or "UNKNOWN" for t in buffer_turns})
+            speaker_chars: dict[str, int] = {}
+            for t in buffer_turns:
+                spk = t.get("speaker") or "UNKNOWN"
+                speaker_chars[spk] = speaker_chars.get(spk, 0) + len((t.get("text") or "").strip())
+            primary_speaker = max(speaker_chars, key=speaker_chars.get) if speaker_chars else "UNKNOWN"
+
+            chunks.append(
+                TextChunk(
+                    chunk_id=f"{document_id}:chunk-{len(chunks)}",
+                    document_id=document_id,
+                    text=full_text,
+                    index=len(chunks),
+                    total_chunks=0,  # backfilled below
+                    metadata={
+                        **base_meta,
+                        "speakers": speakers_in_chunk,
+                        "primary_speaker": primary_speaker,
+                        "speaker": primary_speaker,  # back-compat key for callers
+                        "turn_count": len(buffer_turns),
+                        "start_s": buffer_turns[0].get("start", 0),
+                        "end_s": buffer_turns[-1].get("end", 0),
+                        "strategy": strategy,
+                    },
+                )
+            )
+
+        buffer: list[dict] = []
+        buffer_chars = 0
+
+        for seg in segments:
+            text = (seg.get("text") or "").strip()
+            if not text:
+                continue
+
+            formatted = _format_turn(seg)
+            seg_chars = len(formatted)
+
+            # Single oversize turn — emit current buffer, then split this one
+            # turn via speech-pause logic (preserve precise timestamps).
+            if seg_chars > limit:
+                _emit(buffer)
+                buffer, buffer_chars = [], 0
+
+                # Reuse single-speaker split logic for this oversize turn.
+                # Build a one-segment chunks list, then re-tag the strategy.
+                solo = self.chunk_speaker_segments(
+                    [seg],
+                    document_id=document_id,
+                    title="",  # title already prepended at the multi-speaker level
+                    metadata=base_meta,
+                    max_chars=limit,
+                    pause_threshold_s=pause_threshold_s,
+                    fallback_chunk_size=fallback,
+                )
+                # Splice these in as multi_speaker_split chunks — preserve their
+                # speaker_turn / speech_pause_split / text_split_fallback strategy
+                # tags but mark them as part of the multi-speaker run.
+                for s in solo:
+                    s.chunk_id = f"{document_id}:chunk-{len(chunks)}"
+                    s.index = len(chunks)
+                    s.metadata = {
+                        **base_meta,
+                        **(s.metadata or {}),
+                        "speakers": [s.metadata.get("speaker", "UNKNOWN")],
+                        "primary_speaker": s.metadata.get("speaker", "UNKNOWN"),
+                        "turn_count": 1,
+                        "strategy": "multi_speaker_split",
+                    }
+                    chunks.append(s)
+                continue
+
+            # If adding this turn would push the buffer past the limit, flush first
+            if buffer and buffer_chars + 1 + seg_chars > limit:
+                _emit(buffer)
+                buffer, buffer_chars = [], 0
+
+            buffer.append(seg)
+            buffer_chars += (1 if buffer_chars else 0) + seg_chars  # +1 for the joining newline
+
+        if buffer:
+            _emit(buffer)
+
+        # Backfill total_chunks + recompute content_hash on final text
+        for c in chunks:
+            c.total_chunks = len(chunks)
+            c.content_hash = hashlib.sha256(c.text.encode()).hexdigest()
+
+        if chunks:
+            for strat, count in Counter(c.metadata.get("strategy") for c in chunks).items():
+                CHUNKS_CREATED.labels(strategy=str(strat)).inc(count)
+
+        return chunks
+
+    def refine_with_semantic(
+        self,
+        chunks: list[TextChunk],
+        embedder,
+        merge_threshold: float | None = None,
+        max_chars_after_merge: int | None = None,
+    ) -> list[TextChunk]:
+        """Post-pass refinement: merge adjacent chunks with high semantic similarity.
+
+        Use after ``chunk_multi_speaker_segments`` to collapse consecutive
+        chunks that talk about the same topic — gives the LLM longer
+        topically-coherent windows where the topic actually persists.
+
+        Algorithm:
+          1. Embed every chunk's text via ``embedder.embed(texts)``.
+          2. Compute cosine similarity between each adjacent pair.
+          3. If ``merge_threshold`` is not provided, derive it from the 75th
+             percentile of pairwise similarities (the top-quartile of
+             "this-flows-into-the-next" candidates).
+          4. Walk pairs in order; when sim(i, i+1) >= threshold AND the
+             merged size stays under ``max_chars_after_merge``, fuse them.
+
+        We do NOT split low-similarity chunks here — splitting requires
+        sub-chunk re-segmentation which is complex. Merging is the easier,
+        higher-leverage win for conversational content.
+
+        Args:
+            chunks: output of ``chunk_multi_speaker_segments``.
+            embedder: anything with ``embed(texts: list[str]) -> list[list[float]]``
+                — e.g. ``EmbeddingResource.embed`` (bound method).
+            merge_threshold: cosine similarity above which adjacent chunks
+                merge. Default: 75th percentile of pairwise similarities.
+            max_chars_after_merge: don't merge if the result would exceed this;
+                default = ``2 * self.chunk_size`` (twice the windowing target).
+        """
+        if len(chunks) < 2:
+            return chunks
+
+        ceiling = max_chars_after_merge if max_chars_after_merge is not None else (self.chunk_size * 2)
+        texts = [c.text for c in chunks]
+        try:
+            vectors = embedder.embed(texts) if hasattr(embedder, "embed") else embedder(texts)
+        except Exception as e:
+            logger.warning("refine_with_semantic: embedding failed (%s); returning chunks unchanged", e)
+            return chunks
+
+        # Pairwise cosine similarities for adjacent chunks
+        def _cosine(a: list[float], b: list[float]) -> float:
+            num = sum(x * y for x, y in zip(a, b, strict=False))
+            da = sum(x * x for x in a) ** 0.5
+            db = sum(x * x for x in b) ** 0.5
+            return num / (da * db) if da and db else 0.0
+
+        sims = [_cosine(vectors[i], vectors[i + 1]) for i in range(len(vectors) - 1)]
+
+        if merge_threshold is None:
+            sorted_sims = sorted(sims)
+            # 75th percentile — top quartile of "topically continuous"
+            idx = int(len(sorted_sims) * 0.75)
+            merge_threshold = sorted_sims[min(idx, len(sorted_sims) - 1)]
+
+        merged: list[TextChunk] = []
+        i = 0
+        merged_count = 0
+        while i < len(chunks):
+            current = chunks[i]
+            # Greedy forward-merge as long as the next chunk is similar AND fits
+            j = i
+            while j + 1 < len(chunks) and sims[j] >= merge_threshold:
+                next_chunk = chunks[j + 1]
+                proposed_text = current.text + "\n" + next_chunk.text
+                if len(proposed_text) > ceiling:
+                    break
+                # Merge metadata
+                cur_speakers = set(current.metadata.get("speakers", []) or [current.metadata.get("speaker", "")])
+                next_speakers = set(next_chunk.metadata.get("speakers", []) or [next_chunk.metadata.get("speaker", "")])
+                combined_speakers = sorted(s for s in (cur_speakers | next_speakers) if s)
+                speaker_chars = {s: 0 for s in combined_speakers}
+                # Approximate primary speaker by total char weight from both chunks
+                cur_primary = current.metadata.get("primary_speaker", "")
+                next_primary = next_chunk.metadata.get("primary_speaker", "")
+                speaker_chars[cur_primary] = speaker_chars.get(cur_primary, 0) + len(current.text)
+                speaker_chars[next_primary] = speaker_chars.get(next_primary, 0) + len(next_chunk.text)
+                primary = max(speaker_chars, key=speaker_chars.get) if speaker_chars else cur_primary
+
+                current = TextChunk(
+                    chunk_id=current.chunk_id,
+                    document_id=current.document_id,
+                    text=proposed_text,
+                    index=current.index,
+                    total_chunks=current.total_chunks,
+                    metadata={
+                        **current.metadata,
+                        "speakers": combined_speakers,
+                        "primary_speaker": primary,
+                        "speaker": primary,
+                        "turn_count": (current.metadata.get("turn_count", 0) or 0)
+                        + (next_chunk.metadata.get("turn_count", 0) or 0),
+                        "end_s": next_chunk.metadata.get("end_s", current.metadata.get("end_s", 0)),
+                        "strategy": "semantic_merge",
+                        "merged_from": (current.metadata.get("merged_from", 0) or 0) + 1,
+                    },
+                )
+                merged_count += 1
+                j += 1
+            merged.append(current)
+            i = j + 1
+
+        # Re-index + rehash post-merge
+        for k, c in enumerate(merged):
+            c.chunk_id = f"{c.document_id}:chunk-{k}"
+            c.index = k
+            c.total_chunks = len(merged)
+            c.content_hash = hashlib.sha256(c.text.encode()).hexdigest()
+
+        logger.info(
+            "refine_with_semantic: %d chunks → %d after %d merges (threshold=%.3f)",
+            len(chunks),
+            len(merged),
+            merged_count,
+            merge_threshold,
+        )
+        return merged
+
+    def chunk_with_semantic_refinement(
+        self,
+        segments: list[dict],
+        document_id: str,
+        title: str,
+        embedder=None,
+        metadata: dict | None = None,
+        target_chars: int | None = None,
+        pause_threshold_s: float = 1.0,
+        fallback_chunk_size: int | None = None,
+        inline_speaker_tags: bool = True,
+        merge_threshold: float | None = None,
+    ) -> list[TextChunk]:
+        """One-shot hybrid: multi-speaker windowing + semantic refinement.
+
+        Used by both production ``media_chunks`` asset and the benchmark
+        regen script so prod and benchmark are always in lockstep on
+        chunking strategy.
+
+        When ``embedder`` is None, falls back to plain multi-speaker
+        windowing (no refinement) — useful for unit tests / environments
+        without an embedder configured.
+        """
+        chunks = self.chunk_multi_speaker_segments(
+            segments,
+            document_id=document_id,
+            title=title,
+            metadata=metadata,
+            target_chars=target_chars,
+            pause_threshold_s=pause_threshold_s,
+            fallback_chunk_size=fallback_chunk_size,
+            inline_speaker_tags=inline_speaker_tags,
+        )
+        if embedder is None or len(chunks) < 2:
+            return chunks
+        return self.refine_with_semantic(chunks, embedder, merge_threshold=merge_threshold)
+
     def passthrough(
         self,
         document_id: str,
