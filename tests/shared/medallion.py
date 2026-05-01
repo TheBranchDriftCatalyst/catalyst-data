@@ -50,30 +50,85 @@ def load_chunks(
             for partitioned and unpartitioned outputs.
         sample_per_domain: Cap rows per domain (path-based, not metadata-based,
             so it's robust when a domain's chunks lack a ``metadata.domain`` tag).
-            Useful for benchmark extraction — open-leaks materializes 3.6M+
-            chunks so a full extraction pass is intractable. Default ``None``
-            (no cap). The harness defaults to a small per-domain cap so a
-            cross-domain run completes in reasonable time.
+            When set, the cap is **distributed across partition files** within a
+            domain via round-robin — a domain with 7 partition files and cap=70
+            yields ~10 chunks per file rather than the first 70 chunks of file 1.
+            Critical for benchmarks that span domain variability — open-leaks's
+            3.6M chunks across one file or media-ingest's 1052 chunks across 7
+            videos otherwise sample lopsidedly. Default ``None`` (no cap).
 
     Returns ``[]`` if nothing has been materialized yet.
     """
-    per_domain_count: dict[str, int] = {}
-    merged: list[dict] = []
-
+    # Group jsonl files by domain so we can distribute the cap evenly across files.
+    files_by_domain: dict[str, list[Path]] = {}
     for pattern in _PATTERNS:
         for jsonl in _OUT_ROOT.glob(pattern):
             domain = _domain_of(jsonl)
-            if sample_per_domain is not None and per_domain_count.get(domain, 0) >= sample_per_domain:
-                continue
-            with open(jsonl) as f:
-                for line in f:
-                    if not line.strip():
-                        continue
-                    row = json.loads(line)
-                    if doc_ids and row.get("document_id") not in doc_ids:
-                        continue
-                    merged.append(row)
-                    per_domain_count[domain] = per_domain_count.get(domain, 0) + 1
-                    if sample_per_domain is not None and per_domain_count[domain] >= sample_per_domain:
-                        break
+            files_by_domain.setdefault(domain, []).append(jsonl)
+
+    merged: list[dict] = []
+    for _domain, files in files_by_domain.items():
+        if sample_per_domain is None:
+            # No cap — read everything, in stable file order
+            for jsonl in sorted(files):
+                merged.extend(_read_jsonl(jsonl, doc_ids))
+            continue
+
+        # Round-robin: pull from each file iteratively until the per-domain cap is met.
+        # Each file gets ~ceil(cap / num_files) rows; if a small file runs out early
+        # the remaining cap rolls over to the others.
+        files_sorted = sorted(files)
+        per_file_quota = max(1, -(-sample_per_domain // len(files_sorted)))  # ceil-div
+        per_domain_count = 0
+        # Per-file iterators so we can pull lazily
+        iters = [_iter_jsonl(jsonl, doc_ids) for jsonl in files_sorted]
+        active = list(range(len(iters)))
+        per_file_taken = [0] * len(iters)
+
+        while active and per_domain_count < sample_per_domain:
+            next_active = []
+            for i in active:
+                if per_domain_count >= sample_per_domain:
+                    break
+                if per_file_taken[i] >= per_file_quota:
+                    next_active.append(i)
+                    continue
+                try:
+                    merged.append(next(iters[i]))
+                    per_file_taken[i] += 1
+                    per_domain_count += 1
+                    next_active.append(i)
+                except StopIteration:
+                    pass  # this file is exhausted; drop from active
+            # If we ran a full pass and every file hit its quota, raise the quota
+            # (round-robin spillover) so we still hit the cap when one file is small.
+            if all(per_file_taken[i] >= per_file_quota for i in next_active):
+                per_file_quota += 1
+            active = next_active
+
     return merged
+
+
+def _read_jsonl(path: Path, doc_ids: list[str] | None) -> list[dict]:
+    rows: list[dict] = []
+    with open(path) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if doc_ids and row.get("document_id") not in doc_ids:
+                continue
+            rows.append(row)
+    return rows
+
+
+def _iter_jsonl(path: Path, doc_ids: list[str] | None):
+    """Yield chunk dicts one at a time; respects doc_ids filter."""
+    with open(path) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if doc_ids and row.get("document_id") not in doc_ids:
+                continue
+            yield row
