@@ -7,7 +7,7 @@ Dagster data platform for the catalyst homelab. Three code locations processing 
 | Location | Assets | Status |
 |----------|--------|--------|
 | **congress-data** | 8 (bills, members, committees + transforms) | Stages 1-2 working, 3-6 stubbed |
-| **media-ingest** | 5 (discovery, metadata, documents, transcription, embeddings) | Stages 1-3 working, 4-5 stubbed |
+| **media-ingest** | 11 (discovery → transcode → transcription → diarization → segment-merge → chunks → mentions/assertions/embeddings → speakers → entity candidates) | End-to-end working; multi-video benchmark wired (per-video GT/scoring deferred — see CD-vfiq) |
 | **open-leaks** | 9 (WikiLeaks, ICIJ, Epstein + transforms) | Stage 1 working, 2-6 stubbed |
 
 ## Quick Start
@@ -55,6 +55,29 @@ See **[TESTING.md](TESTING.md)** for the full testing guide, including:
 - Unit tests per code location
 - Integration pipeline tests (media-ingest, congress-data)
 - Extraction benchmark framework (multi-model comparison)
+- Multi-video workflow (`audio_manifest.yaml` + per-doc-id pipeline cache)
+
+## Quick start: benchmark workflow
+
+```bash
+# One-time: compress raw fixture videos to keep the working tree small
+python scripts/compress_fixtures.py tests/fixtures/media-ingest/
+
+# Pre-warm the per-doc-id audio cache for every manifest video
+HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
+
+# Rebuild per-video benchmark_chunks from cached audio
+task bench:chunks:regen
+
+# Run the benchmark — single-video flow (default) or multi-video flow
+task bench                         # single-video, all models, ensemble GT, F1 report
+task bench -- --all-videos --models gliner-medium  # multi-video extraction (per doc_id)
+
+# View results
+task bench:view                    # SPA at http://localhost:5173/viewer/benchmarks
+```
+
+See **[BENCHMARK.md](BENCHMARK.md)** for the complete benchmark reference.
 
 ## CI/CD
 

@@ -331,4 +331,52 @@ The harness supports an interactive mode (run with no flags) that presents a men
 
 ---
 
+## 2026-04 update — what changed since the original post
+
+The framework above describes the original 7-chunk / 3-domain / 12-model run. A
+few infrastructure pieces have been added since:
+
+**Two-stage pipeline cache.** `0_transcription.json` and `1_diarization.json` are
+the only files that get cached now. The original layout cached
+`segment_merge.json` and `chunks.json` too, but those are millisecond-fast
+pure-Python passes that read cached transcription+diarization on every
+invocation. Caching them was disk noise. Now iterating on chunker config
+(`MAX_CHUNK_CHARS`, pause threshold, prepend_title) doesn't require
+regenerating any audio work — the slow stages stay frozen, the fast stages
+run live. Layout lives at `pipeline-cache/<doc_id>/{0,1}_*.json` and the
+stage-prefix means an `ls` reflects execution order.
+
+**mlx-whisper backend on Apple Silicon.** The original post used
+`faster-whisper` on CPU. A third backend now sits next to faster-whisper and
+openvino: `mlx-whisper` runs Whisper on Metal via Apple's MLX framework. On
+an M-series machine `WHISPER_BACKEND=mlx-whisper MLX_MODEL_ID=mlx-community/whisper-base-mlx`
+transcribes ~60-100x realtime on Metal. Crucially, the production Dagster
+asset (`media_transcriptions`) and the integration test fixture both call
+the same `_select_backend(MediaIngestConfig)` dispatcher — the test on a
+laptop exercises the same code path that would deploy on `mac-node`. Zero
+dev/prod deviation; backend choice is a config field, not a code branch.
+
+**Speaker-aware chunker moved to `ChunkingResource`.** Originally the
+speaker-segment chunker lived in `media_ingest.assets.chunks` as a 261-line
+asset with a hard-coded `MAX_CHUNK_CHARS=1500` constant. It now lives on
+`ChunkingResource.chunk_speaker_segments(...)` in
+`libs/dagster-io/src/dagster_io/chunking.py` alongside `chunk_document`. The
+asset is a 90-line wrapper. The practical effect: `max_chars` now defaults to
+`self.chunk_size`, which means the Dagster UI launchpad's `chunk_size`
+setting controls audio chunking the same way it controls text chunking.
+Future variants (`chunk_vad_windows`, `chunk_sentence_boundary`,
+`refine_with_semantic`) slot in as sibling methods without touching the
+asset signature. See `packages/media-ingest/src/media_ingest/assets/CHUNKING.md`
+for the strategy details.
+
+**Multi-video benchmarking.** The harness now supports `--all-videos`, which
+swaps the per-model subprocess from the single-video pytest path to
+`scripts/bench_extract_per_video.py`. That script iterates
+`tests/fixtures/media-ingest/audio_manifest.yaml` and produces per-doc-id
+extraction artifacts at `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json`.
+Per-(model, video) F1 scoring isn't built yet — see beads task **CD-vfiq**.
+Walkthrough lives in the sibling post `docs/blog/multi-video-benchmark/`.
+
+---
+
 *Built with LangGraph, Pydantic MCP validation, GLiNER, Ollama, React, and an unreasonable number of terminal hours watching progress bars.*

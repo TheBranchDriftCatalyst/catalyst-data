@@ -20,7 +20,12 @@ Single CLI entry point: `tests/benchmark_harness.py`
 ```bash
 task bench                    # full methodology (run + GT + score + report)
 task bench -- --local-only    # skip cloud models (no API key needed)
+task bench -- --all-videos    # extract across every video in audio_manifest.yaml (multi-video)
 task bench:view               # viewer SPA at http://localhost:5173/viewer/benchmarks
+
+# Fixture prep (run before `task bench` whenever new source videos are added):
+task bench:fixtures:regen     # populate per-doc-id pipeline-cache for every manifest video
+task bench:chunks:regen       # rebuild per-video benchmark_chunks fixtures from cached audio
 ```
 
 ## Architecture
@@ -299,6 +304,7 @@ URL: `http://localhost:5173/viewer/benchmarks`
 | `--timeout N` | Per-model timeout in seconds (default: 300) |
 | `--local-only` | Skip cloud models (no API key needed) |
 | `--exgraph` | Use exgraph v2 pipeline |
+| `--all-videos` | Run each model across every video in `audio_manifest.yaml` (multi-video; uses `scripts/bench_extract_per_video.py` instead of single-video pytest path) |
 | `--label NAME` | Label for this run (used in runs/ dir name) |
 | `--models LIST` | Run only specific models (comma-separated) |
 | `--ner-models LIST` | Override ensemble NER panel (comma-separated) |
@@ -315,10 +321,13 @@ URL: `http://localhost:5173/viewer/benchmarks`
 | `task bench:ground-truth` | Generate ensemble ground truth only |
 | `task bench:report` | Regenerate report with F1 scores |
 | `task bench:view` | Start benchmark viewer SPA |
+| `task bench:pipeline:warm` | Pre-warm single-video audio cache (visible Whisper + pyannote progress) |
+| `task bench:fixtures:regen` | Multi-video: populate `pipeline-cache/<doc_id>/` for every manifest video (requires `HF_TOKEN`) |
+| `task bench:chunks:regen` | Multi-video: rebuild per-video `benchmark_chunks` fixtures from cached audio |
 | `task bench:clean` | Standard: extractions + GT + runs + reports |
 | `task bench:clean:extractions` | Just extraction artifacts |
 | `task bench:clean:runs` | Just timestamped runs (keep pipeline cache) |
-| `task bench:clean:pipeline` | Pipeline cache (transcription, diarization) -- EXPENSIVE |
+| `task bench:clean:pipeline` | Pipeline cache (transcription, diarization) — EXPENSIVE |
 | `task bench:clean:all` | Nuclear: everything except true fixtures |
 
 ## Artifact Management
@@ -328,43 +337,60 @@ URL: `http://localhost:5173/viewer/benchmarks`
 ```
 tests/fixtures/
     media-ingest/
-        benchmark_chunks.json    # curated audio chunks (3 chunks)
+        audio_manifest.yaml          # 7 source videos -> stable doc_ids
+        demo_video.mp4               # default single-video fixture
+        <other source videos>.mp4    # gitignored when present (compressed via scripts/compress_fixtures.py)
+        benchmark_chunks.json        # merged curated chunks across all manifest videos
+        per_video_chunks/<doc_id>/
+            benchmark_chunks.json    # per-video curated chunk subset (source of truth)
     congress-data/
-        benchmark_chunks.json    # curated bill chunks (4 chunks)
+        benchmark_chunks.json        # curated bill chunks (4 chunks)
     open-leaks/
-        benchmark_chunks.json    # curated leak chunks (3 chunks)
-    benchmark_chunks.json        # legacy single-file fallback
-    demo_video.mp4               # source media for pipeline integration tests
-    model_cache/                 # local model weights cache
+        benchmark_chunks.json        # curated leak chunks (3 chunks)
+    benchmark_chunks.json            # legacy single-file fallback
+    model_cache/                     # local model weights cache
 ```
 
 `BenchmarkStore.load_benchmark_chunks()` merges chunks from all three
-per-domain dirs. Each domain can scale its fixture set independently.
+per-domain dirs. Each domain can scale its fixture set independently. For
+media-ingest, the merged file is rebuilt by `scripts/regen_benchmark_chunks.py`
+from the per-doc-id sources of truth in `per_video_chunks/`.
 
 ### Cached Artifacts (generated, gitignored, regenerable)
 
 ```
 .test-output/media-ingest/
-    pipeline-cache/              # slow audio-model outputs only
-        0_transcription.json     # Whisper output (slow, cached; stage prefix = order)
-        1_diarization.json       # pyannote output (slow, cached)
-                                 # segment_merge + chunking are fast — recomputed
-                                 # from cached transcription+diarization on every run.
-    ground-truth/                # ground truth versions
-        ensemble-12model.json    # named, versioned
-        active.json              # currently used for scoring
-    extractions/                 # cross-run cached LLM extractions
+    pipeline-cache/                  # slow audio-model outputs only
+        <doc_id>/                    # one subdir per video in audio_manifest.yaml
+            0_transcription.json     # Whisper output for this video (stage prefix = order)
+            1_diarization.json       # pyannote output for this video
+        # Flat 0_transcription.json + 1_diarization.json directly under
+        # pipeline-cache/ remain readable as the single-video fallback for
+        # `task bench:pipeline:warm` (doc_id=None path).
+    ground-truth/                    # ground truth versions
+        ensemble-12model.json        # named, versioned
+        active.json                  # currently used for scoring
+    extractions/                     # cross-run cached LLM extractions (single-video)
         extraction_<model>.json
-    runs/                        # timestamped benchmark runs
+    runs/                            # timestamped benchmark runs
         2026-04-29-exgraph-v2/
-            extractions/         # extraction_<model>.json per model
-            audit-logs/          # structured audit logs per model
+            extractions/             # single-video flow
+                extraction_<model>.json
+                <doc_id>/            # multi-video (--all-videos) per-doc-id files
+                    extraction_<model>.json
+            audit-logs/              # structured audit logs per model
             benchmark-report.json
             run-config.json
-        latest -> ...            # symlink to most recent run
-    benchmark-report.json        # top-level copy for viewer SPA
-    audit-logs/                  # top-level copy for viewer SPA
+        latest -> ...                # symlink to most recent run
+    benchmark-report.json            # top-level copy for viewer SPA
+    audit-logs/                      # top-level copy for viewer SPA
 ```
+
+`BenchmarkStore.{load,save}_pipeline_artifact(name, doc_id=...)` and
+`RunStore.{load,save,list}_extraction(model, doc_id=...)` accept an optional
+`doc_id` arg. With `doc_id=None` they hit the flat single-video paths;
+with a slug they read/write under the per-video subdir
+(`tests/shared/store.py:298-336`).
 
 The two-stage cache (transcription + diarization only) is intentional. Both
 are slow audio-model outputs (~5–60s each on Metal, minutes on CPU). The
@@ -407,8 +433,13 @@ stdout is captured. Run the prewarmup task first to see live progress and
 populate the cache:
 
 ```bash
-WHISPER_BACKEND=mlx-whisper task bench:pipeline:warm   # Apple Silicon
+WHISPER_BACKEND=mlx-whisper task bench:pipeline:warm   # Apple Silicon (single video)
 task bench:pipeline:warm                                # other platforms
+
+# Multi-video equivalent — populates pipeline-cache/<doc_id>/ for every video
+# in audio_manifest.yaml. Same backend dispatcher and prewarmup banners as the
+# single-video path, just iterated.
+HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
 ```
 
 The fixtures print a `[prewarmup] AUDIO PIPELINE — STAGE 1/2: TRANSCRIPTION`
@@ -416,7 +447,108 @@ banner, the resolved backend/device, and elapsed time per stage. After
 prewarmup, every model in `task bench` reuses the cached audio output and
 runs in seconds instead of minutes.
 
-Delete any file to force regeneration from that stage onward. Pipeline cache (Steps 1-4) is model-independent -- only extraction varies per model.
+Delete any file to force regeneration from that stage onward. Pipeline cache
+(Steps 1-4) is model-independent — only extraction varies per model.
+
+## Multi-Video Benchmarking
+
+The single-video path runs the harness against `tests/fixtures/media-ingest/demo_video.mp4`.
+The multi-video path (`--all-videos`) iterates every video in
+`tests/fixtures/media-ingest/audio_manifest.yaml`, runs the chunker +
+`extract_validated()` per video, and saves per-doc-id artifacts under the
+current run.
+
+### Manifest
+
+```yaml
+# tests/fixtures/media-ingest/audio_manifest.yaml
+videos:
+  - doc_id: demo-video
+    file: 'demo_video.mp4'
+    title: 'demo_video'
+  - doc_id: inside-the-aipac-pipeline
+    file: 'Inside The AIPAC Pipeline.mp4'
+    title: 'Inside The AIPAC Pipeline'
+  # ... 5 more
+```
+
+`doc_id` is a slugified stable identifier — drives the `pipeline-cache/<doc_id>/`
+and `extractions/<doc_id>/` subdirs. `file` is relative to the manifest
+parent directory.
+
+### Fixture Pipeline
+
+Three scripts power the multi-video flow. Run them in this order whenever
+new source videos are added:
+
+```bash
+# 1. Compress: shrink raw videos in-place via the production transcode
+#    dispatcher (videotoolbox-hevc on macOS, svt-av1 elsewhere).
+python scripts/compress_fixtures.py tests/fixtures/media-ingest/
+
+# 2. Audio cache: per-doc-id transcription + diarization.
+HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
+
+# 3. Chunk fixtures: rebuild per-video benchmark_chunks from cached audio.
+task bench:chunks:regen
+```
+
+Each script reads the manifest and writes outputs keyed by `doc_id`:
+
+| Script | Reads | Writes |
+|--------|-------|--------|
+| `compress_fixtures.py` | `*.mp4` source files | replaces `*.mp4` in place via `_transcode_video` |
+| `regen_audio_fixtures.py` | source `.mp4` + manifest | `pipeline-cache/<doc_id>/{0_transcription,1_diarization}.json` |
+| `regen_benchmark_chunks.py` | cached diarization | `per_video_chunks/<doc_id>/benchmark_chunks.json` + merged file |
+| `bench_extract_per_video.py` | per-doc-id chunks | `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json` |
+
+`bench_extract_per_video.py` is invoked as a subprocess by
+`benchmark_harness.py --all-videos` — it's not run directly. The harness
+sets `LLM_MODEL` / `LLM_BASE_URL` / `LLM_API_KEY` env vars per-model, the
+script iterates the manifest, and per-video stats stream back as
+predictable lines:
+
+```
+  [1/7] demo-video: 53 chunks → 47 mentions, 12 assertions in 4.3s
+```
+
+### Aggregate vs Per-Video Artifacts
+
+`bench_extract_per_video.py` writes two kinds of extraction artifact per
+model run:
+
+- **Per-doc-id** (source of truth): `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json`
+  contains the full mentions / assertions arrays for that video.
+- **Flat aggregate roll-up**: `runs/<run-id>/extractions/extraction_<model>.json`
+  contains per-video stats (chunk count, mention count, duration) and
+  `doc_ids[]` but with empty `mentions` / `assertions` arrays. The harness
+  loads this to print summary lines and to ensure `runs/<run-id>` has a
+  default extraction file the existing report code can find.
+
+### Curating Per-Video Chunks
+
+`regen_benchmark_chunks.py --max-chunks-per-video N` truncates each video's
+chunks to the first N. **This is a placeholder strategy and is discouraged
+for evaluation runs** — taking the first N chunks biases the benchmark
+toward intros/cold-opens rather than sampling a representative slice of
+each video. A proper curation strategy (semantic sampling, domain-stratified
+selection, manual review) is part of the deferred work tracked under
+**CD-6ef7** and **CD-uu76**. Until that lands, prefer running with no
+curation flag (default 0 = keep all chunks) and let the harness run wide.
+
+### Per-(model, video) GT and Scoring (Deferred)
+
+`--all-videos` produces extraction artifacts but does **not** yet produce
+per-video F1 scores. `_run_ensemble_gt`, `_score_latest`, and
+`build_report_json` operate on a single chunks/GT pair. Wiring per-video GT
+generation, per-pair scoring, and a viewer-SPA video selector is tracked
+under **CD-vfiq** (phases A-E). Today's `--all-videos` run is useful for:
+
+- Per-model wall-clock time across an actual workload distribution
+  (different episode lengths, speaker counts, content domains)
+- Sanity-checking extraction stability across different content
+- Producing the data substrate that CD-vfiq's scoring layer will consume
+  once built
 
 ## Configuration
 
