@@ -1,8 +1,8 @@
 """Integration tests against a real demo video.
 
-Each test runs ACTUAL pipeline code against tests/demo_video.mp4 and saves
-cached artifacts via BenchmarkStore for downstream tests to consume. Tests are
-ordered — transcription first, then diarization, then merge, etc.
+Each test runs ACTUAL pipeline code against tests/fixtures/media-ingest/demo_video.mp4
+and reuses the per-doc-id audio cache populated by ``task bench:fixtures:regen``.
+Tests are ordered — transcription first, then diarization, then merge, etc.
 
 Run with: pytest tests/test_pipeline_integration.py -v -s
 (use -s to see progress logs since transcription/diarization take time)
@@ -19,7 +19,8 @@ import pytest
 
 from tests.shared.store import BenchmarkStore
 
-DEMO_VIDEO = Path(__file__).parent / "demo_video.mp4"
+DEMO_DOC_ID = "demo-video"  # matches audio_manifest.yaml entry
+DEMO_VIDEO = Path(__file__).parent / "fixtures" / "media-ingest" / "demo_video.mp4"
 LOCAL_MODEL_CACHE = str(Path(__file__).parent / "fixtures" / "model_cache")
 
 pytestmark = pytest.mark.skipif(not DEMO_VIDEO.exists(), reason="demo_video.mp4 not found")
@@ -50,7 +51,9 @@ def transcription_result():
         WHISPER_COMPUTE_TYPE  — faster-whisper compute type ("int8", "float16", ...)
         MLX_MODEL_ID          — HF id for mlx-whisper (e.g. "mlx-community/whisper-large-v3-mlx")
     """
-    cached = _store.load_fixture("transcription")
+    # Try per-doc-id cache first (populated by `task bench:fixtures:regen`),
+    # then fall back to the flat single-video cache (legacy prewarmup path).
+    cached = _store.load_pipeline_artifact("transcription", doc_id=DEMO_DOC_ID) or _store.load_fixture("transcription")
     if cached:
         print(
             f"\n  [prewarmup] Transcription cache HIT "
@@ -138,7 +141,7 @@ def test_transcription_words_have_timestamps(transcription_result):
 @pytest.fixture(scope="session")
 def diarization_result(transcription_result):
     """Run our actual _run_diarization + _assign_speakers pipeline code."""
-    cached = _store.load_fixture("diarization")
+    cached = _store.load_pipeline_artifact("diarization", doc_id=DEMO_DOC_ID) or _store.load_fixture("diarization")
     if cached:
         print(
             f"\n  [prewarmup] Diarization cache HIT "
@@ -397,6 +400,7 @@ def extraction_result(chunks_result):
             "mention_retries": pipeline_stats.get("mention_retries", 0),
             "proposition_retries": pipeline_stats.get("proposition_retries", 0),
             "errors": pipeline_stats.get("errors", 0),
+            "llm_call_count": pipeline_stats.get("llm_call_count", 0),
             "pipeline": pipeline_stats.get("pipeline", {}),
             "audit_events": pipeline_stats.get("audit_events", []) if os.environ.get("SAVE_AUDIT_LOG") else [],
         },

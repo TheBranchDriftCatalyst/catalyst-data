@@ -11,6 +11,7 @@ interface Row {
   assertions: number;
   duration: number;
   tokensPerSec: number;
+  llmCalls: number;
   retries: number;
   errors: number;
 }
@@ -23,6 +24,9 @@ function toRows(models: ModelResult[]): Row[] {
     assertions: m.stats.assertion_count,
     duration: m.stats.duration_s,
     tokensPerSec: m.stats.tokens_per_sec,
+    // llm_call_count was added to extraction stats in the per-mention provenance
+    // refactor — older fixtures lack it; default to 0 for back-compat.
+    llmCalls: (m.stats as { llm_call_count?: number }).llm_call_count ?? 0,
     retries: m.stats.mention_retries + m.stats.proposition_retries,
     errors: m.stats.errors,
   }));
@@ -78,6 +82,12 @@ export function ModelStatsTable({
     { key: "assertions", label: "Assertions", tooltip: METRIC_TOOLTIPS.assertions },
     { key: "duration", label: "Time(s)", tooltip: METRIC_TOOLTIPS.duration },
     { key: "tokensPerSec", label: "Tok/s", tooltip: METRIC_TOOLTIPS.tokens_per_sec },
+    {
+      key: "llmCalls",
+      label: "LLM Calls",
+      tooltip:
+        "Total LLM API calls (NER + SPO + repair). Encoders show 0 — they bypass the LLM graph.",
+    },
     { key: "retries", label: "Retries", tooltip: METRIC_TOOLTIPS.retries },
     { key: "errors", label: "Errors", tooltip: METRIC_TOOLTIPS.errors },
   ];
@@ -138,6 +148,9 @@ export function ModelStatsTable({
                   <td className="py-1.5 px-2 text-center text-zinc-500 text-[11px]">
                     avg {avg(group, "tokensPerSec").toFixed(0)}
                   </td>
+                  <td className="py-1.5 px-2 text-center text-zinc-500 text-[11px]">
+                    Σ {sum(group, "llmCalls")}
+                  </td>
                   <AggCell value={sum(group, "retries")} label="Σ" warn />
                   <AggCell value={sum(group, "errors")} label="Σ" error />
                 </tr>
@@ -154,6 +167,7 @@ export function ModelStatsTable({
                       <td className="py-1.5 px-2 text-center text-zinc-300">
                         {r.tokensPerSec.toFixed(0)}
                       </td>
+                      <td className="py-1.5 px-2 text-center text-zinc-300">{r.llmCalls}</td>
                       <td
                         className={`py-1.5 px-2 text-center ${r.retries > 0 ? "text-amber-400" : "text-zinc-300"}`}
                       >

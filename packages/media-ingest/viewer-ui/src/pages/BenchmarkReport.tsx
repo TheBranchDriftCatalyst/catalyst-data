@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { BenchmarkReport as BenchmarkReportType } from "@/types/benchmark";
+import type { BenchmarkReport as BenchmarkReportType, EntityRow } from "@/types/benchmark";
 import {
   StatCard,
   PerformanceChart,
@@ -11,6 +11,7 @@ import type { GroupByDimension } from "@/components/benchmark/shared";
 import { ModelStatsTable } from "@/components/benchmark/ModelStatsTable";
 import { ScoresTable } from "@/components/benchmark/ScoresTable";
 import { EntityMatrix } from "@/components/benchmark/EntityMatrix";
+import { EntityJsonPanel } from "@/components/benchmark/EntityJsonPanel";
 import { PropositionMatrix } from "@/components/benchmark/PropositionMatrix";
 import { PipelineTable } from "@/components/benchmark/PipelineTable";
 import { AuditViewer } from "@/components/benchmark/AuditViewer";
@@ -239,12 +240,19 @@ export default function BenchmarkReport() {
   const [error, setError] = useState<string | null>(null);
   const [reportSource, setReportSource] = useState(REPORT_SOURCES[0]!.url);
   const [availableSources, setAvailableSources] = useState<ReportSource[]>([]);
-  const [activeTab, setActiveTab] = useState<
+  const [activeTab, _setActiveTab] = useState<
     "overview" | "scores" | "entities" | "propositions" | "pipeline" | "audit" | "ground-truth"
   >("overview");
+  // Wrapper that also clears the entity drawer when leaving the entities tab,
+  // so reopening the tab doesn't unexpectedly resurrect a stale selection.
+  const setActiveTab = (t: typeof activeTab) => {
+    if (t !== "entities") setSelectedEntity(null);
+    _setActiveTab(t);
+  };
   const [groupBy, setGroupBy] = useState<GroupByDimension>("type");
   const [hiddenModels, setHiddenModels] = useState<Set<string>>(new Set());
   const [selectedGT, setSelectedGT] = useState("active");
+  const [selectedEntity, setSelectedEntity] = useState<EntityRow | null>(null);
 
   // Probe which report sources exist
   useEffect(() => {
@@ -477,7 +485,16 @@ export default function BenchmarkReport() {
           )}
 
           {activeTab === "entities" && (
-            <EntityMatrix entities={report.entities} modelNames={report.model_names} />
+            <EntityMatrix
+              entities={report.entities}
+              modelNames={report.model_names}
+              onSelectEntity={setSelectedEntity}
+              selectedEntityKey={
+                selectedEntity
+                  ? `${selectedEntity.domain}::${selectedEntity.consensus_type}::${selectedEntity.text}`
+                  : null
+              }
+            />
           )}
 
           {activeTab === "propositions" && (
@@ -493,6 +510,10 @@ export default function BenchmarkReport() {
           )}
         </div>
       </div>
+      {/* Entity-detail side drawer — only relevant on the entities tab; clears when switching tabs */}
+      {activeTab === "entities" && (
+        <EntityJsonPanel entity={selectedEntity} onClose={() => setSelectedEntity(null)} />
+      )}
     </div>
   );
 }

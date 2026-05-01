@@ -100,13 +100,39 @@ def build_report_json(
             if not text:
                 continue
             if text not in entity_rows:
-                entity_rows[text] = {"text": text, "consensus_type": "", "domain": "", "models": {}}
+                entity_rows[text] = {
+                    "text": text,
+                    "consensus_type": "",
+                    "domain": "",
+                    "models": {},
+                    "mentions": [],  # per-occurrence provenance for the side-panel detail view
+                }
             entity_rows[text]["models"][r["model"]] = {
                 "type": m.get("mention_type", "?"),
                 "confidence": m.get("confidence", 0),
                 "span_start": m.get("span_start"),
                 "span_end": m.get("span_end"),
             }
+            # Preserve full per-mention provenance — one entry per source mention
+            # across (model, chunk). The aggregated `models` map drives the
+            # consensus matrix; `mentions` drives EntityJsonPanel's detail view.
+            prov = m.get("provenance") or {}
+            entity_rows[text]["mentions"].append(
+                {
+                    "model": r["model"],
+                    "type": m.get("mention_type", "?"),
+                    "chunk_id": m.get("chunk_id", ""),
+                    "document_id": m.get("document_id", "") or prov.get("source_document_id", ""),
+                    "span_start": m.get("span_start"),
+                    "span_end": m.get("span_end"),
+                    "confidence": m.get("confidence", 0),
+                    "context": m.get("context", ""),
+                    "temporal_start_ms": prov.get("temporal_start_ms"),
+                    "temporal_end_ms": prov.get("temporal_end_ms"),
+                    "speaker_label": prov.get("speaker_label"),
+                    "source_media_uri": prov.get("source_media_uri"),
+                }
+            )
             chunk_id = m.get("chunk_id", "")
             if chunk_id and not entity_rows[text]["domain"]:
                 entity_rows[text]["domain"] = chunk_domains.get(chunk_id, "unknown")

@@ -98,26 +98,47 @@ class RunStore:
 
     # ── Extractions (cached artifacts) ───────────────────────────────
 
-    def load_extraction(self, model: str) -> dict | None:
-        f = self.extractions_dir / f"extraction_{model}.json"
+    def _extractions_root(self, doc_id: str | None) -> Path:
+        """Resolve the extractions dir for a given doc_id (multi-video flow).
+
+        - ``doc_id=None`` → flat ``extractions/extraction_<model>.json`` (single-video back-compat)
+        - ``doc_id="<slug>"`` → ``extractions/<slug>/extraction_<model>.json`` (multi-video)
+        """
+        return self.extractions_dir / doc_id if doc_id else self.extractions_dir
+
+    def load_extraction(self, model: str, doc_id: str | None = None) -> dict | None:
+        f = self._extractions_root(doc_id) / f"extraction_{model}.json"
         return json.loads(f.read_text()) if f.exists() else None
 
-    def save_extraction(self, model: str, data: dict) -> Path:
-        self._ensure(self.extractions_dir)
-        p = self.extractions_dir / f"extraction_{model}.json"
+    def save_extraction(self, model: str, data: dict, doc_id: str | None = None) -> Path:
+        root = self._extractions_root(doc_id)
+        self._ensure(root)
+        p = root / f"extraction_{model}.json"
         p.write_text(json.dumps(data, indent=2, default=str))
         return p
 
-    def list_extractions(self) -> list[str]:
+    def list_extractions(self, doc_id: str | None = None) -> list[str]:
+        root = self._extractions_root(doc_id)
+        if not root.exists():
+            return []
+        return sorted(f.stem.replace("extraction_", "") for f in root.glob("extraction_*.json"))
+
+    def list_doc_ids(self) -> list[str]:
+        """List doc_ids that have at least one extraction in this run (multi-video runs only)."""
         if not self.extractions_dir.exists():
             return []
-        return sorted(f.stem.replace("extraction_", "") for f in self.extractions_dir.glob("extraction_*.json"))
+        return sorted(d.name for d in self.extractions_dir.iterdir() if d.is_dir())
 
     def clean_extractions(self) -> None:
-        """Remove all cached extraction artifacts in this run."""
-        if self.extractions_dir.exists():
-            for f in self.extractions_dir.glob("extraction_*.json"):
-                f.unlink()
+        """Remove all cached extraction artifacts in this run (flat + per-doc-id)."""
+        if not self.extractions_dir.exists():
+            return
+        for f in self.extractions_dir.glob("extraction_*.json"):
+            f.unlink()
+        for d in self.extractions_dir.iterdir():
+            if d.is_dir():
+                for f in d.glob("extraction_*.json"):
+                    f.unlink()
 
     # ── Audit Logs (cached artifacts) ────────────────────────────────
 
@@ -274,24 +295,43 @@ class BenchmarkStore:
             return json.loads(legacy.read_text())
         return None
 
-    def load_pipeline_artifact(self, name: str) -> dict | list | None:
+    def _pipeline_cache_root(self, doc_id: str | None) -> Path:
+        """Resolve the cache root for a stage artifact, with per-document subdirs.
+
+        - ``doc_id=None`` → flat ``pipeline-cache/`` (back-compat for the single-
+          video integration test fixture path).
+        - ``doc_id="<slug>"`` → ``pipeline-cache/<slug>/`` so the multi-video
+          regen flow doesn't collide artifacts across source files.
+        """
+        return self.pipeline_cache_dir / doc_id if doc_id else self.pipeline_cache_dir
+
+    def load_pipeline_artifact(self, name: str, doc_id: str | None = None) -> dict | list | None:
         """Load a pipeline stage artifact (transcription, diarization, etc.).
 
-        These are cached artifacts -- expensive to regenerate but not true fixtures.
+        Cached artifacts -- expensive to regenerate but not true fixtures.
+        Pass ``doc_id`` to read from the per-video subdir.
         """
-        for p in (
-            self.pipeline_cache_dir / _stage_filename(name),
-            self.pipeline_cache_dir / f"{name}.json",  # pre-stage-prefix layout
-            self._legacy_fixtures / f"{name}.json",
-        ):
+        cache_root = self._pipeline_cache_root(doc_id)
+        candidates = [
+            cache_root / _stage_filename(name),
+            cache_root / f"{name}.json",  # pre-stage-prefix layout
+        ]
+        # Legacy flat-fixtures fallback only applies to the no-doc-id (single-video) path
+        if doc_id is None:
+            candidates.append(self._legacy_fixtures / f"{name}.json")
+        for p in candidates:
             if p.exists():
                 return json.loads(p.read_text())
         return None
 
-    def save_pipeline_artifact(self, name: str, data) -> Path:
-        """Save a pipeline stage artifact (cached artifact)."""
-        self._ensure(self.pipeline_cache_dir)
-        p = self.pipeline_cache_dir / _stage_filename(name)
+    def save_pipeline_artifact(self, name: str, data, doc_id: str | None = None) -> Path:
+        """Save a pipeline stage artifact (cached artifact).
+
+        Pass ``doc_id`` to write to the per-video subdir.
+        """
+        cache_root = self._pipeline_cache_root(doc_id)
+        self._ensure(cache_root)
+        p = cache_root / _stage_filename(name)
         p.write_text(json.dumps(data, indent=2, default=str))
         return p
 
@@ -329,34 +369,44 @@ class BenchmarkStore:
     # ═════════════════════════════════════════════════════════════════
 
     def create_run(self, label: str | None = None) -> RunStore:
-        """Create a new timestamped run directory and update the 'latest' symlink."""
+        """Create a new timestamped run directory.
+
+        Run dir names are timestamp-prefixed (UTC ``YYYY-MM-DD-HHMMSS``) so
+        sorting alphabetically == sorting chronologically. ``load_run("latest")``
+        picks the alphabetically-largest run rather than reading a symlink.
+        """
         ts = datetime.now(UTC).strftime("%Y-%m-%d-%H%M%S")
         name = f"{ts}-{label}" if label else ts
         run_dir = self._ensure(self.runs_dir) / name
         run_dir.mkdir(parents=True, exist_ok=True)
+        # Best-effort: clear any leftover legacy `latest` symlink/dir from
+        # before this refactor so it doesn't confuse load_run logic below.
+        import contextlib as _contextlib
 
-        # Update 'latest' symlink
-        latest = self.runs_dir / "latest"
-        if latest.is_symlink() or latest.exists():
-            latest.unlink()
-        latest.symlink_to(run_dir.name)
-
+        legacy_latest = self.runs_dir / "latest"
+        if legacy_latest.is_symlink() or legacy_latest.exists():
+            with _contextlib.suppress(IsADirectoryError, OSError):
+                legacy_latest.unlink()
         return RunStore(run_dir)
 
     def load_run(self, name: str = "latest") -> RunStore | None:
-        """Load an existing run by name or 'latest'."""
+        """Load a run by name. ``name="latest"`` resolves to the most recent
+        timestamped run by lexical sort (timestamps sort chronologically)."""
+        if name == "latest":
+            runs = self.list_runs()
+            if not runs:
+                return None
+            return RunStore(self.runs_dir / runs[-1])
         run_dir = self.runs_dir / name
         if not run_dir.exists():
             return None
-        # Resolve symlink
-        if run_dir.is_symlink():
-            run_dir = run_dir.resolve()
         return RunStore(run_dir)
 
     def list_runs(self) -> list[str]:
-        """List available run names (excluding 'latest' symlink)."""
+        """List timestamped run names, ascending (oldest first)."""
         if not self.runs_dir.exists():
             return []
+        # Skip the legacy `latest` symlink/dir if it lingers from older runs.
         return sorted(
             d.name for d in self.runs_dir.iterdir() if d.is_dir() and d.name != "latest" and not d.is_symlink()
         )

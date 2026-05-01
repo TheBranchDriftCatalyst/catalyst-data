@@ -1,7 +1,6 @@
 import { useState, useMemo } from "react";
 import type { EntityRow } from "@/types/benchmark";
 import { DomainBadge, TypeBadge, METRIC_TOOLTIPS, MetricLabel } from "./shared";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@thebranchdriftcatalyst/catalyst-ui";
 
 const DOMAIN_ORDER: Record<string, number> = {
   media: 0,
@@ -20,9 +19,13 @@ interface GroupAgg {
 export function EntityMatrix({
   entities,
   modelNames,
+  onSelectEntity,
+  selectedEntityKey,
 }: {
   entities: EntityRow[];
   modelNames: string[];
+  onSelectEntity?: (entity: EntityRow) => void;
+  selectedEntityKey?: string | null;
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [sortCol, setSortCol] = useState<string | null>(null);
@@ -172,6 +175,8 @@ export function EntityMatrix({
                   modelNames={activeModels}
                   onToggle={() => toggleGroup(domain)}
                   sortedRows={isOpen ? sortedGroup(rows) : []}
+                  onSelectEntity={onSelectEntity}
+                  selectedEntityKey={selectedEntityKey}
                 />
               );
             })}
@@ -196,6 +201,8 @@ function GroupRows({
   modelNames,
   onToggle,
   sortedRows,
+  onSelectEntity,
+  selectedEntityKey,
 }: {
   domain: string;
   rows: EntityRow[];
@@ -204,6 +211,8 @@ function GroupRows({
   modelNames: string[];
   onToggle: () => void;
   sortedRows: EntityRow[];
+  onSelectEntity?: (entity: EntityRow) => void;
+  selectedEntityKey?: string | null;
 }) {
   return (
     <>
@@ -247,76 +256,55 @@ function GroupRows({
         })}
       </tr>
 
-      {/* Expanded entity rows */}
+      {/* Expanded entity rows.
+          Per-model breakdown is shown in the EntityJsonPanel side drawer
+          (click a row); we no longer render an on-hover tooltip here since
+          it duplicated the drawer content and fought the row's click
+          affordance. */}
       {isOpen &&
         sortedRows.map((entity) => {
-          const modelEntries = Object.entries(entity.models);
+          const entityKey = `${entity.domain}::${entity.consensus_type}::${entity.text}`;
+          const isSelected = selectedEntityKey === entityKey;
+          const isClickable = !!onSelectEntity;
           return (
-            <Tooltip key={entity.text}>
-              <TooltipTrigger asChild>
-                <tr className="border-b border-white/5 hover:bg-white/[0.02] cursor-default">
-                  <td />
-                  <td className="py-1.5 px-2 text-left">
-                    <span className="text-zinc-200 max-w-[200px] truncate block">
-                      {entity.text}
+            <tr
+              key={entity.text}
+              className={[
+                "border-b border-white/5 transition-colors",
+                isClickable
+                  ? "cursor-pointer hover:bg-cyan-500/5"
+                  : "cursor-default hover:bg-white/[0.02]",
+                isSelected ? "bg-cyan-500/10 outline outline-1 outline-cyan-500/40" : "",
+              ].join(" ")}
+              onClick={isClickable ? () => onSelectEntity?.(entity) : undefined}
+            >
+              <td />
+              <td className="py-1.5 px-2 text-left">
+                <span className="text-zinc-200 max-w-[200px] truncate block">{entity.text}</span>
+              </td>
+              <td className="py-1.5 px-1 text-center">
+                <TypeBadge type={entity.consensus_type} />
+              </td>
+              <td className="py-1.5 px-1 text-center text-zinc-400">{entity.model_count}</td>
+              {modelNames.map((name) => {
+                const info = entity.models[name];
+                if (!info) {
+                  return (
+                    <td key={name} className="py-1.5 px-1 text-center text-zinc-700">
+                      ·
+                    </td>
+                  );
+                }
+                const isConsensus = info.type === entity.consensus_type;
+                return (
+                  <td key={name} className="py-1.5 px-1 text-center">
+                    <span className={isConsensus ? "text-emerald-400" : "text-amber-400"}>
+                      {isConsensus ? "✓" : info.type.slice(0, 3)}
                     </span>
                   </td>
-                  <td className="py-1.5 px-1 text-center">
-                    <TypeBadge type={entity.consensus_type} />
-                  </td>
-                  <td className="py-1.5 px-1 text-center text-zinc-400">{entity.model_count}</td>
-                  {modelNames.map((name) => {
-                    const info = entity.models[name];
-                    if (!info) {
-                      return (
-                        <td key={name} className="py-1.5 px-1 text-center text-zinc-700">
-                          ·
-                        </td>
-                      );
-                    }
-                    const isConsensus = info.type === entity.consensus_type;
-                    return (
-                      <td key={name} className="py-1.5 px-1 text-center">
-                        <span className={isConsensus ? "text-emerald-400" : "text-amber-400"}>
-                          {isConsensus ? "✓" : info.type.slice(0, 3)}
-                        </span>
-                      </td>
-                    );
-                  })}
-                </tr>
-              </TooltipTrigger>
-              <TooltipContent
-                side="top"
-                sideOffset={8}
-                className="max-w-sm text-xs leading-relaxed p-0"
-              >
-                <div className="px-3 py-2 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <DomainBadge domain={entity.domain || "unknown"} />
-                    <TypeBadge type={entity.consensus_type} />
-                    <span className="text-zinc-400 text-[10px] font-mono">
-                      {entity.model_count}/{modelNames.length} models
-                    </span>
-                  </div>
-                  <div className="font-mono text-zinc-100">{entity.text}</div>
-                  <div className="border-t border-white/10 pt-1.5 space-y-1">
-                    <span className="text-[10px] text-zinc-500 uppercase">Per-model breakdown</span>
-                    {modelEntries.map(([name, info]) => (
-                      <div key={name} className="flex items-center gap-2 text-[11px] font-mono">
-                        <span className="text-zinc-400 min-w-[80px] truncate">{name}</span>
-                        <TypeBadge type={info.type} />
-                        <span className="text-zinc-300">{(info.confidence * 100).toFixed(0)}%</span>
-                        {info.span_start != null && (
-                          <span className="text-zinc-600">
-                            [{info.span_start}:{info.span_end}]
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </TooltipContent>
-            </Tooltip>
+                );
+              })}
+            </tr>
           );
         })}
     </>

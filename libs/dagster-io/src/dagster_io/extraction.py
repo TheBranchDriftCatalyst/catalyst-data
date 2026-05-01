@@ -297,10 +297,15 @@ def extract_validated(
                 _extract_chunk(graph, chunk.text, chunk.document_id, chunk.chunk_id, max_retries=_max_retries)
             )
             duration = time.monotonic() - start
-            # Attach chunk metadata to result so we can build provenance later
+            # Attach chunk metadata to result so we can build provenance later.
+            # Carry chunk.text + chunk.document_id explicitly so post-extraction
+            # context computation and document_id fallback work without a second
+            # join against the chunk list.
             chunk_meta = getattr(chunk, "metadata", {}) or {}
             result["_chunk_metadata"] = chunk_meta
             result["_chunk_id"] = getattr(chunk, "chunk_id", "")
+            result["_chunk_text"] = getattr(chunk, "text", "") or ""
+            result["_chunk_document_id"] = getattr(chunk, "document_id", "") or ""
             LLM_REQUEST_DURATION.labels(model=_llm_model, operation="validated_extraction").observe(duration)
             LLM_REQUESTS.labels(model=_llm_model, operation="validated_extraction", status="success").inc()
             return idx, result
@@ -319,13 +324,18 @@ def extract_validated(
             idx, result = future.result()  # raises on permanent failure
             chunk_meta = result.get("_chunk_metadata", {})
             chunk_id = result.get("_chunk_id", "")
+            chunk_text = result.get("_chunk_text", "")
+            chunk_doc_id = result.get("_chunk_document_id", "")
             # Tag each mention/assertion with its source chunk metadata
             for m in result["mentions"]:
                 m["_chunk_metadata"] = chunk_meta
                 m["_chunk_id"] = chunk_id
+                m["_chunk_text"] = chunk_text
+                m["_chunk_document_id"] = chunk_doc_id
             for a in result["propositions"]:
                 a["_chunk_metadata"] = chunk_meta
                 a["_chunk_id"] = chunk_id
+                a["_chunk_document_id"] = chunk_doc_id
             all_mentions.extend(result["mentions"])
             all_assertions.extend(result["propositions"])
             all_audit_events.extend(result.get("audit_events", []))
@@ -363,11 +373,25 @@ def extract_validated(
         # Build provenance — ALWAYS, not just for temporal/speaker data
         chunk_meta = m.pop("_chunk_metadata", {})
         chunk_id_from_meta = m.pop("_chunk_id", "")
-        doc_id = m.get("document_id", "")
+        chunk_text = m.pop("_chunk_text", "")
+        chunk_doc_id = m.pop("_chunk_document_id", "")
+        # Prefer the chunk's document_id (always present, set by chunker) over
+        # whatever the LLM may or may not have echoed back.
+        doc_id = chunk_doc_id or m.get("document_id", "")
         cid = chunk_id_from_meta or m.get("chunk_id", "")
         start_s = chunk_meta.get("start_s")
         end_s = chunk_meta.get("end_s")
         speaker = chunk_meta.get("speaker")
+        # Compute context window from chunk text + spans (LLM rarely returns it).
+        # Window = ±100 chars around the mention span; falls back to LLM-supplied
+        # context if present, then to empty string.
+        computed_context = ""
+        sp = m.get("span_start")
+        ep = m.get("span_end")
+        if chunk_text and sp is not None and ep is not None and 0 <= sp < ep <= len(chunk_text):
+            ctx_start = max(0, sp - 100)
+            ctx_end = min(len(chunk_text), ep + 100)
+            computed_context = chunk_text[ctx_start:ctx_end]
 
         prov = Provenance(
             source_document_id=doc_id,
@@ -391,7 +415,7 @@ def extract_validated(
                 span_start=m.get("span_start"),
                 span_end=m.get("span_end"),
                 confidence=m.get("confidence", 1.0),
-                context=m.get("context", ""),
+                context=m.get("context") or computed_context,
                 provenance=prov,
             )
         )
@@ -406,7 +430,8 @@ def extract_validated(
     for a in all_assertions:
         chunk_meta = a.pop("_chunk_metadata", {})
         chunk_id_from_meta = a.pop("_chunk_id", "")
-        a_doc_id = a.get("document_id", "")
+        a_chunk_doc_id = a.pop("_chunk_document_id", "")
+        a_doc_id = a_chunk_doc_id or a.get("document_id", "")
         a_cid = chunk_id_from_meta or ""
         a_start_s = chunk_meta.get("start_s")
         a_end_s = chunk_meta.get("end_s")
@@ -464,6 +489,26 @@ def extract_validated(
     # Include chunk_config info if exgraph pipeline was used
     _context_window = int(os.environ.get("LLM_CONTEXT_WINDOW", "4096"))
 
+    # Total LLM calls across the run. Validators are deterministic (no LLM),
+    # so we count only the four LLM-calling LangGraph nodes. Two-tier:
+    #   1. Audit events (exact, when audit logging is on)
+    #   2. Derived from chunks + retries (when audit isn't captured)
+    # Encoder runs (e.g. gliner) bypass this code path entirely; they end up
+    # at 0 LLM calls here and the harness reports inference_calls separately.
+    _LLM_NODES = {
+        "mention_extractor",
+        "repair_mention_extractor",
+        "proposition_extractor",
+        "repair_proposition_extractor",
+    }
+    audit_call_count = sum(1 for e in all_audit_events if e.get("node_name") in _LLM_NODES)
+    derived_call_count = (
+        completed * 2  # base: 1 NER + 1 SPO per successful chunk
+        + total_mention_retries
+        + total_proposition_retries
+    )
+    llm_call_count = audit_call_count or derived_call_count
+
     extract_validated.last_stats = {
         "chunk_count": len(chunks),
         "mention_count": len(mention_models),
@@ -471,6 +516,7 @@ def extract_validated(
         "mention_retries": total_mention_retries,
         "proposition_retries": total_proposition_retries,
         "errors": errors,
+        "llm_call_count": llm_call_count,
         "pipeline": pipeline_breakdown,
         "audit_events": all_audit_events,
         "context_window": _context_window,

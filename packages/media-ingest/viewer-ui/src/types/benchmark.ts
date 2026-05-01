@@ -87,6 +87,27 @@ export interface PipelineStage {
   error_codes?: Record<string, number>;
 }
 
+/**
+ * One extraction occurrence — preserved per (model, chunk) so the side-panel
+ * detail view can show full provenance (where in the corpus, what was said,
+ * who was speaking, when in the timeline). Aggregated EntityRow.models still
+ * exists for the matrix consensus view.
+ */
+export interface EntityMention {
+  model: string;
+  type: string;
+  chunk_id: string;
+  document_id: string;
+  span_start: number | null;
+  span_end: number | null;
+  confidence: number;
+  context: string;
+  temporal_start_ms: number | null;
+  temporal_end_ms: number | null;
+  speaker_label: string | null;
+  source_media_uri: string | null;
+}
+
 export interface EntityRow {
   text: string;
   consensus_type: string;
@@ -101,6 +122,7 @@ export interface EntityRow {
       span_end: number | null;
     }
   >;
+  mentions?: EntityMention[];
 }
 
 export interface AuditEvent {

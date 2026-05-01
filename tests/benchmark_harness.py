@@ -45,8 +45,19 @@ from tests.shared.report import build_report_json
 from tests.shared.store import BenchmarkStore
 
 
-def _run_model(cfg: ModelConfig, timeout: int, save_audit: bool, store: BenchmarkStore) -> dict | None:
-    """Run extraction for one model via subprocess."""
+def _run_model(
+    cfg: ModelConfig,
+    timeout: int,
+    save_audit: bool,
+    store: BenchmarkStore,
+    all_videos: bool = False,
+) -> dict | None:
+    """Run extraction for one model via subprocess.
+
+    When ``all_videos=False`` (default): pytest fixture chain on tests/demo_video.mp4 (single).
+    When ``all_videos=True``: scripts/bench_extract_per_video.py iterates the manifest.
+    Returns the latest run's aggregate extraction record, loadable via ``store.load_fixture``.
+    """
     is_cloud = "cloud" in cfg.tags
     if is_cloud:
         api_key = cfg.api_key or os.environ.get("LLM_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
@@ -70,26 +81,38 @@ def _run_model(cfg: ModelConfig, timeout: int, save_audit: bool, store: Benchmar
         "PYTHONPATH": str(ROOT),
     }
 
+    if all_videos:
+        cmd = [sys.executable, str(ROOT / "scripts" / "bench_extract_per_video.py")]
+    else:
+        cmd = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/test_pipeline_integration.py",
+            "-k",
+            "extraction_produces_mentions",
+            "-v",
+            "-s",
+            "--no-header",
+            "--tb=short",
+        ]
+
     try:
         subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "tests/test_pipeline_integration.py",
-                "-k",
-                "extraction_produces_mentions",
-                "-v",
-                "-s",
-                "--no-header",
-                "--tb=short",
-            ],
+            cmd,
             env=env,
             capture_output=True,
             text=True,
             timeout=timeout,
             cwd=str(ROOT),
         )
+        # Both paths write extraction_<model>.json — single-video to legacy fixture, multi-video
+        # to runs/<run>/extractions/extraction_<model>.json (aggregate). load_fixture finds either.
+        run = store.load_run("latest")
+        if all_videos and run is not None:
+            cached = run.load_extraction(cfg.model)
+            if cached:
+                return cached
         return store.load_fixture(f"extraction_{cfg.model}")
     except subprocess.TimeoutExpired:
         return None
@@ -454,6 +477,13 @@ examples:
     config.add_argument("--timeout", type=int, default=300, help="Per-model timeout in seconds (default: 300)")
     config.add_argument("--local-only", action="store_true", help="Skip cloud models")
     config.add_argument("--exgraph", action="store_true", help="Use exgraph v2 pipeline")
+    config.add_argument(
+        "--all-videos",
+        action="store_true",
+        help="Run each model across every video in tests/fixtures/media-ingest/audio_manifest.yaml "
+        "(multi-video mode). Uses cached transcription/diarization, runs chunker + extraction per video. "
+        "Default: single-video pytest fixture path.",
+    )
     config.add_argument("--label", type=str, metavar="NAME", help="Label for this run (used in runs/ dir name)")
     config.add_argument(
         "--chunk-size",
@@ -581,43 +611,137 @@ examples:
         models = ALL_MODELS
 
     chunk_size_str = f"{args.chunk_size} tokens" if getattr(args, "chunk_size", None) else "default"
-    print(f"\n{'=' * 70}")
-    print("  Extraction Benchmark Harness")
-    print(f"  Models: {len(models)}")
-    print(f"  Timeout: {args.timeout}s | Regen: {args.regen} | Audit: {args.audit_log}")
-    print(f"  Chunk size: {chunk_size_str}")
-    print(f"  Pipeline: {'exgraph v2' if os.environ.get('EXGRAPH_ENABLED') == 'true' else 'v1 (legacy)'}")
-    print(f"{'=' * 70}\n")
+    pipeline_label_str = "exgraph v2" if os.environ.get("EXGRAPH_ENABLED") == "true" else "v1 (legacy)"
+    pipeline_label = getattr(args, "label", None) or (
+        "exgraph-v2" if os.environ.get("EXGRAPH_ENABLED") == "true" else "legacy-v1"
+    )
 
-    # Create a run for this benchmark session
-    pipeline_label = getattr(args, "label", None)
-    if not pipeline_label:
-        pipeline_label = "exgraph-v2" if os.environ.get("EXGRAPH_ENABLED") == "true" else "legacy-v1"
+    # ── Catalyst data corpus footprint ──────────────────────────────────
+    # Inventory the audio cache + manifest so the user sees what they're benchmarking against
+    # before the slow per-model loop kicks off.
+    manifest_path = ROOT / "tests" / "fixtures" / "media-ingest" / "audio_manifest.yaml"
+    manifest_videos: list[dict] = []
+    if manifest_path.exists():
+        try:
+            import yaml as _yaml
+
+            manifest_videos = (_yaml.safe_load(manifest_path.read_text()) or {}).get("videos", []) or []
+        except Exception:
+            manifest_videos = []
+    cached_audio_doc_ids = (
+        sorted(d.name for d in store.pipeline_cache_dir.iterdir() if d.is_dir() and d.name != "model_cache")
+        if store.pipeline_cache_dir.exists()
+        else []
+    )
+    benchmark_chunks = store.load_benchmark_chunks() or []
+
+    n_local = sum(1 for m in models if "cloud" not in m.tags)
+    n_cloud = sum(1 for m in models if "cloud" in m.tags)
+    n_encoder = sum(1 for m in models if "encoder" in m.tags)
+
+    # Honest accounting: in single-video mode we'll only process ONE video
+    # (the integration-test demo). Showing "7 manifest videos" here misleads
+    # users who haven't passed --all-videos. The corpus line scopes to what
+    # will actually run.
+    if args.all_videos:
+        scope_label = "multi-video (--all-videos · media-ingest)"
+        active_video_label = f"{len(manifest_videos)} manifest video(s)"
+        active_chunks = len(benchmark_chunks)  # merged across all manifest docs
+    else:
+        scope_label = "single-video (demo_video)"
+        active_video_label = "1 demo video (demo_video.mp4)"
+        # Single-video scope: count chunks that match the demo doc; the
+        # integration test fixture path also feeds a `:full` legacy chunk in
+        # some configurations, so we count both demo doc-id forms.
+        active_chunks = sum(
+            1 for c in benchmark_chunks if c.get("document_id") in {"demo-video", "test-demo-video", ""}
+        )
+
+    print(f"\n{'═' * 78}")
+    print("  catalyst-data │ extraction benchmark harness")
+    print(f"  pipeline = {pipeline_label_str:<20} run-label = {pipeline_label or '(auto)'}")
+    print(f"{'─' * 78}")
+    print(f"  models      {len(models):<3} ({n_encoder} encoder · {n_local - n_encoder} local-llm · {n_cloud} cloud)")
+    print(
+        f"  corpus      {active_video_label} · "
+        f"{len(cached_audio_doc_ids)} audio-cached available · "
+        f"{active_chunks} benchmark chunks in scope"
+    )
+    print(f"  scope       {scope_label} · timeout={args.timeout}s · regen={args.regen} · audit={args.audit_log}")
+    print(f"  chunker     chunk_size={chunk_size_str}")
+    print(f"  output      {store.runs_dir.relative_to(ROOT)}/<run-id>/")
+    print(f"{'═' * 78}\n")
+
+    # Create a run for this benchmark session (pipeline_label resolved above for the header)
     run = store.create_run(label=pipeline_label)
 
     if args.regen:
         # Clear legacy extraction cached artifacts
         store.clean_extractions()
-        print("  Cleared extraction artifacts\n")
+        print(f"  cleared extraction artifacts → {run.dir.relative_to(ROOT)}")
+        print()
+
+    # ── Live results table — one row per model as it finishes ───────────────
+    HEADER = (
+        f"  {'#':>2} {'model':<22} {'tier':<8} {'status':<8} "
+        f"{'mentions':>9} {'spo':>5} {'time':>9} {'tok/s':>7} {'calls':>6} {'retry':>5} {'err':>4}"
+    )
+    print(HEADER)
+    print(f"  {'─' * len(HEADER.lstrip())}")
+
+    def _tier_label(tags: list[str]) -> str:
+        if "encoder" in tags:
+            return "ENC"
+        if "extraction-specialist" in tags:
+            return "SPEC"
+        if "cloud" in tags:
+            return "CLOUD"
+        if "tier1" in tags:
+            return "T1"
+        if "tier2" in tags:
+            return "T2"
+        return "LLM"
+
+    def _row(idx: int, name: str, tier: str, status: str, fixture: dict | None) -> None:
+        if fixture:
+            s = fixture.get("stats", {}) or {}
+            mentions = s.get("mention_count", 0)
+            spo = s.get("assertion_count", 0)
+            duration = s.get("duration_s", 0.0)
+            tok_s = s.get("tokens_per_sec", 0.0)
+            calls = s.get("llm_call_count", 0) or 0
+            retries = (s.get("mention_retries", 0) or 0) + (s.get("proposition_retries", 0) or 0)
+            errors = s.get("errors", 0) or 0
+            print(
+                f"  {idx:>2} {name:<22} {tier:<8} {status:<8} "
+                f"{mentions:>9} {spo:>5} {duration:>8.1f}s {tok_s:>7.0f} {calls:>6} {retries:>5} {errors:>4}",
+                flush=True,
+            )
+        else:
+            print(
+                f"  {idx:>2} {name:<22} {tier:<8} {status:<8} "
+                f"{'—':>9} {'—':>5} {'—':>9} {'—':>7} {'—':>6} {'—':>5} {'—':>4}",
+                flush=True,
+            )
+
     results = []
     t0 = time.monotonic()
 
-    for cfg in models:
+    for idx, cfg in enumerate(models, 1):
+        tier = _tier_label(cfg.tags)
         # Skip cloud if no key
         if "cloud" in cfg.tags:
             api_key = cfg.api_key or os.environ.get("LLM_API_KEY", "")
             if not api_key:
-                print(f"  SKIP {cfg.name}: no API key")
+                _row(idx, cfg.name, tier, "skip", None)
                 continue
 
         # Check cache
         cached = store.load_fixture(f"extraction_{cfg.model}")
         if cached and not args.regen:
-            s = cached.get("stats", {})
-            print(f"  CACHED {cfg.name}: {s.get('mention_count', '?')} mentions, {s.get('duration_s', '?')}s")
             results.append({"model": cfg.name, "fixture": cached, "tags": cfg.tags})
-            # Copy to run directory
             run.save_extraction(cfg.model, cached)
+            _row(idx, cfg.name, tier, "cached", cached)
             continue
 
         # Check endpoint
@@ -627,22 +751,27 @@ examples:
             try:
                 urllib.request.urlopen(urllib.request.Request(f"{cfg.base_url}/models", method="GET"), timeout=3)
             except Exception:
-                print(f"  SKIP {cfg.name}: endpoint not reachable")
+                _row(idx, cfg.name, tier, "no-endpt", None)
                 continue
 
-        print(f"  RUNNING {cfg.name}...", end=" ", flush=True)
-        fixture = _run_model(cfg, args.timeout, args.audit_log, store)
+        # In-flight marker (overwritten by the result row when subprocess returns)
+        sys.stdout.write(
+            f"  {idx:>2} {cfg.name:<22} {tier:<8} {'running…':<8} "
+            f"{'…':>9} {'…':>5} {'…':>9} {'…':>7} {'…':>6} {'…':>5} {'…':>4}\r"
+        )
+        sys.stdout.flush()
+        fixture = _run_model(cfg, args.timeout, args.audit_log, store, all_videos=args.all_videos)
         if fixture:
-            s = fixture.get("stats", {})
-            print(f"OK ({s.get('mention_count', 0)} mentions, {s.get('duration_s', 0)}s)")
             results.append({"model": cfg.name, "fixture": fixture, "tags": cfg.tags})
+            _row(idx, cfg.name, tier, "ok", fixture)
 
             # Save to run directory
             run.save_extraction(cfg.model, fixture)
 
             # Save audit log
             if args.audit_log:
-                audit_events = s.get("audit_events", [])
+                stats = fixture.get("stats", {}) or {}
+                audit_events = stats.get("audit_events", [])
                 if audit_events:
                     run.save_audit_log(
                         cfg.name,
@@ -650,7 +779,7 @@ examples:
                             "model": cfg.model,
                             "name": cfg.name,
                             "tags": cfg.tags,
-                            "stats": {k: v for k, v in s.items() if k != "audit_events"},
+                            "stats": {k: v for k, v in stats.items() if k != "audit_events"},
                             "audit_events": audit_events,
                             "event_count": len(audit_events),
                         },
@@ -659,7 +788,7 @@ examples:
             # Save incremental report
             _save_incremental_report(results, store)
         else:
-            print("TIMEOUT/FAIL")
+            _row(idx, cfg.name, tier, "FAIL", None)
 
         # Unload local model from Ollama VRAM to free memory for next model
         if "cloud" not in cfg.tags and "encoder" not in cfg.tags:
@@ -710,20 +839,46 @@ examples:
     if args.audit_log:
         store.copy_audit_logs_to_top_level(run)
 
-    # Print summary
-    print(f"\n{'=' * 70}")
-    print(f"  Complete: {len(results)} models in {total_time:.0f}s")
-    print(f"  Run: {run.dir}")
-    print(f"  Report: {store.root / 'benchmark-report.json'}")
+    # ── Run footer — totals across the live table above ─────────────────
+    n_ok = len(results)
+    n_fail = len(models) - n_ok
+    total_mentions = sum((r["fixture"].get("stats") or {}).get("mention_count", 0) for r in results)
+    total_assertions = sum((r["fixture"].get("stats") or {}).get("assertion_count", 0) for r in results)
+    total_chunks_processed = sum((r["fixture"].get("stats") or {}).get("chunk_count", 0) for r in results)
+    total_extract_s = sum((r["fixture"].get("stats") or {}).get("duration_s", 0.0) for r in results)
+    total_retries = sum(
+        ((r["fixture"].get("stats") or {}).get("mention_retries", 0) or 0)
+        + ((r["fixture"].get("stats") or {}).get("proposition_retries", 0) or 0)
+        for r in results
+    )
+    total_errors = sum((r["fixture"].get("stats") or {}).get("errors", 0) or 0 for r in results)
+    total_llm_calls = sum((r["fixture"].get("stats") or {}).get("llm_call_count", 0) or 0 for r in results)
+    avg_tok_s = (
+        (sum((r["fixture"].get("stats") or {}).get("tokens_per_sec", 0.0) for r in results) / n_ok) if n_ok else 0.0
+    )
+
+    print(f"\n{'═' * 78}")
+    print(f"  catalyst-data │ run complete in {total_time:.0f}s ({total_time / 60:.1f}m wall clock)")
+    print(f"{'─' * 78}")
+    print(f"  results     {n_ok}/{len(models)} ok · {n_fail} skipped/failed")
+    print(
+        f"  extraction  {total_mentions} mentions · {total_assertions} assertions "
+        f"· {total_chunks_processed} chunks processed"
+    )
+    print(
+        f"  throughput  Σ {total_extract_s:.0f}s extract-time · avg {avg_tok_s:.0f} tok/s "
+        f"· {total_llm_calls} LLM calls · {total_retries} retries · {total_errors} errors"
+    )
     if gt:
-        print(
-            f"  Ground truth: {gt['reference_model']} ({'reviewed' if gt.get('manually_reviewed') else 'unreviewed'})"
-        )
+        gt_label = f"{gt['reference_model']} ({'reviewed' if gt.get('manually_reviewed') else 'unreviewed'})"
+        print(f"  groundtruth {gt_label}")
     else:
-        print("  Ground truth: not available (run with --generate-ground-truth)")
+        print("  groundtruth not available (run with --generate-ground-truth)")
+    print(f"  artifacts   {run.dir.relative_to(ROOT)}/")
+    print(f"  report      {(store.root / 'benchmark-report.json').relative_to(ROOT)}")
     if args.audit_log:
-        print(f"  Audit logs: {run.audit_dir}")
-    print(f"{'=' * 70}")
+        print(f"  audit-logs  {run.audit_dir.relative_to(ROOT)}/")
+    print(f"{'═' * 78}")
 
     # Print the full report
     if results:
