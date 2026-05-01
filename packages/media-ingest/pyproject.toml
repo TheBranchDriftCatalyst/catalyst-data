@@ -32,6 +32,10 @@ openvino = [
     "librosa>=0.11",
     "soundfile>=0.13",
 ]
+mlx = [
+    # Apple Silicon Metal-accelerated Whisper. Install on macOS arm64 only.
+    "mlx-whisper>=0.4",
+]
 dev = [
     "dagster-webserver>=1.13",
     "pytest>=8.3",

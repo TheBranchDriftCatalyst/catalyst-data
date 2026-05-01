@@ -1,8 +1,9 @@
 """Stage 4a: Transcribe audio (speech-to-text only, no diarization).
 
-Supports two backends:
-- faster-whisper (CTranslate2): CPU-optimized
-- openvino (OpenVINO GenAI WhisperPipeline): Intel GPU accelerated
+Supports three backends:
+- faster-whisper (CTranslate2): CPU-optimized, runs anywhere
+- openvino (OpenVINO GenAI WhisperPipeline): Intel GPU accelerated (k8s prod)
+- mlx-whisper: Apple Silicon Metal accelerated (mac-node, dev boxes)
 
 Partitioned by document_id — each run transcribes a single media file.
 Diarization is a separate downstream asset (media_diarization).
@@ -427,6 +428,160 @@ def _transcribe_openvino(pipe, audio_path: str) -> dict:
                 os.unlink(wav_path)
 
 
+# ── Backend: mlx-whisper (Apple Silicon Metal) ───────────────────────────────
+
+
+def _load_mlx_whisper(config: MediaIngestConfig) -> tuple[str, str]:
+    """Verify mlx-whisper is importable and return (model_id, resolved_device).
+
+    MLX runs on Apple Silicon GPU (Metal/MPS) via Apple's MLX framework. There
+    is no CPU fallback — failing import or non-arm64 platform means this
+    backend isn't usable. Caller should select a different backend in that case.
+
+    Returns the HF model id as the "handle" since mlx-whisper does lazy loading
+    inside ``transcribe()`` — there's no separate model object.
+    """
+    try:
+        import mlx_whisper  # noqa: F401
+    except ImportError as e:
+        raise RuntimeError(
+            "mlx-whisper not installed. Install the optional extra: pip install 'media-ingest[mlx]'"
+        ) from e
+    return config.mlx_model_id, "mps"
+
+
+def _transcribe_mlx_whisper(model_id: str, audio_path: str) -> dict:
+    """Transcribe with mlx-whisper, returning the canonical schema.
+
+    mlx-whisper returns segments with native word-level timestamps when
+    ``word_timestamps=True``. It does not report ``language_probability`` (only
+    the detected language code), so that field is set to 0.0 here — the
+    fidelity validator surfaces this as a warning when downstream code expects
+    it.
+    """
+    import mlx_whisper
+
+    result = mlx_whisper.transcribe(
+        audio_path,
+        path_or_hf_repo=model_id,
+        word_timestamps=True,
+    )
+
+    segments_list = []
+    for s in result.get("segments", []):
+        seg = {
+            "start": s["start"],
+            "end": s["end"],
+            "text": _normalize_text(s["text"].strip()),
+        }
+        if s.get("words"):
+            seg["words"] = [
+                {
+                    "start": w["start"],
+                    "end": w["end"],
+                    "word": w["word"],
+                    "probability": w.get("probability", 0.0),
+                }
+                for w in s["words"]
+            ]
+        segments_list.append(seg)
+
+    duration_s = segments_list[-1]["end"] if segments_list else 0.0
+
+    return {
+        "segments": segments_list,
+        "language": result.get("language", "en"),
+        "language_probability": 0.0,  # not exposed by mlx-whisper
+        "duration_s": duration_s,
+    }
+
+
+# ── Backend dispatcher ───────────────────────────────────────────────────────
+
+
+def _select_backend(config: MediaIngestConfig):
+    """Resolve the configured backend into a (handle, device, label, transcribe_fn).
+
+    Single source of truth used by both the Dagster asset and the integration
+    test fixture so the test exercises the same code path that production runs
+    on the same hardware.
+
+    Returns:
+        model_handle: backend-specific model object (or model id string)
+        resolved_device: actual device ("CPU" / "GPU" / "mps" / "cuda" / etc.)
+        model_label: human-readable identifier for metrics + logs
+        transcribe_fn: callable taking (handle, audio_path) -> dict
+    """
+    backend = config.whisper_backend
+    if backend == "mlx-whisper":
+        handle, device = _load_mlx_whisper(config)
+        label = f"mlx-whisper:{config.mlx_model_id}:{device}"
+        return handle, device, label, _transcribe_mlx_whisper
+    if backend == "openvino":
+        handle, device = _load_openvino(config)
+        label = f"openvino:{config.openvino_model_id}:{device}"
+        return handle, device, label, _transcribe_openvino
+    handle = _load_faster_whisper(config)
+    label = f"faster-whisper:{config.whisper_model}:{config.whisper_compute_type}"
+    return handle, config.whisper_device, label, _transcribe_faster_whisper
+
+
+# ── Fidelity validation ──────────────────────────────────────────────────────
+
+
+def _validate_transcription_fidelity(result: dict, backend: str, model_label: str) -> list[str]:
+    """Inspect a transcription result for issues that would break downstream stages.
+
+    Returns a list of human-readable warnings (empty if all good). The asset
+    logs these via context.log.warning so backend misconfigurations surface in
+    the Dagster UI; tests print them so devs see them locally before relying
+    on bad cached fixtures.
+
+    Specific things checked:
+    - Segments produced at all (silent audio / backend hard-failure).
+    - Word-level timestamps on >=50% of segments — required for accurate
+      pyannote speaker assignment in the downstream merge step. Without them,
+      diarization aligns by segment-level timing only, which loses precision
+      at speaker turn boundaries (especially short interjections).
+    - language_probability sanity for backends that report it (faster-whisper).
+    - Segment count vs duration sanity (long audio collapsed to 1-2 segments
+      usually means the timestamp pipeline is broken).
+    """
+    warnings: list[str] = []
+
+    segments = result.get("segments", [])
+    if not segments:
+        warnings.append(
+            f"[{backend}] No segments produced — likely silent audio or backend hard-failure (model={model_label})."
+        )
+        return warnings
+
+    n_with_words = sum(1 for s in segments if s.get("words"))
+    word_ratio = n_with_words / len(segments)
+    if word_ratio < 0.5:
+        warnings.append(
+            f"[{backend}] Only {word_ratio:.0%} of segments have word timestamps "
+            f"({n_with_words}/{len(segments)}). Diarization speaker assignment will be lossy. "
+            f"Verify the backend produces word_timestamps=True (model={model_label})."
+        )
+
+    lang_prob = result.get("language_probability", 0.0)
+    if backend == "faster-whisper" and lang_prob <= 0:
+        warnings.append(
+            f"[{backend}] language_probability=0 — faster-whisper should report this; "
+            f"check model load (model={model_label})."
+        )
+
+    duration_s = result.get("duration_s", 0)
+    if duration_s > 60 and len(segments) <= 2:
+        warnings.append(
+            f"[{backend}] Only {len(segments)} segment(s) for {duration_s:.0f}s of audio — "
+            f"likely a chunking or timestamp issue (model={model_label})."
+        )
+
+    return warnings
+
+
 # ── Dagster asset ────────────────────────────────────────────────────────────
 
 
@@ -490,35 +645,30 @@ def media_transcriptions(
         # `resolved_device` and `model_name` are passed as labels to the RTF
         # histogram so Grafana can distinguish GPU throughput from silent-CPU
         # fallback throughput (see _load_openvino docstring for context).
-        if backend == "openvino":
-            context.log.info(f"Loading OpenVINO model '{config.openvino_model_id}' (device={config.openvino_device})")
-            model_load_start = time.monotonic()
-            model, resolved_device = _load_openvino(config)
-            MODEL_LOAD_DURATION.labels(model_type="openvino").observe(time.monotonic() - model_load_start)
-            model_name = config.openvino_model_id
-            model_label = f"openvino:{model_name}:{resolved_device}"
-            if resolved_device != config.openvino_device:
-                context.log.warning(
-                    f"OpenVINO device fallback: requested={config.openvino_device} resolved={resolved_device}"
-                )
-        else:
-            context.log.info(f"Loading faster-whisper '{config.whisper_model}' (compute={config.whisper_compute_type})")
-            model_load_start = time.monotonic()
-            model = _load_faster_whisper(config)
-            MODEL_LOAD_DURATION.labels(model_type="faster-whisper").observe(time.monotonic() - model_load_start)
-            model_name = config.whisper_model
-            # faster-whisper doesn't silently fall back — whatever config says is what runs
-            resolved_device = config.whisper_device
-            model_label = f"faster-whisper:{model_name}:{config.whisper_compute_type}"
+        context.log.info(f"Loading whisper backend '{backend}'")
+        model_load_start = time.monotonic()
+        model, resolved_device, model_label, transcribe_fn = _select_backend(config)
+        MODEL_LOAD_DURATION.labels(model_type=backend).observe(time.monotonic() - model_load_start)
+        model_name = (
+            config.openvino_model_id
+            if backend == "openvino"
+            else config.mlx_model_id
+            if backend == "mlx-whisper"
+            else config.whisper_model
+        )
+        if backend == "openvino" and resolved_device != config.openvino_device:
+            context.log.warning(
+                f"OpenVINO device fallback: requested={config.openvino_device} resolved={resolved_device}"
+            )
 
-        context.log.info(f"Transcribing: {doc.title}")
+        context.log.info(f"Transcribing: {doc.title} ({model_label})")
 
         try:
             transcribe_start = time.monotonic()
-            if backend == "openvino":
-                result = _transcribe_openvino(model, doc.source_path)
-            else:
-                result = _transcribe_faster_whisper(model, doc.source_path)
+            result = transcribe_fn(model, doc.source_path)
+
+            for w in _validate_transcription_fidelity(result, backend, model_label):
+                context.log.warning(w)
 
             duration = time.monotonic() - start
             transcribe_time = time.monotonic() - transcribe_start
