@@ -178,6 +178,20 @@ tasks:
       - echo "Opening http://localhost:5173/viewer/benchmarks"
       - npm run dev
 
+  bench:pipeline:warm:
+    desc: "Pre-warm audio pipeline cache (transcription + diarization). Visible progress; run before bench so the harness's captured subprocess doesn't hide the slow Whisper/pyannote work."
+    env:
+      PYTHONPATH: "."
+    cmds:
+      - |
+        echo ""
+        echo "==============================================================="
+        echo "  Audio pipeline pre-warmup"
+        echo "  Backend: ${WHISPER_BACKEND:-faster-whisper}  Model: ${WHISPER_MODEL:-base}"
+        echo "  Set WHISPER_BACKEND=mlx-whisper for Metal (Apple Silicon)"
+        echo "==============================================================="
+        pytest tests/test_pipeline_integration.py::test_transcription_produces_segments tests/test_pipeline_integration.py::test_diarization_finds_speakers -v -s
+
   bench:clean:
     desc: "Clean benchmark artifacts (standard tier: extractions + GT + runs + reports)"
     env:

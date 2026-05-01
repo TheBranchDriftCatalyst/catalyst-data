@@ -11,6 +11,7 @@ Run with: pytest tests/test_pipeline_integration.py -v -s
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -51,6 +52,11 @@ def transcription_result():
     """
     cached = _store.load_fixture("transcription")
     if cached:
+        print(
+            f"\n  [prewarmup] Transcription cache HIT "
+            f"({len(cached.get('segments', []))} segments, backend={cached.get('backend', '?')})",
+            flush=True,
+        )
         return cached
 
     from media_ingest.assets.transcription import _select_backend, _validate_transcription_fidelity
@@ -64,16 +70,24 @@ def transcription_result():
         mlx_model_id=os.environ.get("MLX_MODEL_ID", "mlx-community/whisper-base-mlx"),
     )
 
-    print(f"\n  Loading {config.whisper_backend} via prod dispatcher...")
+    sys.stdout.write("\n" + "=" * 70 + "\n")
+    sys.stdout.write("  [prewarmup] AUDIO PIPELINE — STAGE 1/2: TRANSCRIPTION\n")
+    sys.stdout.write(f"  Backend: {config.whisper_backend}\n")
+    sys.stdout.write(f"  Audio:   {DEMO_VIDEO.name}\n")
+    sys.stdout.write("  (cold run; this can take 30s–3min depending on backend/device)\n")
+    sys.stdout.write("=" * 70 + "\n")
+    sys.stdout.flush()
+
+    print(f"  Loading {config.whisper_backend} via prod dispatcher...", flush=True)
     model, resolved_device, model_label, transcribe_fn = _select_backend(config)
 
-    print(f"  Transcribing {DEMO_VIDEO.name} ({model_label} on {resolved_device})...")
+    print(f"  Transcribing {DEMO_VIDEO.name} ({model_label} on {resolved_device})...", flush=True)
     start = time.monotonic()
     result = transcribe_fn(model, str(DEMO_VIDEO))
     duration = time.monotonic() - start
 
     for w in _validate_transcription_fidelity(result, config.whisper_backend, model_label):
-        print(f"\n  ⚠️  {w}")
+        print(f"\n  ⚠️  {w}", flush=True)
 
     # Wrap in the same dict shape the asset produces
     output = {
@@ -126,6 +140,11 @@ def diarization_result(transcription_result):
     """Run our actual _run_diarization + _assign_speakers pipeline code."""
     cached = _store.load_fixture("diarization")
     if cached:
+        print(
+            f"\n  [prewarmup] Diarization cache HIT "
+            f"({cached.get('speaker_count', '?')} speakers on {cached.get('diarization_device', '?')})",
+            flush=True,
+        )
         return cached
 
     hf_token = os.environ.get("HF_TOKEN", "")
@@ -138,7 +157,13 @@ def diarization_result(transcription_result):
     local_cache = str(_store.pipeline_cache_dir / "model_cache")
     os.makedirs(local_cache, exist_ok=True)
 
-    print("\n  Running pyannote diarization (actual pipeline code)...")
+    sys.stdout.write("\n" + "=" * 70 + "\n")
+    sys.stdout.write("  [prewarmup] AUDIO PIPELINE — STAGE 2/2: DIARIZATION\n")
+    sys.stdout.write("  Backend: pyannote.audio (auto cuda → mps → cpu)\n")
+    sys.stdout.write("=" * 70 + "\n")
+    sys.stdout.flush()
+
+    print("  Running pyannote diarization (actual pipeline code)...", flush=True)
     start = time.monotonic()
 
     diarization, device = _run_diarization(str(DEMO_VIDEO), hf_token, local_cache)
@@ -220,23 +245,21 @@ def test_merge_preserves_words(segment_merge_result):
 
 @pytest.fixture(scope="session")
 def chunks_result(segment_merge_result):
-    """Run our actual _speaker_turn_chunks.
+    """Run the production speaker-segment chunker.
 
     Not cached — chunker is millisecond-fast and is the production
     media_chunks asset's logic, which carries provenance (chunk_id,
-    content_hash). We recompute it each run rather than cache its output so
-    iterating on chunker heuristics doesn't go stale against cached chunks.
+    content_hash). Calls ChunkingResource.chunk_speaker_segments directly so
+    the test exercises the same code path the Dagster asset runs.
     """
-    from media_ingest.assets.chunks import _speaker_turn_chunks
-
     from dagster_io import ChunkingResource
 
-    chunks = _speaker_turn_chunks(
+    chunking = ChunkingResource()
+    chunks = chunking.chunk_speaker_segments(
         segment_merge_result["segments"],
         segment_merge_result["document_id"],
         segment_merge_result["title"],
-        ChunkingResource(),
-        {"source": "media_ingest", "language": segment_merge_result.get("language", "unknown")},
+        metadata={"source": "media_ingest", "language": segment_merge_result.get("language", "unknown")},
     )
 
     print(f"\n  Chunking: {len(segment_merge_result['segments'])} turns → {len(chunks)} chunks")
