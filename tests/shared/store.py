@@ -222,17 +222,26 @@ class BenchmarkStore:
         return p
 
     def load_benchmark_chunks(self) -> list[dict] | None:
-        """Load curated benchmark chunks subset.
+        """Load curated benchmark chunks from all domain fixture directories.
 
-        Checks pipeline-cache first (in case a copy was made), then falls back
-        to the true fixture in tests/fixtures/ (read-only, checked into git).
+        Merges chunks from tests/fixtures/{media-ingest,congress-data,open-leaks}/
+        benchmark_chunks.json into a single list. Falls back to the legacy
+        single-file tests/fixtures/benchmark_chunks.json if domain dirs don't exist.
         """
-        for p in [
-            self.pipeline_cache_dir / "benchmark_chunks.json",
-            self._repo_fixtures / "benchmark_chunks.json",
-        ]:
+        # New: per-domain fixture dirs
+        domain_dirs = ["media-ingest", "congress-data", "open-leaks"]
+        merged = []
+        for d in domain_dirs:
+            p = self._repo_fixtures / d / "benchmark_chunks.json"
             if p.exists():
-                return json.loads(p.read_text())
+                merged.extend(json.loads(p.read_text()))
+        if merged:
+            return merged
+
+        # Fallback: legacy single file
+        legacy = self._repo_fixtures / "benchmark_chunks.json"
+        if legacy.exists():
+            return json.loads(legacy.read_text())
         return None
 
     def load_pipeline_artifact(self, name: str) -> dict | list | None:

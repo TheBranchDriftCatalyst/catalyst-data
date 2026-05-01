@@ -1,0 +1,56 @@
+[
+  {
+    "chunk_id": "wikileaks-cable-04harare578:chunk-0",
+    "document_id": "wikileaks-cable-04harare578",
+    "text": "Cable 04HARARE578: Embassy Harare\n\nUNCLAS HARARE 000578 \n \nSIPDIS \n \nSENSITIVE \n \nSTATE FOR AF/S \nNSC FOR SENIOR AFRICA DIRECTOR JFRAZER \nUSDOC FOR AMANDA HILLIGAS \nPASS USTR FLORIZELLE LISER \nSTATE PASS USAID FOR MARJORIE COPSON \n \nE. O. 12958: N/A \nTAGS: ELAB, PHUM, ETRD, ECON, EINV, PGOV, ZI, Zimbabwe Congress of Trade Unions (ZCTU) \nSUBJECT: New Charges of Labor Harassment \n \n1. (SBU) Summary: The Zimbabwe Congress of Trade Unions \n(ZCTU) alleges pro-Government groups are stepping up \nrepression of labor leaders.  End summary. \n \n2. (SBU) ZCTU cited two recent cases in press statements: \n \n- On March 25, an unnamed caller invited Progressive \nTeachers Union Secretary General Raymond Majongwe to pick \nup documents in a Harare suburb.  Fearing a set-up, \nMajongwe sent his driver instead.  A second car trailed \nMajongwe\\'s for some time and finally tried to ram the \nvehicle on the driver\\'s side.  The ZCTU alleges the \nsecond car\\'s occupants later observed Majongwe was not \nthe driver and sped away. \n \n- On March 27, fifty youths invaded the residence of \nZimbabwe Construction and Allied Workers Union Secretary \nGeneral Charles Gumbo.  After learning that Gumbo was not \nhome, they ransacked the residence.  The gang held \nGumbo\\'s wife and three children hostage for a time. \nAlthough the gang stole several belongings - cell phone, \ncar radio, etc - and did not raise Gumbo\\'s union \naffiliation, ZCTU officials believe it was not a \nburglary.  In any event, the large number of invaders is",
+    "index": 0,
+    "total_chunks": 2,
+    "metadata": {
+      "source": "wikileaks",
+      "domain": "open_leaks",
+      "document_type": "cable",
+      "classification": "UNCLASSIFIED//FOR OFFICIAL USE ONLY",
+      "origin": "Embassy Harare",
+      "chunk_size": 1500,
+      "chunk_overlap": 250,
+      "strategy": "recursive"
+    },
+    "content_hash": "a7e6eaf5884c03d686822caee6efed6a449954d7ed2c77eb23e9664783647d5d"
+  },
+  {
+    "chunk_id": "wikileaks-cable-04djibouti492:chunk-0",
+    "document_id": "wikileaks-cable-04djibouti492",
+    "text": "Cable 04DJIBOUTI492: Embassy Djibouti\n\nC O N F I D E N T I A L DJIBOUTI 000492 \n \nSIPDIS \n \nE.O. 12958: DECL: 04/05/2014 \nTAGS: PREL, PGOV, AMGT, ABLD, ECON, ETRD, EINV, DJ, SA \nSUBJECT: SAUDI INVESTOR DEVELOPING HARAMOUS REGION \n \nREF: DJIBOUTI 340 \n \nClassified By: Pol/Econ Erinn C. Reed for reasons 1.4 (b) and (d) \n \n1. (U) PolOff, Econ/Comm Assistant and OBO \nrepresentative met April 4 with Mohammed M. Ali Yamani, \nManaging Director of Maya Trading Company in Jeddah and \nFahmi Ahmed Al-Hag, President Guelleh\\'s Advisor on \nInvestment.  Yamani recently signed a contract with the \nGovernment of Djibouti, including full land ownership \nrights, to develop the Haramous region of Djibouti city. \n(See Reftel)  Embassy met with Yamani to discuss the \nimpact the Haramous Village development would have on \npossible sites for a New Embassy Compound.  All three \npossible sites are located within the Haramous Village \narea. \n \n2. (U) Al-Hag led off discussions reminding Embassy \nrepresentatives that the U.S. had not made any formal \nrequests for sites to the government and a decision \nwould have to be made quickly due to the high demand \nfor land in the last residential zoned sector of the \ncity.  Al-Hag explained that the amount of land \ndesignated for the Haramous Village project is 840,000 \nsquare meters, which was increased from the initial \nnumber cited in reftel.  Al-Hag also explained that \nthough this region has been undeveloped up to this \npoint, there are twenty landowners in the Haramous",
+    "index": 0,
+    "total_chunks": 3,
+    "metadata": {
+      "source": "wikileaks",
+      "domain": "open_leaks",
+      "document_type": "cable",
+      "classification": "CONFIDENTIAL",
+      "origin": "Embassy Djibouti",
+      "chunk_size": 1500,
+      "chunk_overlap": 250,
+      "strategy": "recursive"
+    },
+    "content_hash": "0b5e3e6864d20c242b7cb0ee92b0daf1a54f079adb33c1d272c1f37600241138"
+  },
+  {
+    "chunk_id": "wikileaks-cable-04thehague876:chunk-0",
+    "document_id": "wikileaks-cable-04thehague876",
+    "text": "Cable 04THEHAGUE876: Embassy The Hague\n\nUNCLAS THE HAGUE 000876 \n \nSIPDIS \n \nE.O. 12958: N/A \nTAGS: PHUM, PREL \nSUBJECT: DUTCH OPPOSE NO-ACTION MOTIONS AT CHR \n \nREF: SECSTATE 74060 \n \nPolOff delivered reftel demarche to MFA\\'s Senior Policy \nAdvisor and Commission on Human Rights (CHR) action officer \nHans Docter.  GoNL policy remains unchanged on this issue; \nthe Netherlands opposes no-action motions at the CHR. \nSOBEL",
+    "index": 0,
+    "total_chunks": 1,
+    "metadata": {
+      "source": "wikileaks",
+      "domain": "open_leaks",
+      "document_type": "cable",
+      "classification": "UNCLASSIFIED",
+      "origin": "Embassy The Hague",
+      "chunk_size": 1500,
+      "chunk_overlap": 250,
+      "strategy": "recursive"
+    },
+    "content_hash": "afc3485446adaa4f66dcbe397833e938be8acaf0127ecde869f1d0594b0e9be3"
+  }
+]
