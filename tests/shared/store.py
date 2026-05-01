@@ -385,16 +385,91 @@ class BenchmarkStore:
             count += 1
         return count
 
-    def clean_all(self) -> dict[str, int]:
-        """Delete all cached artifacts. Returns counts per category.
+    def clean_runs(self, keep_recent: int = 0) -> int:
+        """Delete timestamped benchmark runs. Returns count deleted.
 
-        Never touches tests/fixtures/ (true fixtures) or pipeline-cache
-        (too expensive to regenerate casually).
+        Args:
+            keep_recent: Keep the N most recent runs (by dir name sort). 0 = delete all.
         """
-        return {
+        count = 0
+        runs_dir = self.root / "runs"
+        if not runs_dir.exists():
+            return 0
+        # Remove latest symlink first
+        latest = runs_dir / "latest"
+        if latest.is_symlink():
+            latest.unlink()
+        # Sort by name (timestamp-based, so alphabetical = chronological)
+        run_dirs = sorted(
+            [d for d in runs_dir.iterdir() if d.is_dir()],
+            key=lambda d: d.name,
+        )
+        to_delete = run_dirs if keep_recent == 0 else run_dirs[:-keep_recent]
+        for d in to_delete:
+            import shutil
+
+            shutil.rmtree(d)
+            count += 1
+        # Clean empty runs dir
+        if runs_dir.exists() and not any(runs_dir.iterdir()):
+            runs_dir.rmdir()
+        return count
+
+    def clean_reports(self) -> int:
+        """Delete report and audit log artifacts. Returns count deleted."""
+        count = 0
+        top_report = self.root / "benchmark-report.json"
+        if top_report.exists():
+            top_report.unlink()
+            count += 1
+        top_audits = self.root / "audit-logs"
+        if top_audits.exists():
+            import shutil
+
+            count += len(list(top_audits.glob("*.json")))
+            shutil.rmtree(top_audits)
+        return count
+
+    def clean_pipeline_cache(self) -> int:
+        """Delete pipeline stage cache (transcription, diarization, etc.).
+
+        WARNING: Expensive to regenerate (~2 min for transcription + diarization).
+        """
+        count = 0
+        cache_dir = self.root / "pipeline-cache"
+        if cache_dir.exists():
+            for f in cache_dir.glob("*.json"):
+                f.unlink()
+                count += 1
+        # Legacy location
+        for name in ("transcription", "diarization", "segment_merge", "chunks"):
+            legacy = self._legacy_fixtures / f"{name}.json"
+            if legacy.exists():
+                legacy.unlink()
+                count += 1
+        return count
+
+    def clean_all(self, tier: str = "standard") -> dict[str, int]:
+        """Delete cached artifacts at the specified tier. Returns counts per category.
+
+        Tiers:
+            quick:     extractions + ground truth only
+            standard:  + runs + reports + audit logs (default)
+            full:      + pipeline cache (expensive to regenerate!)
+            nuclear:   + everything (even pipeline cache)
+
+        Never touches tests/fixtures/ (true fixtures, checked into git).
+        """
+        result: dict[str, int] = {
             "extractions": self.clean_extractions(),
             "ground_truth": self.clean_ground_truth(),
         }
+        if tier in ("standard", "full", "nuclear"):
+            result["runs"] = self.clean_runs()
+            result["reports"] = self.clean_reports()
+        if tier in ("full", "nuclear"):
+            result["pipeline_cache"] = self.clean_pipeline_cache()
+        return result
 
     # ═════════════════════════════════════════════════════════════════
     # Generic I/O (backward compat wrappers)

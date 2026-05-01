@@ -179,15 +179,39 @@ tasks:
       - npm run dev
 
   bench:clean:
-    desc: "Clean all cached benchmark artifacts (extractions, ground truth, report, audit logs, runs)"
+    desc: "Clean benchmark artifacts (standard tier: extractions + GT + runs + reports)"
+    env:
+      PYTHONPATH: "."
     cmds:
-      - rm -f .test-output/media-ingest/fixtures/extraction_*.json
-      - rm -f .test-output/media-ingest/fixtures/ground_truth_*.json
-      - rm -f .test-output/media-ingest/benchmark-report.json
-      - rm -rf .test-output/media-ingest/audit-logs/
-      - rm -rf .test-output/media-ingest/ground-truth/
-      - rm -rf .test-output/media-ingest/runs/
-      - echo "Cleaned cached artifacts. Kept pipeline-cache and tests/fixtures/ (true fixtures)."
+      - python -c "from tests.shared.store import BenchmarkStore; r = BenchmarkStore().clean_all('standard'); print(f'Cleaned: {r}')"
+
+  bench:clean:extractions:
+    desc: "Clean only extraction artifacts (keep GT, runs, pipeline cache)"
+    env:
+      PYTHONPATH: "."
+    cmds:
+      - python -c "from tests.shared.store import BenchmarkStore; n = BenchmarkStore().clean_extractions(); print(f'Deleted {n} extraction files')"
+
+  bench:clean:runs:
+    desc: "Clean timestamped benchmark runs (keep pipeline cache + GT)"
+    env:
+      PYTHONPATH: "."
+    cmds:
+      - python -c "from tests.shared.store import BenchmarkStore; n = BenchmarkStore().clean_runs(); print(f'Deleted {n} runs')"
+
+  bench:clean:pipeline:
+    desc: "Clean pipeline cache (transcription, diarization, etc.) — EXPENSIVE to regenerate!"
+    env:
+      PYTHONPATH: "."
+    cmds:
+      - python -c "from tests.shared.store import BenchmarkStore; n = BenchmarkStore().clean_pipeline_cache(); print(f'Deleted {n} pipeline cache files')"
+
+  bench:clean:all:
+    desc: "Nuclear clean — everything except true fixtures (tests/fixtures/)"
+    env:
+      PYTHONPATH: "."
+    cmds:
+      - python -c "from tests.shared.store import BenchmarkStore; r = BenchmarkStore().clean_all('nuclear'); print(f'Cleaned: {r}')"
 
   # ── Dev ──────────────────────────────────────────────────────────────────
 
