@@ -61,12 +61,14 @@ See **[TESTING.md](TESTING.md)** for the full testing guide, including:
 
 ```bash
 # One-time: compress raw fixture videos to keep the working tree small
-python scripts/compress_fixtures.py tests/fixtures/media-ingest/
+python scripts/compress_fixtures.py packages/media-ingest/tests/fixtures/
 
 # Pre-warm the per-doc-id audio cache for every manifest video
 HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
 
-# Rebuild per-video benchmark_chunks from cached audio
+# Materialize the *_chunks Dagster assets for all 3 domains via LocalJsonIOManager
+# (writes to .test-output/<domain>/<layer>/.../*_chunks/[<partition>/]data.jsonl —
+# same medallion paths MinIO uses in prod, swapped via DAGSTER_IO_BACKEND env)
 task bench:chunks:regen
 
 # Run the benchmark — single-video flow (default) or multi-video flow

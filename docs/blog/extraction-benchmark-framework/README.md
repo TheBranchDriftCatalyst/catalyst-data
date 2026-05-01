@@ -376,10 +376,29 @@ for the strategy details.
 **Multi-video benchmarking.** The harness now supports `--all-videos`, which
 swaps the per-model subprocess from the single-video pytest path to
 `scripts/bench_extract_per_video.py`. That script iterates
-`tests/fixtures/media-ingest/audio_manifest.yaml` and produces per-doc-id
+`packages/media-ingest/tests/fixtures/audio_manifest.yaml` and produces per-doc-id
 extraction artifacts at `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json`.
 Per-(model, video) F1 scoring isn't built yet — see beads task **CD-vfiq**.
 Walkthrough lives in the sibling post `docs/blog/multi-video-benchmark/`.
+
+**Medallion-path unification across prod and bench.** Chunks used to live in
+two parallel storage paths: production wrote to MinIO at
+`gold/<code_loc>/.../<asset>/<partition>/data.jsonl` while the benchmark wrote
+to a checked-in `tests/fixtures/<domain>/benchmark_chunks.json`. The two
+disagreed on which chunker was canonical. That fork is gone. The
+`LocalJsonIOManager` in `dagster_io.local_io_manager` is now a drop-in
+filesystem analog of `MinioIOManager` (with `LocalOptionalIOManager` and
+`LocalAppendIOManager` siblings for the `Optional`/`Append` variants), and
+each code location's `Definitions` calls
+`select_io_managers(default_local_dir=...)` which picks the backend off
+`DAGSTER_IO_BACKEND` (`local` | `minio`). `task dev` and the integration tests
+materialize chunks to the same medallion paths the production assets do — only
+the storage backend differs. The benchmark harness reads from those medallion
+paths via a single `tests/shared/medallion.py::load_chunks()` glob across all
+3 domains. Per-domain chunk regen runs through pytest:
+`task bench:chunks:regen:{media,congress,leaks}` (or `task bench:chunks:regen`
+for all three). One asset, one chunker, one set of paths — prod and bench
+exercise the same code path now.
 
 ---
 

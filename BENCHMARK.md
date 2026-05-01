@@ -334,27 +334,24 @@ URL: `http://localhost:5173/viewer/benchmarks`
 
 ### True Fixtures (checked into git, never cleaned)
 
+Each domain owns its own fixtures under `packages/<domain>/tests/fixtures/`:
+
 ```
-tests/fixtures/
-    media-ingest/
-        audio_manifest.yaml          # 7 source videos -> stable doc_ids
-        demo_video.mp4               # default single-video fixture
-        <other source videos>.mp4    # gitignored when present (compressed via scripts/compress_fixtures.py)
-        benchmark_chunks.json        # merged curated chunks across all manifest videos
-        per_video_chunks/<doc_id>/
-            benchmark_chunks.json    # per-video curated chunk subset (source of truth)
-    congress-data/
-        benchmark_chunks.json        # curated bill chunks (4 chunks)
-    open-leaks/
-        benchmark_chunks.json        # curated leak chunks (3 chunks)
-    benchmark_chunks.json            # legacy single-file fallback
-    model_cache/                     # local model weights cache
+packages/media-ingest/tests/fixtures/
+    audio_manifest.yaml          # 7 source videos -> stable doc_ids
+    demo_video.mp4               # default single-video fixture
+    <other source videos>.mp4    # gitignored when present (compressed via scripts/compress_fixtures.py)
+    benchmark_documents.json     # raw documents for adaptive chunking
+packages/congress-data/tests/fixtures/
+    bill_manifest.yaml           # bill_ids iterated by task bench:chunks:regen:congress
+packages/open-leaks/tests/fixtures/
+    (deterministic; bronze sources fetch live)
 ```
 
-`BenchmarkStore.load_benchmark_chunks()` merges chunks from all three
-per-domain dirs. Each domain can scale its fixture set independently. For
-media-ingest, the merged file is rebuilt by `scripts/regen_benchmark_chunks.py`
-from the per-doc-id sources of truth in `per_video_chunks/`.
+Chunks are no longer fixtures — they are Dagster asset outputs at the
+canonical medallion path under `.test-output/<domain>/<layer>/.../*_chunks/`,
+written by `LocalJsonIOManager` (see "Cached Artifacts" below). Cross-domain
+readers use `tests/shared/medallion.py::load_chunks(sample_per_domain=...)`.
 
 ### Cached Artifacts (generated, gitignored, regenerable)
 
@@ -452,16 +449,17 @@ Delete any file to force regeneration from that stage onward. Pipeline cache
 
 ## Multi-Video Benchmarking
 
-The single-video path runs the harness against `tests/fixtures/media-ingest/demo_video.mp4`.
+The single-video path runs the harness against `packages/media-ingest/tests/fixtures/demo_video.mp4`.
 The multi-video path (`--all-videos`) iterates every video in
-`tests/fixtures/media-ingest/audio_manifest.yaml`, runs the chunker +
-`extract_validated()` per video, and saves per-doc-id artifacts under the
-current run.
+`packages/media-ingest/tests/fixtures/audio_manifest.yaml`, materializes
+the production `media_chunks` Dagster asset against `LocalJsonIOManager`,
+runs `extract_validated()` per video, and saves per-doc-id artifacts under
+the current run.
 
 ### Manifest
 
 ```yaml
-# tests/fixtures/media-ingest/audio_manifest.yaml
+# packages/media-ingest/tests/fixtures/audio_manifest.yaml
 videos:
   - doc_id: demo-video
     file: 'demo_video.mp4'
@@ -472,35 +470,39 @@ videos:
   # ... 5 more
 ```
 
-`doc_id` is a slugified stable identifier — drives the `pipeline-cache/<doc_id>/`
-and `extractions/<doc_id>/` subdirs. `file` is relative to the manifest
+`doc_id` is a slugified stable identifier — drives the `pipeline-cache/<doc_id>/`,
+medallion partition path `gold/.../media_chunks/<doc_id>/`, and
+`extractions/<doc_id>/` subdirs. `file` is relative to the manifest
 parent directory.
 
 ### Fixture Pipeline
 
-Three scripts power the multi-video flow. Run them in this order whenever
-new source videos are added:
+Three steps power the multi-video flow. Run them in order whenever new
+source videos are added:
 
 ```bash
 # 1. Compress: shrink raw videos in-place via the production transcode
 #    dispatcher (videotoolbox-hevc on macOS, svt-av1 elsewhere).
-python scripts/compress_fixtures.py tests/fixtures/media-ingest/
+python scripts/compress_fixtures.py packages/media-ingest/tests/fixtures/
 
 # 2. Audio cache: per-doc-id transcription + diarization.
 HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
 
-# 3. Chunk fixtures: rebuild per-video benchmark_chunks from cached audio.
-task bench:chunks:regen
+# 3. Chunks: materialize the media_chunks asset (across all 3 domains, or
+#    per-domain). Outputs land at the canonical medallion path under
+#    .test-output/<domain>/<layer>/.../*_chunks/[<partition>/]data.jsonl.
+task bench:chunks:regen           # all 3 domains
+task bench:chunks:regen:media     # just media-ingest
 ```
 
-Each script reads the manifest and writes outputs keyed by `doc_id`:
+Each step reads the manifest and writes outputs keyed by `doc_id`:
 
-| Script | Reads | Writes |
-|--------|-------|--------|
+| Step | Reads | Writes |
+|------|-------|--------|
 | `compress_fixtures.py` | `*.mp4` source files | replaces `*.mp4` in place via `_transcode_video` |
 | `regen_audio_fixtures.py` | source `.mp4` + manifest | `pipeline-cache/<doc_id>/{0_transcription,1_diarization}.json` |
-| `regen_benchmark_chunks.py` | cached diarization | `per_video_chunks/<doc_id>/benchmark_chunks.json` + merged file |
-| `bench_extract_per_video.py` | per-doc-id chunks | `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json` |
+| `task bench:chunks:regen:media` | cached diarization (pre-seeds segment_merge) | `gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl` (canonical medallion path) |
+| `bench_extract_per_video.py` | medallion chunks | `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json` |
 
 `bench_extract_per_video.py` is invoked as a subprocess by
 `benchmark_harness.py --all-videos` — it's not run directly. The harness
@@ -525,16 +527,20 @@ model run:
   loads this to print summary lines and to ensure `runs/<run-id>` has a
   default extraction file the existing report code can find.
 
-### Curating Per-Video Chunks
+### Curating Cross-Domain Chunks
 
-`regen_benchmark_chunks.py --max-chunks-per-video N` truncates each video's
-chunks to the first N. **This is a placeholder strategy and is discouraged
-for evaluation runs** — taking the first N chunks biases the benchmark
-toward intros/cold-opens rather than sampling a representative slice of
-each video. A proper curation strategy (semantic sampling, domain-stratified
-selection, manual review) is part of the deferred work tracked under
-**CD-6ef7** and **CD-uu76**. Until that lands, prefer running with no
-curation flag (default 0 = keep all chunks) and let the harness run wide.
+The medallion tree merges chunks across all 3 domains via
+`tests/shared/medallion.py::load_chunks(sample_per_domain=N)`. Open-leaks
+materializes 3.6M+ chunks (paradise papers, ICIJ entities, court docs), so a
+full extraction pass is intractable. The `BENCH_SAMPLE_PER_DOMAIN` env var
+(or `--sample-per-domain N` on the harness, default 50) caps each domain's
+contribution. Path-based stratification with early-stop file reads — the cap
+is bounded even when one domain is multi-GB.
+
+A proper curation strategy (semantic sampling, domain-stratified selection,
+manual review) is the deferred work tracked under **CD-6ef7** and **CD-uu76**.
+Until that lands, the per-domain cap is the practical lever for keeping
+benchmark runs tractable while still spanning all 3 domains.
 
 ### Per-(model, video) GT and Scoring (Deferred)
 

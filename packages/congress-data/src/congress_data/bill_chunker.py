@@ -243,9 +243,14 @@ def _parse_xml(xml_content: str, config: ChunkConfig | None = None) -> tuple[str
     preamble = _xml_get_text(form) if form is not None else None
     preamble = preamble if preamble else None
 
+    # Bill XMLs use ``<legis-body>``; resolution XMLs (hres/sres) use
+    # ``<resolution-body>``. Both share the same section/title structure
+    # downstream, so accept either as the chunkable body.
     legis_body = root.find("legis-body")
     if legis_body is None:
-        raise ValueError("No <legis-body> element found in bill XML")
+        legis_body = root.find("resolution-body")
+    if legis_body is None:
+        raise ValueError("No <legis-body> or <resolution-body> element found in bill XML")
 
     max_chars = config.target_chars if config else MAX_CHUNK_CHARS
     candidates: list[ChunkCandidate] = []

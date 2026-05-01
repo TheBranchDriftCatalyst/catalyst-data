@@ -108,31 +108,32 @@ chunks = chunking.chunk_vad_windows(segments, doc_id, title, ...)
 
 When iterating chunker config (`max_chars`, `pause_threshold_s`,
 `fallback_chunk_size`) against the multi-video benchmark workflow, regenerate
-per-video chunk fixtures from cached audio:
+per-video chunks from cached audio:
 
 ```bash
-task bench:chunks:regen
+task bench:chunks:regen:media
 ```
 
-This calls `scripts/regen_benchmark_chunks.py`, which iterates
-`tests/fixtures/media-ingest/audio_manifest.yaml`, runs
-`ChunkingResource.chunk_speaker_segments` against each video's cached
-diarization, and writes:
+This invokes `packages/media-ingest/tests/integration/test_chunks_cpu.py`,
+which iterates `packages/media-ingest/tests/fixtures/audio_manifest.yaml`,
+pre-seeds `media_segment_merge` from each video's cached diarization, then
+calls `dagster.materialize([media_chunks], partition_key=doc_id, resources={...})`
+with `LocalJsonIOManager` swapped in. Output lands in the medallion tree at:
 
-- `tests/fixtures/media-ingest/per_video_chunks/<doc_id>/benchmark_chunks.json` —
-  per-video source of truth.
-- `tests/fixtures/media-ingest/benchmark_chunks.json` — merged file consumed
-  by `BenchmarkStore.load_benchmark_chunks()`.
+- `.test-output/media-ingest/gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl` —
+  same path `MinioIOManager` writes in production; consumed cross-domain by
+  `tests/shared/medallion.py::load_chunks()`.
 
 The chunker is millisecond-fast per video, so regen is cheap. The slow audio
-stages (transcription + diarization) are not touched — `bench:chunks:regen`
-reads cached `pipeline-cache/<doc_id>/1_diarization.json` for each video.
+stages (transcription + diarization) are not touched — the test reads cached
+`pipeline-cache/<doc_id>/1_diarization.json` for each video.
 
-**Caveat**: `regen_benchmark_chunks.py --max-chunks-per-video N` truncates
-each video's chunks to the first N. This is a placeholder curation strategy
-that biases toward video intros and is **discouraged** for evaluation runs.
-Proper curation (semantic sampling, domain-stratified selection) is part of
-the deferred work tracked under beads tasks **CD-uu76** (embedding-derived
+**Caveat**: open-leaks materializes 3.6M+ chunks, so cross-domain extraction
+defaults to a stratified per-domain cap via
+`load_chunks(sample_per_domain=N)` (50/domain in `test_extraction_e2e`,
+override with `BENCH_SAMPLE_PER_DOMAIN`). This is a backstop, not a curation
+strategy. Proper curation (semantic sampling, domain-stratified selection)
+is deferred work tracked under beads tasks **CD-uu76** (embedding-derived
 chunking POC) and **CD-6ef7** (per-domain chunking strategies via LangChain
 splitters).
 
@@ -157,6 +158,7 @@ splitters).
   covering speaker-turn, pause-splitting, mixed strategies. Tests pass
   `max_chars=1500` explicitly so they're deterministic regardless of
   `CHUNK_SIZE` env.
-- **Integration**: `pytest tests/test_pipeline_integration.py::test_chunks_produced`
-  — runs the chunker against real cached transcription/diarization output.
-  Same code path the production `media_chunks` asset runs.
+- **Integration**: `pytest packages/media-ingest/tests/integration/test_chunks_cpu.py`
+  — materializes the production `media_chunks` Dagster asset against real
+  cached transcription/diarization output via `LocalJsonIOManager`. Same code
+  path the production asset runs in cluster, only the IO manager differs.

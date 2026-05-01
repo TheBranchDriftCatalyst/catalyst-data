@@ -5,12 +5,30 @@ This project uses pytest with a cascading fixture pattern. Integration tests run
 ## Quick Start
 
 ```bash
+# First-time setup: pull API keys + IO config from the catalyst-cluster k8s
+# secrets and write per-domain .envrc files (chmod 600, all gitignored).
+# Idempotent — re-run any time the cluster secrets rotate.
+./scripts/pull-dev-secrets.sh
+direnv allow                          # at the repo root, then in each package
+
+# Run dagster dev with all 3 code locations using LocalJsonIOManager —
+# materialize anything in the UI without S3. Outputs land at
+# .test-output/<domain>/... matching the integration test layout.
+task dev                              # http://127.0.0.1:3000
+
 # Single-video flow — pre-warm the demo_video.mp4 audio cache once:
 WHISPER_BACKEND=mlx-whisper task bench:pipeline:warm   # Apple Silicon (Metal)
 task bench:pipeline:warm                                # other platforms (faster-whisper CPU)
 
 # Multi-video flow — populate the per-doc-id cache for every video in the manifest:
 HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
+
+# Materialize *_chunks Dagster assets across all 3 domains (writes to the
+# medallion tree at .test-output/<domain>/<layer>/.../*_chunks/.../data.jsonl):
+task bench:chunks:regen                            # all 3 domains
+task bench:chunks:regen:media                      # media_chunks only
+task bench:chunks:regen:congress                   # bill_chunks (needs CONGRESS_API_KEY)
+task bench:chunks:regen:leaks                      # leak_chunks (no creds)
 
 # Full benchmark (single-video, run all models, generate ground truth, score, report):
 PYTHONPATH=. python tests/benchmark_harness.py --full --exgraph
@@ -33,12 +51,18 @@ pytest libs/ packages/ -k "not integration and not llm and not slow"
 ## Quick Reference
 
 ```bash
-# Media-ingest integration (requires tests/fixtures/media-ingest/demo_video.mp4)
-pytest tests/test_pipeline_integration.py -v -s
+# Media-ingest integration — transcription / diarization / segment_merge
+# (requires packages/media-ingest/tests/fixtures/demo_video.mp4)
+pytest packages/media-ingest/tests/integration/test_pipeline_integration.py -v -s
 
-# Media-ingest extraction (requires LLM API key)
+# Media-ingest chunks materialization (CPU-only — pre-seeds segment_merge
+# from cached diarization, materializes media_chunks via LocalJsonIOManager)
+pytest packages/media-ingest/tests/integration/test_chunks_cpu.py -v -s
+
+# Cross-domain LLM extraction tests (consumes load_chunks() across all
+# 3 domains; requires the *_chunks asset to have been materialized first)
 LLM_MODEL=gpt-4o-mini OPENAI_API_KEY=xxx \
-    pytest tests/test_pipeline_integration.py -k "extraction" -v -s
+    pytest tests/test_extraction_e2e.py -v -s
 
 # Congress integration (requires Congress API key)
 CONGRESS_API_KEY=xxx DAGSTER_CODE_LOCATION=congress_data \
@@ -47,31 +71,50 @@ CONGRESS_API_KEY=xxx DAGSTER_CODE_LOCATION=congress_data \
 # Congress extraction (requires both API keys)
 CONGRESS_API_KEY=xxx LLM_API_KEY=xxx LLM_MODEL=gpt-4o-mini DAGSTER_CODE_LOCATION=congress_data \
     pytest packages/congress-data/tests/integration/test_pipeline.py -k "gold or full" -v -s
+
+# Open-leaks chunks materialization (no creds needed)
+DAGSTER_CODE_LOCATION=open_leaks \
+    pytest packages/open-leaks/tests/integration/test_chunks.py -v -s
 ```
 
 ## Directory Structure
 
-There are two distinct categories of test data:
+Inputs live in domains, outputs bubble up. Each domain owns its private
+fixtures (manifests, source files); each domain's chunks asset writes to a
+shared medallion tree under `.test-output/`. The cross-domain harness reads
+from that tree via a single glob — it never touches per-domain inputs.
 
-**True Fixtures** (checked into git, never deleted by `--regen` or `bench:clean`):
+**Domain-private fixtures** (checked into git, never deleted by `bench:clean`):
 ```
-tests/fixtures/
-    media-ingest/
-        audio_manifest.yaml          # 7 source videos -> stable doc_ids
-        demo_video.mp4               # smallest fixture; default for single-video integration tests
-        <other source videos>.mp4    # gitignored when present (compressed via scripts/compress_fixtures.py)
-        benchmark_chunks.json        # merged curated chunks across all manifest videos
-        per_video_chunks/<doc_id>/
-            benchmark_chunks.json    # per-video curated chunk subset (source of truth)
-    congress-data/
-        benchmark_chunks.json        # curated bill chunks (4 chunks)
-    open-leaks/
-        benchmark_chunks.json        # curated leak chunks (3 chunks)
-    benchmark_chunks.json            # legacy single-file fallback
-    model_cache/                     # local model weights cache
+packages/media-ingest/tests/fixtures/
+    audio_manifest.yaml              # 7 source videos -> stable doc_ids
+    demo_video.mp4                   # smallest fixture; default for single-video integration tests
+    <other source videos>.mp4        # gitignored when present (compressed via scripts/compress_fixtures.py)
+
+packages/congress-data/tests/fixtures/
+    bill_manifest.yaml               # bill_ids the integration test materializes
+
+packages/open-leaks/tests/fixtures/
+    <leak source files>              # input documents for leak_chunks
 ```
 
-**Cached Artifacts** (generated, gitignored, regenerable):
+**Medallion outputs** (generated, gitignored, regenerable — `task bench:chunks:regen`):
+```
+.test-output/<domain>/<layer>/<code_loc>/<group>/<asset>/[<partition>/]data.jsonl
+
+  media-ingest/gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl
+  congress-data/silver/congress_data/congress/bill_chunks/<bill_id>/data.jsonl
+  open-leaks/silver/open_leaks/leaks/leak_chunks/data.jsonl    (unpartitioned)
+```
+
+These are the same paths `MinioIOManager` writes in production. `task dev` and
+the integration tests use `LocalJsonIOManager` (its drop-in filesystem analog
+in `dagster_io.local_io_manager`); prod uses the MinIO variant. Backend
+selection happens in each code location's `Definitions` via
+`select_io_managers(default_local_dir=...)`, which reads `DAGSTER_IO_BACKEND`
+(`local` | `minio`) from the env.
+
+**Cached audio artifacts** (slow stages only, gitignored, regenerable):
 ```
 .test-output/media-ingest/
     pipeline-cache/                  # expensive audio-model outputs (slow stages only)
@@ -81,6 +124,7 @@ tests/fixtures/
         # Flat pipeline-cache/0_transcription.json + 1_diarization.json
         # remain readable as the single-video fallback for legacy
         # `task bench:pipeline:warm` runs (doc_id=None path).
+    model_cache/                     # local model weights cache (gitignored)
     ground-truth/                    # ground truth versions (independent of runs)
         ensemble-12model.json        # named, versioned
         active.json                  # currently used for scoring
@@ -109,33 +153,60 @@ The **per-doc-id subdir layout** (`pipeline-cache/<doc_id>/`,
 `extractions/<doc_id>/`) lets a multi-video run keep each video's artifacts
 isolated. `BenchmarkStore.{load,save}_pipeline_artifact(name, doc_id=<slug>)`
 and `RunStore.{load,save,list}_extraction(model, doc_id=<slug>)` route to the
-subdir; pass `doc_id=None` to read/write the flat single-video paths
-(see `tests/shared/store.py:298-336`).
+subdir; pass `doc_id=None` to read/write the flat single-video paths.
+
+**Cross-domain chunk loading.** `tests/shared/medallion.py::load_chunks()` is
+the only path through which the harness reads chunks. It globs the medallion
+tree across all 3 domains (gold + silver, partitioned + unpartitioned) and
+returns a merged list of dicts. Filter by `doc_ids=[...]` to narrow to
+specific documents. Pass `sample_per_domain=N` to cap rows per domain — open-leaks
+materializes 3.6M+ chunks, so `sample_per_domain` is required for tractable
+extraction in `test_extraction_e2e` and `task bench:run`. The legacy
+`BenchmarkStore.load_chunks` / `load_benchmark_chunks` paths (and the
+`tests/fixtures/<domain>/benchmark_chunks.json` fixtures) are gone — there is
+exactly one source of truth for chunks now.
 
 ## Test Structure
 
+Cross-domain concerns at the root; each domain owns its own pipeline tests
+and chunks materialization:
+
 ```
-tests/
+tests/                              # cross-domain only
     conftest.py                     # shared Dagster fixtures, safe env defaults
-    test_pipeline_integration.py    # media-ingest: full pipeline cascade
-    test_extraction_benchmark.py    # media-ingest: ground truth + model scoring
     benchmark_harness.py            # CLI entry point (interactive + flags)
     benchmark_config.py             # model registry + ensemble model panels
+    test_extraction_e2e.py          # cross-domain LLM extraction (consumes load_chunks())
+    test_extraction_benchmark.py    # ground truth + model scoring
     shared/
         __init__.py
-        store.py                    # BenchmarkStore + RunStore (centralized I/O)
+        medallion.py                # load_chunks() — globs the medallion tree across all domains
+        store.py                    # BenchmarkStore + RunStore (harness-lifecycle artifacts only)
         ground_truth.py             # ensemble consensus logic
         report.py                   # report builder for viewer SPA
         extraction_scoring.py       # mention/proposition F1 scoring
-        local_io_manager.py         # filesystem IO manager for test outputs
+
+packages/media-ingest/tests/
     fixtures/
-        benchmark_chunks.json       # true fixture (curated, checked into git)
+        audio_manifest.yaml         # 7 source videos -> stable doc_ids
+        demo_video.mp4              # smallest fixture; default for single-video integration tests
+    integration/
+        conftest.py                 # media test fixtures
+        test_pipeline_integration.py  # transcription / diarization / segment_merge
+        test_pipeline.py            # full GPU chain
+        test_chunks_cpu.py          # pre-seed segment_merge → materialize media_chunks (CPU)
 
 packages/congress-data/tests/
+    fixtures/
+        bill_manifest.yaml          # bill_ids the integration test materializes
     integration/
         conftest.py                 # congress test fixtures + CLI options
-        test_pipeline.py            # full bill pipeline: bronze -> silver -> gold
-        test_extraction_benchmark.py
+        test_pipeline.py            # full bill pipeline: bronze -> silver -> gold (incl. test_bill_chunks)
+
+packages/open-leaks/tests/
+    integration/
+        conftest.py                 # open-leaks test fixtures
+        test_chunks.py              # leak_documents -> leak_chunks (no creds)
 ```
 
 ## Integration Test Pipeline
@@ -177,13 +248,13 @@ consumed by the other.
 
 ### Multi-Video Workflow
 
-The `tests/fixtures/media-ingest/audio_manifest.yaml` manifest maps a list of
-source videos to stable `doc_id` slugs. Each entry drives a per-doc-id branch
-of the pipeline cache so multiple videos can coexist without stomping on each
-other.
+The `packages/media-ingest/tests/fixtures/audio_manifest.yaml` manifest maps a
+list of source videos to stable `doc_id` slugs. Each entry drives a per-doc-id
+branch of the pipeline cache so multiple videos can coexist without stomping
+on each other.
 
 ```yaml
-# tests/fixtures/media-ingest/audio_manifest.yaml
+# packages/media-ingest/tests/fixtures/audio_manifest.yaml
 videos:
   - doc_id: demo-video
     file: 'demo_video.mp4'
@@ -194,15 +265,15 @@ videos:
   # ...
 ```
 
-Three regen scripts under `scripts/` operate on the manifest. They run in
-order; later scripts depend on the artifacts produced by earlier ones:
+Three steps wire the manifest from raw video to extraction artifacts. They run
+in order; later steps depend on artifacts produced by earlier ones:
 
-| Script | Wraps | Reads | Writes | When to run |
-|--------|-------|-------|--------|-------------|
-| `compress_fixtures.py` | `media_ingest.assets.transcode._transcode_video` | `*.mp4` source files | replaces `*.mp4` in place | After dropping new source videos into the fixture dir; brings them under git-friendly size |
-| `regen_audio_fixtures.py` | `_select_backend(MediaIngestConfig)` + `_run_diarization` | `*.mp4` + manifest | `pipeline-cache/<doc_id>/0_transcription.json`, `1_diarization.json` | After compressing fixtures, or when changing `WHISPER_BACKEND` / `MLX_MODEL_ID` |
-| `regen_benchmark_chunks.py` | `ChunkingResource.chunk_speaker_segments` | cached diarization (per-doc-id) | `tests/fixtures/media-ingest/per_video_chunks/<doc_id>/benchmark_chunks.json` + merged `benchmark_chunks.json` | After audio regen, or when changing chunker config (`CHUNK_SIZE`, pause threshold) |
-| `bench_extract_per_video.py` | `extract_validated()` | per-doc-id chunks | `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json` (+ flat aggregate roll-up) | Invoked as a subprocess by `benchmark_harness.py --all-videos`; not run directly |
+| Step | Wraps | Reads | Writes | When to run |
+|------|-------|-------|--------|-------------|
+| `scripts/compress_fixtures.py` | `media_ingest.assets.transcode._transcode_video` | `*.mp4` source files | replaces `*.mp4` in place | After dropping new source videos into the fixture dir; brings them under git-friendly size |
+| `scripts/regen_audio_fixtures.py` (via `task bench:fixtures:regen`) | `_select_backend(MediaIngestConfig)` + `_run_diarization` | `*.mp4` + manifest | `pipeline-cache/<doc_id>/0_transcription.json`, `1_diarization.json` | After compressing fixtures, or when changing `WHISPER_BACKEND` / `MLX_MODEL_ID` |
+| `task bench:chunks:regen:media` | `media_chunks` Dagster asset via `LocalJsonIOManager` | cached diarization (per-doc-id) | `.test-output/media-ingest/gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl` | After audio regen, or when changing chunker config (`CHUNK_SIZE`, pause threshold) |
+| `scripts/bench_extract_per_video.py` | `extract_validated()` | per-doc-id chunks (via `load_chunks(doc_ids=...)`) | `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json` (+ flat aggregate roll-up) | Invoked as a subprocess by `benchmark_harness.py --all-videos`; not run directly |
 
 Taskfile shortcuts:
 
@@ -211,13 +282,16 @@ HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
 HF_TOKEN=hf_xxx task bench:fixtures:regen -- --only demo-video,inside-the-aipac-pipeline
 HF_TOKEN=hf_xxx task bench:fixtures:regen -- --force  # bypass per-video cache check
 
-task bench:chunks:regen                                  # all videos
-task bench:chunks:regen -- --only saagar-x-joe-kent      # narrow
+task bench:chunks:regen                              # all 3 domains
+task bench:chunks:regen:media                        # media_chunks (CPU-only, all videos)
+task bench:chunks:regen:media -- -k demo-video       # narrow via pytest -k
+task bench:chunks:regen:congress                     # bill_chunks (needs CONGRESS_API_KEY)
+task bench:chunks:regen:leaks                        # leak_chunks (no creds)
 ```
 
-Both scripts are idempotent — `regen_audio_fixtures.py` skips a `doc_id` whose
-two cache files already exist unless `--force` is set, and
-`regen_benchmark_chunks.py` always recomputes from cached diarization since
+Both pre-extraction steps are idempotent — `regen_audio_fixtures.py` skips a
+`doc_id` whose two cache files already exist unless `--force` is set, and
+`bench:chunks:regen:media` always recomputes from cached diarization since
 the chunker is fast.
 
 #### Multi-video benchmark
@@ -256,8 +330,8 @@ can be inspected manually but does not yet produce a per-video F1 table.
 Congress.gov API (partition: 119-hres-1)
     -> Bronze: bill_detail, bill_actions, bill_cosponsors, bill_text_versions, bill_full_text
     -> Silver: bill_document, bill_chunks
+        -> .test-output/congress-data/silver/congress_data/congress/bill_chunks/<bill_id>/data.jsonl
     -> Gold: bill_mentions, bill_assertions, bill_embeddings
-        -> .test-output/congress-data/fixtures/extraction_{model}.json
 ```
 
 ## Extraction Benchmarking
@@ -290,6 +364,9 @@ See [BENCHMARK.md](BENCHMARK.md) for the full extraction benchmark reference, in
 | `EXGRAPH_ENABLED` | Enable exgraph v2 pipeline | `false` |
 | `TEST_OUTPUT_ROOT` | Override test output location | `.test-output` |
 | `BENCH_ONLY_DOC_IDS` | Restrict `--all-videos` extraction to a subset (comma-separated `doc_id`s); set by harness when narrowing | -- |
+| `BENCH_SAMPLE_PER_DOMAIN` | Cap chunks per domain in `test_extraction_e2e` and the harness's in-process fixtures. open-leaks materializes 3.6M+ chunks so a full extraction is intractable; set to `0` to disable the cap | `50` |
+| `DAGSTER_IO_BACKEND` | IO manager selection for each code location (`local` writes to `.test-output/<domain>/...` via `LocalJsonIOManager`; `minio` writes to S3 via `MinioIOManager`). `task dev` and the integration tests set `local`; production sets `minio` | `minio` |
+| `WHISPER_MODEL_CACHE` | Local cache dir for Whisper model weights (env-driven; was previously hard-coded to `/data/whisper-models`). Local dev typically uses `~/.cache/whisper-models` | `~/.cache/whisper-models` |
 | `SAVE_AUDIT_LOG` | Persist per-video audit events when `--audit-log` is set on the harness | `""` (off) |
 | `CATALYST_TELEMETRY` | Force-enable OTEL metrics + tracing export from CLI scripts. Default off outside Dagster — dev tooling stays silent and doesn't try to reach `alloy.monitoring.svc.cluster.local`. Set to `1` / `true` / `yes` / `on` to opt in. Inside Dagster (DAGSTER_RUN_ID/DAGSTER_HOME set) telemetry initializes automatically regardless. | `""` (auto: on inside Dagster, off otherwise) |
 
@@ -315,4 +392,4 @@ one place, configure once.
 - Extraction uses `extract_validated()` from `dagster_io.extraction` — the exact same code path as production
 - Each benchmark run is preserved in `runs/` — old runs are never overwritten
 - The `latest` symlink always points to the most recent run
-- Add a new benchmark video by dropping the `.mp4` into `tests/fixtures/media-ingest/`, appending an entry to `audio_manifest.yaml`, then running `task bench:fixtures:regen` followed by `task bench:chunks:regen`
+- Add a new benchmark video by dropping the `.mp4` into `packages/media-ingest/tests/fixtures/`, appending an entry to `audio_manifest.yaml`, then running `task bench:fixtures:regen` followed by `task bench:chunks:regen:media`

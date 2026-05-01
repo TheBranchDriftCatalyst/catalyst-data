@@ -8,8 +8,8 @@ A walkthrough of the multi-video pipeline that the media-ingest benchmark harnes
 
 - Seven source videos (~9 hours of audio) compressed in place via Apple Silicon hardware HEVC: **6.9 GB → 824 MB at 8.55x overall** using `videotoolbox-hevc` on an M-series machine.
 - Audio cache regenerated per-video using `mlx-whisper` (Metal) + `pyannote` (MPS): **14m31s** wall-clock for all 7 videos, 14 cache files (~33 MB total).
-- Manifest-driven layout: `tests/fixtures/media-ingest/audio_manifest.yaml` maps source `.mp4` files to slugified `doc_id`s; everything downstream keys off that.
-- Per-doc-id storage everywhere: `pipeline-cache/<doc_id>/{0_transcription,1_diarization}.json`, `extractions/<doc_id>/extraction_<model>.json`, `per_video_chunks/<doc_id>/benchmark_chunks.json`.
+- Manifest-driven layout: `packages/media-ingest/tests/fixtures/audio_manifest.yaml` maps source `.mp4` files to slugified `doc_id`s; everything downstream keys off that.
+- Per-doc-id storage everywhere: `pipeline-cache/<doc_id>/{0_transcription,1_diarization}.json`, `extractions/<doc_id>/extraction_<model>.json`, and the medallion tree at `.test-output/media-ingest/gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl`.
 - Harness gains `--all-videos` flag — swaps the per-model subprocess from single-video pytest to `scripts/bench_extract_per_video.py` which iterates the manifest.
 - **Not yet built**: per-(model, video) ensemble GT, per-pair F1 scoring, viewer SPA video selector. Tracked under beads **CD-vfiq**.
 
@@ -20,7 +20,7 @@ A walkthrough of the multi-video pipeline that the media-ingest benchmark harnes
 Everything starts here:
 
 ```yaml
-# tests/fixtures/media-ingest/audio_manifest.yaml
+# packages/media-ingest/tests/fixtures/audio_manifest.yaml
 videos:
   - doc_id: demo-video
     file: 'demo_video.mp4'
@@ -38,9 +38,9 @@ videos:
 
 Adding a new video is three steps:
 
-1. Drop the `.mp4` into `tests/fixtures/media-ingest/`
+1. Drop the `.mp4` into `packages/media-ingest/tests/fixtures/`
 2. Append an entry to `audio_manifest.yaml`
-3. Run `task bench:fixtures:regen` then `task bench:chunks:regen`
+3. Run `task bench:fixtures:regen` then `task bench:chunks:regen:media`
 
 That's it — no other config touchpoint.
 
@@ -51,7 +51,7 @@ That's it — no other config touchpoint.
 Source videos straight off YouTube are typically 1080p H.264 or AV1 at 1-2 Mbps. For benchmark fixtures they're decorative — the audio is what matters, and even that gets resampled to mono 16 kHz inside Whisper. So the script aggressively shrinks them:
 
 ```bash
-python scripts/compress_fixtures.py tests/fixtures/media-ingest/ \
+python scripts/compress_fixtures.py packages/media-ingest/tests/fixtures/ \
   --scale 480 --vt-bitrate 200k --audio-mono-16k
 ```
 
@@ -77,7 +77,7 @@ Running the seven source videos through compression:
 6.9 GB → 824 MB total (8.55x overall)
 ```
 
-The largest source went from ~2 GB (1080p H.264 at 5+ Mbps) down to a manageable 200-300 MB. With this footprint the `tests/fixtures/media-ingest/` dir stays small enough to remain practical even though the actual `.mp4` files are gitignored — `git status` doesn't get noisy and `du` doesn't blow up the local checkout.
+The largest source went from ~2 GB (1080p H.264 at 5+ Mbps) down to a manageable 200-300 MB. With this footprint the `packages/media-ingest/tests/fixtures/` dir stays small enough to remain practical even though the actual `.mp4` files are gitignored — `git status` doesn't get noisy and `du` doesn't blow up the local checkout.
 
 ### Bitrate target vs quality mode
 
@@ -139,33 +139,52 @@ This means the test fixture and the deployed Dagster asset on `mac-node` exercis
 
 ---
 
-## Stage 3: Chunk Fixture Regen (`scripts/regen_benchmark_chunks.py`)
+## Stage 3: Chunk Materialization (`task bench:chunks:regen:media`)
 
-Once audio cache exists, the chunker is fast:
+Once audio cache exists, the chunker is fast. Materializing chunks now goes
+through the production `media_chunks` Dagster asset itself — there's no
+separate script. The integration test
+`packages/media-ingest/tests/integration/test_chunks_cpu.py` pre-seeds
+`media_segment_merge` from cached diarization, then calls
+`dagster.materialize([media_chunks], partition_key=doc_id, resources={...})`
+with `LocalJsonIOManager` swapped in for `MinioIOManager`:
 
 ```bash
-task bench:chunks:regen
+task bench:chunks:regen:media                        # all videos in the manifest
+task bench:chunks:regen:media -- -k demo-video       # narrow via pytest -k
+task bench:chunks:regen                              # all 3 domains (media + congress + leaks)
 ```
 
-For each video:
+For each video the asset:
 
-1. Load `pipeline-cache/<doc_id>/1_diarization.json` (already has speaker labels).
-2. Run `ChunkingResource().chunk_speaker_segments(diarization["segments"], document_id, title, metadata)` — same chunker the production `media_chunks` asset runs.
-3. Save full chunks to `tests/fixtures/media-ingest/per_video_chunks/<doc_id>/benchmark_chunks.json`.
-4. Append to a merged `tests/fixtures/media-ingest/benchmark_chunks.json` that `BenchmarkStore.load_benchmark_chunks()` consumes.
+1. Reads pre-seeded `media_segment_merge` (built from `pipeline-cache/<doc_id>/1_diarization.json`).
+2. Calls `ChunkingResource().chunk_speaker_segments(...)` — same chunker the production asset uses.
+3. Writes chunks via `LocalJsonIOManager` to `.test-output/media-ingest/gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl` — the exact medallion path `MinioIOManager` would write to in production.
 
-The chunker runs in milliseconds per video — it's a pure Python pass over already-segmented data. Re-run after changing chunker config (`CHUNK_SIZE`, pause threshold) or after audio regen.
+The chunker runs in milliseconds per video — it's a pure Python pass over
+already-segmented data. Re-run after changing chunker config (`CHUNK_SIZE`,
+pause threshold) or after audio regen. The cross-domain harness reads chunks
+back via `tests/shared/medallion.py::load_chunks()`, which globs the medallion
+tree across all 3 domains and returns a merged list.
 
 ### Curation: known weak spot
 
-`regen_benchmark_chunks.py --max-chunks-per-video N` truncates each video's chunks to the first N. **The flag is still in the script but its use is discouraged for evaluation runs** — taking the first N chunks systematically biases the benchmark toward intros and cold-opens, which are atypical of the rest of the conversation in most podcast/lecture content. Models that handle intro greetings well will look disproportionately good.
+open-leaks materializes 3.6M+ chunks, which makes a full extraction pass
+intractable. The harness defaults to a stratified per-domain cap via
+`load_chunks(sample_per_domain=N)` — `test_extraction_e2e` uses 50/domain by
+default, override with `BENCH_SAMPLE_PER_DOMAIN=N` (or `0` for the full
+corpus). The cap is path-based (uses the medallion path's first segment as
+the domain key) so it works even when a chunk's `metadata.domain` is missing,
+and reads early-stop once a domain hits its cap so the slow path is bounded —
+79 chunks (media 28 + congress 1 + leaks capped at 50) returns in <10ms.
 
 A proper curation strategy is part of the deferred work tracked under:
 
 - **CD-uu76** — embedding-derived chunking POC: log adjacent-chunk cosine similarity distributions on existing chunks, then layer semantic refinement on top of the speaker chunker behind a feature flag.
 - **CD-6ef7** — the broader epic: per-domain chunking strategies via LangChain splitters, EmbeddingResource integration, per-subtype chunks assets.
 
-Until that lands, the recommendation is to drop `--max-chunks-per-video` entirely and let the harness run wide. Disk and wall-clock are cheap relative to producing biased numbers.
+Until proper semantic sampling lands, `BENCH_SAMPLE_PER_DOMAIN` is the
+backstop — head-of-corpus truncation is gone.
 
 ---
 
@@ -179,21 +198,20 @@ PYTHONPATH=. python tests/benchmark_harness.py --all-videos --models gliner-medi
 
 ### How `--all-videos` rewires the harness
 
-In `tests/benchmark_harness.py:48-112`, `_run_model(cfg, ..., all_videos=False)` toggles between two subprocess paths:
+In `tests/benchmark_harness.py`, `_run_model(cfg, ..., all_videos=False)` toggles between two subprocess paths:
 
-- `all_videos=False` (default) — runs `pytest tests/test_pipeline_integration.py -k extraction_produces_mentions` against `demo_video.mp4`. Single-video, legacy behavior.
+- `all_videos=False` (default) — runs `pytest tests/test_extraction_e2e.py -k extraction_produces_mentions` against the merged cross-domain chunk set. Single-video, legacy behavior.
 - `all_videos=True` — runs `python scripts/bench_extract_per_video.py`. The script reads the manifest and iterates per-video.
 
-Per-model env vars (`LLM_MODEL`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_STRUCTURED_METHOD`, `LLM_MAX_TOKENS`, `LLM_CONTEXT_WINDOW`) are set the same way for both paths — only the entrypoint differs.
+Per-model env vars (`LLM_MODEL`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_STRUCTURED_METHOD`, `LLM_MAX_TOKENS`, `LLM_CONTEXT_WINDOW`) are set the same way for both paths — only the entrypoint differs. The harness also sets `BENCH_SAMPLE_PER_DOMAIN` so the in-process extraction fixtures and the subprocess path agree on the per-domain cap.
 
 ### What `bench_extract_per_video.py` does per video
 
 For each entry in the manifest:
 
-1. Loads cached diarization at `pipeline-cache/<doc_id>/1_diarization.json`. If missing, logs a warning and skips that video — re-run `task bench:fixtures:regen` to populate.
-2. Runs `ChunkingResource().chunk_speaker_segments(...)` to produce `TextChunk`s.
-3. Calls `extract_validated(chunks, code_location="media_ingest", max_concurrency=1)` from `dagster_io.extraction` — same function the production `media_mentions` and `media_assertions` Dagster assets use.
-4. Saves the extraction at `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json` via `RunStore.save_extraction(model, data, doc_id=...)`.
+1. Calls `load_chunks(doc_ids=[doc_id])` (from `tests/shared/medallion.py`), which reads the materialized chunks at `.test-output/media-ingest/gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl`. If missing, logs a warning and skips that video — re-run `task bench:chunks:regen:media` to populate.
+2. Calls `extract_validated(chunks, code_location="media_ingest", max_concurrency=1)` from `dagster_io.extraction` — same function the production `media_mentions` and `media_assertions` Dagster assets use.
+3. Saves the extraction at `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json` via `RunStore.save_extraction(model, data, doc_id=...)`.
 
 Per-video lines stream back to the harness:
 
@@ -232,7 +250,7 @@ This is the honest section. The multi-video infrastructure produces extraction a
 
 **Viewer SPA.** Add a video selector tab/column. Phase E (frontend work).
 
-**Curation strategy.** As covered above — `--max-chunks-per-video N` is a placeholder that biases toward video intros. Real curation needs either semantic sampling or domain-stratified manual review. Tracked under CD-uu76 / CD-6ef7.
+**Curation strategy.** As covered above — `BENCH_SAMPLE_PER_DOMAIN` is a path-based stratified cap that keeps the harness tractable but doesn't pick semantically representative chunks. Real curation needs either semantic sampling or domain-stratified manual review. Tracked under CD-uu76 / CD-6ef7.
 
 What today's `--all-videos` run is good for in the meantime:
 
@@ -246,13 +264,13 @@ What today's `--all-videos` run is good for in the meantime:
 
 ```bash
 # One-time fixture prep (after dropping new videos into the fixture dir)
-python scripts/compress_fixtures.py tests/fixtures/media-ingest/
+python scripts/compress_fixtures.py packages/media-ingest/tests/fixtures/
 HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
-task bench:chunks:regen
+task bench:chunks:regen:media
 
 # Narrow regen to specific videos
 HF_TOKEN=hf_xxx task bench:fixtures:regen -- --only demo-video,inside-the-aipac-pipeline
-task bench:chunks:regen -- --only saagar-x-joe-kent-resignation-israeli-nukes-epstein-charlie-kirk-mike-huckabee
+task bench:chunks:regen:media -- -k saagar-x-joe-kent
 
 # Force regen even if cache hits
 HF_TOKEN=hf_xxx task bench:fixtures:regen -- --force
@@ -273,14 +291,16 @@ task bench:pipeline:warm
 
 ### Relevant file paths
 
-- Manifest: `tests/fixtures/media-ingest/audio_manifest.yaml`
+- Manifest: `packages/media-ingest/tests/fixtures/audio_manifest.yaml`
 - Compression: `scripts/compress_fixtures.py`
 - Audio regen: `scripts/regen_audio_fixtures.py`
-- Chunk regen: `scripts/regen_benchmark_chunks.py`
+- Chunk materialization: `packages/media-ingest/tests/integration/test_chunks_cpu.py` (run via `task bench:chunks:regen:media`)
 - Extraction subprocess: `scripts/bench_extract_per_video.py`
-- Harness flag: `tests/benchmark_harness.py:474-480` (`--all-videos`)
-- Per-doc-id store APIs: `tests/shared/store.py:101-141` (RunStore), `tests/shared/store.py:298-336` (BenchmarkStore)
-- Transcode dispatcher: `packages/media-ingest/src/media_ingest/assets/transcode.py:255-269` (`_transcode_video`)
+- Cross-domain chunk loader: `tests/shared/medallion.py` (`load_chunks`)
+- IO manager backends: `libs/dagster-io/src/dagster_io/local_io_manager.py` + `io_backend.py` (`select_io_managers`)
+- Harness flag: `tests/benchmark_harness.py` (`--all-videos`, `--sample-per-domain`)
+- Per-doc-id store APIs: `tests/shared/store.py` (RunStore + BenchmarkStore — harness-lifecycle artifacts only)
+- Transcode dispatcher: `packages/media-ingest/src/media_ingest/assets/transcode.py` (`_transcode_video`)
 - Transcription dispatcher: `packages/media-ingest/src/media_ingest/assets/transcription.py` (`_select_backend`)
 - Chunker: `libs/dagster-io/src/dagster_io/chunking.py` (`ChunkingResource.chunk_speaker_segments`)
 
