@@ -27,13 +27,25 @@ class ChunkNode:
         self.config = config
 
     async def __call__(self, state: dict) -> dict[str, Any]:
-        # If chunks already provided, passthrough
+        raw_text = state.get("raw_text", "")
+        target_chars = self.config.target_chars
+
+        # If chunks already provided AND they fit the model's context, passthrough
         existing_chunks = state.get("chunks")
         if existing_chunks:
-            logger.info("chunk: %d pre-chunked chunks, passthrough", len(existing_chunks))
-            return {}
+            oversized = [c for c in existing_chunks if len(c.get("text", "")) > target_chars * 1.5]
+            if not oversized:
+                logger.info("chunk: %d pre-chunked chunks fit model context, passthrough", len(existing_chunks))
+                return {}
+            # Re-chunk oversized chunks for this model's context window
+            logger.info(
+                "chunk: %d/%d chunks exceed target (%d chars), re-chunking",
+                len(oversized),
+                len(existing_chunks),
+                target_chars,
+            )
+            raw_text = "\n\n".join(c.get("text", "") for c in existing_chunks)
 
-        raw_text = state.get("raw_text", "")
         if not raw_text:
             return {"chunks": []}
 

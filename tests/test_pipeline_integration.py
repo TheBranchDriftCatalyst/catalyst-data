@@ -34,25 +34,46 @@ _store = BenchmarkStore()
 
 @pytest.fixture(scope="session")
 def transcription_result():
-    """Transcribe using our actual _transcribe_faster_whisper pipeline code."""
+    """Transcribe using the production backend dispatcher.
+
+    Uses media_ingest.assets.transcription._select_backend() — the same code
+    path the production media_transcriptions asset runs. Backend choice comes
+    from MediaIngestConfig fields, overridable via env so dev boxes can pick
+    an accelerated backend (mlx-whisper on Apple Silicon, openvino on Intel
+    GPU) while CI defaults to plain faster-whisper CPU.
+
+    Env overrides:
+        WHISPER_BACKEND       — faster-whisper | openvino | mlx-whisper
+        WHISPER_MODEL         — model name for faster-whisper (e.g. "base", "large-v3")
+        WHISPER_DEVICE        — faster-whisper device ("cpu", "cuda", "auto")
+        WHISPER_COMPUTE_TYPE  — faster-whisper compute type ("int8", "float16", ...)
+        MLX_MODEL_ID          — HF id for mlx-whisper (e.g. "mlx-community/whisper-large-v3-mlx")
+    """
     cached = _store.load_fixture("transcription")
     if cached:
         return cached
 
-    from media_ingest.assets.transcription import _transcribe_faster_whisper
+    from media_ingest.assets.transcription import _select_backend, _validate_transcription_fidelity
     from media_ingest.config import MediaIngestConfig
 
-    config = MediaIngestConfig(whisper_model="base", whisper_device="cpu", whisper_compute_type="int8")
+    config = MediaIngestConfig(
+        whisper_backend=os.environ.get("WHISPER_BACKEND", "faster-whisper"),
+        whisper_model=os.environ.get("WHISPER_MODEL", "base"),
+        whisper_device=os.environ.get("WHISPER_DEVICE", "cpu"),
+        whisper_compute_type=os.environ.get("WHISPER_COMPUTE_TYPE", "int8"),
+        mlx_model_id=os.environ.get("MLX_MODEL_ID", "mlx-community/whisper-base-mlx"),
+    )
 
-    print("\n  Loading faster-whisper model (base)...")
-    from faster_whisper import WhisperModel
+    print(f"\n  Loading {config.whisper_backend} via prod dispatcher...")
+    model, resolved_device, model_label, transcribe_fn = _select_backend(config)
 
-    model = WhisperModel(config.whisper_model, device=config.whisper_device, compute_type=config.whisper_compute_type)
-
-    print(f"  Transcribing {DEMO_VIDEO.name}...")
+    print(f"  Transcribing {DEMO_VIDEO.name} ({model_label} on {resolved_device})...")
     start = time.monotonic()
-    result = _transcribe_faster_whisper(model, str(DEMO_VIDEO))
+    result = transcribe_fn(model, str(DEMO_VIDEO))
     duration = time.monotonic() - start
+
+    for w in _validate_transcription_fidelity(result, config.whisper_backend, model_label):
+        print(f"\n  ⚠️  {w}")
 
     # Wrap in the same dict shape the asset produces
     output = {
@@ -65,6 +86,9 @@ def transcription_result():
         "segments": result["segments"],
         "segment_count": len(result["segments"]),
         "source_path": str(DEMO_VIDEO),
+        "backend": config.whisper_backend,
+        "model_label": model_label,
+        "resolved_device": resolved_device,
     }
 
     print(f"  Transcription complete: {len(result['segments'])} segments in {duration:.1f}s")
@@ -156,11 +180,10 @@ def test_diarization_preserves_words(diarization_result):
 
 @pytest.fixture(scope="session")
 def segment_merge_result(diarization_result):
-    """Run our actual _merge_same_speaker_segments + _build_speaker_text."""
-    cached = _store.load_fixture("segment_merge")
-    if cached:
-        return cached
+    """Run our actual _merge_same_speaker_segments + _build_speaker_text.
 
+    Not cached — fast Python pass, recomputed each run from cached diarization.
+    """
     from media_ingest.assets.diarization import _build_speaker_text, _merge_same_speaker_segments
 
     pre_merge = len(diarization_result["segments"])
@@ -176,7 +199,6 @@ def segment_merge_result(diarization_result):
     }
 
     print(f"\n  Segment merge: {pre_merge} → {len(merged)} segments")
-    _store.save_fixture("segment_merge", output)
     return output
 
 
@@ -198,13 +220,13 @@ def test_merge_preserves_words(segment_merge_result):
 
 @pytest.fixture(scope="session")
 def chunks_result(segment_merge_result):
-    """Run our actual _speaker_turn_chunks."""
-    cached = _store.load_fixture("chunks")
-    if cached:
-        from dagster_io import TextChunk
+    """Run our actual _speaker_turn_chunks.
 
-        return [TextChunk(**c) for c in cached]
-
+    Not cached — chunker is millisecond-fast and is the production
+    media_chunks asset's logic, which carries provenance (chunk_id,
+    content_hash). We recompute it each run rather than cache its output so
+    iterating on chunker heuristics doesn't go stale against cached chunks.
+    """
     from media_ingest.assets.chunks import _speaker_turn_chunks
 
     from dagster_io import ChunkingResource
@@ -218,7 +240,6 @@ def chunks_result(segment_merge_result):
     )
 
     print(f"\n  Chunking: {len(segment_merge_result['segments'])} turns → {len(chunks)} chunks")
-    _store.save_fixture("chunks", [c.model_dump() for c in chunks])
     return chunks
 
 
@@ -284,17 +305,36 @@ def extraction_result(chunks_result):
     if shared_prompts.exists():
         os.environ.setdefault("PROMPT_REGISTRY_DIR", str(shared_prompts.resolve()))
 
-    # Use benchmark subset (4 representative chunks) instead of all 15.
-    # Full set takes too long with local models (~30-60s per chunk).
-    benchmark_data = _store.load_benchmark_chunks()
-    if benchmark_data:
+    # Prefer raw documents (pipeline chunks adaptively per model context window).
+    # Fall back to pre-chunked data for backward compat.
+    benchmark_docs = _store.load_benchmark_documents()
+    if benchmark_docs:
         from dagster_io import TextChunk
 
-        eval_chunks = [TextChunk(**c) for c in benchmark_data]
-        print(f"\n  Using benchmark subset: {len(eval_chunks)} chunks (from benchmark_chunks.json)")
+        # Wrap each document as a single TextChunk — ChunkNode will re-split
+        # based on the model's context_window via ChunkConfig
+        eval_chunks = [
+            TextChunk(
+                chunk_id=f"{doc['document_id']}:full",
+                document_id=doc["document_id"],
+                text=doc["text"],
+                index=0,
+                total_chunks=1,
+                metadata=doc.get("metadata", {}),
+            )
+            for doc in benchmark_docs
+        ]
+        print(f"\n  Using benchmark documents: {len(eval_chunks)} docs (adaptive chunking per model)")
     else:
-        eval_chunks = chunks_result
-        print(f"\n  Using full chunk set: {len(eval_chunks)} chunks")
+        benchmark_data = _store.load_benchmark_chunks()
+        if benchmark_data:
+            from dagster_io import TextChunk
+
+            eval_chunks = [TextChunk(**c) for c in benchmark_data]
+            print(f"\n  Using benchmark chunks: {len(eval_chunks)} pre-chunked (legacy)")
+        else:
+            eval_chunks = chunks_result
+            print(f"\n  Using full chunk set: {len(eval_chunks)} chunks")
 
     from dagster_io.extraction import extract_validated
 

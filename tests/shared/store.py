@@ -11,11 +11,10 @@ Terminology:
 
 Directory layout under root (typically .test-output/media-ingest):
 
-    pipeline-cache/              -- expensive pipeline stage outputs
-        transcription.json
-        diarization.json
-        segment_merge.json
-        chunks.json              -- full pipeline chunks
+    pipeline-cache/              -- expensive audio-model outputs
+        0_transcription.json     -- Whisper output (slow, cached)
+        1_diarization.json       -- pyannote output (slow, cached)
+                                    (segment_merge + chunks are fast, recomputed)
     ground-truth/                -- ground truth versions
         ensemble-12model.json
         active.json              -- the one currently used for scoring
@@ -59,6 +58,24 @@ def _default_root() -> Path:
     """Resolve the default test-output root for media-ingest benchmarks."""
     repo_root = Path(__file__).resolve().parents[2]
     return Path(os.environ.get("TEST_OUTPUT_ROOT", str(repo_root / ".test-output"))) / "media-ingest"
+
+
+# Pipeline-stage ordering — prepended to pipeline-cache filenames so an `ls`
+# reflects execution order. Only the two slow audio-model stages are cached
+# (Whisper transcription, pyannote diarization). Speaker-merge and chunking are
+# fast Python passes that re-run from cached transcription+diarization on every
+# benchmark invocation.
+_STAGE_ORDER: dict[str, int] = {
+    "transcription": 0,
+    "diarization": 1,
+}
+
+
+def _stage_filename(name: str) -> str:
+    """Return the on-disk filename for a pipeline stage artifact."""
+    if name in _STAGE_ORDER:
+        return f"{_STAGE_ORDER[name]}_{name}.json"
+    return f"{name}.json"
 
 
 class RunStore:
@@ -204,22 +221,35 @@ class BenchmarkStore:
     # ═════════════════════════════════════════════════════════════════
 
     def load_chunks(self) -> list[dict] | None:
-        """Load full pipeline chunks (cached artifact)."""
-        p = self.pipeline_cache_dir / "chunks.json"
-        if p.exists():
-            return json.loads(p.read_text())
-        # Legacy fallback (read-only migration)
-        legacy = self._legacy_fixtures / "chunks.json"
-        if legacy.exists():
-            return json.loads(legacy.read_text())
+        """Load full pipeline chunks if previously cached (legacy/back-compat).
+
+        Chunks are no longer cached as part of the standard flow; they are
+        recomputed from cached segmentation each run. This method still reads
+        any pre-existing chunks.json so older trees keep loading, but
+        ``save_chunks`` is no longer called by the harness.
+        """
+        for p in (
+            self.pipeline_cache_dir / "chunks.json",
+            self.pipeline_cache_dir / "3_chunks.json",  # pre-collapse stage prefix
+            self._legacy_fixtures / "chunks.json",
+        ):
+            if p.exists():
+                return json.loads(p.read_text())
         return None
 
-    def save_chunks(self, data: list[dict]) -> Path:
-        """Save pipeline chunks (cached artifact)."""
-        self._ensure(self.pipeline_cache_dir)
-        p = self.pipeline_cache_dir / "chunks.json"
-        p.write_text(json.dumps(data, indent=2, default=str))
-        return p
+    def load_benchmark_documents(self) -> list[dict] | None:
+        """Load raw benchmark documents from per-domain fixture directories.
+
+        These are full document texts (not pre-chunked). The pipeline's
+        ChunkNode splits them adaptively per model context window.
+        """
+        domain_dirs = ["media-ingest", "congress-data", "open-leaks"]
+        merged = []
+        for d in domain_dirs:
+            p = self._repo_fixtures / d / "benchmark_documents.json"
+            if p.exists():
+                merged.extend(json.loads(p.read_text()))
+        return merged if merged else None
 
     def load_benchmark_chunks(self) -> list[dict] | None:
         """Load curated benchmark chunks from all domain fixture directories.
@@ -249,19 +279,19 @@ class BenchmarkStore:
 
         These are cached artifacts -- expensive to regenerate but not true fixtures.
         """
-        p = self.pipeline_cache_dir / f"{name}.json"
-        if p.exists():
-            return json.loads(p.read_text())
-        # Legacy fallback (read-only migration)
-        legacy = self._legacy_fixtures / f"{name}.json"
-        if legacy.exists():
-            return json.loads(legacy.read_text())
+        for p in (
+            self.pipeline_cache_dir / _stage_filename(name),
+            self.pipeline_cache_dir / f"{name}.json",  # pre-stage-prefix layout
+            self._legacy_fixtures / f"{name}.json",
+        ):
+            if p.exists():
+                return json.loads(p.read_text())
         return None
 
     def save_pipeline_artifact(self, name: str, data) -> Path:
         """Save a pipeline stage artifact (cached artifact)."""
         self._ensure(self.pipeline_cache_dir)
-        p = self.pipeline_cache_dir / f"{name}.json"
+        p = self.pipeline_cache_dir / _stage_filename(name)
         p.write_text(json.dumps(data, indent=2, default=str))
         return p
 
@@ -499,7 +529,7 @@ class BenchmarkStore:
         if name == "ground_truth_media_ingest":
             return self.load_ground_truth("active")
 
-        # Chunks (cached artifact)
+        # Chunks: legacy read-only fallback (see load_chunks docstring)
         if name == "chunks":
             return self.load_chunks()
         if name == "benchmark_chunks":
@@ -510,8 +540,8 @@ class BenchmarkStore:
             model = name.replace("extraction_", "")
             return self.load_extraction(model)
 
-        # Pipeline stage artifacts (cached)
-        if name in ("transcription", "diarization", "segment_merge"):
+        # Pipeline stage artifacts (cached): transcription, diarization
+        if name in ("transcription", "diarization"):
             return self.load_pipeline_artifact(name)
 
         # Fallback: try legacy cached artifacts dir
@@ -533,19 +563,14 @@ class BenchmarkStore:
             self.save_ground_truth("active", data)
             return
 
-        # Chunks (cached artifact)
-        if name == "chunks":
-            self.save_chunks(data)
-            return
-
         # Extraction artifacts (cached)
         if name.startswith("extraction_"):
             model = name.replace("extraction_", "")
             self.save_extraction(model, data)
             return
 
-        # Pipeline stage artifacts (cached)
-        if name in ("transcription", "diarization", "segment_merge"):
+        # Pipeline stage artifacts (cached): transcription, diarization
+        if name in ("transcription", "diarization"):
             self.save_pipeline_artifact(name, data)
             return
 
