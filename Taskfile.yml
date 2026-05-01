@@ -183,7 +183,8 @@ tasks:
     env:
       PYTHONPATH: "."
     cmds:
-      - python -c "from tests.shared.store import BenchmarkStore; r = BenchmarkStore().clean_all('standard'); print(f'Cleaned: {r}')"
+      - |
+        python -c "from tests.shared.store import BenchmarkStore; r = BenchmarkStore().clean_all('standard'); print(f'Cleaned: {r}')"
 
   bench:clean:extractions:
     desc: "Clean only extraction artifacts (keep GT, runs, pipeline cache)"
@@ -211,7 +212,8 @@ tasks:
     env:
       PYTHONPATH: "."
     cmds:
-      - python -c "from tests.shared.store import BenchmarkStore; r = BenchmarkStore().clean_all('nuclear'); print(f'Cleaned: {r}')"
+      - |
+        python -c "from tests.shared.store import BenchmarkStore; r = BenchmarkStore().clean_all('nuclear'); print(f'Cleaned: {r}')"
 
   # ── Dev ──────────────────────────────────────────────────────────────────
 

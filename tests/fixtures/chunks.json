@@ -1,0 +1,242 @@
+[
+  {
+    "chunk_id": "test-demo-video:chunk-0",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nTotally, especially behind the scenes where, you know, they can at least talk with people without being silenced, called balls and strikes on what the government there is doing and what he was saying is there are far more people there in Israel who are against what is happening there and the actions being taken of course there's a portion of society that is not and I take huge issue with that.",
+    "index": 0,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 0.0,
+      "end_s": 22.98,
+      "strategy": "speaker_turn"
+    },
+    "content_hash": "06c1d90f2bdd2f635cd18f9ef22390e1e662d659321ce478e6906e493b3a232e"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-1",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nI'm still getting pissed watching people like take like the war edits they make like people still like I see it all over Twitter like how fucking dope these are I'm like you're a fucking idiot.",
+    "index": 1,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_01",
+      "start_s": 24.14,
+      "end_s": 34.82,
+      "strategy": "speaker_turn"
+    },
+    "content_hash": "056a046f39c7a371e428dfb3e8f015d2c80904a1a015c9d52ca7dd32638cde1a"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-2",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nI have not I have not spoken with a ton of people I've spoken with a lot of people on the left and right over the past four or five weeks including boomers when I was seeing my parents.",
+    "index": 2,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 35.580000000000005,
+      "end_s": 50.34,
+      "strategy": "speech_pause_split"
+    },
+    "content_hash": "b9dd20481976966347551d69105d0b4868182ac403b4177a66d1c617dbe70844"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-3",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nAnd I have not personally spoken with one person who gave a full-throated support of the war and almost everyone was like what the fuck what the fuck is happening. Yeah, like I literally a couple of my parents friends are boomers Jewish people who were like what the fuck are we doing. Yeah, which is how a lot of Jewish people in America feel there was also a report the other day about like all the Jewish people in America who are breaking with Israel just like what the fuck is this which is an amazing thing to see by the way. I love that. This is exactly what I've been saying for the longest time. If we start letting BB Netanyahu talk for an entire race of people around the world we have lost. Just like the I told it shouldn't talk for all Iranians around the world just like fucking Xi Jinping shouldn't talk for all Chinese people around the world just like Vladimir Putin shouldn't talk for all Russian people around the world. Just like Donald Trump shouldn't talk for all American people around the world. Like these are some bad things going on and the leadership of that government in particularly say nothing in my own but the leadership of the Israeli government has been embarrassing. I mean, that's that's a really nice way of putting it genocidal in recent years and you know this this could be a moment where a lot of people can come together around that and be like, yeah, let's just stop this shit. And I was actually speaking with someone who cannot come on the podcast unfortunately awesome dude awesome dude. I had a two hour conversation with someone who would be an amazing podcast but they're running third party for public office. So I can't do it because I don't bring on active politicians.",
+    "index": 3,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 53.56000000000002,
+      "end_s": 148.62,
+      "strategy": "speech_pause_split"
+    },
+    "content_hash": "278116af0c3b09d1c67aa9561ffbe81b07fa2852e4c1cbfc8cba0a6e532a0cab"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-4",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nBut it gave me some hope because one of the things he was telling me was some stories about a lot of the people in the kinesa who have a been silenced but be have totally especially behind the scenes where you know they can at least talk with people without being silenced called balls and strikes on what the government there is doing. And what he was saying is there are far more people there in Israel who are against what is happening there and the actions being taken. Of course, there's a portion of society that is not and I take huge issue with that. And you know, we've seen videos of people who think like that obviously Abby Martin has put out videos like that for years where we've seen her talk with people and some of the hardliners and and what they think and then we see the people in the west bank settlements like they're just.",
+    "index": 4,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 150.88,
+      "end_s": 200.56,
+      "strategy": "speech_pause_split"
+    },
+    "content_hash": "51a35e8ad4568fc23460632bff401401b27bb996cca7c026bf544178eb95e441"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-5",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nThese are bad people but that's not representative of the entire society or anything like that and I think it's going to be really important that Israel has a hard look in the mirror. As a people and some of these people who have been unrighteously obviously silenced start to get a voice and maybe there's ways to do that now that America's also involved once again in their conflict maybe there's ways we can help in this country on that. But let's close on that arrest that happened which didn't happen this week by the way. It just kind of came out this week but there was first a Chinese national who goes by the name John he right David he is his alias David he I can't say his Chinese name because I can only demand or not Cantonese these Cantonese is his alias David he who was arrested",
+    "index": 5,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 201.88000000000002,
+      "end_s": 265.16,
+      "strategy": "speech_pause_split"
+    },
+    "content_hash": "183f16861e8d4a80222e51556e1d4be11cd77d77760bd1db110ea0900d86683b"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-6",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\ndo I still have that link I got your best link yeah this is it okay so this guy David he was first arrested in California can you scroll down to where David he is yeah so I can read that part first if okay so authorities say Solomon who I'm going to get to in a minute this guy or Solomon works for a Chinese citizen named Jabe Zoo who goes by the alias David he property records identified zoo is the owner of the home on sugar springs drive which is in Vegas he is jailed in California and faces charges related to the 2023 investigation into an illegal laboratory in Readley California near Fresno in a warehouse linked to zoo which is Johnny he investigators found pathogens including samples of COVID-19 and other diseases as well as hundreds of transgenic mice and boxes of adulterated and misbranded medical test which zoo is accused of illegally selling nice you know because obviously COVID just sprouted out of thin air it didn't come from wet marketing I saw it was all there was also HIV malaria too Oh that's nice yeah the article I wrote back in 2020 in 2019 yeah it definitely didn't come out of a wet market in China he had the plug you know that that didn't happen because that would make no sense right you know I'm talking about that he now but you can hit if you're in the right we chat group you can get plugged on that yeah they got that they got that rolling come on mob deep if you will but now we have a guy arrested in 2023 investigation into United States domestic United States California no less which we've talked about a bunch on this podcast with some of the issues in in particularly in that state with Chinese infiltration and a lot of stuff going on you know that's that sends a chill up your spine and what is weird now is as I alluded to in reading the other name there there has been a recent arrest of a property manager for Johnny he in Las Vegas by the name of Ori Salomon who is a 55 year old Israeli citizen here on a visa so let me read some of this article right here okay Ori Salomon the property manager faces charges in connection with an illegal bio lab and at a Las Vegas short term rental will be released from custody while he awaits trial I was going to say to clarify too because we didn't say it this isn't this is a second lab now we're telling you guys about that first one in 2023 was read Lee California this is a new one now Corvegas so Salomon appeared in federal court on Friday afternoon and was released on his own recognizance was certain conditions he has to surrender any passport is not allowed to leave the country must notify the court if he plans to leave Clark County and must not possess a firearm or any other weapon Friday is hearing focused on a federal fire arm charges against Salomon and Israeli citizen in the US on a non immigrant visa Salomon is not allowed to possess firearms prosecutors say multiple guns were seized from his home according to an affidavit of chain obtained by Channel 13 Solomon also faces a criminal charge in Clark County for the improper disposal of hazardous waste he was arrested on Saturday after local and federal investigators discovered what has been called an illegal biological lab inside a home he managed near Washington Avenue and Hollywood Boulevard investigators have recovered suspected biological materials and lab equipment at this point authorities tell us testing on those materials is still underway and it's not yet clear exactly what was found who was Ori Salomon though school down right here investigators say they were tipped off by someone who worked at the home on sugar springs drive days later police identified Salomon as the property manager we have no knowledge that he has any expertise in the area or he's somewhat of a trained biologist no said crystal zodo special agent in charge FBI's Las Vegas field office authorities say Salomon works for a Chinese citizen named job a zoo goes by the name David he and once again zoo was listed as the owner of the home on sugar springs drive he's jailed in California for the investigation I mentioned and investigators say much of what was found in the readly warehouses consistent with materials found in the so called lab in Las Vegas they also claim Salomon manages more than 30 rental properties in the valley it could take months to find out why the materials and equipment were there what they were being used so you have an Israeli citizen here on a non-immigrant fees and managing 30 properties in the Las Vegas area happening to manage a property for a Chinese national who was in possession of some crazy fucking shit and this same Israeli national is in possession of all kinds of firearms not sure why a property manager is going to need that I'm sure some of my property managers out there",
+    "index": 6,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 266.56,
+      "end_s": 557.18,
+      "strategy": "speech_pause_split"
+    },
+    "content_hash": "feeae58f053de5740d09487f14b02725d81455f5a4a414e8be5ffca82633bfdf"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-7",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nyeah maybe maybe but it's certainly suspect that this same guy is in possession of that many weapons and is being brought up on charges for that in relation to an investigation like this and here's the weird part",
+    "index": 7,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 559.54,
+      "end_s": 573.98,
+      "strategy": "speech_pause_split"
+    },
+    "content_hash": "a47a123ace3bf2c215e37e6a934bc29c14bd5f30c26f67fd2f4bce5a13d5e813"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-8",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nhmm it's like we it's like you were saying Chinese guy and Israeli walking a bar the Chinese government doesn't even recognize Israel as a country yeah on their map well they don't recognize Taiwan so yeah or no they do recognize Taiwan as one China yeah part of China that would be the get back right so what are they doing maybe it's nothing",
+    "index": 8,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_01",
+      "start_s": 573.98,
+      "end_s": 599.3,
+      "strategy": "speaker_turn"
+    },
+    "content_hash": "595343574a5d60b420c08e7a6ecbf52dcdcb8c3e375a6e2089fa4be5eab94a44"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-9",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nmaybe or he just there just for production as a property manager but that was fascinating that's all yeah that's a strange one released on his own cognizance that was crazy too they did take his passport it would appear they learn their lesson from the Thomas Alexander Vitch case which was also in Nevada I probably said his last name wrong but and Israeli cyber security Israeli government cyber security expert head whatever his title was was a part of an underage the sex trafficking sting and was released on bail and allowed to return to Israel",
+    "index": 9,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 600.2,
+      "end_s": 639.92,
+      "strategy": "speech_pause_split"
+    },
+    "content_hash": "aabb127d91429e29cb944618c75707a6e863a38d402a4976c1febb42ee811433"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-10",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nI guess we just let pedophiles just return to Israel there are some here I I don't know I found that very very interesting",
+    "index": 10,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 645.0400000000001,
+      "end_s": 653.7,
+      "strategy": "speech_pause_split"
+    },
+    "content_hash": "ae6a0c179d27d3bf9038fcf94775425187b1b92c7fa55a076b3f604d9351eb15"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-11",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nso at least this time this man appears to be stuck in Nevada to wait around while they figure some stuff out but it does once again provide a great example of just how fragile society is in today's times with the smallest things and the smallest places with the most nondescript type people just living in a regular house could be preparing the next biological pipe bomb that goes off and shuts down society and that's that's a terrifying thing you know and that's why when I look at the war and and some of the biblical prophecies that are spoken about so openly by leaders in this war including in our own government it annoys the fuck out of me and really concerns me because it's like let's not",
+    "index": 11,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 655.6,
+      "end_s": 710.38,
+      "strategy": "speech_pause_split"
+    },
+    "content_hash": "ee25e4e47c5b073287f581ac7a011b9e91a4c4da8bf7c1d0cb9776a0c79646e2"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-12",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nlet's not play fucking galactical prophecy whatever with people around the world who have no say in the matter this is the ultimate definition of men and suits in back rooms making decisions where people live and people die and we have no say in the matter and we see how things work with the upstein files now we see that you know how they look at us look at all of us as cattle so now we're awake to that which means we got to use our voice when there appears to be evidence that people could be fucking around with people in those positions could be fucking around with things that are going to cost all of us dearly so yes we have fun on the show yes we laugh yes you have to make we defenite both believe in making comedy out of life that's what it is that's what my show's always been even when we talk about very serious topics but then there's also not a point to be lost there that like you know there's a reason we're recovering this stuff and that's why we're going to continue to do it and I hope to not see the upstein files continue to be shuffled away into the other sphere and by the way the war coming to a close as soon as possible would help with that which tells you maybe they don't want it to come to a close well you didn't you didn't hear you got like two weeks we should be good yeah that's right yeah two weeks two weeks away from five years being two weeks away",
+    "index": 12,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 712.8399999999999,
+      "end_s": 794.98,
+      "strategy": "speech_pause_split"
+    },
+    "content_hash": "30797f3e80c2177ff0edd766f093fc4263422d2028249f7392731bc569430183"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-13",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nyou could probably you could probably clock it by memorial day weekend feed up in the sand no more war no more war",
+    "index": 13,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_01",
+      "start_s": 794.98,
+      "end_s": 801.38,
+      "strategy": "speaker_turn"
+    },
+    "content_hash": "0d36a87055c715be10bb1005fe10659bff89f5ed1f68496fbd9cf4bd8bf8e6e8"
+  },
+  {
+    "chunk_id": "test-demo-video:chunk-14",
+    "document_id": "test-demo-video",
+    "text": "Demo Video\n\nwell I hope all of our service members and men and women stay safe out there yeah and I hope to see this brought to a diplomatic solution we'll see you guys next week thank you guys for watching the episode if you haven't already please hit that subscribe button and smash that like button on the video they're both a huge help and if you would like to follow me on instagram and x those links are in my description below",
+    "index": 14,
+    "total_chunks": 15,
+    "metadata": {
+      "source": "media_ingest",
+      "language": "en",
+      "speaker": "SPEAKER_00",
+      "start_s": 802.94,
+      "end_s": 824.92,
+      "strategy": "speaker_turn"
+    },
+    "content_hash": "80b53bfc10af1884207cfaf1bb279c844fda4d3d1b507b33aa66c0492a5b25a5"
+  }
+]

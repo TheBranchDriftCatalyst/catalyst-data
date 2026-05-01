@@ -12,6 +12,7 @@ build/
 # Test output — all integration test outputs go here
 .test-output/
 tests/pipeline-output/
+tests/__pipeline-output/
 tests/congress-pipeline-output/
 tests/fixtures/model_cache/
 tests/demo_video.mp4

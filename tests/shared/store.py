@@ -11,18 +11,20 @@ Terminology:
 
 Directory layout under root (typically .test-output/media-ingest):
 
-    pipeline-cache/              -- cached pipeline stage outputs (regenerable)
+    pipeline-cache/              -- expensive pipeline stage outputs
         transcription.json
         diarization.json
         segment_merge.json
         chunks.json              -- full pipeline chunks
-        benchmark_chunks.json    -- copy of curated subset from tests/fixtures/
-    ground-truth/                -- ground truth versions (independent of runs)
-        ensemble-5model.json
+    ground-truth/                -- ground truth versions
+        ensemble-12model.json
         active.json              -- the one currently used for scoring
+    extractions/                 -- per-model extraction artifacts
+        extraction_gpt-4o.json
+        extraction_mistral:latest.json
     runs/                        -- timestamped benchmark runs
         2026-04-29-exgraph-v2/
-            extractions/
+            extractions/         -- run-specific copies
             audit-logs/
             benchmark-report.json
             run-config.json
@@ -149,10 +151,11 @@ class BenchmarkStore:
         self.ground_truth_dir = self.root / "ground-truth"
         self.pipeline_cache_dir = self.root / "pipeline-cache"
         self.runs_dir = self.root / "runs"
-        # Legacy flat layout (still used as fallback for cached artifacts)
-        self._legacy_fixtures = self.root / "fixtures"
+        self.extractions_dir = self.root / "extractions"
         # True fixtures shipped with repo (read-only, never written to)
         self._repo_fixtures = Path(__file__).resolve().parents[1] / "fixtures"
+        # Legacy flat layout (read-only fallback for migration, never written to)
+        self._legacy_fixtures = self.root / "fixtures"
 
     def _ensure(self, d: Path) -> Path:
         d.mkdir(parents=True, exist_ok=True)
@@ -186,12 +189,6 @@ class BenchmarkStore:
         self._ensure(self.ground_truth_dir)
         p = self.ground_truth_dir / f"{name}.json"
         p.write_text(json.dumps(data, indent=2, default=str))
-        # Also write to legacy location for backward compat
-        if name == "active":
-            self._ensure(self._legacy_fixtures)
-            (self._legacy_fixtures / "ground_truth_media_ingest.json").write_text(
-                json.dumps(data, indent=2, default=str)
-            )
         return p
 
     def set_active_ground_truth(self, name: str) -> None:
@@ -201,9 +198,6 @@ class BenchmarkStore:
             raise FileNotFoundError(f"Ground truth '{name}' not found at {src}")
         dst = self.ground_truth_dir / "active.json"
         shutil.copy2(src, dst)
-        # Also write to legacy location for backward compat
-        self._ensure(self._legacy_fixtures)
-        shutil.copy2(src, self._legacy_fixtures / "ground_truth_media_ingest.json")
 
     # ═════════════════════════════════════════════════════════════════
     # Pipeline Cache (cached artifacts -- expensive to regenerate)
@@ -211,12 +205,13 @@ class BenchmarkStore:
 
     def load_chunks(self) -> list[dict] | None:
         """Load full pipeline chunks (cached artifact)."""
-        for p in [
-            self.pipeline_cache_dir / "chunks.json",
-            self._legacy_fixtures / "chunks.json",
-        ]:
-            if p.exists():
-                return json.loads(p.read_text())
+        p = self.pipeline_cache_dir / "chunks.json"
+        if p.exists():
+            return json.loads(p.read_text())
+        # Legacy fallback (read-only migration)
+        legacy = self._legacy_fixtures / "chunks.json"
+        if legacy.exists():
+            return json.loads(legacy.read_text())
         return None
 
     def save_chunks(self, data: list[dict]) -> Path:
@@ -234,7 +229,6 @@ class BenchmarkStore:
         """
         for p in [
             self.pipeline_cache_dir / "benchmark_chunks.json",
-            self._legacy_fixtures / "benchmark_chunks.json",
             self._repo_fixtures / "benchmark_chunks.json",
         ]:
             if p.exists():
@@ -246,12 +240,13 @@ class BenchmarkStore:
 
         These are cached artifacts -- expensive to regenerate but not true fixtures.
         """
-        for p in [
-            self.pipeline_cache_dir / f"{name}.json",
-            self._legacy_fixtures / f"{name}.json",
-        ]:
-            if p.exists():
-                return json.loads(p.read_text())
+        p = self.pipeline_cache_dir / f"{name}.json"
+        if p.exists():
+            return json.loads(p.read_text())
+        # Legacy fallback (read-only migration)
+        legacy = self._legacy_fixtures / f"{name}.json"
+        if legacy.exists():
+            return json.loads(legacy.read_text())
         return None
 
     def save_pipeline_artifact(self, name: str, data) -> Path:
@@ -262,26 +257,33 @@ class BenchmarkStore:
         return p
 
     # ═════════════════════════════════════════════════════════════════
-    # Extraction Artifacts (cached, in legacy flat layout)
+    # Extraction Artifacts (cached, per-model)
     # ═════════════════════════════════════════════════════════════════
 
     def load_extraction(self, model: str) -> dict | None:
-        """Load an extraction artifact from legacy flat layout (cached artifact)."""
-        f = self._legacy_fixtures / f"extraction_{model}.json"
-        return json.loads(f.read_text()) if f.exists() else None
+        """Load an extraction artifact. Checks extractions/ then legacy fixtures/."""
+        for p in [
+            self.extractions_dir / f"extraction_{model}.json",
+            self._legacy_fixtures / f"extraction_{model}.json",
+        ]:
+            if p.exists():
+                return json.loads(p.read_text())
+        return None
 
     def save_extraction(self, model: str, data: dict) -> Path:
-        """Save extraction artifact to legacy flat layout (cached artifact)."""
-        self._ensure(self._legacy_fixtures)
-        p = self._legacy_fixtures / f"extraction_{model}.json"
+        """Save extraction artifact."""
+        self._ensure(self.extractions_dir)
+        p = self.extractions_dir / f"extraction_{model}.json"
         p.write_text(json.dumps(data, indent=2, default=str))
         return p
 
     def list_extractions(self) -> list[str]:
-        """List model names with extraction artifacts in legacy layout."""
-        if not self._legacy_fixtures.exists():
-            return []
-        return sorted(f.stem.replace("extraction_", "") for f in self._legacy_fixtures.glob("extraction_*.json"))
+        """List model names with extraction artifacts."""
+        names: set[str] = set()
+        for d in [self.extractions_dir, self._legacy_fixtures]:
+            if d.exists():
+                names.update(f.stem.replace("extraction_", "") for f in d.glob("extraction_*.json"))
+        return sorted(names)
 
     # ═════════════════════════════════════════════════════════════════
     # Runs
@@ -361,14 +363,15 @@ class BenchmarkStore:
     def clean_extractions(self) -> int:
         """Delete all cached extraction artifacts. Returns count deleted.
 
-        Only removes extraction_*.json from the legacy fixtures dir.
+        Cleans extractions/ (new) and any remaining extraction_*.json in fixtures/ (legacy).
         Never touches tests/fixtures/ (true fixtures).
         """
         count = 0
-        if self._legacy_fixtures.exists():
-            for f in self._legacy_fixtures.glob("extraction_*.json"):
-                f.unlink()
-                count += 1
+        for d in [self.extractions_dir, self._legacy_fixtures]:
+            if d.exists():
+                for f in d.glob("extraction_*.json"):
+                    f.unlink()
+                    count += 1
         return count
 
     def clean_ground_truth(self) -> int:
@@ -524,9 +527,6 @@ class BenchmarkStore:
         # Chunks (cached artifact)
         if name == "chunks":
             self.save_chunks(data)
-            # Also write to legacy location for backward compat
-            self._ensure(self._legacy_fixtures)
-            (self._legacy_fixtures / "chunks.json").write_text(json.dumps(data, indent=2, default=str))
             return
 
         # Extraction artifacts (cached)
@@ -538,11 +538,8 @@ class BenchmarkStore:
         # Pipeline stage artifacts (cached)
         if name in ("transcription", "diarization", "segment_merge"):
             self.save_pipeline_artifact(name, data)
-            # Also write to legacy location
-            self._ensure(self._legacy_fixtures)
-            (self._legacy_fixtures / f"{name}.json").write_text(json.dumps(data, indent=2, default=str))
             return
 
-        # Fallback: legacy cached artifacts dir
-        self._ensure(self._legacy_fixtures)
-        (self._legacy_fixtures / f"{name}.json").write_text(json.dumps(data, indent=2, default=str))
+        # Fallback: pipeline-cache for unknown names
+        self._ensure(self.pipeline_cache_dir)
+        (self.pipeline_cache_dir / f"{name}.json").write_text(json.dumps(data, indent=2, default=str))
