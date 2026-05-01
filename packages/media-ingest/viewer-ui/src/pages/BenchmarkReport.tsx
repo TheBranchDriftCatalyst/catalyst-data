@@ -18,6 +18,7 @@ import { AuditViewer } from "@/components/benchmark/AuditViewer";
 import { GroundTruthPanel } from "@/components/benchmark/GroundTruthPanel";
 import { TableControls } from "@/components/benchmark/TableControls";
 import { GTSelector } from "@/components/benchmark/GTSelector";
+import { DomainBreakdown } from "@/components/benchmark/DomainBreakdown";
 
 // ── Scores Tab Content ────────────────────────────────────────────────
 function ScoresTab({
@@ -241,7 +242,14 @@ export default function BenchmarkReport() {
   const [reportSource, setReportSource] = useState(REPORT_SOURCES[0]!.url);
   const [availableSources, setAvailableSources] = useState<ReportSource[]>([]);
   const [activeTab, _setActiveTab] = useState<
-    "overview" | "scores" | "entities" | "propositions" | "pipeline" | "audit" | "ground-truth"
+    | "overview"
+    | "scores"
+    | "entities"
+    | "propositions"
+    | "domains"
+    | "pipeline"
+    | "audit"
+    | "ground-truth"
   >("overview");
   // Wrapper that also clears the entity drawer when leaving the entities tab,
   // so reopening the tab doesn't unexpectedly resurrect a stale selection.
@@ -328,6 +336,10 @@ export default function BenchmarkReport() {
     {
       key: "propositions" as const,
       label: `Propositions (${report.proposition_count})`,
+    },
+    {
+      key: "domains" as const,
+      label: `Domains (${Object.keys(report.domains || {}).length})`,
     },
     { key: "pipeline" as const, label: "Pipeline" },
     { key: "audit" as const, label: "Audit" },
@@ -499,6 +511,10 @@ export default function BenchmarkReport() {
 
           {activeTab === "propositions" && (
             <PropositionMatrix propositions={report.propositions} modelNames={report.model_names} />
+          )}
+
+          {activeTab === "domains" && (
+            <DomainBreakdown report={report} visibleModels={visibleModels} groupBy={groupBy} />
           )}
 
           {activeTab === "pipeline" && <PipelineTable models={visibleModels} groupBy={groupBy} />}
