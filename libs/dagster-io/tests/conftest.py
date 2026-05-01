@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+# Suppress OTEL metric exports to unreachable cluster endpoints during tests
+os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+os.environ.setdefault("OTEL_METRICS_EXPORTER", "none")
 
 import pytest
 

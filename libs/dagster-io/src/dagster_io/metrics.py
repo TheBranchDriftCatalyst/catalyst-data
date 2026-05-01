@@ -29,6 +29,12 @@ def _get_meter():
     if _meter is not None:
         return _meter
 
+    # Respect OTEL_METRICS_EXPORTER=none (e.g. in tests)
+    if os.environ.get("OTEL_METRICS_EXPORTER", "").lower() == "none":
+        logger.info("OTEL metrics disabled (OTEL_METRICS_EXPORTER=none)")
+        _meter = _NoOpMeter()
+        return _meter
+
     try:
         from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
             OTLPMetricExporter,
