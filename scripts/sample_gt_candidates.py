@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sample a stratified, extraction-aware diverse GT candidate set across all 3 domains.
+"""Sample a stratified, extraction-aware diverse GT candidate set across all domains.
 
 The benchmark currently uses 10 curated chunks; SFT/DPO fine-tuning wants 200+
 annotated chunks. This script picks a defensibly-diverse subset from the
@@ -7,40 +7,29 @@ materialized medallion tree (``.test-output/<domain>/<layer>/.../*_chunks/.../da
 so a human reviewer (via the viewer-ui GT editor) is annotating chunks that
 actually exercise the model — not topic-redundant boilerplate.
 
+See ``docs/SEED.md`` for the methodology and the determinism contract.
+
 Selection pipeline (per-domain, deterministic given ``--seed``):
 
-    1. Load chunks from the medallion tree via tests/shared/medallion.load_chunks.
-    2. Open-leaks two-stage subsample: 3.6M chunks → ``--leaks-prefilter`` random
-       chunks (default 5000) before any expensive work.
-    3. (Optional, ``--score-extractions``) Cheap NER pre-filter using GLiNER:
-       drop chunks producing zero mentions. Caches results to
-       ``.test-output/gt-sampler-cache/<domain>/ner_pass.json`` so re-runs skip
-       the encoder.
+    1. Load chunks via ``tests.shared.medallion.load_chunks``.
+    2. Optional pre-subsample (per-domain ``prefilter_max``) — random down-sample
+       before any expensive work. Used by open-leaks (3.6M-chunk corpus).
+    3. Optional GLiNER NER pre-filter (``--score-extractions``) drops chunks
+       producing zero mentions. Caches results to
+       ``.test-output/gt-sampler-cache/<domain>/ner_pass.json``.
     4. Embed remaining chunks via ``dagster_io.EmbeddingResource``
-       (text-embedding-3-small by default; falls back to in-process
-       sentence-transformers when ``EMBEDDING_PROVIDER=huggingface``).
-       Cached to ``.test-output/gt-sampler-cache/<domain>/embeddings.npz``.
+       (text-embedding-3-small by default; sentence-transformers fallback when
+       ``EMBEDDING_PROVIDER=huggingface``). Cached to
+       ``.test-output/gt-sampler-cache/<domain>/embeddings.npz``.
     5. Build per-domain feature vectors that capture **extraction-relevant**
-       diversity (not just topic-distance):
-         media-ingest:   [primary_speaker_onehot, speaker_count_norm,
-                          mention_type_histogram, embedding]
-         congress-data:  [chunk_strategy_onehot, section_depth_norm,
-                          mention_type_histogram, embedding]
-         open-leaks:     [document_type_onehot, mention_type_histogram, embedding]
-       Histograms are L1-normalized; embedding is L2-normalized; the embedding
-       block is weighted (default 1.0) relative to scalar/categorical blocks.
+       diversity. Each domain registers its own ``DomainSpec`` (categorical
+       and scalar feature getters + a default quota and prefilter ceiling).
     6. Greedy farthest-point (k-center) sampling on the combined feature
-       vector. Seeds with a domain-deterministic chunk index, then iteratively
-       picks the chunk maximizing the minimum distance to the already-selected
-       set. O(N·K) per domain. Deterministic given a seed.
+       vector. O(N·K) per domain. Deterministic given a seed.
 
-Stratification: the global ``--target`` is split per-domain via ``--media``,
-``--congress``, ``--leaks`` (default 80/60/60 = 200) so a single domain (most
-notably open-leaks's 3.6M-chunk corpus) can't dominate the sample.
-
-Diagnostics (``--diagnostics``): per-domain coverage report — distinct mention
-types in pool vs sample, embedding-space spread, scalar-feature coverage. Lets
-us see whether the sample is actually capturing variability.
+Adding a new domain is a single ``register_domain(...)`` call — no core code
+changes. See ``DomainSpec`` and the registrations near the top of this file
+for the shape.
 
 Output: ``.test-output/gt-candidates.json`` with the chosen
 ``(domain, document_id, chunk_id, index)`` tuples. Re-running with the same
@@ -48,29 +37,25 @@ Output: ``.test-output/gt-candidates.json`` with the chosen
 
 Usage::
 
-    # Embedding-only diversity (fast, ~1 min after caches warm):
     python scripts/sample_gt_candidates.py --target 200 --seed 42
-
-    # Extraction-aware (recommended, ~5-10 min first run for the NER pass):
-    python scripts/sample_gt_candidates.py --target 200 --seed 42 --score-extractions
-
-    # Diagnostic dump:
-    python scripts/sample_gt_candidates.py --target 200 --diagnostics
+    python scripts/sample_gt_candidates.py --target 200 --seed 42 --score-extractions --diagnostics
+    python scripts/sample_gt_candidates.py --target 200 --seed 42 --media 80 --congress 60 --leaks 60
 
 The script does NOT write anything to ground-truth/ — it only writes the
 candidate list. Human annotation happens via the viewer-ui GT editor against
-``ground-truth/active.json``, which the GT generation flow is responsible for
-seeding (e.g. ``task bench:ground-truth`` after ``task bench:run``).
+``ground-truth/active.json``, which the GT generation flow seeds (e.g.
+``task bench:ground-truth`` after ``task bench:run``).
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import hashlib
 import json
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -84,17 +69,134 @@ from tests.shared.medallion import load_chunks  # noqa: E402
 CACHE_ROOT = ROOT / ".test-output" / "gt-sampler-cache"
 OUTPUT_PATH = ROOT / ".test-output" / "gt-candidates.json"
 
-DOMAIN_DIRS = {
-    "media-ingest": "media",
-    "congress-data": "congress",
-    "open-leaks": "leaks",
-}
 
-DEFAULT_PER_DOMAIN = {
-    "media-ingest": 80,
-    "congress-data": 60,
-    "open-leaks": 60,
-}
+# ────────────────────────────────────────────────────────────────────────────
+# DomainSpec registry — adding a new domain is a single register_domain() call.
+# ────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class CategoricalFeature:
+    """A categorical chunk attribute that becomes a one-hot block in the feature vector.
+
+    ``key`` is the metadata field name (purely for diagnostics).
+    ``get`` extracts the value from a chunk dict; missing/None becomes ``"unknown"``.
+    """
+
+    key: str
+    get: Callable[[dict], str]
+
+
+@dataclass(frozen=True)
+class ScalarFeature:
+    """A scalar chunk attribute (e.g. speaker_count, section_depth) — normalized to [0, 1]."""
+
+    key: str
+    get: Callable[[dict], float]
+
+
+@dataclass(frozen=True)
+class DomainSpec:
+    """Everything the orchestrator needs to sample one domain.
+
+    Adding a domain: register_domain(DomainSpec(name=..., ...)) — no core
+    pipeline changes. The orchestrator iterates registered domains in
+    insertion order so output is deterministic.
+    """
+
+    name: str  # exact domain dir name under .test-output (e.g. "media-ingest")
+    default_quota: int  # default samples-per-domain when --target is split proportionally
+    categorical_features: tuple[CategoricalFeature, ...] = ()
+    scalar_features: tuple[ScalarFeature, ...] = ()
+    prefilter_max: int | None = None  # if pool > this, random pre-subsample first
+
+    # Extension-point hook: domains can register a tiny block of extra
+    # numeric features computed from their chunks (e.g. ``embeddings`` for
+    # speaker identity). Default: no extra columns.
+    extra_features: Callable[[list[dict]], np.ndarray] | None = None
+
+    def categorical_keys(self) -> list[str]:
+        return [f.key for f in self.categorical_features]
+
+
+_DOMAIN_REGISTRY: dict[str, DomainSpec] = {}
+
+
+def register_domain(spec: DomainSpec) -> None:
+    if spec.name in _DOMAIN_REGISTRY:
+        raise ValueError(f"domain {spec.name!r} already registered")
+    _DOMAIN_REGISTRY[spec.name] = spec
+
+
+def registered_domains() -> list[DomainSpec]:
+    """Return registered domains in insertion order (deterministic)."""
+    return list(_DOMAIN_REGISTRY.values())
+
+
+# Per-domain registrations. Each chooses extraction-relevant axes for its
+# corpus — what makes media-ingest content vary is different from what makes
+# congress-data content vary.
+
+register_domain(
+    DomainSpec(
+        name="media-ingest",
+        default_quota=80,
+        # Speaker identity + count are the dominant variability axes in podcasts/interviews.
+        categorical_features=(
+            CategoricalFeature(
+                key="primary_speaker",
+                get=lambda c: (c.get("metadata", {}) or {}).get("primary_speaker") or "UNKNOWN",
+            ),
+        ),
+        scalar_features=(
+            ScalarFeature(
+                key="speaker_count",
+                get=lambda c: float((c.get("metadata", {}) or {}).get("speaker_count", 1) or 1),
+            ),
+        ),
+    )
+)
+
+
+def _section_depth(chunk: dict) -> float:
+    """Section depth derived from `<section>.<sub>.<sub-sub>` numbering."""
+    sn = (chunk.get("metadata", {}) or {}).get("section_number")
+    if isinstance(sn, str):
+        return float(sn.count(".") + 1)
+    return 0.0
+
+
+register_domain(
+    DomainSpec(
+        name="congress-data",
+        default_quota=60,
+        # Bill structure varies by chunk strategy + nesting depth (preamble vs section vs subsection).
+        categorical_features=(
+            CategoricalFeature(
+                key="strategy",
+                get=lambda c: (c.get("metadata", {}) or {}).get("strategy") or "unknown",
+            ),
+        ),
+        scalar_features=(ScalarFeature(key="section_depth", get=_section_depth),),
+    )
+)
+
+
+register_domain(
+    DomainSpec(
+        name="open-leaks",
+        default_quota=60,
+        # Document-type dominates variability: cable vs offshore_entity vs court_document
+        # are extraction-wise very different.
+        categorical_features=(
+            CategoricalFeature(
+                key="document_type",
+                get=lambda c: (c.get("metadata", {}) or {}).get("document_type") or "unknown",
+            ),
+        ),
+        prefilter_max=5000,  # 3.6M chunks — random down-sample before embedding/NER.
+    )
+)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -107,9 +209,14 @@ def _stable_hash_int(s: str) -> int:
     return int(hashlib.sha256(s.encode("utf-8")).hexdigest()[:16], 16)
 
 
-def _seed_for(seed: int, domain: str) -> int:
-    """Domain-derived sub-seed so each domain's RNG is independent but reproducible."""
-    return (seed * 1_000_003 + _stable_hash_int(domain)) % (2**32)
+def _seed_for(seed: int, label: str) -> int:
+    """Domain/stage-derived sub-seed so each RNG is independent but reproducible."""
+    return (seed * 1_000_003 + _stable_hash_int(label)) % (2**32)
+
+
+def _stable_sort(chunks: list[dict]) -> list[dict]:
+    """Sort by chunk_id for a deterministic input order regardless of glob ordering."""
+    return sorted(chunks, key=lambda c: c.get("chunk_id", ""))
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -118,60 +225,49 @@ def _seed_for(seed: int, domain: str) -> int:
 
 
 def _bucket_by_domain(chunks: list[dict]) -> dict[str, list[dict]]:
-    """Bucket merged chunks by domain. Domain comes from the medallion path
-    (already in load_chunks's per_domain_count, but not propagated to rows),
-    so we recover it from the chunk's metadata.source / domain hints."""
-    buckets: dict[str, list[dict]] = defaultdict(list)
+    """Bucket all chunks by their domain (path-derived, set on each chunk by load_chunks)."""
+    out: dict[str, list[dict]] = defaultdict(list)
     for c in chunks:
-        meta = c.get("metadata", {}) or {}
-        source = (meta.get("source") or "").lower()
-        domain_hint = (meta.get("domain") or "").lower()
-
-        if source == "media_ingest":
-            domain = "media-ingest"
-        elif source == "congress.gov" or domain_hint == "congress":
-            domain = "congress-data"
-        elif source == "wikileaks" or domain_hint == "open_leaks":
-            domain = "open-leaks"
-        else:
-            # Fall back to chunk_id namespacing pattern
-            cid = c.get("chunk_id", "")
-            if cid.startswith("congress-"):
-                domain = "congress-data"
-            elif cid.startswith("wikileaks-"):
-                domain = "open-leaks"
-            else:
-                domain = "media-ingest"
-        buckets[domain].append(c)
-    return buckets
+        d = c.get("__domain__") or _domain_from_chunk(c)
+        out[d].append(c)
+    return out
 
 
-def _stable_sort(chunks: list[dict]) -> list[dict]:
-    """Sort by chunk_id so the sampler input is invariant to glob/FS order."""
-    return sorted(chunks, key=lambda c: c.get("chunk_id", ""))
+def _domain_from_chunk(chunk: dict) -> str:
+    """Best-effort domain inference from chunk metadata when not annotated upstream."""
+    meta = chunk.get("metadata", {}) or {}
+    src = meta.get("source", "")
+    if "media" in src:
+        return "media-ingest"
+    if "congress" in src or src == "bill":
+        return "congress-data"
+    if "open_leaks" in src or "leak" in src:
+        return "open-leaks"
+    # Fall back to chunk_id prefix
+    cid = chunk.get("chunk_id", "")
+    if cid.startswith("congress-bill-"):
+        return "congress-data"
+    if cid.startswith(("epstein-", "icij-", "wikileaks-")):
+        return "open-leaks"
+    return "media-ingest"
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 2 — open-leaks pre-subsample (3.6M → ~5K)
+# Stage 2 — pre-subsample (for the leaks domain, etc.)
 # ────────────────────────────────────────────────────────────────────────────
 
 
-def _prefilter_leaks(chunks: list[dict], target: int, seed: int) -> list[dict]:
-    """Random pre-subsample for open-leaks. Embedding 3.6M chunks is intractable.
-
-    Reservoir-style sampling on a sorted list with a seeded RNG so the result
-    is deterministic and independent of FS iteration order.
-    """
-    if len(chunks) <= target:
+def _prefilter(chunks: list[dict], n: int, seed: int) -> list[dict]:
+    """Deterministic random subsample of n chunks. Used for huge corpora."""
+    if n >= len(chunks):
         return chunks
     rng = np.random.default_rng(seed)
-    idx = rng.choice(len(chunks), size=target, replace=False)
-    idx.sort()
-    return [chunks[i] for i in idx]
+    indices = sorted(rng.choice(len(chunks), size=n, replace=False).tolist())
+    return [chunks[i] for i in indices]
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 3 — optional GLiNER NER pre-filter
+# Stage 3 — NER pre-filter (optional; gated by --score-extractions)
 # ────────────────────────────────────────────────────────────────────────────
 
 
@@ -179,137 +275,98 @@ def _ner_cache_path(domain: str) -> Path:
     return CACHE_ROOT / domain / "ner_pass.json"
 
 
-async def _gliner_predict_batch(texts: list[str]) -> list[list[dict]]:
-    """Run GLiNER on a list of texts. Returns one entity-list per text."""
-    from catalyst_langgraph.clients.gliner import (
-        MENTION_TYPE_TO_GLINER_LABEL,
-        GLiNERClient,
-    )
+def _load_or_compute_ner(domain: str, chunks: list[dict], force: bool) -> dict[str, list[dict]]:
+    """Return {chunk_id: [{mention_type, text, ...}]}. Cached per-domain."""
+    p = _ner_cache_path(domain)
+    cached: dict[str, list[dict]] = {}
+    if p.exists() and not force:
+        cached = json.loads(p.read_text())
 
-    client = GLiNERClient()
-    model = client._get_model()  # noqa: SLF001 — internal API, but lazy-load is what we want
-    labels = list(MENTION_TYPE_TO_GLINER_LABEL.values())
-    results: list[list[dict]] = []
-    for text in texts:
-        if not text.strip():
-            results.append([])
-            continue
-        try:
-            ents = model.predict_entities(text, labels, threshold=client.threshold)
-        except Exception as e:
-            print(f"  GLiNER failed on chunk: {e}", file=sys.stderr)
-            ents = []
-        results.append(
-            [
-                {
-                    "text": e["text"],
-                    "mention_type": e["label"],
-                    "score": float(e["score"]),
-                }
-                for e in ents
-            ]
-        )
-    return results
-
-
-def _load_or_compute_ner(domain: str, chunks: list[dict], force: bool = False) -> dict[str, list[dict]]:
-    """Cache GLiNER results keyed by chunk_id. Returns chunk_id → entity list."""
-    cache_path = _ner_cache_path(domain)
-    cache: dict[str, list[dict]] = {}
-    if cache_path.exists() and not force:
-        cache = json.loads(cache_path.read_text())
-
-    missing = [c for c in chunks if c["chunk_id"] not in cache]
+    missing = [c for c in chunks if c["chunk_id"] not in cached]
     if not missing:
-        return cache
+        return cached
 
-    print(f"  [{domain}] Running GLiNER on {len(missing)} uncached chunks…")
-    texts = [c.get("text", "") for c in missing]
-    entities = asyncio.run(_gliner_predict_batch(texts))
+    print(f"  [{domain}] NER pass on {len(missing)} new chunks (GLiNER)…")
+    try:
+        from gliner import GLiNER  # type: ignore[import-untyped]
+    except ImportError:
+        print(
+            f"  [{domain}] gliner not installed — skipping NER pass. "
+            "Install via `uv pip install gliner` to enable --score-extractions.",
+            file=sys.stderr,
+        )
+        return cached
 
-    for c, ents in zip(missing, entities, strict=True):
-        cache[c["chunk_id"]] = ents
+    model = GLiNER.from_pretrained("urchade/gliner_medium-v2.1")
+    labels = ["PERSON", "ORGANIZATION", "LOCATION", "EVENT", "DATE", "MONEY", "PRODUCT"]
+    for c in missing:
+        ents = model.predict_entities(c.get("text", ""), labels, threshold=0.5)
+        cached[c["chunk_id"]] = [
+            {"mention_type": e["label"], "text": e["text"], "score": float(e["score"])} for e in ents
+        ]
 
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(cache, indent=2))
-    return cache
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(cached, indent=2, sort_keys=True))
+    return cached
 
 
-def _filter_extractive(chunks: list[dict], ner_cache: dict[str, list[dict]], min_mentions: int = 1) -> list[dict]:
-    """Drop chunks producing fewer than ``min_mentions`` GLiNER mentions."""
+def _filter_extractive(chunks: list[dict], ner_cache: dict[str, list[dict]], min_mentions: int) -> list[dict]:
     return [c for c in chunks if len(ner_cache.get(c["chunk_id"], [])) >= min_mentions]
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 4 — embeddings (cached)
+# Stage 4 — embed
 # ────────────────────────────────────────────────────────────────────────────
 
 
-def _embed_cache_path(domain: str) -> Path:
+def _embeddings_cache_path(domain: str) -> Path:
     return CACHE_ROOT / domain / "embeddings.npz"
 
 
-def _load_or_compute_embeddings(domain: str, chunks: list[dict], force: bool = False) -> np.ndarray:
-    """Embed each chunk's text. Cached as .npz keyed by chunk_id order.
-
-    Cache layout: ``{ "chunk_ids": <U..>, "vectors": float32[N, D] }``.
-    On cache hit + identical chunk_ids order, returns the cached array.
-    On partial hit, recomputes only the new chunk_ids and merges.
-    """
-    cache_path = _embed_cache_path(domain)
-    chunk_ids = [c["chunk_id"] for c in chunks]
-    texts = [c.get("text", "") for c in chunks]
-
+def _load_or_compute_embeddings(domain: str, chunks: list[dict], force: bool) -> np.ndarray:
+    p = _embeddings_cache_path(domain)
     cached_ids: list[str] = []
     cached_vecs: np.ndarray | None = None
-    if cache_path.exists() and not force:
-        data = np.load(cache_path, allow_pickle=False)
-        cached_ids = list(data["chunk_ids"].astype(str))
-        cached_vecs = data["vectors"].astype(np.float32)
+    if p.exists() and not force:
+        z = np.load(p, allow_pickle=False)
+        cached_ids = list(z["chunk_ids"].astype(str))
+        # Cache schema: prefer "vectors" (legacy / compat with prior versions);
+        # fall back to "embeddings" for forward compat.
+        cached_vecs = z["vectors"] if "vectors" in z else z["embeddings"]
 
-    cached_lookup = {cid: i for i, cid in enumerate(cached_ids)}
-    missing_idx = [i for i, cid in enumerate(chunk_ids) if cid not in cached_lookup]
-
-    if missing_idx:
-        # Lazy import — only require dagster_io / langchain when actually embedding.
-        sys.path.insert(0, str(ROOT / "libs" / "dagster-io" / "src"))
+    needed = [c for c in chunks if c["chunk_id"] not in set(cached_ids)]
+    if needed:
         from dagster_io import EmbeddingResource
 
         embedder = EmbeddingResource()
         embedder.setup_for_execution(None)
+        print(f"  [{domain}] Embedding {len(needed)} new chunks (model={embedder.model})…")
+        new_vecs = np.asarray(embedder.embed([c["text"] for c in needed]), dtype=np.float32)
+        new_ids = [c["chunk_id"] for c in needed]
 
-        missing_texts = [texts[i] for i in missing_idx]
-        print(f"  [{domain}] Embedding {len(missing_texts)} new chunks (model={embedder.model})…")
-        new_vecs_list = embedder.embed(missing_texts)
-        new_vecs = np.array(new_vecs_list, dtype=np.float32)
-
-        if cached_vecs is None:
-            all_ids = [chunk_ids[i] for i in missing_idx]
-            all_vecs = new_vecs
+        if cached_vecs is not None:
+            cached_vecs = np.vstack([cached_vecs, new_vecs])
+            cached_ids = cached_ids + new_ids
         else:
-            all_ids = list(cached_ids) + [chunk_ids[i] for i in missing_idx]
-            all_vecs = np.vstack([cached_vecs, new_vecs])
+            cached_vecs = new_vecs
+            cached_ids = new_ids
 
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(cache_path, chunk_ids=np.array(all_ids), vectors=all_vecs)
-        cached_lookup = {cid: i for i, cid in enumerate(all_ids)}
-        cached_vecs = all_vecs
+        p.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(p, chunk_ids=np.array(cached_ids), vectors=cached_vecs)
 
-    # Reorder to match input chunks order
-    assert cached_vecs is not None
+    cached_lookup = {cid: i for i, cid in enumerate(cached_ids)}
+    chunk_ids = [c["chunk_id"] for c in chunks]
     out = np.stack([cached_vecs[cached_lookup[cid]] for cid in chunk_ids])
-    # L2 normalize so cosine == dot
     norms = np.linalg.norm(out, axis=1, keepdims=True) + 1e-12
     return (out / norms).astype(np.float32)
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 5 — extraction-relevant feature vectors
+# Stage 5 — feature vectors (registry-driven, NOT per-domain inlined)
 # ────────────────────────────────────────────────────────────────────────────
 
 
 def _onehot(values: list[str], vocab: list[str]) -> np.ndarray:
-    """One-hot encode a list of categorical values against a fixed vocab."""
     idx = {v: i for i, v in enumerate(vocab)}
     out = np.zeros((len(values), len(vocab)), dtype=np.float32)
     for r, v in enumerate(values):
@@ -319,7 +376,6 @@ def _onehot(values: list[str], vocab: list[str]) -> np.ndarray:
 
 
 def _mention_histogram(chunks: list[dict], ner_cache: dict[str, list[dict]], vocab: list[str]) -> np.ndarray:
-    """Per-chunk normalized mention-type histogram from GLiNER output."""
     idx = {v: i for i, v in enumerate(vocab)}
     out = np.zeros((len(chunks), len(vocab)), dtype=np.float32)
     for r, c in enumerate(chunks):
@@ -334,19 +390,33 @@ def _mention_histogram(chunks: list[dict], ner_cache: dict[str, list[dict]], voc
 
 
 def _build_feature_vectors(
-    domain: str,
+    spec: DomainSpec,
     chunks: list[dict],
     embeddings: np.ndarray,
     ner_cache: dict[str, list[dict]] | None,
     embedding_weight: float,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Compose per-domain feature vector capturing extraction-relevant axes.
+    """Compose feature vector from the DomainSpec's registered features + embeddings.
 
-    Returns (features, vocab_metadata) where vocab_metadata captures the
-    one-hot/histogram bins used (for diagnostics).
+    Layout: [categorical one-hots | scalar features | mention_type_hist | weighted_embedding]
     """
     n = len(chunks)
     vocab_meta: dict[str, Any] = {}
+
+    # Categorical one-hot blocks
+    cat_blocks: list[np.ndarray] = []
+    for cf in spec.categorical_features:
+        values = [cf.get(c) or "unknown" for c in chunks]
+        vocab = sorted(set(values))
+        vocab_meta[cf.key] = vocab
+        cat_blocks.append(_onehot(values, vocab))
+
+    # Scalar features (max-normalized so they're roughly comparable to one-hot magnitudes)
+    scalar_cols: list[np.ndarray] = []
+    for sf in spec.scalar_features:
+        col = np.array([sf.get(c) for c in chunks], dtype=np.float32).reshape(-1, 1)
+        col_max = float(col.max() or 1.0)
+        scalar_cols.append(col / col_max)
 
     # Mention-type histogram (only when NER pass was run)
     if ner_cache:
@@ -358,55 +428,27 @@ def _build_feature_vectors(
         mention_hist = np.zeros((n, 0), dtype=np.float32)
         vocab_meta["mention_types"] = []
 
-    # Per-domain scalar/categorical features
-    if domain == "media-ingest":
-        speakers = [(c.get("metadata", {}) or {}).get("primary_speaker", "UNKNOWN") or "UNKNOWN" for c in chunks]
-        speaker_vocab = sorted(set(speakers))
-        vocab_meta["primary_speaker"] = speaker_vocab
-        sp_oh = _onehot(speakers, speaker_vocab)
-
-        sp_count = np.array(
-            [(c.get("metadata", {}) or {}).get("speaker_count", 1) for c in chunks],
-            dtype=np.float32,
-        ).reshape(-1, 1)
-        sp_count_max = float(sp_count.max() or 1.0)
-        sp_count = sp_count / sp_count_max
-
-        scalar = np.hstack([sp_oh, sp_count])
-    elif domain == "congress-data":
-        strategies = [(c.get("metadata", {}) or {}).get("strategy", "unknown") or "unknown" for c in chunks]
-        strat_vocab = sorted(set(strategies))
-        vocab_meta["strategy"] = strat_vocab
-        st_oh = _onehot(strategies, strat_vocab)
-
-        depths = []
-        for c in chunks:
-            meta = c.get("metadata", {}) or {}
-            sn = meta.get("section_number")
-            if isinstance(sn, str):
-                depths.append(float(sn.count(".") + 1))
-            else:
-                depths.append(0.0)
-        depth_arr = np.array(depths, dtype=np.float32).reshape(-1, 1)
-        depth_max = float(depth_arr.max() or 1.0)
-        depth_arr = depth_arr / depth_max
-
-        scalar = np.hstack([st_oh, depth_arr])
-    elif domain == "open-leaks":
-        doctypes = [(c.get("metadata", {}) or {}).get("document_type", "unknown") or "unknown" for c in chunks]
-        dt_vocab = sorted(set(doctypes))
-        vocab_meta["document_type"] = dt_vocab
-        dt_oh = _onehot(doctypes, dt_vocab)
-        scalar = dt_oh
+    # Domain-supplied extras (e.g. speaker embeddings)
+    if spec.extra_features:
+        extra = spec.extra_features(chunks).astype(np.float32)
     else:
-        scalar = np.zeros((n, 0), dtype=np.float32)
+        extra = np.zeros((n, 0), dtype=np.float32)
 
-    # L1-normalize scalar block per row so it doesn't dominate by magnitude
-    scalar_norm = np.linalg.norm(scalar, axis=1, keepdims=True) + 1e-12
-    scalar = scalar / scalar_norm
+    # Combine. L1-normalize the categorical/scalar block per row so it doesn't
+    # dominate by magnitude; embedding block carries its own weight.
+    structural = np.hstack([*cat_blocks, *scalar_cols]) if (cat_blocks or scalar_cols) else np.zeros((n, 0), np.float32)
+    if structural.size:
+        structural_norm = np.linalg.norm(structural, axis=1, keepdims=True) + 1e-12
+        structural = structural / structural_norm
 
-    # Compose: [scalar | mention_hist | embedding_weight * embedding]
-    features = np.hstack([scalar, mention_hist, embedding_weight * embeddings]).astype(np.float32)
+    features = np.hstack(
+        [
+            structural,
+            mention_hist,
+            extra,
+            embedding_weight * embeddings,
+        ]
+    ).astype(np.float32)
     return features, vocab_meta
 
 
@@ -418,9 +460,9 @@ def _build_feature_vectors(
 def _farthest_point_sampling(features: np.ndarray, k: int, seed: int) -> list[int]:
     """Greedy k-center selection. O(N·k). Deterministic given a seed.
 
-    Distance metric: Euclidean on the (already-normalized) feature vectors.
-    Ties broken by smaller index (stable). The seed only chooses the initial
-    point, so re-runs with the same seed are byte-identical.
+    Distance metric: Euclidean on (already-normalized) feature vectors. Ties
+    broken by smaller index (stable). The seed only chooses the initial point,
+    so re-runs with the same seed are byte-identical.
     """
     n = features.shape[0]
     k = min(k, n)
@@ -429,18 +471,15 @@ def _farthest_point_sampling(features: np.ndarray, k: int, seed: int) -> list[in
     rng = np.random.default_rng(seed)
     first = int(rng.integers(0, n))
     selected = [first]
-    # min_dist[i] = min distance from chunk i to any already-selected chunk
     diff = features - features[first]
-    min_dist = np.einsum("ij,ij->i", diff, diff)  # squared euclidean
+    min_dist = np.einsum("ij,ij->i", diff, diff)
 
     for _ in range(1, k):
-        # Argmax with stable tiebreak (lowest index)
         best = int(np.argmax(min_dist))
         selected.append(best)
         diff = features - features[best]
         new_dist = np.einsum("ij,ij->i", diff, diff)
         min_dist = np.minimum(min_dist, new_dist)
-        # Mark selected so we don't re-pick (its min_dist is 0 anyway)
         min_dist[best] = -np.inf
 
     return selected
@@ -452,22 +491,20 @@ def _farthest_point_sampling(features: np.ndarray, k: int, seed: int) -> list[in
 
 
 def _diagnostics(
-    domain: str,
+    spec: DomainSpec,
     pool_chunks: list[dict],
     selected_idx: list[int],
     ner_cache: dict[str, list[dict]] | None,
     vocab_meta: dict[str, Any],
 ) -> dict[str, Any]:
-    """Per-domain coverage report — distinct vocab values in pool vs sample."""
+    """Per-domain coverage report — how much of the pool's variability the sample captured."""
     selected = [pool_chunks[i] for i in selected_idx]
-    out: dict[str, Any] = {
-        "pool_size": len(pool_chunks),
-        "selected_size": len(selected),
-    }
+    out: dict[str, Any] = {"pool_size": len(pool_chunks), "selected_size": len(selected)}
 
+    # Mention-type coverage (only when NER pass was run)
     if ner_cache:
-        pool_types: Counter[str] = Counter()
-        sample_types: Counter[str] = Counter()
+        pool_types: Counter = Counter()
+        sample_types: Counter = Counter()
         for c in pool_chunks:
             for e in ner_cache.get(c["chunk_id"], []):
                 pool_types[e.get("mention_type", "")] += 1
@@ -480,20 +517,11 @@ def _diagnostics(
             "coverage_pct": round(100 * len(sample_types) / max(len(pool_types), 1), 1),
         }
 
-    for key, vocab in vocab_meta.items():
-        if not vocab or key == "mention_types":
-            continue
-        if domain == "media-ingest" and key == "primary_speaker":
-            getter = lambda c, k=key: (c.get("metadata", {}) or {}).get("primary_speaker") or "UNKNOWN"  # noqa: E731
-        elif domain == "congress-data" and key == "strategy":
-            getter = lambda c, k=key: (c.get("metadata", {}) or {}).get("strategy") or "unknown"  # noqa: E731
-        elif domain == "open-leaks" and key == "document_type":
-            getter = lambda c, k=key: (c.get("metadata", {}) or {}).get("document_type") or "unknown"  # noqa: E731
-        else:
-            continue
-        pool_vals = {getter(c) for c in pool_chunks}
-        sample_vals = {getter(c) for c in selected}
-        out[f"{key}_coverage"] = {
+    # Categorical feature coverage (registry-driven — works for any new domain)
+    for cf in spec.categorical_features:
+        pool_vals = {cf.get(c) or "unknown" for c in pool_chunks}
+        sample_vals = {cf.get(c) or "unknown" for c in selected}
+        out[f"{cf.key}_coverage"] = {
             "pool_distinct": len(pool_vals),
             "sample_distinct": len(sample_vals),
             "coverage_pct": round(100 * len(sample_vals) / max(len(pool_vals), 1), 1),
@@ -508,14 +536,13 @@ def _diagnostics(
 
 
 def _sample_domain(
-    domain: str,
+    spec: DomainSpec,
     chunks: list[dict],
     k: int,
     *,
     seed: int,
     score_extractions: bool,
     embedding_weight: float,
-    leaks_prefilter: int,
     force_recompute: bool,
 ) -> tuple[list[dict], dict[str, Any]]:
     """End-to-end pipeline for one domain. Returns (selected_rows, diagnostics)."""
@@ -523,45 +550,55 @@ def _sample_domain(
         return [], {"pool_size": 0, "selected_size": 0}
 
     chunks = _stable_sort(chunks)
-    print(f"\n[{domain}] pool size: {len(chunks)}")
+    print(f"\n[{spec.name}] pool size: {len(chunks)}")
 
-    # Open-leaks pre-subsample
-    if domain == "open-leaks" and len(chunks) > leaks_prefilter:
-        chunks = _prefilter_leaks(chunks, leaks_prefilter, _seed_for(seed, domain + ":prefilter"))
-        print(f"[{domain}] after prefilter: {len(chunks)}")
+    # Stage 2: per-domain prefilter (DomainSpec.prefilter_max)
+    if spec.prefilter_max is not None and len(chunks) > spec.prefilter_max:
+        chunks = _prefilter(chunks, spec.prefilter_max, _seed_for(seed, spec.name + ":prefilter"))
+        print(f"[{spec.name}] after prefilter: {len(chunks)}")
 
-    # NER pre-filter (optional but recommended)
+    # Stage 3: optional NER pre-filter
     ner_cache: dict[str, list[dict]] | None = None
     if score_extractions:
-        ner_cache = _load_or_compute_ner(domain, chunks, force=force_recompute)
+        ner_cache = _load_or_compute_ner(spec.name, chunks, force=force_recompute)
         before = len(chunks)
         chunks = _filter_extractive(chunks, ner_cache, min_mentions=1)
-        print(f"[{domain}] after NER filter (>=1 mention): {len(chunks)} (dropped {before - len(chunks)})")
+        print(f"[{spec.name}] after NER filter (>=1 mention): {len(chunks)} (dropped {before - len(chunks)})")
 
     if not chunks:
         return [], {"pool_size": 0, "selected_size": 0, "note": "all chunks filtered out"}
 
-    # Embeddings
-    embeddings = _load_or_compute_embeddings(domain, chunks, force=force_recompute)
+    # Stage 4: embeddings
+    embeddings = _load_or_compute_embeddings(spec.name, chunks, force=force_recompute)
 
-    # Feature composition
-    features, vocab_meta = _build_feature_vectors(domain, chunks, embeddings, ner_cache, embedding_weight)
+    # Stage 5: feature vectors (registry-driven)
+    features, vocab_meta = _build_feature_vectors(spec, chunks, embeddings, ner_cache, embedding_weight)
 
-    # Greedy farthest-point selection
-    selected_idx = _farthest_point_sampling(features, k, _seed_for(seed, domain + ":fps"))
+    # Stage 6: greedy farthest-point selection
+    selected_idx = _farthest_point_sampling(features, k, _seed_for(seed, spec.name + ":fps"))
     selected_idx.sort()  # stable output order (by pool index)
 
     rows = [
         {
-            "domain": domain,
+            "domain": spec.name,
             "document_id": chunks[i].get("document_id", ""),
             "chunk_id": chunks[i]["chunk_id"],
             "index": chunks[i].get("index", 0),
         }
         for i in selected_idx
     ]
-    diag = _diagnostics(domain, chunks, selected_idx, ner_cache, vocab_meta)
+    diag = _diagnostics(spec, chunks, selected_idx, ner_cache, vocab_meta)
     return rows, diag
+
+
+def _resolve_quotas(target: int, overrides: dict[str, int | None]) -> dict[str, int]:
+    """Map --target + --<domain> overrides to a per-domain quota."""
+    specs = registered_domains()
+    if any(v is not None for v in overrides.values()):
+        return {s.name: overrides.get(s.name) or s.default_quota for s in specs}
+    total_default = sum(s.default_quota for s in specs)
+    scale = target / total_default if total_default else 0
+    return {s.name: max(1, int(round(s.default_quota * scale))) for s in specs}
 
 
 def main() -> int:
@@ -570,9 +607,11 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--target", type=int, default=200, help="Total candidates across all domains.")
-    parser.add_argument("--media", type=int, help="Override media-ingest quota (default: 80).")
-    parser.add_argument("--congress", type=int, help="Override congress-data quota (default: 60).")
-    parser.add_argument("--leaks", type=int, help="Override open-leaks quota (default: 60).")
+    # One per-domain quota flag per registered domain (so adding a new domain
+    # auto-gets a CLI override flag — `--<domain-with-hyphens>`).
+    for spec in registered_domains():
+        flag = "--" + spec.name.replace("_", "-")
+        parser.add_argument(flag, dest=spec.name, type=int, help=f"Override quota for {spec.name}.")
     parser.add_argument("--seed", type=int, default=42, help="Deterministic seed for sampling.")
     parser.add_argument(
         "--score-extractions",
@@ -586,32 +625,13 @@ def main() -> int:
         default=1.0,
         help="Weight of embedding block relative to scalar/categorical blocks (default 1.0).",
     )
-    parser.add_argument(
-        "--leaks-prefilter",
-        type=int,
-        default=5000,
-        help="Random subsample size for open-leaks before embedding (default 5000).",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Ignore cached embeddings/NER and recompute.",
-    )
+    parser.add_argument("--force", action="store_true", help="Ignore cached embeddings/NER and recompute.")
     parser.add_argument("--diagnostics", action="store_true", help="Print per-domain coverage report.")
     parser.add_argument("--output", type=Path, default=OUTPUT_PATH, help="Output JSON path.")
     args = parser.parse_args()
 
-    # Resolve per-domain quotas — if --target is given but per-domain not, scale defaults proportionally
-    if any(x is not None for x in (args.media, args.congress, args.leaks)):
-        quotas = {
-            "media-ingest": args.media if args.media is not None else DEFAULT_PER_DOMAIN["media-ingest"],
-            "congress-data": (args.congress if args.congress is not None else DEFAULT_PER_DOMAIN["congress-data"]),
-            "open-leaks": args.leaks if args.leaks is not None else DEFAULT_PER_DOMAIN["open-leaks"],
-        }
-    else:
-        # Scale the default 80/60/60 = 200 split to the target
-        scale = args.target / sum(DEFAULT_PER_DOMAIN.values())
-        quotas = {d: max(1, int(round(v * scale))) for d, v in DEFAULT_PER_DOMAIN.items()}
+    overrides = {s.name: getattr(args, s.name) for s in registered_domains()}
+    quotas = _resolve_quotas(args.target, overrides)
 
     print("=" * 70)
     print("  GT Candidate Sampler")
@@ -629,11 +649,11 @@ def main() -> int:
         return 2
 
     buckets = _bucket_by_domain(all_chunks)
-    for d in ["media-ingest", "congress-data", "open-leaks"]:
-        print(f"  {d}: {len(buckets.get(d, []))} chunks")
+    for spec in registered_domains():
+        print(f"  {spec.name}: {len(buckets.get(spec.name, []))} chunks")
 
     output: dict[str, Any] = {
-        "schema_version": "1",
+        "schema_version": "2",
         "seed": args.seed,
         "target": args.target,
         "quotas": quotas,
@@ -643,20 +663,19 @@ def main() -> int:
         "diagnostics": {},
     }
 
-    for domain in ["media-ingest", "congress-data", "open-leaks"]:
+    for spec in registered_domains():
         rows, diag = _sample_domain(
-            domain,
-            buckets.get(domain, []),
-            quotas[domain],
+            spec,
+            buckets.get(spec.name, []),
+            quotas[spec.name],
             seed=args.seed,
             score_extractions=args.score_extractions,
             embedding_weight=args.embedding_weight,
-            leaks_prefilter=args.leaks_prefilter,
             force_recompute=args.force,
         )
         output["candidates"].extend(rows)
-        output["diagnostics"][domain] = diag
-        print(f"[{domain}] selected: {len(rows)}")
+        output["diagnostics"][spec.name] = diag
+        print(f"[{spec.name}] selected: {len(rows)}")
 
     output["total_selected"] = len(output["candidates"])
 
