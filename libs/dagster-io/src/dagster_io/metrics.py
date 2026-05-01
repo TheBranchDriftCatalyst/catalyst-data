@@ -29,9 +29,14 @@ def _get_meter():
     if _meter is not None:
         return _meter
 
-    # Respect OTEL_METRICS_EXPORTER=none (e.g. in tests)
-    if os.environ.get("OTEL_METRICS_EXPORTER", "").lower() == "none":
-        logger.info("OTEL metrics disabled (OTEL_METRICS_EXPORTER=none)")
+    # Auto-suppress outside Dagster: CLI scripts and dev tooling that import
+    # this library shouldn't try to ship metrics to alloy.monitoring (it's
+    # only reachable from inside the talos cluster). Power users can force
+    # telemetry on via CATALYST_TELEMETRY=1.
+    from dagster_io._runtime_context import telemetry_enabled
+
+    if not telemetry_enabled():
+        logger.info("OTEL metrics disabled (running outside Dagster; set CATALYST_TELEMETRY=1 to override)")
         _meter = _NoOpMeter()
         return _meter
 
@@ -553,13 +558,18 @@ def start_metrics_server(port: int | None = None) -> None:
     """Initialize OTEL metrics export.
 
     The PeriodicExportingMetricReader flushes every 30s automatically
-    and on process shutdown. No atexit/SIGTERM hacks needed.
+    and on process shutdown. No atexit/SIGTERM hacks needed. When running
+    outside Dagster (e.g. CLI scripts), this is a silent no-op via the
+    ``_get_meter()`` runtime-context check.
     """
     global _metrics_initialized
     if _metrics_initialized:
         return
     _metrics_initialized = True
 
-    # Force initialization of the meter (creates exporter + reader)
-    _get_meter()
+    # Force initialization of the meter (creates exporter + reader, or
+    # returns a _NoOpMeter when telemetry is disabled).
+    meter = _get_meter()
+    if isinstance(meter, _NoOpMeter):
+        return
     logger.info("OTEL metrics initialized — flushing every 30s to Alloy")

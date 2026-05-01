@@ -16,14 +16,23 @@ def configure_tracing(service_name: str = "catalyst-data") -> None:
     - OTEL_SERVICE_NAME (overrides service_name param)
     - OTEL_RESOURCE_ATTRIBUTES (additional resource attributes)
     - TRACING_ENABLED (default: true, set to false to disable)
+    - CATALYST_TELEMETRY (default: 0; set to 1 to force-enable tracing
+      from CLI contexts even when not running inside Dagster)
+
+    Auto-suppresses outside Dagster — CLI scripts and dev tooling don't
+    spin up the OTLP exporter (alloy.monitoring is only reachable in
+    cluster). Inside Dagster (DAGSTER_RUN_ID / DAGSTER_HOME etc set),
+    tracing initializes as before.
     """
     global _configured
     if _configured:
         return
     _configured = True
 
-    if os.getenv("TRACING_ENABLED", "true").lower() == "false":
-        logger.info("Tracing disabled via TRACING_ENABLED=false")
+    from dagster_io._runtime_context import telemetry_enabled
+
+    if not telemetry_enabled():
+        logger.info("Tracing disabled (running outside Dagster; set CATALYST_TELEMETRY=1 to override)")
         return
 
     try:
