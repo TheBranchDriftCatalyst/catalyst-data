@@ -327,37 +327,49 @@ URL: `http://localhost:5173/viewer/benchmarks`
 
 ```
 tests/fixtures/
-    benchmark_chunks.json    # curated benchmark subset (4 representative chunks)
-    demo_video.mp4           # source media for pipeline integration tests
-    model_cache/             # local model weights cache
+    media-ingest/
+        benchmark_chunks.json    # curated audio chunks (3 chunks)
+    congress-data/
+        benchmark_chunks.json    # curated bill chunks (4 chunks)
+    open-leaks/
+        benchmark_chunks.json    # curated leak chunks (3 chunks)
+    benchmark_chunks.json        # legacy single-file fallback
+    demo_video.mp4               # source media for pipeline integration tests
+    model_cache/                 # local model weights cache
 ```
+
+`BenchmarkStore.load_benchmark_chunks()` merges chunks from all three
+per-domain dirs. Each domain can scale its fixture set independently.
 
 ### Cached Artifacts (generated, gitignored, regenerable)
 
 ```
 .test-output/media-ingest/
-    pipeline-cache/              # model-independent pipeline outputs
-        transcription.json       # Step 1: Whisper transcription
-        diarization.json         # Step 2: Speaker diarization
-        segment_merge.json       # Step 3: Same-speaker merge
-        chunks.json              # Step 4: Speaker-aware chunking
-        benchmark_chunks.json    # copy of curated subset
+    pipeline-cache/              # slow audio-model outputs only
+        0_transcription.json     # Whisper output (slow, cached; stage prefix = order)
+        1_diarization.json       # pyannote output (slow, cached)
+                                 # segment_merge + chunking are fast — recomputed
+                                 # from cached transcription+diarization on every run.
     ground-truth/                # ground truth versions
-        ensemble-5model.json     # named, versioned
+        ensemble-12model.json    # named, versioned
         active.json              # currently used for scoring
+    extractions/                 # cross-run cached LLM extractions
+        extraction_<model>.json
     runs/                        # timestamped benchmark runs
         2026-04-29-exgraph-v2/
-            extractions/         # extraction_model.json per model
+            extractions/         # extraction_<model>.json per model
             audit-logs/          # structured audit logs per model
             benchmark-report.json
             run-config.json
         latest -> ...            # symlink to most recent run
-    fixtures/                    # legacy flat layout (backward compat)
-        extraction_*.json
-        ground_truth_*.json
     benchmark-report.json        # top-level copy for viewer SPA
     audit-logs/                  # top-level copy for viewer SPA
 ```
+
+The two-stage cache (transcription + diarization only) is intentional. Both
+are slow audio-model outputs (~5–60s each on Metal, minutes on CPU). The
+`segment_merge` and `chunks` stages are pure-Python passes that take
+milliseconds, so caching them adds disk noise without saving time.
 
 ### Tiered Clean System
 
@@ -373,14 +385,36 @@ tests/fixtures/
 
 ```
 demo_video.mp4 (true fixture)
-  --> transcription.json (Whisper, ~minutes)
-    --> diarization.json (pyannote, ~minutes, needs HF_TOKEN)
-      --> segment_merge.json (fast)
-        --> chunks.json (fast)
+  --> 0_transcription.json (cached — Whisper)
+        backend = WHISPER_BACKEND env (mlx-whisper / openvino / faster-whisper)
+        ~13s on M3 Metal (mlx-base) | ~30-60s CPU (faster-whisper base)
+    --> 1_diarization.json (cached — pyannote, needs HF_TOKEN)
+          device auto-selects: cuda → mps → cpu
+          ~25s on M3 MPS | ~60-120s CPU
+      --> [recomputed] segment_merge (fast Python pass)
+        --> [recomputed] chunks via ChunkingResource.chunk_speaker_segments (fast)
           --> extraction_{model}.json (per model, seconds to minutes)
             --> ground_truth (ensemble from multiple extractions)
               --> benchmark-report.json (scoring, fast)
 ```
+
+### Pre-warming the audio cache
+
+The benchmark harness's `_run_model` invokes pytest as a subprocess with
+`capture_output=True`. The first model's subprocess pays the cold
+transcription/diarization cost — but you can't see Whisper progress because
+stdout is captured. Run the prewarmup task first to see live progress and
+populate the cache:
+
+```bash
+WHISPER_BACKEND=mlx-whisper task bench:pipeline:warm   # Apple Silicon
+task bench:pipeline:warm                                # other platforms
+```
+
+The fixtures print a `[prewarmup] AUDIO PIPELINE — STAGE 1/2: TRANSCRIPTION`
+banner, the resolved backend/device, and elapsed time per stage. After
+prewarmup, every model in `task bench` reuses the cached audio output and
+runs in seconds instead of minutes.
 
 Delete any file to force regeneration from that stage onward. Pipeline cache (Steps 1-4) is model-independent -- only extraction varies per model.
 
