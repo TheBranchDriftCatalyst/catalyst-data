@@ -177,8 +177,19 @@ tasks:
     cmds:
       - python tests/benchmark_harness.py --regen --audit-log {{.CLI_ARGS}}
 
+  bench:gt-candidates:
+    desc: "Run scripts/sample_gt_candidates.py against the medallion tree to produce .test-output/gt-candidates.json — extraction-aware diversity sampling, deterministic given seed. Default: --target 200 --seed 42 --score-extractions --diagnostics."
+    env:
+      PYTHONPATH: "."
+      OTEL_METRICS_EXPORTER: none
+      OTEL_TRACES_EXPORTER: none
+      EMBEDDING_PROVIDER: '{{.EMBEDDING_PROVIDER | default "huggingface"}}'
+      EMBEDDING_MODEL: '{{.EMBEDDING_MODEL | default "sentence-transformers/all-mpnet-base-v2"}}'
+    cmds:
+      - python scripts/sample_gt_candidates.py --target 200 --seed 42 --score-extractions --diagnostics {{.CLI_ARGS}}
+
   bench:ground-truth:
-    desc: "Generate ensemble consensus ground truth from existing cached artifacts"
+    desc: "Generate ensemble consensus ground truth. Auto-restricts to .test-output/gt-candidates.json when present (run task bench:gt-candidates first); pass --no-candidates to use the full pool."
     env:
       PYTHONPATH: "."
     cmds:

@@ -161,6 +161,7 @@ def generate_ensemble_ground_truth(
     exclude_model: str | None = None,
     ner_threshold: int | None = None,
     spo_threshold: int | None = None,
+    candidates: list[str] | None = None,
 ) -> dict | None:
     """Generate ground truth from multi-model consensus.
 
@@ -173,6 +174,12 @@ def generate_ensemble_ground_truth(
             should not vote on the ground truth it is scored against.
         ner_threshold: Minimum NER votes required. Defaults to strict majority (N//2+1).
         spo_threshold: Minimum SPO votes required. Defaults to strict majority (N//2+1).
+        candidates: Optional list of ``chunk_id`` values to restrict the ensemble
+            to. When set, only chunks whose chunk_id is in this list participate
+            in voting — used to scope GT generation to the diversity-sampled
+            seed produced by ``scripts/sample_gt_candidates.py`` rather than
+            running consensus over the full 3.6M-chunk corpus. Default ``None``
+            (process every chunk).
 
     Returns:
         Ground truth dict matching the standard fixture format, or None if
@@ -192,6 +199,19 @@ def generate_ensemble_ground_truth(
     if not chunks:
         print("  ERROR: No chunks materialized. Run task bench:chunks:regen first.")
         return None
+
+    # Restrict to the diversity-sampled seed when a candidate list is provided.
+    # This is the link between scripts/sample_gt_candidates.py output and the
+    # ensemble GT generator — without it, ensemble runs over every materialized
+    # chunk (3.6M with open-leaks), which is intractable.
+    if candidates is not None:
+        candidate_ids = set(candidates)
+        before = len(chunks)
+        chunks = [c for c in chunks if c.get("chunk_id") in candidate_ids]
+        print(f"  Candidate filter: {before:,} → {len(chunks)} chunks (matching {len(candidate_ids)} ids)")
+        if not chunks:
+            print("  ERROR: candidate list matched zero materialized chunks.")
+            return None
 
     # Load available extraction fixtures
     ner_extractions = _load_available_extractions(store, ner_models)

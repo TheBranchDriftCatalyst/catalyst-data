@@ -254,14 +254,46 @@ If a domain is small (`< prefilter_max`), the prefilter is a no-op.
 
 Downstream consumers:
 
-- **GT generation** — `task bench:ground-truth` should be plumbed to
-  read this file and restrict the ensemble pass to these chunk_ids
-  (tracked as **CD-4ssa**).
-- **Viewer-ui GT editor** — annotation queue should filter to these
-  candidates first (tracked as **CD-991f** — UX gaps include no
-  chunk-list filter, no per-chunk reviewed flag, no diff-vs-ensemble).
+- **GT generation** — `task bench:ground-truth` reads this file
+  automatically when present and restricts ensemble consensus voting to
+  these chunk_ids. Pass `--no-candidates` to ignore the file and run
+  against the full pool. (Shipped CD-4ssa.)
+- **Viewer-ui GT editor** — annotation queue surfaces a chunk-list filter
+  + j/k keyboard nav + debounced autosave so a human can review the 200.
+  (Shipped CD-991f.) Per-chunk reviewed flag + diff-vs-ensemble views
+  remain follow-ups.
 - **SFT/DPO export** (CD-foy3) — training-data generator reads the
   reviewed GT and produces JSONL.
+
+---
+
+## Closing the GT loop end-to-end
+
+Five commands take you from raw fixtures to a scored benchmark report:
+
+```bash
+# 1. Materialize chunks for all 3 domains via LocalJsonIOManager.
+#    Outputs land at .test-output/<domain>/<layer>/.../*_chunks/.../data.jsonl
+task bench:chunks:regen
+
+# 2. Sample 200 diverse, extraction-aware GT candidates.
+#    Writes .test-output/gt-candidates.json
+task bench:gt-candidates
+
+# 3. Run extraction (NER+SPO) for every configured model.
+#    Per-model JSON fixtures land in runs/<run-id>/extractions/.
+task bench:run
+
+# 4. Generate ensemble consensus GT — restricted to the 200 candidates
+#    automatically when gt-candidates.json is present.
+task bench:ground-truth
+
+# 5. Score per-domain F1 + render the report (viewer-ui at task bench:view).
+task bench:report
+```
+
+Each step is independently re-runnable and idempotent given the upstream
+output. Cache layout under `.test-output/` keeps re-invocations fast.
 
 ---
 

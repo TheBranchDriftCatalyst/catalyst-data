@@ -119,14 +119,30 @@ def _run_model(
         return None
 
 
+def _load_candidate_chunk_ids(path: Path | None) -> list[str] | None:
+    """Read .test-output/gt-candidates.json (or the path given) and return its
+    ``chunk_id`` list. Returns None when the file is absent — caller treats
+    None as 'no candidate filter, run over the full pool'.
+    """
+    if path is None:
+        return None
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text())
+    return [c["chunk_id"] for c in payload.get("candidates", []) if c.get("chunk_id")]
+
+
 def _run_ensemble_gt(
     store: BenchmarkStore,
     ner_models: list[str] | None = None,
     spo_models: list[str] | None = None,
+    candidates: list[str] | None = None,
 ):
     """Generate ensemble ground truth from cached extraction artifacts."""
     print(f"\n{'=' * 70}")
     print("  Ensemble Ground Truth Generation")
+    if candidates is not None:
+        print(f"  Restricted to {len(candidates)} candidate chunks (sampler seed)")
     print(f"{'=' * 70}")
 
     existing = store.load_ground_truth("active")
@@ -135,7 +151,9 @@ def _run_ensemble_gt(
         print(f"{'=' * 70}")
         return
 
-    ground_truth = generate_ensemble_ground_truth(store, ner_models=ner_models, spo_models=spo_models)
+    ground_truth = generate_ensemble_ground_truth(
+        store, ner_models=ner_models, spo_models=spo_models, candidates=candidates
+    )
     if ground_truth is None:
         print("\n  Failed: not enough model fixtures for ensemble (need >= 2).")
         print(f"{'=' * 70}")
@@ -505,6 +523,24 @@ examples:
         ),
     )
     config.add_argument(
+        "--candidates",
+        type=Path,
+        metavar="PATH",
+        default=Path(".test-output/gt-candidates.json"),
+        help=(
+            "Path to gt-candidates.json from scripts/sample_gt_candidates.py. "
+            "When the file exists, ensemble GT generation is restricted to those "
+            "chunk_ids. Pass --no-candidates to disable. Default: .test-output/gt-candidates.json."
+        ),
+    )
+    config.add_argument(
+        "--no-candidates",
+        dest="candidates",
+        action="store_const",
+        const=None,
+        help="Run ensemble GT against the full chunk pool, ignoring gt-candidates.json.",
+    )
+    config.add_argument(
         "--models",
         type=str,
         metavar="LIST",
@@ -610,7 +646,8 @@ examples:
         ner_override = args.ner_models.split(",") if getattr(args, "ner_models", None) else None
         spo_override = args.spo_models.split(",") if getattr(args, "spo_models", None) else None
         # Temporarily patch the generation call
-        _run_ensemble_gt(store, ner_models=ner_override, spo_models=spo_override)
+        candidates = _load_candidate_chunk_ids(args.candidates)
+        _run_ensemble_gt(store, ner_models=ner_override, spo_models=spo_override, candidates=candidates)
         return
 
     # Determine which models to run
@@ -820,7 +857,8 @@ examples:
     if args.ensemble_gt:
         ner_override = args.ner_models.split(",") if getattr(args, "ner_models", None) else None
         spo_override = args.spo_models.split(",") if getattr(args, "spo_models", None) else None
-        _run_ensemble_gt(store, ner_models=ner_override, spo_models=spo_override)
+        candidates = _load_candidate_chunk_ids(args.candidates)
+        _run_ensemble_gt(store, ner_models=ner_override, spo_models=spo_override, candidates=candidates)
 
     # Load ground truth and compute scores
     gt = store.load_ground_truth("active")
