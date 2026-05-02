@@ -65,11 +65,15 @@ def _human(seconds: float) -> str:
 
 def _seed_media_documents_to_s3() -> int:
     """Pre-seed silver/media_ingest/media/media_documents/data.jsonl from
-    the manifest + on-disk mp4 sizes. Same shape the production
-    media_documents asset would produce, just bypassing the NFS scanner.
-    Returns count of docs written.
+    the manifest + on-disk mp4 paths. Builds MediaDocument rows directly
+    instead of going through ``_file_to_document`` because the asset's
+    partition lookup matches ``doc.id == partition_key`` — the partition
+    key is the manifest's ``doc_id``, not the hashed
+    ``_make_document_id`` output. We also need ``metadata.has_audio=True``
+    so the transcription asset doesn't short-circuit on the no-audio
+    fast-path. Returns count of docs written.
     """
-    from media_ingest.assets.documents import _file_to_document
+    from media_ingest.assets.documents import MediaDocument
 
     from dagster_io.s3_client import S3Client
 
@@ -86,15 +90,19 @@ def _seed_media_documents_to_s3() -> int:
         mp4 = FIXTURE_DIR / entry["file"]
         if not mp4.exists():
             continue
-        file_info = {
-            "filename": mp4.name,
-            "source_dir": "/data/metube",
-            "path": f"/data/metube/{mp4.name}",
-            "extension": mp4.suffix,
-            "size_bytes": mp4.stat().st_size,
-            "metadata": {"title": entry.get("title") or mp4.stem, "doc_id": entry["doc_id"]},
-        }
-        docs.append(_file_to_document(file_info).model_dump(mode="json"))
+        doc = MediaDocument(
+            id=entry["doc_id"],  # match the partition_key exactly
+            title=entry.get("title") or mp4.stem,
+            source_path=str(mp4.resolve()),  # actual on-disk path Whisper reads
+            source="metube",
+            metadata={
+                "extension": mp4.suffix,
+                "size_bytes": mp4.stat().st_size,
+                "has_audio": True,
+                "doc_id": entry["doc_id"],
+            },
+        )
+        docs.append(doc.model_dump(mode="json"))
 
     payload = "\n".join(json.dumps(d, default=str) for d in docs) + ("\n" if docs else "")
     prefix = "silver/media_ingest/media/media_documents"
@@ -147,7 +155,9 @@ def main() -> int:
 
     print(f"\n{'─' * 70}")
     print(f"  Regenerating audio fixtures via Dagster materialize for {len(videos)} video(s)")
-    print(f"  Output: s3://{os.environ['DAGSTER_S3_BUCKET']}/gold/media_ingest/media/media_{{transcriptions,diarization,segment_merge}}/<doc_id>/data.json")
+    print(
+        f"  Output: s3://{os.environ['DAGSTER_S3_BUCKET']}/gold/media_ingest/media/media_{{transcriptions,diarization,segment_merge}}/<doc_id>/data.json"
+    )
     print(f"  Backend: {os.environ.get('WHISPER_BACKEND', 'faster-whisper')}")
     if args.skip_diarization:
         print("  Skipping diarization (--skip-diarization)")
@@ -192,7 +202,9 @@ def main() -> int:
     # MediaIngestConfig is read from env (WHISPER_BACKEND, WHISPER_MODEL, etc.)
     # by the asset body — no override needed here, just make sure env is set.
     config = MediaIngestConfig()
-    print(f"  Whisper config: backend={config.whisper_backend} model={config.whisper_model} device={config.whisper_device}")
+    print(
+        f"  Whisper config: backend={config.whisper_backend} model={config.whisper_model} device={config.whisper_device}"
+    )
 
     instance = DagsterInstance.ephemeral()
     instance.add_dynamic_partitions("media_document", [v["doc_id"] for v in videos])

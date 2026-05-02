@@ -202,12 +202,11 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
 
     # ── media_documents seed ────────────────────────────────────────────────
     # The Media tab in viewer-ui reads silver/media_ingest/media/media_documents/data.jsonl.
-    # That asset's upstream is media_metadata (which comes from media_files, an
-    # NFS scanner). Skip the full discovery chain — synthesize media_metadata
-    # rows directly from the audio manifest + on-disk mp4 sizes, then call
-    # _file_to_document and write the result to silver. This is the same
-    # transform media_documents itself runs; we just bypass the upstream.
-    from media_ingest.assets.documents import _file_to_document
+    # The transcription/diarization assets look up the doc by `id == partition_key`,
+    # so the doc.id must equal the manifest's doc_id (NOT the hashed
+    # _make_document_id form). has_audio=True keeps the transcription asset
+    # from short-circuiting on its no-audio fast-path.
+    from media_ingest.assets.documents import MediaDocument
 
     fixture_dir = _media_fixtures()
     docs = []
@@ -215,17 +214,19 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
         mp4 = fixture_dir / entry["file"]
         if not mp4.exists():
             continue
-        # Synthesize the file_info shape media_files produces.
-        file_info = {
-            "filename": mp4.name,
-            "source_dir": "/data/metube",  # required prefix for source detection
-            "path": f"/data/metube/{mp4.name}",
-            "extension": mp4.suffix,
-            "size_bytes": mp4.stat().st_size,
-            "metadata": {"title": entry.get("title") or mp4.stem, "doc_id": entry["doc_id"]},
-        }
-        # _file_to_document returns a MediaDocument; serialize via .model_dump for jsonl.
-        docs.append(_file_to_document(file_info).model_dump(mode="json"))
+        doc = MediaDocument(
+            id=entry["doc_id"],
+            title=entry.get("title") or mp4.stem,
+            source_path=str(mp4.resolve()),
+            source="metube",
+            metadata={
+                "extension": mp4.suffix,
+                "size_bytes": mp4.stat().st_size,
+                "has_audio": True,
+                "doc_id": entry["doc_id"],
+            },
+        )
+        docs.append(doc.model_dump(mode="json"))
 
     docs_payload = "\n".join(json.dumps(d, default=str) for d in docs) + ("\n" if docs else "")
     docs_prefix = "silver/media_ingest/media/media_documents"
