@@ -1,12 +1,38 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type {
   GroundTruthFile,
   GroundTruthChunk,
   GroundTruthMention,
   GroundTruthProposition,
 } from "@/types/benchmark";
+import type { AutosaveStatus, VisibleChunkEntry } from "@/types/gt-editor";
 import { TypeBadge, MetricLabel, TYPE_COLORS } from "./shared";
 import { GTSelector } from "./GTSelector";
+
+/** Debounce window for autosave writes (ms). */
+const AUTOSAVE_DEBOUNCE_MS = 500;
+
+/** Format an epoch ms timestamp as HH:MM:SS for the saved-at indicator. */
+function formatSavedAt(at: number): string {
+  const d = new Date(at);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+/**
+ * Returns true when the keyboard event originated inside an editable element
+ * (form fields, contenteditable). We swallow keyboard nav in that case so the
+ * user can type 'j' or 'k' into a mention/text input without jumping chunks.
+ */
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (target.isContentEditable) return true;
+  return false;
+}
 
 // ── Data fetching ────────────────────────────────────────────────────
 
@@ -466,17 +492,40 @@ export function GroundTruthPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedChunk, setSelectedChunk] = useState<number>(0);
+  const [chunkFilter, setChunkFilter] = useState<string>("");
 
   const isDirty = useMemo(() => {
     if (!gt || !originalGt) return false;
     return JSON.stringify(gt) !== JSON.stringify(originalGt);
   }, [gt, originalGt]);
 
+  // Filtered chunk list: substring match on chunk_id (case-insensitive). The
+  // filter is informational only — it does not mutate the GT file or shift
+  // indices; we keep the original index alongside each visible entry so
+  // selection + keyboard nav still address the underlying array.
+  const visibleChunks = useMemo<VisibleChunkEntry[]>(() => {
+    if (!gt) return [];
+    const all: VisibleChunkEntry[] = gt.chunks.map((chunk, origIndex) => ({ chunk, origIndex }));
+    const q = chunkFilter.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter(({ chunk }) => chunk.chunk_id.toLowerCase().includes(q));
+  }, [gt, chunkFilter]);
+
   // GT list discovery is handled by GTSelector component
 
-  // Load selected ground truth
+  // Load selected ground truth.
+  //
+  // We null out gt/originalGt synchronously *before* kicking off the fetch so
+  // that any autosave timer the previous file scheduled (still-dirty edits at
+  // switch time) is cancelled by the autosave effect's next run: with gt===null
+  // the effect's `if (!isDirty || !gt) return` early-exits, and its cleanup
+  // clears the pending timer. Without this, a 500ms-debounced PUT against the
+  // *new* selectedGT path can fire with the *old* file's edits and corrupt
+  // the freshly-loaded file on disk.
   useEffect(() => {
     if (!selectedGT) return;
+    setGt(null);
+    setOriginalGt(null);
     setLoading(true);
     setError(null);
     fetchGT(selectedGT).then((data) => {
@@ -484,6 +533,7 @@ export function GroundTruthPanel({
         setGt(deepClone(data));
         setOriginalGt(deepClone(data));
         setSelectedChunk(0);
+        setChunkFilter("");
       } else {
         setError(`Could not load ground truth: ${selectedGT}`);
       }
@@ -516,46 +566,128 @@ export function GroundTruthPanel({
     [gt, selectedChunk],
   );
 
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "fallback">("idle");
+  const [saveStatus, setSaveStatus] = useState<AutosaveStatus>({ kind: "idle" });
+
+  // Latest GT snapshot mirrored into a ref so the debounce timer reads the
+  // most recent edits at the moment it fires (avoids stale-closure writes).
+  const gtRef = useRef<GroundTruthFile | null>(null);
+  useEffect(() => {
+    gtRef.current = gt;
+  }, [gt]);
+
+  /**
+   * Persist the GT file. `markReviewed` flips `manually_reviewed: true` —
+   * autosave passes false (review status is intent, not a side effect of
+   * editing); the explicit Save button passes true.
+   *
+   * Returns the resulting AutosaveStatus so callers can react to it.
+   */
+  const persistGT = useCallback(
+    async (snapshot: GroundTruthFile, markReviewed: boolean): Promise<AutosaveStatus> => {
+      const exported: GroundTruthFile = markReviewed
+        ? { ...snapshot, manually_reviewed: true }
+        : snapshot;
+      const json = JSON.stringify(exported, null, 2);
+
+      // Try PUT to Vite dev server (writes to disk)
+      try {
+        const res = await fetch(`/viewer/ground-truth/${selectedGT}.json`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: json,
+        });
+        if (res.ok) {
+          setOriginalGt(deepClone(exported));
+          return { kind: "saved", at: Date.now() };
+        }
+      } catch {
+        // Dev server not available — fall back to download
+      }
+
+      // Fallback: download as file (only meaningful for explicit save)
+      if (markReviewed) {
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${selectedGT}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setOriginalGt(deepClone(exported));
+        return { kind: "fallback", at: Date.now() };
+      }
+
+      // Autosave failed silently — surface as error so the user knows their
+      // edits aren't on disk. We keep originalGt unchanged so isDirty stays
+      // true and a retry happens on the next edit.
+      return { kind: "error", message: "Autosave failed (dev server unreachable)" };
+    },
+    [selectedGT],
+  );
 
   const handleSave = useCallback(async () => {
     if (!gt) return;
-    const exported: GroundTruthFile = {
-      ...gt,
-      manually_reviewed: true,
-    };
-    const json = JSON.stringify(exported, null, 2);
+    setSaveStatus({ kind: "saving" });
+    const next = await persistGT(gt, true);
+    setSaveStatus(next);
+  }, [gt, persistGT]);
 
-    // Try PUT to Vite dev server (writes to disk)
-    setSaveStatus("saving");
-    try {
-      const res = await fetch(`/viewer/ground-truth/${selectedGT}.json`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: json,
-      });
-      if (res.ok) {
-        setSaveStatus("saved");
-        setOriginalGt(deepClone(gt));
-        setTimeout(() => setSaveStatus("idle"), 2000);
-        return;
-      }
-    } catch {
-      // Dev server not available — fall back to download
+  // ── Debounced autosave ───────────────────────────────────────────────
+  // Schedule a write AUTOSAVE_DEBOUNCE_MS after the most recent edit. The
+  // timer is cleared on every change so rapid edits coalesce into one PUT.
+  // We also clear the timer on unmount and when switching GT files so a
+  // pending write can't clobber a freshly-loaded file.
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (autosaveTimer.current) {
+      clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
     }
+    if (!isDirty || !gt) return;
 
-    // Fallback: download as file
-    setSaveStatus("fallback");
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${selectedGT}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setOriginalGt(deepClone(gt));
-    setTimeout(() => setSaveStatus("idle"), 2000);
-  }, [gt, selectedGT]);
+    autosaveTimer.current = setTimeout(() => {
+      const snapshot = gtRef.current;
+      if (!snapshot) return;
+      setSaveStatus({ kind: "saving" });
+      void persistGT(snapshot, false).then(setSaveStatus);
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (autosaveTimer.current) {
+        clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = null;
+      }
+    };
+  }, [gt, isDirty, persistGT]);
+
+  // ── Keyboard nav (j/k + arrow up/down) ───────────────────────────────
+  // Navigates within the currently-visible (filtered) chunk list. Skipped
+  // entirely when focus is in a form field so editing values isn't hijacked.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isEditableTarget(e.target)) return;
+      let delta = 0;
+      if (e.key === "j" || e.key === "ArrowDown") delta = 1;
+      else if (e.key === "k" || e.key === "ArrowUp") delta = -1;
+      else return;
+      if (visibleChunks.length === 0) return;
+      e.preventDefault();
+      // Find current selection within the visible window; if it's filtered
+      // out, fall back to the start (delta=1) or end (delta=-1) of the list.
+      const visIdx = visibleChunks.findIndex((v) => v.origIndex === selectedChunk);
+      let nextVis: number;
+      if (visIdx === -1) {
+        nextVis = delta > 0 ? 0 : visibleChunks.length - 1;
+      } else {
+        nextVis = Math.max(0, Math.min(visibleChunks.length - 1, visIdx + delta));
+      }
+      const target = visibleChunks[nextVis];
+      if (target) setSelectedChunk(target.origIndex);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [visibleChunks, selectedChunk]);
 
   const handleReset = useCallback(() => {
     if (!originalGt) return;
@@ -618,9 +750,9 @@ export function GroundTruthPanel({
 
         {/* Save controls */}
         <div className="flex items-center gap-2 ml-auto">
-          {isDirty && (
+          {isDirty && saveStatus.kind !== "saving" && (
             <>
-              <span className="text-amber-400 text-xs font-mono">Unsaved changes</span>
+              <span className="text-amber-400 text-xs font-mono">Unsaved</span>
               <button
                 onClick={handleReset}
                 className="px-2 py-1 text-xs font-mono bg-surface-1 border border-white/10 rounded text-zinc-400 hover:text-zinc-200 transition-colors"
@@ -629,22 +761,34 @@ export function GroundTruthPanel({
               </button>
             </>
           )}
-          {saveStatus === "saved" && (
-            <span className="text-emerald-400 text-xs font-mono">Saved to disk</span>
+          {saveStatus.kind === "saving" && (
+            <span className="text-cyan-400 text-xs font-mono">Saving…</span>
           )}
-          {saveStatus === "fallback" && (
-            <span className="text-amber-400 text-xs font-mono">Downloaded</span>
+          {saveStatus.kind === "saved" && (
+            <span className="text-emerald-400 text-xs font-mono">
+              Saved at {formatSavedAt(saveStatus.at)}
+            </span>
+          )}
+          {saveStatus.kind === "fallback" && (
+            <span className="text-amber-400 text-xs font-mono">
+              Downloaded at {formatSavedAt(saveStatus.at)}
+            </span>
+          )}
+          {saveStatus.kind === "error" && (
+            <span className="text-red-400 text-xs font-mono" title={saveStatus.message}>
+              Autosave failed
+            </span>
           )}
           <button
             onClick={handleSave}
-            disabled={saveStatus === "saving"}
+            disabled={saveStatus.kind === "saving"}
             className={`px-3 py-1.5 text-xs font-mono rounded border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
               isDirty
                 ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30"
                 : "bg-surface-1 border-white/10 text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            {isDirty ? "Save & Download (reviewed)" : "Download JSON"}
+            {isDirty ? "Save & mark reviewed" : "Mark reviewed"}
           </button>
         </div>
       </div>
@@ -662,20 +806,43 @@ export function GroundTruthPanel({
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
         {/* Left: Chunk list */}
         <div className="bg-surface-1 border border-white/5 rounded-lg overflow-y-auto max-h-[500px]">
-          <div className="p-2 text-xs font-mono text-zinc-400 border-b border-white/5 sticky top-0 bg-surface-1">
-            Chunks ({gt.chunks.length})
+          <div className="sticky top-0 bg-surface-1 border-b border-white/5 z-10">
+            <div className="p-2 text-xs font-mono text-zinc-400 flex items-center justify-between">
+              <span>
+                Chunks ({visibleChunks.length}
+                {visibleChunks.length !== gt.chunks.length && `/${gt.chunks.length}`})
+              </span>
+              <span className="text-[10px] text-zinc-600" title="j/k or arrow keys navigate">
+                j/k
+              </span>
+            </div>
+            <div className="px-2 pb-2">
+              <input
+                type="text"
+                value={chunkFilter}
+                onChange={(e) => setChunkFilter(e.target.value)}
+                placeholder="Filter by chunk_id…"
+                aria-label="Filter chunks by chunk_id substring"
+                className="w-full bg-surface-0 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+              />
+            </div>
           </div>
           <div className="space-y-0.5 p-1">
-            {gt.chunks.map((chunk, i) => (
+            {visibleChunks.length === 0 && (
+              <div className="px-3 py-4 text-xs font-mono text-zinc-500 text-center">
+                No chunks match "{chunkFilter}"
+              </div>
+            )}
+            {visibleChunks.map(({ chunk, origIndex }) => (
               <button
                 key={chunk.chunk_id}
-                onClick={() => setSelectedChunk(i)}
+                onClick={() => setSelectedChunk(origIndex)}
                 className={`w-full text-left px-3 py-2 rounded text-xs font-mono transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-                  i === selectedChunk
+                  origIndex === selectedChunk
                     ? "bg-cyan-500/10 text-zinc-100 border border-cyan-500/20"
                     : "text-zinc-400 hover:bg-white/[0.03] hover:text-zinc-200"
                 }`}
-                aria-selected={i === selectedChunk}
+                aria-selected={origIndex === selectedChunk}
               >
                 <div className="flex justify-between items-center">
                   <span className="truncate max-w-[180px]">{chunk.chunk_id.slice(0, 20)}</span>
@@ -710,9 +877,12 @@ export function GroundTruthPanel({
       </div>
 
       {/* Actions footer */}
-      <div className="flex items-center gap-3 text-xs font-mono text-zinc-600">
-        Click any row to edit. Download saves with{" "}
-        <code className="text-zinc-400">manually_reviewed: true</code>. Place the file at{" "}
+      <div className="flex items-center gap-3 text-xs font-mono text-zinc-600 flex-wrap">
+        Click any row to edit. Edits autosave to disk every {AUTOSAVE_DEBOUNCE_MS}ms (dev server);
+        explicit Save also flips <code className="text-zinc-400">manually_reviewed: true</code>. Use{" "}
+        <kbd className="px-1 border border-white/10 rounded text-zinc-400">j</kbd>/
+        <kbd className="px-1 border border-white/10 rounded text-zinc-400">k</kbd> or arrow keys to
+        navigate chunks. Place the file at{" "}
         <code className="text-zinc-400">.test-output/media-ingest/ground-truth/active.json</code> to
         use for scoring.
       </div>
