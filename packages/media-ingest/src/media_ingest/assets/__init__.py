@@ -8,6 +8,7 @@ from media_ingest.assets.gold import media_gold_assets
 from media_ingest.assets.metadata import media_metadata
 from media_ingest.assets.speaker_embeddings import media_speaker_embeddings
 from media_ingest.assets.speaker_profiles import media_speaker_profiles
+from media_ingest.assets.training import dpo_dataset, sft_dataset
 from media_ingest.assets.transcode import media_transcode
 from media_ingest.assets.transcription import media_transcriptions
 
@@ -29,4 +30,6 @@ __all__ = [
     "media_speaker_profiles",
     # Bench/training data plumbing (Phase 2/3)
     "bench_overrides_snapshot",
+    "sft_dataset",
+    "dpo_dataset",
 ]

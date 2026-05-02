@@ -41,6 +41,7 @@ _run_status_sensors = make_run_status_sensor("media_ingest")
 
 from media_ingest.assets import (
     bench_overrides_snapshot,
+    dpo_dataset,
     media_chunks,
     media_diarization,
     media_documents,
@@ -53,6 +54,7 @@ from media_ingest.assets import (
     media_speaker_profiles,
     media_transcode,
     media_transcriptions,
+    sft_dataset,
 )
 from media_ingest.schedules import media_discovery_job, media_discovery_schedule
 from media_ingest.sensors import media_document_sensor
@@ -77,6 +79,10 @@ defs = Definitions(
         # Bench/training plumbing — postgres → S3 snapshot for deterministic
         # training-dataset materialization (Phase 2/3).
         bench_overrides_snapshot,
+        # Training-dataset emitters (Phase 3) — write SFT/DPO JSONL to
+        # s3://<bucket>/bench/training/{sft,dpo}/<domain>/data.jsonl.
+        sft_dataset,
+        dpo_dataset,
     ],
     sensors=[
         media_document_sensor,
