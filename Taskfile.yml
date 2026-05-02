@@ -167,26 +167,37 @@ tasks:
   # slice of each domain so a fresh `tilt up` has real data to render.
   # Not an ML seed — for diversity-by-embedding sampling, see
   # scripts/benchmark/sample_gt_candidates.py instead.
+  #
+  # Every seed task sets DAGSTER_S3_ENDPOINT_URL=http://localhost:9000
+  # explicitly because MinioIOManager reads it as a class-attribute default
+  # at module-import time. Without this override, a developer's shell may
+  # leak the cluster default ("minio.minio.svc.cluster.local") from
+  # .envrc.cluster — which doesn't resolve off-cluster.
 
   seed:
     desc: "Bubble up — populate local MinIO with a representative dev seed across all 3 domains."
-    env: { PYTHONPATH: "." }
-    cmds: [python scripts/dev/seed_local.py --domain all]
+    env: &seed-env
+      PYTHONPATH: "."
+      DAGSTER_S3_ENDPOINT_URL: http://localhost:9000
+      DAGSTER_S3_ACCESS_KEY: minio
+      DAGSTER_S3_SECRET_KEY: minio123
+      DAGSTER_S3_BUCKET: dagster
+    cmds: [mise exec -- python scripts/dev/seed_local.py --domain all]
 
   seed:media:
     desc: "media-ingest dev seed: up to 5 cached audio docs → media_chunks. Skips docs without diarization cache (run task bench:fixtures:regen first)."
-    env: { PYTHONPATH: "." }
-    cmds: [python scripts/dev/seed_local.py --domain media --limit 5]
+    env: *seed-env
+    cmds: [mise exec -- python scripts/dev/seed_local.py --domain media --limit 5]
 
   seed:congress:
     desc: "congress-data dev seed: 5 hand-picked variety bills (seed_subset in bill_manifest.yaml) → bill_documents + bill_chunks. Requires CONGRESS_API_KEY."
-    env: { PYTHONPATH: "." }
-    cmds: [python scripts/dev/seed_local.py --domain congress --limit 5]
+    env: *seed-env
+    cmds: [mise exec -- python scripts/dev/seed_local.py --domain congress --limit 5]
 
   seed:leaks:
     desc: "open-leaks dev seed: 5 cables from packages/open-leaks/tests/fixtures/cablegate_sample.csv → leak_chunks (asset is unpartitioned)."
-    env: { PYTHONPATH: "." }
-    cmds: [python scripts/dev/seed_local.py --domain leaks]
+    env: *seed-env
+    cmds: [mise exec -- python scripts/dev/seed_local.py --domain leaks]
 
   # ── Benchmark ────────────────────────────────────────────────────────────
 

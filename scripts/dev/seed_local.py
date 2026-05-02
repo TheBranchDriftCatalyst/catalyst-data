@@ -48,6 +48,20 @@ sys.path.insert(0, str(ROOT / "packages" / "congress-data" / "src"))
 sys.path.insert(0, str(ROOT / "packages" / "open-leaks" / "src"))
 sys.path.insert(0, str(ROOT / "libs" / "dagster-io" / "src"))
 
+# MinioIOManager reads endpoint_url as a class-attribute default at
+# module-import time — so we must set the env vars BEFORE any dagster_io
+# import below. We FORCE the localhost endpoint here (not setdefault)
+# because this is a dev-only seed: the shell-exported defaults often
+# point at the cluster-internal URL (.envrc.cluster sets
+# DAGSTER_S3_ENDPOINT_URL=http://minio.minio.svc.cluster.local) which
+# can't resolve off-cluster. To target a non-localhost MinIO, set the
+# CATALYST_SEED_S3_ENDPOINT env var as an explicit override.
+_endpoint_override = os.environ.get("CATALYST_SEED_S3_ENDPOINT")
+os.environ["DAGSTER_S3_ENDPOINT_URL"] = _endpoint_override or "http://localhost:9000"
+os.environ["DAGSTER_S3_ACCESS_KEY"] = os.environ.get("CATALYST_SEED_S3_ACCESS_KEY", "minio")
+os.environ["DAGSTER_S3_SECRET_KEY"] = os.environ.get("CATALYST_SEED_S3_SECRET_KEY", "minio123")
+os.environ["DAGSTER_S3_BUCKET"] = os.environ.get("CATALYST_SEED_S3_BUCKET", "dagster")
+
 
 def _media_fixtures() -> Path:
     return ROOT / "packages" / "media-ingest" / "tests" / "fixtures"
@@ -95,7 +109,11 @@ def _maybe_regen(prefix: str) -> None:
 
 def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
     _print_header("media")
-    os.environ.setdefault("DAGSTER_CODE_LOCATION", "media_ingest")
+    # FORCE — not setdefault — because when --domain all runs, the previous
+    # domain leaves its CODE_LOCATION set and path_builder uses it for the
+    # next domain's S3 keys (we'd see e.g. bronze/media_ingest/bill/... for
+    # congress assets — exactly the bug we hit).
+    os.environ["DAGSTER_CODE_LOCATION"] = "media_ingest"
 
     import yaml
     from dagster import AssetKey, DagsterInstance, SourceAsset, materialize
@@ -275,7 +293,7 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
 
 def _seed_congress(limit: int, with_gold: bool, regen: bool) -> dict:
     _print_header("congress")
-    os.environ.setdefault("DAGSTER_CODE_LOCATION", "congress_data")
+    os.environ["DAGSTER_CODE_LOCATION"] = "congress_data"
 
     if not os.environ.get("CONGRESS_API_KEY"):
         print("  ⊘ skipped: CONGRESS_API_KEY not set (live API call required)")
@@ -375,7 +393,7 @@ def _seed_congress(limit: int, with_gold: bool, regen: bool) -> dict:
 
 def _seed_leaks(limit: int, with_gold: bool, regen: bool) -> dict:
     _print_header("leaks")
-    os.environ.setdefault("DAGSTER_CODE_LOCATION", "open_leaks")
+    os.environ["DAGSTER_CODE_LOCATION"] = "open_leaks"
 
     sample = _leaks_fixtures() / "cablegate_sample.csv"
     if not sample.exists():
