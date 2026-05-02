@@ -76,7 +76,7 @@ ENCODER_MODELS = [
         name="gliner-medium",
         model="gliner",  # triggers GLiNERClient in _build_graph()
         base_url="",  # not used — runs in-process
-        context_window=512,
+        context_window=384,  # gliner architecture cap; sliding-window in GLiNERClient covers the full chunk
         tags=["encoder", "extraction-specialist", "300m"],
     ),
     ModelConfig(
@@ -90,7 +90,7 @@ ENCODER_MODELS = [
         name="gliner-pii",
         model="gliner-pii",  # PII + general NER — detects phone, email, SSN + standard entities
         base_url="",
-        context_window=512,
+        context_window=384,  # gliner architecture cap; sliding-window in GLiNERClient covers the full chunk
         tags=["encoder", "extraction-specialist", "300m"],
     ),
     ModelConfig(

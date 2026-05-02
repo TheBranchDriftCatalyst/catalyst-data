@@ -114,6 +114,7 @@ tasks:
       DAGSTER_S3_ACCESS_KEY: minio
       DAGSTER_S3_SECRET_KEY: minio123
       DAGSTER_S3_BUCKET: dagster
+      DAGSTER_HOME: "{{.TASKFILE_DIR}}/.test-output/dagster-home"
       OTEL_METRICS_EXPORTER: none
       OTEL_TRACES_EXPORTER: none
     cmds:
@@ -182,6 +183,9 @@ tasks:
       DAGSTER_S3_ACCESS_KEY: minio
       DAGSTER_S3_SECRET_KEY: minio123
       DAGSTER_S3_BUCKET: dagster
+      # Consolidate Dagster's runtime state under .test-output/ instead of
+      # the auto-generated .tmp_dagster_home_<hash>/ in the repo root.
+      DAGSTER_HOME: "{{.TASKFILE_DIR}}/.test-output/dagster-home"
     cmds: [mise exec -- python scripts/dev/seed_local.py --domain all]
 
   seed:media:
@@ -381,6 +385,11 @@ tasks:
       DAGSTER_S3_ACCESS_KEY: minio
       DAGSTER_S3_SECRET_KEY: minio123
       DAGSTER_S3_BUCKET: dagster
+      # Dev override — the seeded media_documents have source_path
+      # /data/metube/<file> (canonical), but the actual mp4s live under
+      # the fixture dir. Point _MEDIA_ROOTS at the fixture dir so the
+      # /viewer/media/* + /viewer/media/thumbnail/* routes resolve them.
+      CATALYST_MEDIA_ROOT_METUBE: "{{.TASKFILE_DIR}}/packages/media-ingest/tests/fixtures"
       PYTHONPATH: "packages/media-ingest/src:libs/dagster-io/src"
     cmds:
       # Resolve python via mise so we get the project's installed deps

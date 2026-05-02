@@ -24,10 +24,13 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/viewer/media", tags=["viewer-media"])
 
-# Allowed NFS source roots
+# Allowed NFS source roots. In dev (no NFS mount) the seed sets
+# CATALYST_MEDIA_ROOT_METUBE to the fixture dir so the same source path
+# convention (`/data/metube/<file>` in the document model) resolves to
+# the on-disk mp4 without the SPA needing to know about the override.
 _MEDIA_ROOTS: dict[str, str] = {
-    "metube": "/data/metube",
-    "tubesync": "/data/tubesync",
+    "metube": os.environ.get("CATALYST_MEDIA_ROOT_METUBE", "/data/metube"),
+    "tubesync": os.environ.get("CATALYST_MEDIA_ROOT_TUBESYNC", "/data/tubesync"),
 }
 
 # Supported media extensions
@@ -112,17 +115,32 @@ def _range_stream(file_path: str, start: int, end: int) -> Generator[bytes, None
             yield data
 
 
-_THUMB_CACHE_DIR = "/tmp/catalyst-thumbnails"
+# Thumbnails are cached in S3 at media/thumbnails/<sha256>.jpg so they
+# persist across container restarts and live alongside the rest of the
+# medallion data. Local /tmp cache was a dev-only convenience that lost
+# everything on every viewer-api restart.
+_S3_THUMB_PREFIX = "media/thumbnails"
 
 
-def _generate_thumbnail(video_path: str, thumb_path: str) -> bool:
-    """Generate a JPEG thumbnail from a video file at ~10% mark.
+def _s3_for_thumbs():
+    from dagster_io.s3_client import S3Client
 
-    Returns True if thumbnail was created successfully.
+    return S3Client(
+        endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
+        access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio"),
+        secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123"),
+        bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),
+    )
+
+
+def _generate_thumbnail_bytes(video_path: str) -> bytes | None:
+    """Generate a JPEG thumbnail from a video file at ~10% mark, returning bytes.
+
+    Returns None if generation failed (ffmpeg missing, video unreadable, etc.).
     """
     import subprocess
+    import tempfile
 
-    # Get duration to seek to 10% mark
     try:
         probe = subprocess.run(
             ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", video_path],
@@ -136,7 +154,8 @@ def _generate_thumbnail(video_path: str, thumb_path: str) -> bool:
 
     seek_pos = max(1.0, duration * 0.1) if duration > 10 else 1.0
 
-    os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp_path = tmp.name
     try:
         result = subprocess.run(
             [
@@ -152,22 +171,28 @@ def _generate_thumbnail(video_path: str, thumb_path: str) -> bool:
                 "-q:v",
                 "5",
                 "-y",
-                thumb_path,
+                tmp_path,
             ],
             capture_output=True,
             text=True,
             timeout=15,
         )
-        return result.returncode == 0
+        if result.returncode != 0:
+            return None
+        with open(tmp_path, "rb") as f:
+            return f.read()
     except subprocess.TimeoutExpired:
-        return False
+        return None
+    finally:
+        import contextlib
+
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
 
 
 @router.get("/thumbnail/{source}/{path:path}")
 def get_thumbnail(source: str, path: str) -> Response:
-    """Serve a JPEG thumbnail for a video file, generating on first request."""
-    from fastapi.responses import FileResponse
-
+    """Serve a JPEG thumbnail for a video file, generating + caching to S3 on miss."""
     root = _MEDIA_ROOTS.get(source)
     if root is None:
         raise HTTPException(status_code=400, detail=f"Unknown media source: {source}")
@@ -177,28 +202,40 @@ def get_thumbnail(source: str, path: str) -> Response:
         raise HTTPException(status_code=403, detail="Path traversal not allowed")
 
     if not os.path.isfile(full_path):
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail=f"File not found: {full_path}")
 
-    # Check if it's a video file
     ext = os.path.splitext(full_path)[1].lower()
     if ext not in {".mp4", ".mkv", ".webm", ".avi", ".mov"}:
         raise HTTPException(status_code=400, detail="Thumbnails only for video files")
 
-    # Cache key: hash of the full path
     import hashlib
 
-    path_hash = hashlib.sha256(full_path.encode()).hexdigest()[:16]
-    thumb_path = os.path.join(_THUMB_CACHE_DIR, f"{path_hash}.jpg")
+    # Hash the relative path (not full_path) so the same fixture under
+    # different roots resolves to one cache entry.
+    path_hash = hashlib.sha256(path.encode()).hexdigest()[:16]
+    s3_key = f"{_S3_THUMB_PREFIX}/{path_hash}.jpg"
+    s3 = _s3_for_thumbs()
 
-    # Serve cached thumbnail if exists
-    if os.path.isfile(thumb_path):
-        return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+    # Serve cached thumbnail if it exists in S3
+    try:
+        cached = s3.get_object(s3_key)
+        return Response(
+            content=cached,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except Exception:
+        pass  # cache miss → generate
 
-    # Generate thumbnail
-    if not _generate_thumbnail(full_path, thumb_path):
-        raise HTTPException(status_code=500, detail="Failed to generate thumbnail")
-
-    return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+    img_bytes = _generate_thumbnail_bytes(full_path)
+    if img_bytes is None:
+        raise HTTPException(status_code=500, detail="Failed to generate thumbnail (ffmpeg)")
+    s3.put_object(s3_key, img_bytes)
+    return Response(
+        content=img_bytes,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/{source}/{path:path}")

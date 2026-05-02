@@ -105,16 +105,24 @@ def _seed_media_documents_to_s3() -> int:
         mp4 = FIXTURE_DIR / entry["file"]
         if not mp4.exists():
             continue
+        # Whisper reads source_path directly via ffmpeg, so during regen
+        # this MUST be the actual on-disk fixture path. After materialize
+        # finishes, we rewrite the same MediaDocument with the canonical
+        # /data/metube/<filename> path so the viewer's resolve_media_url()
+        # picks it up and the SPA can render thumbnails. See the
+        # _rewrite_canonical_paths_to_s3() call at the end of main().
         doc = MediaDocument(
             id=entry["doc_id"],  # match the partition_key exactly
             title=entry.get("title") or mp4.stem,
-            source_path=str(mp4.resolve()),  # actual on-disk path Whisper reads
+            source_path=str(mp4.resolve()),
             source="metube",
             metadata={
                 "extension": mp4.suffix,
                 "size_bytes": mp4.stat().st_size,
                 "has_audio": True,
+                "has_video": True,  # gates thumbnail_url in /viewer/api/documents
                 "doc_id": entry["doc_id"],
+                "fixture_filename": mp4.name,  # used by the post-rewrite step
             },
         )
         docs.append(doc.model_dump(mode="json"))
@@ -275,6 +283,13 @@ def main() -> int:
             failed.append((doc_id, f"{type(exc).__name__}: {exc}"))
             print(f"  ✗ {doc_id}: {type(exc).__name__}: {exc}")
 
+    # Post-materialize: rewrite media_documents with canonical /data/metube/
+    # paths so the viewer's resolve_media_url + thumbnail flow works. The
+    # on-disk paths we used during Whisper aren't recognized by _MEDIA_ROOTS.
+    if succeeded:
+        _rewrite_canonical_paths_to_s3()
+        print("  ✓ media_documents rewritten with canonical /data/metube/ paths")
+
     total = time.monotonic() - overall_start
     print(f"\n{'─' * 70}")
     print(f"  Done in {_human(total)}: {succeeded} succeeded, {len(failed)} failed")
@@ -283,6 +298,41 @@ def main() -> int:
             print(f"    ✗ {doc_id}: {msg}")
     print(f"{'─' * 70}")
     return 1 if failed else 0
+
+
+def _rewrite_canonical_paths_to_s3() -> None:
+    """Read silver/.../media_documents/data.jsonl, swap each doc's
+    source_path to /data/metube/<fixture_filename> (recorded in metadata
+    during the initial seed), write back. Whisper's already done; the
+    viewer needs the canonical layout to resolve_media_url + render
+    thumbnails."""
+    from dagster_io.s3_client import S3Client
+
+    s3 = S3Client(
+        endpoint_url=os.environ["DAGSTER_S3_ENDPOINT_URL"],
+        access_key=os.environ["DAGSTER_S3_ACCESS_KEY"],
+        secret_key=os.environ["DAGSTER_S3_SECRET_KEY"],
+        bucket=os.environ["DAGSTER_S3_BUCKET"],
+    )
+    prefix = "silver/media_ingest/media/media_documents"
+    raw = s3.get_object(f"{prefix}/data.jsonl").decode("utf-8")
+    rewritten = []
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        d = json.loads(line)
+        meta = d.get("metadata") or {}
+        fname = meta.get("fixture_filename")
+        if fname:
+            d["source_path"] = f"/data/metube/{fname}"
+        rewritten.append(d)
+    payload = "\n".join(json.dumps(d, default=str) for d in rewritten) + "\n"
+    s3.put_object(f"{prefix}/data.jsonl", payload.encode("utf-8"))
+    # Update _metadata.json size to match
+    meta_key = f"{prefix}/_metadata.json"
+    md = json.loads(s3.get_object(meta_key))
+    md["size_bytes"] = len(payload.encode("utf-8"))
+    s3.put_object(meta_key, json.dumps(md).encode("utf-8"))
 
 
 if __name__ == "__main__":

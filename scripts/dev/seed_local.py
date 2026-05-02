@@ -214,15 +214,25 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
         mp4 = fixture_dir / entry["file"]
         if not mp4.exists():
             continue
+        # Use the canonical /data/metube/<filename> source_path so
+        # resolve_media_url() in the viewer-api resolves correctly. The
+        # viewer-api reads CATALYST_MEDIA_ROOT_METUBE to point at the
+        # actual on-disk fixture dir without the SPA seeing a different
+        # path layout in dev vs prod.
         doc = MediaDocument(
             id=entry["doc_id"],
             title=entry.get("title") or mp4.stem,
-            source_path=str(mp4.resolve()),
+            source_path=f"/data/metube/{mp4.name}",
             source="metube",
             metadata={
                 "extension": mp4.suffix,
                 "size_bytes": mp4.stat().st_size,
                 "has_audio": True,
+                # has_video gates thumbnail_url generation in
+                # viewer/routes/api.py:list_documents — without it the
+                # SPA falls back to the icon and never hits the thumbnail
+                # endpoint.
+                "has_video": True,
                 "doc_id": entry["doc_id"],
             },
         )

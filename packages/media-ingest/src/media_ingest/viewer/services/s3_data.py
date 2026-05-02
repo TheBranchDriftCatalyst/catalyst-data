@@ -43,10 +43,12 @@ CHUNKS_PREFIX = f"{_GOLD_PREFIX}/media_chunks"
 MENTIONS_PREFIX = f"{_GOLD_PREFIX}/media_mentions"
 ASSERTIONS_PREFIX = f"{_GOLD_PREFIX}/media_assertions"
 
-# NFS media source roots (same as config.py defaults)
+# NFS media source roots (overridable via env for dev — see
+# packages/media-ingest/src/media_ingest/viewer/routes/media.py for the
+# matching pair that serves the bytes).
 _MEDIA_ROOTS: dict[str, str] = {
-    "metube": "/data/metube",
-    "tubesync": "/data/tubesync",
+    "metube": os.environ.get("CATALYST_MEDIA_ROOT_METUBE", "/data/metube"),
+    "tubesync": os.environ.get("CATALYST_MEDIA_ROOT_TUBESYNC", "/data/tubesync"),
 }
 
 
