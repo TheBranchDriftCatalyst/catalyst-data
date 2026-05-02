@@ -15,7 +15,7 @@ these; new callers should follow the same pattern.
 
 from __future__ import annotations
 
-from dagster_io.bench_store import S3BenchmarkStore, S3RunStore
+from dagster_io.bench import S3BenchmarkStore, S3RunStore
 
 # Module-level aliases — keep the import surface stable.
 BenchmarkStore = S3BenchmarkStore

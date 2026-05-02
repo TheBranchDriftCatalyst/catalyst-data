@@ -61,10 +61,11 @@ def _default_local_cache_root() -> Path:
     bus-port file). Persists between runs only as a side effect — the canonical
     archive lives in S3.
 
-    bench_store.py lives at ``libs/dagster-io/src/dagster_io/bench_store.py``
-    so the repo root is ``parents[4]``.
+    store.py lives at ``libs/dagster-io/src/dagster_io/bench/store.py``
+    so the repo root is ``parents[5]``. Tracked by CD-vse9 (replace these
+    parents[N] hops with a single dagster_io.paths.repo_root() helper).
     """
-    repo_root = Path(__file__).resolve().parents[4]
+    repo_root = Path(__file__).resolve().parents[5]
     base = Path(os.environ.get("TEST_OUTPUT_ROOT", str(repo_root / ".test-output")))
     return base / "media-ingest" / "bench-cache"
 
@@ -251,7 +252,7 @@ class S3BenchmarkStore:
 
         # True fixtures shipped with repo (read-only, never written to). The
         # benchmark documents are checked into the repo and don't belong in S3.
-        self._repo_fixtures = Path(__file__).resolve().parents[4] / "tests" / "fixtures"
+        self._repo_fixtures = Path(__file__).resolve().parents[5] / "tests" / "fixtures"
 
     @property
     def root_uri(self) -> str:
@@ -312,7 +313,7 @@ class S3BenchmarkStore:
         """Reads the per-package benchmark_documents.json fixtures from the
         repo. Not in S3 — these are checked-in test inputs that live in each
         domain's package at ``packages/<domain>/tests/fixtures/``."""
-        repo_root = Path(__file__).resolve().parents[4]
+        repo_root = Path(__file__).resolve().parents[5]
         domain_dirs = ["media-ingest", "congress-data", "open-leaks"]
         merged: list[dict] = []
         for d in domain_dirs:

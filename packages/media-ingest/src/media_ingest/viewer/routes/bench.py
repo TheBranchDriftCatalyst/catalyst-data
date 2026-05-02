@@ -21,7 +21,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from dagster_io.bench_store import S3BenchmarkStore
+from dagster_io.bench import S3BenchmarkStore
 from dagster_io.logging import get_logger
 
 logger = get_logger(__name__)

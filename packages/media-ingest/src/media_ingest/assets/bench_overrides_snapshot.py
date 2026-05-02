@@ -15,7 +15,7 @@ from typing import Any
 
 from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
-from dagster_io.bench_store import S3BenchmarkStore
+from dagster_io.bench import S3BenchmarkStore
 from dagster_io.logging import get_logger
 
 logger = get_logger(__name__)

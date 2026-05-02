@@ -1,10 +1,9 @@
 """Shared IO manager, resources, and utilities for Dagster pipelines."""
 
-from dagster_io import event_tail
 from dagster_io.append_io_manager import AppendIOManager
 from dagster_io.asset_factories import LLM_ASSET_K8S_CONFIG
 from dagster_io.asset_factory import EMBEDDING_ASSET_K8S_CONFIG, PipelineConfig, extraction_assets
-from dagster_io.bench_store import S3BenchmarkStore, S3RunStore
+from dagster_io.bench import S3BenchmarkStore, S3RunStore, event_tail
 from dagster_io.chunking import (
     PRESET_CONFIGS,
     ChunkConfig,
