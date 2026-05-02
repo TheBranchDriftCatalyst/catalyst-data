@@ -15,9 +15,6 @@ Usage:
     # Quick run (cached fixtures):
     python tests/benchmark_harness.py
 
-    # With exgraph v2:
-    EXGRAPH_ENABLED=true python tests/benchmark_harness.py --regen
-
     # Generate ground truth from best model:
     python tests/benchmark_harness.py --generate-ground-truth --ground-truth-model gpt-4o
 """
@@ -206,11 +203,8 @@ def _run_ensemble_gt(
 
 def _interactive_prompt() -> argparse.Namespace:
     """Interactive mode -- ask user what to run when no flags provided."""
-    current_pipeline = "exgraph v2" if os.environ.get("EXGRAPH_ENABLED") == "true" else "v1 (legacy)"
-
     print(f"\n{'=' * 70}")
     print("  Extraction Benchmark Harness -- Interactive Mode")
-    print(f"  Current pipeline: {current_pipeline}")
     print(f"{'=' * 70}\n")
 
     options = [
@@ -218,13 +212,10 @@ def _interactive_prompt() -> argparse.Namespace:
         ("regen", "Regenerate all extraction fixtures"),
         ("ensemble-gt", "Generate ensemble ground truth only"),
         ("local-only", "Skip cloud models (no API key needed)"),
-        ("exgraph", "Use exgraph v2 pipeline (instead of v1 legacy)"),
-        ("compare", "Compare v1 vs v2 (runs both, side-by-side report)"),
     ]
 
     for i, (_, desc) in enumerate(options, 1):
-        marker = " *" if (i == 5 and os.environ.get("EXGRAPH_ENABLED") == "true") else ""
-        print(f"  [{i}] {desc}{marker}")
+        print(f"  [{i}] {desc}")
     print("  [Enter] Default run (use cached fixtures, score, report)")
     print()
 
@@ -240,8 +231,6 @@ def _interactive_prompt() -> argparse.Namespace:
         gt_model="gpt-4o",
         ensemble_gt=False,
         full=False,
-        compare=False,
-        exgraph=False,
         models=None,
         ner_models=None,
         spo_models=None,
@@ -269,10 +258,6 @@ def _interactive_prompt() -> argparse.Namespace:
                 args.ensemble_gt = True
             elif choice == "4":
                 args.local_only = True
-            elif choice == "5":
-                os.environ["EXGRAPH_ENABLED"] = "true"
-            elif choice == "6":
-                args.compare = True
 
     timeout_raw = input(f"  Timeout per model [{args.timeout}s]: ").strip()
     if timeout_raw.isdigit():
@@ -280,90 +265,6 @@ def _interactive_prompt() -> argparse.Namespace:
 
     print()
     return args
-
-
-def _run_comparison(args):
-    """Run v1 and v2 pipelines and print side-by-side F1 comparison."""
-    store = BenchmarkStore()
-
-    for version, label, env_val in [("v1 (legacy)", "legacy-v1", "false"), ("v2 (exgraph)", "exgraph-v2", "true")]:
-        print(f"\n{'=' * 70}")
-        print(f"  Running {version} pipeline...")
-        print(f"{'=' * 70}")
-
-        store.create_run(label=label)
-
-        env = {
-            **os.environ,
-            "EXGRAPH_ENABLED": env_val,
-        }
-
-        subprocess.run(
-            [sys.executable, __file__, "--regen", "--timeout", str(args.timeout)]
-            + (["--local-only"] if args.local_only else []),
-            env=env,
-            timeout=args.timeout * 20,
-        )
-
-    # Load reports from the two most recent runs (S3-backed).
-    runs = store.list_runs()
-    if len(runs) < 2:
-        print("\n  ERROR: need at least 2 runs for comparison")
-        return
-
-    v1_run = store.load_run(runs[-2])
-    v2_run = store.load_run(runs[-1])
-
-    if not v1_run or not v2_run:
-        print("\n  ERROR: could not load comparison runs")
-        return
-
-    v1 = v1_run.load_report()
-    v2 = v2_run.load_report()
-
-    if not v1 or not v2:
-        print("\n  ERROR: one or both runs failed to produce a report")
-        return
-
-    v1_models = {m["name"]: m for m in v1["models"]}
-    v2_models = {m["name"]: m for m in v2["models"]}
-    all_names = sorted(set(v1_models) | set(v2_models))
-
-    print(f"\n{'=' * 90}")
-    print("  v1 vs v2 Pipeline Comparison")
-    print(f"{'=' * 90}")
-    print(
-        f"\n  {'Model':<22} {'v1 Strict F1':>14} {'v2 Strict F1':>14} {'Delta':>10} {'v1 SPAN_ERR':>12} {'v2 SPAN_ERR':>12}"
-    )
-    print(f"  {'-' * 84}")
-
-    for name in all_names:
-        m1 = v1_models.get(name)
-        m2 = v2_models.get(name)
-        f1_v1 = m1["scores"]["mention_strict_f1"] * 100 if m1 and m1.get("scores") else None
-        f1_v2 = m2["scores"]["mention_strict_f1"] * 100 if m2 and m2.get("scores") else None
-
-        def _span_errors(m):
-            if not m:
-                return "---"
-            pipeline = m.get("pipeline", {})
-            total = 0
-            for stage_info in pipeline.values():
-                for code, count in (stage_info.get("error_codes", {}) or {}).items():
-                    if "SPAN" in code:
-                        total += count
-            return str(total) if total else "0"
-
-        s1 = f"{f1_v1:.1f}%" if f1_v1 is not None else "---"
-        s2 = f"{f1_v2:.1f}%" if f1_v2 is not None else "---"
-        delta = ""
-        if f1_v1 is not None and f1_v2 is not None:
-            d = f1_v2 - f1_v1
-            delta = f"{'+' if d >= 0 else ''}{d:.1f}%"
-
-        print(f"  {name:<22} {s1:>14} {s2:>14} {delta:>10} {_span_errors(m1):>12} {_span_errors(m2):>12}")
-
-    print(f"\n{'=' * 90}")
 
 
 def _save_incremental_report(results: list[dict], store: BenchmarkStore) -> None:
@@ -512,7 +413,7 @@ def main():
         epilog="""\
 examples:
   python tests/benchmark_harness.py                       # interactive mode
-  python tests/benchmark_harness.py --full --exgraph      # full methodology
+  python tests/benchmark_harness.py --full                # full methodology
   python tests/benchmark_harness.py --models mistral-7b,gliner-large
   python tests/benchmark_harness.py --ensemble-gt         # GT only
   python tests/benchmark_harness.py --list-gt             # show ground truths
@@ -534,7 +435,6 @@ examples:
     action.add_argument("--ensemble-gt", action="store_true", help="Generate ground truth via multi-model consensus")
     action.add_argument("--generate-gt", action="store_true", help="Generate ground truth from a single model")
     action.add_argument("--gt-model", type=str, default="gpt-4o", help="Model for single-model GT generation")
-    action.add_argument("--compare", action="store_true", help="Compare v1 vs v2 pipelines side-by-side")
     action.add_argument("--score", action="store_true", help="Re-score latest run against active GT (no model runs)")
     action.add_argument("--report", action="store_true", help="Rebuild report JSON from latest run (no model runs)")
     action.add_argument("--list-gt", action="store_true", help="List available ground truth files")
@@ -553,7 +453,6 @@ examples:
     config.add_argument("--regen", action="store_true", help="Clear and regenerate all extraction artifacts")
     config.add_argument("--timeout", type=int, default=300, help="Per-model timeout in seconds (default: 300)")
     config.add_argument("--local-only", action="store_true", help="Skip cloud models")
-    config.add_argument("--exgraph", action="store_true", help="Use exgraph v2 pipeline")
     config.add_argument(
         "--all-videos",
         action="store_true",
@@ -640,10 +539,6 @@ examples:
     if len(sys.argv) == 1:
         args = _interactive_prompt()
 
-    # --exgraph sets the env var
-    if args.exgraph:
-        os.environ["EXGRAPH_ENABLED"] = "true"
-
     # --full implies --ensemble-gt (run everything in one shot)
     if args.full:
         args.ensemble_gt = True
@@ -693,15 +588,8 @@ examples:
 
     if getattr(args, "compare_runs", None):
         raise NotImplementedError(
-            "--compare-runs is not yet implemented. "
-            "Use --compare for v1-vs-v2 pipeline comparison, "
-            "or manually compare reports in .test-output/media-ingest/runs/"
+            "--compare-runs is not yet implemented. Manually compare reports under s3://<bucket>/bench/runs/"
         )
-
-    # ── Compare mode: run v1 then v2, side-by-side ────────────────────
-    if args.compare:
-        _run_comparison(args)
-        return
 
     # ── Ensemble-only mode (no model runs) ──────────────────────────────
     if args.ensemble_gt and not args.full:
@@ -730,10 +618,8 @@ examples:
         models = ALL_MODELS
 
     chunk_size_str = f"{args.chunk_size} tokens" if getattr(args, "chunk_size", None) else "default"
-    pipeline_label_str = "exgraph v2" if os.environ.get("EXGRAPH_ENABLED") == "true" else "v1 (legacy)"
-    pipeline_label = getattr(args, "label", None) or (
-        "exgraph-v2" if os.environ.get("EXGRAPH_ENABLED") == "true" else "legacy-v1"
-    )
+    pipeline_label_str = "exgraph"
+    pipeline_label = getattr(args, "label", None) or "exgraph"
 
     # ── Catalyst data corpus footprint ──────────────────────────────────
     # Inventory the audio cache + manifest so the user sees what they're benchmarking against
@@ -1053,7 +939,6 @@ examples:
             **bench_config.to_dict(),
             "pipeline": pipeline_label,
             "regen": args.regen,
-            "exgraph_enabled": os.environ.get("EXGRAPH_ENABLED", "false"),
         }
     )
 

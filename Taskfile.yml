@@ -168,7 +168,6 @@ tasks:
     desc: "Full benchmark methodology: run models → ground truth → F1 report → viewer"
     env:
       PYTHONPATH: "."
-      EXGRAPH_ENABLED: "true"
     cmds:
       - python tests/benchmark_harness.py --full --regen {{.CLI_ARGS}}
 
@@ -176,7 +175,6 @@ tasks:
     desc: "Run extraction benchmarks (skip ground truth regen)"
     env:
       PYTHONPATH: "."
-      EXGRAPH_ENABLED: "true"
     cmds:
       - python tests/benchmark_harness.py --regen {{.CLI_ARGS}}
 
@@ -202,7 +200,6 @@ tasks:
     desc: "Regenerate benchmark report with F1 scores (needs ground truth)"
     env:
       PYTHONPATH: "."
-      EXGRAPH_ENABLED: "true"
     cmds:
       - python tests/benchmark_harness.py {{.CLI_ARGS}}
 

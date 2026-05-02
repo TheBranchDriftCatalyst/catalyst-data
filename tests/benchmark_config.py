@@ -305,7 +305,6 @@ class BenchmarkConfig:
     ner_ensemble: list[str]
     spo_ensemble: list[str]
     ensemble_threshold: str  # "majority"
-    exgraph_enabled: bool = True
     timeout_s: int = 300
     label: str = ""
 
@@ -327,7 +326,6 @@ class BenchmarkConfig:
             ner_ensemble=NER_ENSEMBLE_MODELS,
             spo_ensemble=SPO_ENSEMBLE_MODELS,
             ensemble_threshold="majority",
-            exgraph_enabled=getattr(args, "exgraph", False),
             timeout_s=getattr(args, "timeout", 300),
             label=getattr(args, "label", "") or "",
         )
@@ -347,7 +345,6 @@ class BenchmarkConfig:
             "ner_ensemble": self.ner_ensemble,
             "spo_ensemble": self.spo_ensemble,
             "ensemble_threshold": self.ensemble_threshold,
-            "exgraph_enabled": self.exgraph_enabled,
             "timeout_s": self.timeout_s,
             "label": self.label,
         }

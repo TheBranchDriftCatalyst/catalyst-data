@@ -75,113 +75,19 @@ def _build_pipeline_breakdown(audit_events: list[dict]) -> dict:
 
 
 def _build_graph():
-    """Build the extraction graph — dispatches to v1 or v2.
+    """Build the extraction graph via catalyst-exgraph.
 
-    Set EXGRAPH_ENABLED=true to use the new catalyst-exgraph pipeline.
-    Default (false) uses the original catalyst-langgraph-aio graph.
-    Reads env var at call time so it can be toggled per-test.
+    The legacy v1 catalyst-langgraph-aio graph + the EXGRAPH_ENABLED toggle
+    were removed when ExGraph became the only supported pipeline (CD-ys8n).
     """
-    if os.environ.get("EXGRAPH_ENABLED", "false").lower() == "true":
-        return _build_graph_v2()
-    return _build_graph_v1()
-
-
-def _build_graph_v1():
-    """Build the original hardcoded NER→SPO graph (catalyst-langgraph-aio).
-
-    .. deprecated:: Use EXGRAPH_ENABLED=true for the new generic pipeline.
-    """
-    logger.info(
-        "_build_graph_v1: using deprecated catalyst-langgraph-aio graph. "
-        "Set EXGRAPH_ENABLED=true to use catalyst-exgraph."
-    )
-    from catalyst_contracts.validators.mention_validator import (
-        validate_mentions as _validate_mentions,
-    )
-    from catalyst_contracts.validators.proposition_validator import (
-        validate_propositions as _validate_propositions,
-    )
-    from catalyst_langgraph.clients.llm import LLMClient
-    from catalyst_langgraph.clients.mcp import DirectMCPClient
-    from catalyst_langgraph.graph import build_extraction_graph
-    from catalyst_langgraph.repository.base import ArtifactRepository
-
-    class _ValidatorHandler:
-        """Direct handler for MCP validation — no subprocess needed."""
-
-        def validate_mentions(self, mentions, source_text, document_id):
-            result = _validate_mentions(mentions, source_text, document_id)
-            return result.model_dump(mode="json")
-
-        def validate_propositions(self, propositions, known_mention_ids, source_text):
-            result = _validate_propositions(propositions, set(known_mention_ids), source_text)
-            return result.model_dump(mode="json")
-
-    class _NullRepository(ArtifactRepository):
-        """No-op repository — Dagster's IO manager handles persistence."""
-
-        async def save_mentions(self, document_id, mentions):
-            pass
-
-        async def save_propositions(self, document_id, propositions):
-            pass
-
-        async def save_audit_trail(self, document_id, audit_events):
-            pass
-
-        async def load_mentions(self, document_id):
-            return []
-
-        async def load_propositions(self, document_id):
-            return []
-
-    # Auto-detect specialized models and use their native adapters
-    _llm_model_name = os.environ.get("LLM_MODEL", "")
-    if "gliner" in _llm_model_name.lower():
-        from catalyst_langgraph.clients.gliner import GLiNERClient
-
-        _gliner_models = {
-            "gliner": "urchade/gliner_medium-v2.1",
-            "gliner-medium": "urchade/gliner_medium-v2.1",
-            "gliner-large": "urchade/gliner_large-v2.1",
-            "gliner-small": "urchade/gliner_small-v2.1",
-            "gliner-pii": "urchade/gliner_multi_pii-v1",
-        }
-        _hf_model = _gliner_models.get(_llm_model_name.lower(), "urchade/gliner_medium-v2.1")
-        llm_client = GLiNERClient(model_name=_hf_model)
-    elif "nuextract" in _llm_model_name.lower():
-        from catalyst_langgraph.clients.nuextract import NuExtractClient
-
-        llm_client = NuExtractClient()
-    elif "universalner" in _llm_model_name.lower() or "uniner" in _llm_model_name.lower():
-        from catalyst_langgraph.clients.universalner import UniversalNERClient
-
-        llm_client = UniversalNERClient()
-    else:
-        llm_client = LLMClient()
-
-    mcp_client = DirectMCPClient(_ValidatorHandler())
-    repo = _NullRepository()
-
-    return build_extraction_graph(llm_client, mcp_client, repo), llm_client
-
-
-def _build_graph_v2():
-    """Build the new generic pipeline via catalyst-exgraph.
-
-    Uses the same model detection logic as v1, but constructs a composable
-    pipeline instead of a hardcoded NER→SPO graph. Returns (graph, client)
-    with the same ainvoke() output shape as v1.
-    """
-    from catalyst_exgraph.config import ner_stage_config, spo_stage_config
-    from catalyst_exgraph.dispatch import _LegacyAdapter
+    from catalyst_exgraph.config import StageConfig, ner_stage_config, spo_stage_config
     from catalyst_exgraph.pipeline import build_pipeline
     from catalyst_exgraph.resource import _build_mcp_client, _resolve_client
 
     _llm_model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
     _llm_base_url = os.environ.get("LLM_BASE_URL")
     _llm_api_key = os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
-    logger.info("_build_graph_v2: model=%s, base_url=%s", _llm_model_name, _llm_base_url)
+    logger.info("_build_graph: model=%s, base_url=%s", _llm_model_name, _llm_base_url)
     client = _resolve_client(_llm_model_name, base_url=_llm_base_url, api_key=_llm_api_key)
     mcp_client = _build_mcp_client()
 
@@ -190,15 +96,11 @@ def _build_graph_v2():
     ner_config = ner_stage_config(model=_llm_model_name, max_retries=0 if is_encoder else 3)
     spo_config = spo_stage_config(model=_llm_model_name, max_retries=3, skip=is_encoder)
 
-    # Set prompt_dir if PROMPT_REGISTRY_DIR is set
     prompt_dir = os.environ.get("PROMPT_REGISTRY_DIR")
     if prompt_dir:
-        from catalyst_exgraph.config import StageConfig
-
         ner_config = StageConfig(**{**ner_config.__dict__, "prompt_dir": prompt_dir})
         spo_config = StageConfig(**{**spo_config.__dict__, "prompt_dir": prompt_dir})
 
-    # Build ChunkConfig from context window env var
     from dagster_io.chunking import ChunkConfig
 
     context_window = int(os.environ.get("LLM_CONTEXT_WINDOW", "4096"))
@@ -207,16 +109,27 @@ def _build_graph_v2():
     pipeline = build_pipeline([ner_config, spo_config], client, mcp_client, chunk_config=chunk_config)
 
     logger.info(
-        "_build_graph_v2: using catalyst-exgraph pipeline (model=%s, encoder=%s, context_window=%d)",
+        "_build_graph: catalyst-exgraph pipeline (model=%s, encoder=%s, context_window=%d)",
         _llm_model_name,
         is_encoder,
         context_window,
     )
-    return _LegacyAdapter(pipeline), client
+    # The exgraph pipeline exposes an ``ainvoke`` returning ExGraphState; the
+    # extract/dispatch shim used to wrap it in _LegacyAdapter to flatten the
+    # output. We now flatten in _extract_chunk directly so there's no shim.
+    return pipeline, client
 
 
 async def _extract_chunk(graph, chunk_text: str, document_id: str, chunk_id: str, max_retries: int = 3) -> dict:
-    """Run the full extraction graph on one chunk."""
+    """Run the full extraction graph on one chunk.
+
+    ``graph`` is the catalyst-exgraph compiled pipeline. We flatten its
+    ExGraphState output via ``pipeline_result_to_legacy`` so callers see
+    the flat ``accepted_mentions`` / ``accepted_propositions`` / ``status``
+    shape they've always consumed — no LegacyAdapter wrapper needed.
+    """
+    from catalyst_exgraph.pipeline import pipeline_result_to_legacy
+
     state = {
         "raw_text": chunk_text,
         "source_metadata": {
@@ -225,7 +138,8 @@ async def _extract_chunk(graph, chunk_text: str, document_id: str, chunk_id: str
         },
         "max_retries": max_retries,
     }
-    result = await graph.ainvoke(state)
+    raw_result = await graph.ainvoke(state)
+    result = pipeline_result_to_legacy(raw_result)
     return {
         "mentions": result.get("accepted_mentions", []),
         "propositions": result.get("accepted_propositions", []),

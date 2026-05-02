@@ -10,6 +10,9 @@ test = ["pytest>=8.0", "pytest-cov", "dagster>=1.9", "pydantic>=2.0"]
 # run-bus: tiny FastAPI WS server the harness boots so the viewer's
 # LiveGantt subscribes to events.jsonl in real time.
 bench = ["fastapi>=0.110", "uvicorn>=0.27"]
+# unsloth: local fine-tuning consumer for Phase 3 SFT/DPO JSONL — see
+# scripts/unsloth_finetune.py + CD-sduv. Heavy + GPU-only; opt-in only.
+unsloth = ["unsloth>=2024.10", "trl>=0.11", "transformers>=4.45", "peft>=0.13", "bitsandbytes>=0.43", "datasets>=3.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/congress-data/tests", "packages/media-ingest/tests", "packages/open-leaks/tests"]

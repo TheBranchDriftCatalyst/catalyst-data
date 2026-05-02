@@ -138,13 +138,12 @@ data:
     python_logs:
       managed_python_loggers:
         - dagster_io
-        - catalyst_langgraph
+        - catalyst_exgraph
         - catalyst_llm_contract_mcp
         - media_ingest
         - congress_data
         - open_leaks
         - knowledge_graph
-        - data_explorer
       python_log_level: INFO
 
     telemetry:

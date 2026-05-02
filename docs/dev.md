@@ -12,20 +12,28 @@ tilt up                          # default — uses ./Tiltfile
 
 Brings up:
 
+- `minio` — local MinIO container (docker-compose) with a persistent
+  volume at `.test-output/minio-data/`. S3 API on
+  <http://localhost:9000>, web console on <http://localhost:9001>
+  (`minio` / `minio123`). The `dagster` bucket is auto-seeded by the
+  `minio-init` one-shot.
 - `dagster-dev` — all three code locations (`media_ingest`,
-  `congress_data`, `open_leaks`) in one process via `task dev`, wired
-  to `LocalJsonIOManager`. Outputs land in `.test-output/<domain>/...`
-  with the same medallion paths as production. Dagster UI on
-  <http://localhost:3000>.
-- `viewer-api` — FastAPI backend (`task dev:viewer:api:local`) on
-  <http://localhost:8080> reading from `.test-output/` via the
-  `LocalFsBackend`. Exposes `/viewer/api/s3/*` and `/viewer/api/...`
-  document endpoints just like the prod API.
+  `congress_data`, `open_leaks`) in one process via `task dev`, pointed
+  at the local MinIO via `DAGSTER_S3_ENDPOINT_URL=http://localhost:9000`.
+  Same medallion paths and same `S3Client` code path as prod — no
+  dual-backend flags. Dagster UI on <http://localhost:3000>.
+- `viewer-api` — FastAPI backend (`task dev:viewer:api`) on
+  <http://localhost:8080>, also pointed at `localhost:9000`. Exposes
+  `/viewer/api/s3/*`, `/viewer/api/bench/*`, and document endpoints.
 - `viewer-ui` — Vite SPA (`task dev:viewer:ui`) on
-  <http://localhost:5173/viewer/>. The S3 Explorer tab browses your
-  on-disk medallion tree as if it were a real bucket.
-- `bench:run` — manual trigger for the benchmark harness; writes runs
-  under `.test-output/media-ingest/runs/<timestamp>/`.
+  <http://localhost:5173/viewer/>. The S3 Explorer tab browses the
+  local MinIO bucket; Benchmark/StateInspector tabs read from
+  `/viewer/api/bench/*`.
+- `bench:run` — manual trigger for the benchmark harness; writes
+  artifacts to `s3://dagster/bench/runs/<timestamp>/...` in the local
+  MinIO bucket. The live `events.jsonl` stays on disk under
+  `.test-output/media-ingest/bench-cache/` (S3 doesn't append) and is
+  archived to S3 at run end.
 
 Run the bench, click around the viewer, materialize a Dagster asset
 end-to-end without ever leaving your laptop.
@@ -52,33 +60,60 @@ This is the cluster observability dashboard:
 
 ArgoCD owns all the workloads — `Tiltfile.prod` only observes.
 
-## Backend selection
+## One backend, two MinIOs
 
-The viewer's data layer reads `DAGSTER_IO_BACKEND`:
+Same code path everywhere — only the `DAGSTER_S3_ENDPOINT_URL` differs:
 
-- `local` (set by `task dev:viewer:api:local`) → `LocalFsBackend`
-  rooted at `.test-output/media-ingest/` (override with
-  `CATALYST_LOCAL_BASE_DIR`).
-- anything else → real `S3Client` against `DAGSTER_S3_ENDPOINT_URL`
-  + creds env vars.
+- **Dev** (`tilt up`) — local MinIO container at `localhost:9000`,
+  bucket data persisted to `.test-output/minio-data/`.
+- **Prod ops** (`tilt up -f Tiltfile.prod`) — cluster MinIO Tenant
+  reached via the Tiltfile's `k8s_attach` port-forward, also surfaced
+  on `localhost:9000`.
 
-Same env var that flips Dagster's IO managers — keeps the dagster code
-servers and the viewer in lockstep on which backend is in play.
+No `DAGSTER_IO_BACKEND` flag, no `LocalFsBackend`, no dual-mode shims.
+Whatever the env var resolves to is the one bucket everything talks to.
 
 ## Running just the harness, no Tilt
 
 ```bash
-task bench:run                   # writes to .test-output/.../runs/
-task dev:viewer:ui               # SPA only
-task dev:viewer:api:local        # FastAPI against .test-output/
-task dev:viewer:api              # FastAPI against cluster MinIO
-                                 # (requires Tiltfile.prod's port-forward
-                                 #  or a manual `kubectl port-forward
-                                 #  svc/minio 9000:9000 -n minio`)
+task bench:run         # writes to s3://dagster/bench/runs/<timestamp>/
+task dev:viewer:ui     # SPA only
+task dev:viewer:api    # FastAPI against whichever MinIO the env points at
 ```
 
-`task dev:viewer:` is a non-Tilt orchestrator that runs both UI + API
-together — useful when you don't want a Tilt session running.
+Both viewer commands work in either mode — the env vars come from
+`task dev` (dev) or your shell (prod-ops port-forward).
+
+## Fine-tuning (local) — Phase 3 consumer
+
+The Phase 3 training assets emit JSONL to S3:
+
+- `s3://dagster/bench/training/sft/<domain>/data.jsonl` (full SFT)
+- `s3://dagster/bench/training/dpo/<domain>/data.jsonl` (DPO pairs)
+
+Local v1 consumer is Unsloth + TRL (CD-sduv). Workflow:
+
+```bash
+# 1. Pull the latest dataset down to a GPU box
+python scripts/pull_training_dataset.py --kind sft --output ./sft.jsonl
+
+# 2. (One-time) install the opt-in fine-tuning deps
+uv pip install -e '.[unsloth]'
+
+# 3. Fine-tune
+python scripts/unsloth_finetune.py --kind sft \
+    --dataset ./sft.jsonl \
+    --base-model unsloth/llama-3.2-1b-Instruct-bnb-4bit \
+    --output ./adapters/sft-media
+
+# 4. (Optional) ship the adapter back to S3
+aws s3 cp --recursive ./adapters/sft-media \
+    s3://dagster/bench/training/adapters/sft-media/
+```
+
+`--dry-run` formats and previews rows without loading the model — runs
+on any laptop, no GPU needed. Cluster-side fine-tuning is a separate
+workstream.
 
 ## What if my system-installed `python` doesn't have dagster?
 
