@@ -8,7 +8,7 @@ Routes by document_type for optimal chunk sizes:
 
 from dagster import AssetExecutionContext, Output, asset
 
-from dagster_io import ChunkingResource, TextChunk
+from dagster_io import ChunkingResource, EmbeddingResource, TextChunk, attach_seeds_batch
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -33,6 +33,7 @@ PASSTHROUGH_TYPES = {"offshore_entity"}
 def leak_chunks(
     context: AssetExecutionContext,
     chunking: ChunkingResource,
+    embedding_seed: EmbeddingResource,
     leak_documents: list[Document],
 ) -> Output[list[TextChunk]]:
     with trace_operation(
@@ -63,6 +64,11 @@ def leak_chunks(
 
             all_chunks.extend(chunks)
             stats[doc.document_type] = stats.get(doc.document_type, 0) + len(chunks)
+
+        # Attach SemanticChunkingSeed to every chunk so the GT candidate
+        # sampler reads precomputed embeddings rather than re-embedding
+        # the whole corpus on each invocation.
+        attach_seeds_batch(all_chunks, embedding_seed, domain="open_leaks")
 
         ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_chunks", layer="silver").inc(
             len(all_chunks)

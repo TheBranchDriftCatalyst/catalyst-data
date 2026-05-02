@@ -81,6 +81,9 @@ def test_resources(local_io_manager) -> dict:
         emb = EmbeddingResource()
         resources["embedding"] = emb
         resources["embeddings"] = emb
+        # SemanticChunkingSeed embedder — separate registration so the
+        # model can diverge from production (CD-wnu5).
+        resources["embedding_seed"] = EmbeddingResource()
     return resources
 
 

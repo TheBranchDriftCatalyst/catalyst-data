@@ -95,6 +95,7 @@ def _failure_handler(state: ExtractionState) -> dict[str, Any]:
     event = make_audit_event(
         "failure_handler",
         "failed",
+        state=state,
         reason="max retries exhausted",
         mention_retry_count=state.get("mention_retry_count", 0),
         proposition_retry_count=state.get("proposition_retry_count", 0),

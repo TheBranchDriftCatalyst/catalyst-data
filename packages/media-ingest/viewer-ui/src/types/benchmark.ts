@@ -125,6 +125,54 @@ export interface EntityRow {
   mentions?: EntityMention[];
 }
 
+/**
+ * A single line from `events.jsonl` — the unified event stream emitted
+ * by harness, exgraph, langgraph, and dagster. Every consumer (LiveGantt,
+ * AuditViewer, StateInspector) reads this shape.
+ */
+export interface RunEvent {
+  ts: string;
+  run_id: string | null;
+  source: "harness" | "exgraph" | "langgraph" | "dagster";
+  node_name: string;
+  status: string;
+  model: string | null;
+  doc_id: string | null;
+  chunk_idx: number | null;
+  /** Stable chunk identifier — lets the StateInspector join intermediate
+   *  events to the one-shot `chunk_loaded` text and the terminal
+   *  `chunk_extracted` NER/SPO output. */
+  chunk_id: string | null;
+  retry_count: number | null;
+  code_location: string | null;
+  /** Per-node state summary (verdict, candidate_sample, errors,
+   *  provenance counts). Always present, may be empty. */
+  state: Record<string, unknown>;
+  details: Record<string, unknown>;
+}
+
+/** A compact mention summary as it appears in `state.candidate_sample`
+ *  and the terminal `chunk_extracted.details.mentions` list. */
+export interface MentionLite {
+  text: string;
+  type?: string;
+  mention_type?: string;
+  span_start?: number | null;
+  span_end?: number | null;
+  span?: [number | null, number | null];
+  conf?: number;
+  confidence?: number;
+}
+
+export interface PropositionLite {
+  subject: string;
+  predicate: string;
+  object: string;
+  conf?: number;
+  confidence?: number;
+}
+
+/** AuditEvent: derived per-model view of RunEvent for the timeline. */
 export interface AuditEvent {
   timestamp: string;
   node_name: string;
@@ -134,6 +182,7 @@ export interface AuditEvent {
     candidate_count?: number;
     verdict?: string;
     errors?: Array<{ code: string; message: string; path?: string }>;
+    [k: string]: unknown;
   };
 }
 

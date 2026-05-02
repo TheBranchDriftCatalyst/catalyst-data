@@ -9,15 +9,16 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_exgraph.config import StageConfig
+from catalyst_exgraph.nodes._audit import make_audit_event
 from catalyst_exgraph.nodes.spans import correct_candidate_spans
 from catalyst_exgraph.protocol import ExtractionClient
 from catalyst_exgraph.state import ExGraphState, ExGraphStatus
+from dagster_io import event_tail
 
 logger = logging.getLogger(__name__)
 
@@ -40,17 +41,6 @@ def _load_prompt(config: StageConfig) -> str:
     return load_prompt(config.prompt_id, config.fallback_prompt)
 
 
-def _make_audit_event(node_name: str, status: str, duration_s: float | None = None, **details) -> dict:
-    """Create a standardized audit event."""
-    return {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "node_name": node_name,
-        "status": status,
-        "duration_s": duration_s,
-        "details": details,
-    }
-
-
 class ExtractNode:
     """Generic extraction node.
 
@@ -69,6 +59,20 @@ class ExtractNode:
         raw_text = state.get("raw_text", "")
         stage_name = self.config.stage_name
         node_name = f"extract_{stage_name}"
+
+        src = state.get("source_metadata") or {}
+        chunk_id = state.get("chunk_id") or src.get("chunk_id")
+        if chunk_id:
+            event_tail.emit_chunk_text(
+                chunk_id,
+                raw_text,
+                doc_id=state.get("doc_id") or src.get("document_id"),
+                model=state.get("model"),
+                domain=src.get("domain"),
+                speaker_label=src.get("speaker_label"),
+                temporal_start_ms=src.get("temporal_start_ms"),
+                temporal_end_ms=src.get("temporal_end_ms"),
+            )
 
         logger.info("%s: start, input_len=%d", node_name, len(raw_text))
         t0 = time.perf_counter()
@@ -131,14 +135,31 @@ class ExtractNode:
                     if stage_name == state.get("_final_stage")
                     else state.get("status", ExGraphStatus.EXTRACTING.value),
                     "audit_events": state.get("audit_events", [])
-                    + [_make_audit_event(node_name, "completed", elapsed, candidate_count=0, skipped="empty")],
+                    + [
+                        make_audit_event(
+                            node_name,
+                            "completed",
+                            state=state,
+                            duration_s=elapsed,
+                            candidate_count=0,
+                            skipped="empty",
+                        )
+                    ],
                 }
 
             return {
                 "stages": stages,
                 "status": ExGraphStatus.VALIDATING.value,
                 "audit_events": state.get("audit_events", [])
-                + [_make_audit_event(node_name, "completed", elapsed, candidate_count=len(candidates))],
+                + [
+                    make_audit_event(
+                        node_name,
+                        "completed",
+                        state=state,
+                        duration_s=elapsed,
+                        candidate_count=len(candidates),
+                    )
+                ],
             }
         except Exception as e:
             elapsed = time.perf_counter() - t0
@@ -157,5 +178,5 @@ class ExtractNode:
                 "status": ExGraphStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [_make_audit_event(node_name, "error", elapsed, error=str(e))],
+                + [make_audit_event(node_name, "error", state=state, duration_s=elapsed, error=str(e))],
             }

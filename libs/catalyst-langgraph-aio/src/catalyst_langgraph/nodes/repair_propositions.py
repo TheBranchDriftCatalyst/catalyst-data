@@ -76,7 +76,7 @@ class RepairPropositions:
                     make_audit_event(
                         "repair_propositions",
                         "completed",
-                        retry_count=retry_count,
+                        state=state,
                         repaired_count=len(repaired),
                     )
                 ],
@@ -87,7 +87,7 @@ class RepairPropositions:
                 "status": WorkflowStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [make_audit_event("repair_propositions", "error", error=str(e))],
+                + [make_audit_event("repair_propositions", "error", state=state, error=str(e))],
             }
 
 

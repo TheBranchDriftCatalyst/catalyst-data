@@ -46,6 +46,7 @@ class ValidatePropositions:
                     make_audit_event(
                         "validate_propositions",
                         verdict,
+                        state=state,
                         errors=result.get("errors", []),
                     )
                 ],
@@ -71,7 +72,7 @@ class ValidatePropositions:
                 "status": WorkflowStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [make_audit_event("validate_propositions", "error", error=str(e))],
+                + [make_audit_event("validate_propositions", "error", state=state, error=str(e))],
             }
 
 

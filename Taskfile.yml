@@ -107,10 +107,13 @@ tasks:
   # ── Pipeline Operations ──────────────────────────────────────────────────
 
   dev:
-    desc: "Run dagster dev with all 3 code locations using LocalJsonIOManager (mirrors integration test layout — outputs land in .test-output/<domain>/...). Materialize anything in the UI without S3."
+    desc: "Run dagster dev with all 3 code locations against local MinIO at http://localhost:9000. Boot the container first with `tilt up` (managed) or `docker compose -f docker-compose.dev.yml up -d`. Single backend (S3) in dev and prod — no LocalJsonIOManager / dual-mode complexity."
     env:
       PYTHONPATH: "packages/media-ingest/src:packages/congress-data/src:packages/open-leaks/src:libs/dagster-io/src:libs/catalyst-contracts-core/src:libs/catalyst-langgraph-aio/src"
-      DAGSTER_IO_BACKEND: local
+      DAGSTER_S3_ENDPOINT_URL: http://localhost:9000
+      DAGSTER_S3_ACCESS_KEY: minio
+      DAGSTER_S3_SECRET_KEY: minio123
+      DAGSTER_S3_BUCKET: dagster
       OTEL_METRICS_EXPORTER: none
       OTEL_TRACES_EXPORTER: none
     cmds:
@@ -167,7 +170,7 @@ tasks:
       PYTHONPATH: "."
       EXGRAPH_ENABLED: "true"
     cmds:
-      - python tests/benchmark_harness.py --full --regen --audit-log {{.CLI_ARGS}}
+      - python tests/benchmark_harness.py --full --regen {{.CLI_ARGS}}
 
   bench:run:
     desc: "Run extraction benchmarks (skip ground truth regen)"
@@ -175,7 +178,7 @@ tasks:
       PYTHONPATH: "."
       EXGRAPH_ENABLED: "true"
     cmds:
-      - python tests/benchmark_harness.py --regen --audit-log {{.CLI_ARGS}}
+      - python tests/benchmark_harness.py --regen {{.CLI_ARGS}}
 
   bench:gt-candidates:
     desc: "Run scripts/sample_gt_candidates.py against the medallion tree to produce .test-output/gt-candidates.json — extraction-aware diversity sampling, deterministic given seed. Default: --target 200 --seed 42 --score-extractions --diagnostics."
@@ -201,7 +204,7 @@ tasks:
       PYTHONPATH: "."
       EXGRAPH_ENABLED: "true"
     cmds:
-      - python tests/benchmark_harness.py --audit-log {{.CLI_ARGS}}
+      - python tests/benchmark_harness.py {{.CLI_ARGS}}
 
   bench:view:
     desc: "Start benchmark viewer SPA"
@@ -333,22 +336,81 @@ tasks:
     cmds:
       - dagster dev -m media_ingest
 
-  dev:viewer:
-    desc: Run media viewer locally against cluster MinIO data
+  dev:viewer:ui:
+    desc: "Vite SPA only (port 5173). Pair with dev:viewer:api or rely on Tilt for both."
+    dir: packages/media-ingest/viewer-ui
+    cmds:
+      - npm run dev
+
+  dev:viewer:api:
+    desc: "FastAPI backend serving /viewer/api/* against MinIO at localhost:9000. Dev mode: local MinIO container (Tilt's `minio` resource). Prod mode: cluster MinIO via Tilt.prod port-forward. Same code path either way — single backend (S3) everywhere."
     env:
       DAGSTER_CODE_LOCATION: media_ingest
-      DAGSTER_S3_ENDPOINT_URL: http://minio.talos00
+      DAGSTER_S3_ENDPOINT_URL: http://localhost:9000
       DAGSTER_S3_ACCESS_KEY: minio
       DAGSTER_S3_SECRET_KEY: minio123
-      DAGSTER_S3_BUCKET: catalyst-data
+      DAGSTER_S3_BUCKET: dagster
+      PYTHONPATH: "packages/media-ingest/src:libs/dagster-io/src"
     cmds:
+      # Resolve python via mise so we get the project's installed deps
+      # (dagster, fastapi, uvicorn, boto3) rather than the empty .venv
+      # that lives in the repo root and would otherwise hijack PATH.
       - |
-        cd packages/media-ingest/viewer-ui && npm run dev &
-        VIEWER_PID=$!
-        echo "Viewer UI: http://localhost:5173/viewer/"
-        python -c "
+        mise exec -- python -c "
         import uvicorn
         from media_ingest.viewer.app import create_viewer_app
-        uvicorn.run(create_viewer_app(), host='0.0.0.0', port=8080)
+        uvicorn.run(create_viewer_app(), host='127.0.0.1', port=8080)
         "
+
+  dev:viewer:
+    desc: "Run viewer SPA + FastAPI backend together (non-Tilt orchestrator). Tilt users should run dev:viewer:ui and dev:viewer:api as separate resources."
+    cmds:
+      - |
+        task dev:viewer:ui &
+        VIEWER_PID=$!
+        echo "Viewer UI: http://localhost:5173/viewer/"
+        task dev:viewer:api
         kill $VIEWER_PID 2>/dev/null
+
+  # ── Cluster diagnostics (Tiltfile delegates here) ────────────────────────
+
+  cluster:status:
+    desc: "Pod / service / PVC snapshot for the catalyst-data namespace"
+    cmds:
+      - echo "=== Pods ===" && kubectl get pods -n catalyst-data -o wide
+      - echo "=== Services ===" && kubectl get svc -n catalyst-data
+      - echo "=== PVCs ===" && kubectl get pvc -n catalyst-data
+
+  cluster:health:
+    desc: "gRPC reachability check from the webserver pod to each Dagster code-location"
+    cmds:
+      - |
+        WEBSERVER_POD=$(kubectl get pod -n catalyst-data \
+          -l app=dagster,app.kubernetes.io/component=webserver \
+          -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        if [ -z "$WEBSERVER_POD" ]; then
+          echo "ERROR: No webserver pod found"
+          exit 1
+        fi
+        echo "Pod: $WEBSERVER_POD"
+        echo ""
+        # The webserver image doesn't ship `nc`; use bash's /dev/tcp instead.
+        for svc in congress-data media-ingest open-leaks knowledge-graph; do
+          if kubectl exec -n catalyst-data "$WEBSERVER_POD" -c webserver -- \
+              bash -c "timeout 3 bash -c 'echo > /dev/tcp/${svc}.catalyst-data.svc.cluster.local/4000'" \
+              >/dev/null 2>&1; then
+            echo "✓ ${svc}:4000 - reachable"
+          else
+            echo "✗ ${svc}:4000 - UNREACHABLE"
+          fi
+        done
+
+  cluster:validate-manifests:
+    desc: "Server-side dry-run of the k8s/ kustomization"
+    cmds:
+      - kubectl apply --dry-run=server -k k8s/
+
+  cluster:dagster-runs:
+    desc: "Tail recent dagster-daemon logs"
+    cmds:
+      - kubectl logs -n catalyst-data deployment/dagster-daemon --tail=100

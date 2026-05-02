@@ -75,7 +75,11 @@ class ExtractPropositions:
                     "audit_events": state.get("audit_events", [])
                     + [
                         make_audit_event(
-                            "extract_propositions", "completed", candidate_count=0, skipped="no_propositions"
+                            "extract_propositions",
+                            "completed",
+                            state=state,
+                            candidate_count=0,
+                            skipped="no_propositions",
                         )
                     ],
                 }
@@ -88,6 +92,7 @@ class ExtractPropositions:
                     make_audit_event(
                         "extract_propositions",
                         "completed",
+                        state=state,
                         candidate_count=len(candidates),
                     )
                 ],
@@ -98,7 +103,7 @@ class ExtractPropositions:
                 "status": WorkflowStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [make_audit_event("extract_propositions", "error", error=str(e))],
+                + [make_audit_event("extract_propositions", "error", state=state, error=str(e))],
             }
 
 

@@ -14,6 +14,7 @@ from catalyst_langgraph.nodes._audit import make_audit_event
 from catalyst_langgraph.nodes._spans import correct_candidate_spans
 from catalyst_langgraph.prompts import load_prompt
 from catalyst_langgraph.state import ExtractionState, WorkflowStatus
+from dagster_io import event_tail
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,19 @@ class ExtractMentions:
 
     async def __call__(self, state: ExtractionState) -> dict[str, Any]:
         raw_text = state.get("raw_text", "")
+        src = state.get("source_metadata") or {}
+        chunk_id = state.get("chunk_id") or src.get("chunk_id")
+        if chunk_id:
+            event_tail.emit_chunk_text(
+                chunk_id,
+                raw_text,
+                doc_id=state.get("doc_id") or src.get("document_id"),
+                model=state.get("model"),
+                domain=src.get("domain"),
+                speaker_label=src.get("speaker_label"),
+                temporal_start_ms=src.get("temporal_start_ms"),
+                temporal_end_ms=src.get("temporal_end_ms"),
+            )
         logger.info("extract_mentions: start, input_len=%d", len(raw_text))
         t0 = time.perf_counter()
         try:
@@ -62,7 +76,14 @@ class ExtractMentions:
                 "current_mention_candidates": candidates,
                 "status": WorkflowStatus.VALIDATING_MENTIONS.value,
                 "audit_events": state.get("audit_events", [])
-                + [make_audit_event("extract_mentions", "completed", candidate_count=len(candidates))],
+                + [
+                    make_audit_event(
+                        "extract_mentions",
+                        "completed",
+                        state=state,
+                        candidate_count=len(candidates),
+                    )
+                ],
             }
         except Exception as e:
             logger.exception("extract_mentions failed")
@@ -70,7 +91,7 @@ class ExtractMentions:
                 "status": WorkflowStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [make_audit_event("extract_mentions", "error", error=str(e))],
+                + [make_audit_event("extract_mentions", "error", state=state, error=str(e))],
             }
 
 

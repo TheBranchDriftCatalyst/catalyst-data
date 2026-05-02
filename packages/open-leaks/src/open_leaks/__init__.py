@@ -62,5 +62,8 @@ defs = Definitions(
         "chunking": ChunkingResource(),
         "llm": LLMResource(),
         "embeddings": EmbeddingResource(),
+        # Seed embedder for SemanticChunkingSeed (CD-wnu5 picks the long-term
+        # default; today it tracks production at text-embedding-3-small).
+        "embedding_seed": EmbeddingResource(),
     },
 )

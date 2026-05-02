@@ -41,7 +41,14 @@ class ValidateMentions:
             update: dict[str, Any] = {
                 "latest_mention_validation": result,
                 "audit_events": state.get("audit_events", [])
-                + [make_audit_event("validate_mentions", verdict, errors=result.get("errors", []))],
+                + [
+                    make_audit_event(
+                        "validate_mentions",
+                        verdict,
+                        state=state,
+                        errors=result.get("errors", []),
+                    )
+                ],
             }
 
             if verdict == "valid":
@@ -85,7 +92,7 @@ class ValidateMentions:
                 "status": WorkflowStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [make_audit_event("validate_mentions", "error", error=str(e))],
+                + [make_audit_event("validate_mentions", "error", state=state, error=str(e))],
             }
 
 

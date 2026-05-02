@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import UTC, datetime
 from typing import Any
 
 from catalyst_exgraph.config import StageConfig
+from catalyst_exgraph.nodes._audit import make_audit_event
 from catalyst_exgraph.state import ExGraphState, ExGraphStatus
 
 logger = logging.getLogger(__name__)
@@ -108,10 +108,11 @@ class ValidateNode:
 
             stages[stage_name] = stage
 
-            audit = _make_audit_event(
+            audit = make_audit_event(
                 node_name,
                 verdict,
-                elapsed,
+                state=state,
+                duration_s=elapsed,
                 valid_count=result.get("valid_count", 0),
                 invalid_count=result.get("invalid_count", 0),
                 errors=result.get("errors", []),
@@ -132,15 +133,5 @@ class ValidateNode:
                 "status": ExGraphStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [_make_audit_event(node_name, "error", elapsed, error=str(e))],
+                + [make_audit_event(node_name, "error", state=state, duration_s=elapsed, error=str(e))],
             }
-
-
-def _make_audit_event(node_name: str, status: str, duration_s: float | None = None, **details) -> dict:
-    return {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "node_name": node_name,
-        "status": status,
-        "duration_s": duration_s,
-        "details": details,
-    }

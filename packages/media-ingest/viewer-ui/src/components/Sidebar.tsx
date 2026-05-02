@@ -16,17 +16,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@thebranchdriftcatalyst/catalyst-ui";
-import {
-  PanelLeftClose,
-  PanelLeft,
-  Search,
-  Video,
-  AudioLines,
-  Tv2,
-  ArrowRightLeft,
-  BarChart3,
-  Database,
-} from "lucide-react";
+import { PanelLeftClose, PanelLeft, Search, Video, AudioLines, Tv2 } from "lucide-react";
 import { fetchDocuments } from "@/api/client";
 import type { MediaDocument } from "@/types/media";
 import { formatTime } from "@/lib/speakers";
@@ -115,50 +105,6 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
         </Tooltip>
 
         <Separator className="my-1" />
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" asChild>
-              <Link to="/">
-                <Tv2 className="h-4 w-4" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">Media Library</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" asChild>
-              <Link to="/overrides">
-                <ArrowRightLeft className="h-4 w-4" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">Entity Overrides</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" asChild>
-              <Link to="/s3">
-                <Database className="h-4 w-4" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">S3 Explorer</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" asChild>
-              <Link to="/benchmarks">
-                <BarChart3 className="h-4 w-4" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">Benchmarks</TooltipContent>
-        </Tooltip>
       </div>
     );
   }
@@ -186,28 +132,6 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
           </TooltipTrigger>
           <TooltipContent side="right">Collapse sidebar</TooltipContent>
         </Tooltip>
-      </div>
-
-      {/* Nav links */}
-      <div className="px-3 py-2 border-b border-white/5 flex items-center gap-1">
-        <Button variant="ghost" size="sm" className="text-xs h-7" asChild>
-          <Link to="/overrides">
-            <ArrowRightLeft className="h-3.5 w-3.5 mr-1.5" />
-            Entity Overrides
-          </Link>
-        </Button>
-        <Button variant="ghost" size="sm" className="text-xs h-7" asChild>
-          <Link to="/s3">
-            <Database className="h-3.5 w-3.5 mr-1.5" />
-            S3 Explorer
-          </Link>
-        </Button>
-        <Button variant="ghost" size="sm" className="text-xs h-7" asChild>
-          <Link to="/benchmarks">
-            <BarChart3 className="h-3.5 w-3.5 mr-1.5" />
-            Benchmarks
-          </Link>
-        </Button>
       </div>
 
       {/* Search + Filters */}

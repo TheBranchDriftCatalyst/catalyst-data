@@ -19,7 +19,7 @@ from typing import Any
 
 from dagster import AssetExecutionContext, Output, asset
 
-from dagster_io import ChunkingResource, EmbeddingResource, TextChunk
+from dagster_io import ChunkingResource, EmbeddingResource, TextChunk, attach_seeds_batch
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -49,6 +49,7 @@ def media_chunks(
     context: AssetExecutionContext,
     chunking: ChunkingResource,
     embedding: EmbeddingResource,
+    embedding_seed: EmbeddingResource,
     media_segment_merge: dict[str, Any],
 ) -> Output[list[TextChunk]]:
     partition_key = context.partition_key
@@ -83,6 +84,12 @@ def media_chunks(
                     "speaker_count": t.get("speaker_count", 0),
                 },
             )
+
+        # Attach SemanticChunkingSeed to every emitted chunk so the GT
+        # candidate sampler can read precomputed embeddings instead of
+        # re-embedding the whole corpus on every run. Travels with the
+        # chunk through silver/gold via TextChunk.metadata.
+        attach_seeds_batch(chunks, embedding_seed, domain="media_ingest")
 
         ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_chunks", layer="gold").inc(
             len(chunks)

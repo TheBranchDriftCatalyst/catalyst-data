@@ -85,6 +85,8 @@ def test_resources(local_io_manager) -> dict:
 
         resources["llm"] = LLMResource()
         resources["embeddings"] = EmbeddingResource()
+        # SemanticChunkingSeed embedder — separate registration (CD-wnu5).
+        resources["embedding_seed"] = EmbeddingResource()
     return resources
 
 

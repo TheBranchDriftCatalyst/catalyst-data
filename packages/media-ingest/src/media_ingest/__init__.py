@@ -99,5 +99,10 @@ defs = Definitions(
         # ``embedding`` (singular); other media assets use ``embeddings`` (plural).
         "embedding": EmbeddingResource(),
         "embeddings": EmbeddingResource(),
+        # Seed embedder for SemanticChunkingSeed — separate registration so the
+        # model can diverge from production without affecting downstream
+        # similarity quality (CD-wnu5 picks the long-term default; today it
+        # tracks production at text-embedding-3-small).
+        "embedding_seed": EmbeddingResource(),
     },
 )

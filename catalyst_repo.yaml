@@ -53,14 +53,13 @@ highlights:
   - "Dual-write knowledge graph: PostgreSQL+pgvector + Neo4j"
   - "22 Prometheus metrics across 8 subsystems with 32 Kubernetes manifests"
   - "QSV AV1 hardware video transcoding for ultra compression"
-  - "13-page Streamlit data explorer with asset browser, semantic search, knowledge graph viz"
+  - "React SPA viewer-ui with HITL annotation, benchmark dashboard, S3 explorer"
 
 domains:
   - congress-data
   - open-leaks
   - media-ingest
   - knowledge-graph
-  - data-explorer
 
 infrastructure:
   cluster: "talos-homelab"

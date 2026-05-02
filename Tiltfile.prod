@@ -1,0 +1,234 @@
+# Tiltfile.prod — Catalyst Data Ops Dashboard (cluster observe-and-port-forward)
+#
+# Usage:
+#   tilt up -f Tiltfile.prod    # Cluster ops + diagnostics
+#
+# For local dev (no cluster) use the default `Tiltfile` instead — that one
+# runs `task dev` (LocalJsonIOManager) + the viewer-ui locally with no
+# cluster contact at all.
+#
+# This file does NOT deploy anything — ArgoCD owns all deployments. It
+# observes existing cluster resources and surfaces ops tooling.
+
+# Load Tilt extensions
+load('ext://uibutton', 'cmd_button', 'location')
+load('ext://k8s_attach', 'k8s_attach')
+
+# Configuration
+config.define_string('k8s_context', args=False, usage='Kubernetes context to use')
+cfg = config.parse()
+
+settings = {
+    'k8s_context': cfg.get('k8s_context', 'admin@catalyst-cluster'),
+}
+
+# Cluster context
+allow_k8s_contexts('admin@catalyst-cluster')
+
+print("""
+======================================================================
+  Catalyst Data - Ops Dashboard (Observe-Only Mode)
+======================================================================
+  Context: %s
+  ArgoCD: ACTIVE (ArgoCD owns all deployments)
+
+  This dashboard observes your cluster and provides:
+  - Log streaming for all workloads
+  - Port-forwards to services
+  - Ops buttons for common tasks
+======================================================================
+""" % settings['k8s_context'])
+
+# ============================================
+# LABEL CONSTANTS
+# ============================================
+LABEL_DAGSTER = '1-dagster-platform'
+LABEL_CODE_LOCATIONS = '2-code-locations'
+LABEL_INFRA = '3-infrastructure'
+LABEL_BENCH = '4-bench-viewer'
+LABEL_OPS = '5-ops'
+
+# ============================================
+# OPS - Manual tasks and cluster inspection
+#
+# Each resource thinly wraps a `task cluster:<x>` so the same diagnostics
+# are reusable from the terminal (`task cluster:status`, etc.) and there's
+# only one source of truth for the bash. See Taskfile.yml `cluster:*`.
+# ============================================
+
+local_resource(
+    'cluster-status',
+    cmd='task cluster:status',
+    auto_init=True,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    labels=[LABEL_OPS],
+)
+
+local_resource(
+    'dagster-runs',
+    cmd='task cluster:dagster-runs',
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    labels=[LABEL_OPS],
+)
+
+local_resource(
+    'code-location-health',
+    cmd='task cluster:health',
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    labels=[LABEL_OPS],
+)
+
+local_resource(
+    'validate-manifests',
+    cmd='task cluster:validate-manifests',
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    labels=[LABEL_OPS],
+)
+
+# ============================================
+# DAGSTER PLATFORM - Webserver, Daemon, Postgres
+# ============================================
+
+k8s_attach('dagster-webserver', 'deployment/dagster-webserver', namespace='catalyst-data',
+           port_forwards=['3000:3000'], labels=[LABEL_DAGSTER])
+k8s_attach('dagster-daemon', 'deployment/dagster-daemon', namespace='catalyst-data',
+           labels=[LABEL_DAGSTER])
+k8s_attach('dagster-postgres', 'deployment/dagster-postgres', namespace='catalyst-data',
+           port_forwards=['5432:5432'], labels=[LABEL_DAGSTER])
+
+cmd_button(
+    name='btn-open-dagster',
+    resource='dagster-webserver',
+    argv=['sh', '-c', 'open http://dagster.talos00 || echo "Open http://dagster.talos00 in your browser"'],
+    text='Open Dagster UI',
+    icon_name='open_in_browser'
+)
+
+# ============================================
+# CODE LOCATIONS - Dagster code locations
+# ============================================
+
+k8s_attach('congress-data', 'deployment/congress-data', namespace='catalyst-data',
+           port_forwards=['4001:4000', '9091:9090'], labels=[LABEL_CODE_LOCATIONS])
+k8s_attach('media-ingest', 'deployment/media-ingest', namespace='catalyst-data',
+           port_forwards=['4002:4000', '8080:8080'], labels=[LABEL_CODE_LOCATIONS])
+k8s_attach('open-leaks', 'deployment/open-leaks', namespace='catalyst-data',
+           port_forwards=['4003:4000'], labels=[LABEL_CODE_LOCATIONS])
+k8s_attach('knowledge-graph', 'deployment/knowledge-graph', namespace='catalyst-data',
+           port_forwards=['4004:4000'], labels=[LABEL_CODE_LOCATIONS])
+
+# ============================================
+# INFRASTRUCTURE - Neo4j, Postgres-Knowledge, MinIO
+# ============================================
+
+k8s_attach('neo4j', 'deployment/neo4j', namespace='catalyst-data',
+           port_forwards=['7474:7474', '7687:7687'], labels=[LABEL_INFRA])
+k8s_attach('postgres-knowledge', 'deployment/postgres-knowledge', namespace='catalyst-data',
+           port_forwards=['5433:5432'], labels=[LABEL_INFRA])
+# MinIO is deployed via the MinIO Operator as a Tenant — workload is
+# statefulset/minio-pool-0; service `minio` exposes the S3 API on :80,
+# `minio-console` exposes the web console on :9090. Map both to the
+# conventional local ports (9000 for S3, 9001 for console).
+k8s_attach('minio', 'statefulset/minio-pool-0', namespace='minio',
+           port_forwards=['9000:9000', '9001:9090'], labels=[LABEL_INFRA])
+
+cmd_button(
+    name='btn-neo4j-info',
+    resource='neo4j',
+    argv=['sh', '-c', 'echo "Neo4j Browser: http://localhost:7474" && echo "Bolt: bolt://localhost:7687" && echo "Auth: neo4j/neo4j-homelab"'],
+    text='Connection Info',
+    icon_name='info'
+)
+
+cmd_button(
+    name='btn-pg-knowledge-info',
+    resource='postgres-knowledge',
+    argv=['sh', '-c', 'echo "PostgreSQL: localhost:5433" && echo "Database: knowledge_graph" && echo "Auth: kg/kg-homelab" && echo "" && echo "psql -h localhost -p 5433 -U kg -d knowledge_graph"'],
+    text='Connection Info',
+    icon_name='info'
+)
+
+cmd_button(
+    name='btn-open-minio-console',
+    resource='minio',
+    argv=['sh', '-c', 'open http://localhost:9001 || echo "Open http://localhost:9001 (login: minio / minio123)"'],
+    text='Open MinIO Console',
+    icon_name='open_in_browser',
+)
+
+# ============================================
+# BENCH / VIEWER - Local SPA + FastAPI backend
+#
+# Two long-running local processes managed independently so each gets
+# its own log lane and restart button. Both are auto_init=False — only
+# start when you click them; not every Tilt session needs the SPA.
+# The FastAPI backend depends on the MinIO port-forward above so its
+# S3Client at http://localhost:9000 actually reaches the cluster bucket.
+# ============================================
+
+local_resource(
+    'viewer-api',
+    serve_cmd='task dev:viewer:api',
+    deps=['packages/media-ingest/src/media_ingest/viewer'],
+    resource_deps=['minio'],
+    auto_init=False,
+    labels=[LABEL_BENCH],
+)
+
+local_resource(
+    'viewer-ui',
+    serve_cmd='task dev:viewer:ui',
+    auto_init=False,
+    labels=[LABEL_BENCH],
+)
+
+cmd_button(
+    name='btn-open-viewer',
+    resource='viewer-ui',
+    argv=['sh', '-c', 'open http://localhost:5173/viewer/ || echo "Open http://localhost:5173/viewer/"'],
+    text='Open Viewer',
+    icon_name='open_in_browser',
+)
+
+local_resource(
+    'bench:run',
+    cmd='task bench:run',
+    deps=['tests/benchmark_harness.py', 'tests/benchmark_config.py'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    labels=[LABEL_BENCH],
+)
+
+# ============================================
+# CONFIGURATION
+# ============================================
+
+update_settings(
+    max_parallel_updates=3,
+    k8s_upsert_timeout_secs=300,
+    suppress_unused_image_warnings=None
+)
+
+print("""
+Ready! UI Groups:
+  1-dagster-platform  - Webserver (→3000), Daemon, Postgres (→5432)
+  2-code-locations    - congress-data (→4001), media-ingest (→4002),
+                        open-leaks (→4003), knowledge-graph (→4004)
+  3-infrastructure    - Neo4j (→7474/7687), Postgres-Knowledge (→5433),
+                        MinIO (→9000 S3 API, →9001 console)
+  4-bench-viewer      - viewer-api (FastAPI :8080), viewer-ui (Vite :5173),
+                        bench:run (manual)
+  5-ops               - Cluster status, Dagster runs, health checks
+
+Note: Some resources may show 'pending' if not yet deployed.
+      ArgoCD manages all deployments - Tilt only observes.
+
+      For fully-local dev (no cluster), use the default `Tiltfile`:
+          tilt up
+
+      Diagnostic resources delegate to `task cluster:*` — same commands
+      are runnable from the terminal (e.g. `task cluster:health`).
+""")

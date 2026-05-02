@@ -8,7 +8,7 @@ Routes by document_type for optimal chunk sizes:
 from dagster import AssetExecutionContext, Output, asset
 
 from congress_data.core.document import Document
-from dagster_io import ChunkingResource, TextChunk
+from dagster_io import ChunkingResource, EmbeddingResource, TextChunk, attach_seeds_batch
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED
 from dagster_io.observability import get_tracer, trace_operation
@@ -32,6 +32,7 @@ PASSTHROUGH_TYPES = {"member_profile", "committee_profile"}
 def congress_chunks(
     context: AssetExecutionContext,
     chunking: ChunkingResource,
+    embedding_seed: EmbeddingResource,
     congress_documents: list[Document],
 ) -> Output[list[TextChunk]]:
     with trace_operation(
@@ -65,6 +66,11 @@ def congress_chunks(
 
             all_chunks.extend(chunks)
             stats[doc.document_type] = stats.get(doc.document_type, 0) + len(chunks)
+
+        # Attach SemanticChunkingSeed to every chunk so the GT candidate
+        # sampler reads precomputed embeddings rather than re-embedding
+        # the whole corpus on each invocation.
+        attach_seeds_batch(all_chunks, embedding_seed, domain="congress_data")
 
         ASSET_RECORDS_PROCESSED.labels(code_location="congress_data", asset_key="congress_chunks", layer="silver").inc(
             len(all_chunks)

@@ -72,7 +72,7 @@ class S3DataService:
     def client(self) -> S3Client:
         if self._client is None:
             self._client = S3Client(
-                endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://minio.minio.svc.cluster.local"),
+                endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
                 access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio"),
                 secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123"),
                 bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),

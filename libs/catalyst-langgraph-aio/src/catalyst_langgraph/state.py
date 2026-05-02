@@ -36,12 +36,20 @@ class AuditEvent:
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     node_name: str = ""
     status: str = ""
+    model: str | None = None
+    doc_id: str | None = None
+    chunk_idx: int | None = None
+    retry_count: int | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
 
 class ExtractionState(TypedDict, total=False):
     source_metadata: dict[str, Any]
     raw_text: str
+
+    model: str
+    doc_id: str
+    chunk_idx: int
 
     current_mention_candidates: list[dict[str, Any]]
     current_proposition_candidates: list[dict[str, Any]]

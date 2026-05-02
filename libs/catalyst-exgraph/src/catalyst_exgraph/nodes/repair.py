@@ -9,12 +9,12 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from catalyst_exgraph.config import StageConfig
+from catalyst_exgraph.nodes._audit import make_audit_event
 from catalyst_exgraph.nodes.spans import compute_correct_spans, correct_candidate_spans
 from catalyst_exgraph.protocol import ExtractionClient
 from catalyst_exgraph.state import ExGraphState, ExGraphStatus
@@ -107,8 +107,12 @@ class RepairNode:
                 "status": ExGraphStatus.VALIDATING.value,
                 "audit_events": state.get("audit_events", [])
                 + [
-                    _make_audit_event(
-                        node_name, "completed", elapsed, repaired_count=len(repaired), retry=retry_count + 1
+                    make_audit_event(
+                        node_name,
+                        "completed",
+                        state=state,
+                        duration_s=elapsed,
+                        repaired_count=len(repaired),
                     )
                 ],
             }
@@ -124,15 +128,5 @@ class RepairNode:
                 "status": ExGraphStatus.FAILED.value,
                 "error": str(e),
                 "audit_events": state.get("audit_events", [])
-                + [_make_audit_event(node_name, "error", elapsed, error=str(e), retry=retry_count + 1)],
+                + [make_audit_event(node_name, "error", state=state, duration_s=elapsed, error=str(e))],
             }
-
-
-def _make_audit_event(node_name: str, status: str, duration_s: float | None = None, **details) -> dict:
-    return {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "node_name": node_name,
-        "status": status,
-        "duration_s": duration_s,
-        "details": details,
-    }

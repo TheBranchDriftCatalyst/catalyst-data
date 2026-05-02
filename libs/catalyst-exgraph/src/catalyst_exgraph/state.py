@@ -67,6 +67,16 @@ class ExGraphState(TypedDict, total=False):
     source_metadata: dict[str, Any]
     """Document/chunk metadata: {document_id, chunk_id, domain, ...}"""
 
+    # ── Run-context attribution (for unified event stream) ───────────
+    model: str
+    """Model identifier — propagated into every emitted audit event."""
+
+    doc_id: str
+    """Document identifier — propagated into every emitted audit event."""
+
+    chunk_idx: int
+    """Chunk index within the document — propagated into every event."""
+
     # ── Chunking ────────────────────────────────────────────────────
     chunks: list[dict[str, Any]]
     """Text chunks produced by ChunkNode (or pre-provided by Dagster asset).

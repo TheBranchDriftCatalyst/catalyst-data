@@ -43,10 +43,6 @@ resources:
   - knowledge-graph-api/deployment.yaml
   - knowledge-graph-api/service.yaml
   - knowledge-graph-api/ingressroute.yaml
-  # Data Explorer (Streamlit UI)
-  - data-explorer/deployment.yaml
-  - data-explorer/service.yaml
-  - data-explorer/ingressroute.yaml
   # Homepage (data platform dashboard)
   - homepage/deployment.yaml
   - homepage/service.yaml
@@ -71,6 +67,3 @@ configMapGenerator:
     files:
       - mention_extraction.prompt=media-ingest/prompts/mention_extraction.prompt
       - proposition_extraction.prompt=media-ingest/prompts/proposition_extraction.prompt
-  - name: data-explorer-prompts
-    files:
-      - rag-research-assistant.prompt=data-explorer/prompts/rag-research-assistant.prompt

@@ -171,17 +171,37 @@ def build_pipeline(
     return graph.compile()
 
 
+def emit_chunk_extracted_for_state(state: ExGraphState) -> None:
+    """Emit the terminal ``chunk_extracted`` event from a finished
+    ExGraphState. Called once per pipeline invocation to tie a chunk's
+    text to the accepted NER + SPO output for the StateInspector."""
+    from dagster_io import event_tail
+
+    src = state.get("source_metadata") or {}
+    chunk_id = state.get("chunk_id") or src.get("chunk_id")
+    if not chunk_id:
+        return
+    stages = state.get("stages") or {}
+    mentions = (stages.get("ner") or {}).get("accepted") or []
+    propositions = (stages.get("spo") or {}).get("accepted") or []
+    event_tail.emit_chunk_extracted(
+        chunk_id,
+        model=state.get("model"),
+        doc_id=state.get("doc_id") or src.get("document_id"),
+        mentions=mentions,
+        propositions=propositions,
+    )
+
+
 def pipeline_result_to_legacy(state: ExGraphState) -> dict[str, Any]:
     """Map ExGraphState to the legacy output format expected by extract_validated().
 
-    This is the backward-compatibility bridge. The old code expects:
-    - accepted_mentions: list[dict]
-    - accepted_propositions: list[dict]
-    - mention_retry_count: int
-    - proposition_retry_count: int
-    - status: str
-    - audit_events: list[dict]
+    Also fires the terminal ``chunk_extracted`` event so the
+    StateInspector can tie the chunk text to the final NER + SPO list
+    without re-walking intermediate validate/repair events.
     """
+    emit_chunk_extracted_for_state(state)
+
     stages = state.get("stages", {})
 
     ner_stage = stages.get("ner", {})

@@ -16,7 +16,6 @@ _NAMESPACES = (
     "congress_data",
     "open_leaks",
     "knowledge_graph",
-    "data_explorer",
     "catalyst",
 )
 

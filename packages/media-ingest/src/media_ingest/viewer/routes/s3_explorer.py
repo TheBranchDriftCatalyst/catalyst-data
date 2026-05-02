@@ -24,10 +24,14 @@ _client: S3Client | None = None
 
 
 def _s3() -> S3Client:
+    """Return the S3 client. Same backend (MinIO) in dev and prod —
+    dev points at a local container at ``localhost:9000`` (see the
+    Tilt-managed ``minio`` resource), prod points at the cluster
+    MinIO Tenant via Tilt's port-forward."""
     global _client
     if _client is None:
         _client = S3Client(
-            endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://minio.minio.svc.cluster.local"),
+            endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
             access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio"),
             secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123"),
             bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),

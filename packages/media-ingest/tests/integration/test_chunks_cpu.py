@@ -104,6 +104,10 @@ def media_chunks_materialized():
                 "io_manager": io_manager,
                 "chunking": chunking,
                 "embedding": embedding,
+                # Reuse the production embedder as the seed embedder for
+                # this test — same EmbeddingResource instance is fine
+                # since the test isn't probing seed-vs-prod model split.
+                "embedding_seed": embedding,
             },
             partition_key=doc_id,
             instance=instance,
