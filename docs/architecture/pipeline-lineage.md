@@ -266,7 +266,7 @@ flowchart LR
 
     subgraph CONFIG ["Config Flow"]
         direction TB
-        ENV["ENV VARS\nLLM_MODEL\nLLM_CONTEXT_WINDOW\nEXGRAPH_ENABLED\nPROMPT_REGISTRY_DIR"]
+        ENV["ENV VARS\nLLM_MODEL\nLLM_CONTEXT_WINDOW\nPROMPT_REGISTRY_DIR"]
         RES["Dagster Resources\nLLMResource\nEmbeddingResource\nChunkingResource"]
         CC["ChunkConfig\n(25% of context window)"]
     end

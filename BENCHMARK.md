@@ -39,13 +39,12 @@ flowchart TD
     MODE -->|--full| RUN
     MODE -->|--ensemble-gt| ENSEMBLE
     MODE -->|--score| SCORE
-    MODE -->|--compare| COMPARE
     MODE -->|no flags| INTERACTIVE[Interactive Prompt]
     INTERACTIVE --> MODE
 
     subgraph RUN_PHASE ["1. Model Runs"]
         RUN[Run All Models]
-        RUN -->|for each model| EXTRACT[Extract via LangGraph]
+        RUN -->|for each model| EXTRACT[Extract via ExGraph]
         EXTRACT --> SAVE_EXT[Save extraction_model.json]
 
         RUN -.- RUN_OPTS
@@ -54,8 +53,6 @@ flowchart TD
         --local-only
         --regen
         --timeout N
-        --exgraph
-        --audit-log
         --label NAME"]
     end
 
@@ -286,7 +283,6 @@ URL: `http://localhost:5173/viewer/benchmarks`
 | `--run` | Run models (default when no action flag) |
 | `--ensemble-gt` | Generate ground truth via multi-model consensus |
 | `--generate-gt` | Generate ground truth from a single model |
-| `--compare` | Compare v1 vs v2 pipelines side-by-side |
 | `--score` | Re-score latest run against active GT (no model runs) |
 | `--report` | Rebuild report JSON from latest run (no model runs) |
 | `--list-gt` | List available ground truth files |
@@ -300,10 +296,8 @@ URL: `http://localhost:5173/viewer/benchmarks`
 | Flag | Description |
 |------|-------------|
 | `--regen` | Clear and regenerate all extraction artifacts |
-| `--audit-log` | Save structured audit logs per model |
 | `--timeout N` | Per-model timeout in seconds (default: 300) |
 | `--local-only` | Skip cloud models (no API key needed) |
-| `--exgraph` | Use exgraph v2 pipeline |
 | `--all-videos` | Run each model across every video in `audio_manifest.yaml` (multi-video; uses `scripts/bench_extract_per_video.py` instead of single-video pytest path) |
 | `--label NAME` | Label for this run (used in runs/ dir name) |
 | `--models LIST` | Run only specific models (comma-separated) |
@@ -585,7 +579,7 @@ class BenchmarkConfig:
 | `LLM_MODEL` | Model selection | `gpt-4o-mini` |
 | `LLM_BASE_URL` | Custom endpoint (vLLM, Ollama) | OpenAI |
 | `HF_TOKEN` | Pyannote diarization models | -- |
-| `EXGRAPH_ENABLED` | Enable exgraph v2 pipeline | `false` |
+| `DAGSTER_S3_ENDPOINT_URL` | MinIO endpoint (local container in dev / cluster Tenant via port-forward in ops mode) | `http://localhost:9000` |
 | `TEST_OUTPUT_ROOT` | Override test output location | `.test-output` |
 | `PROMPT_REGISTRY_DIR` | Prompt file directory | `k8s/shared/prompts/` |
 

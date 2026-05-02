@@ -242,7 +242,6 @@ def _interactive_prompt() -> argparse.Namespace:
         view=False,
         score=False,
         report=False,
-        compare_runs=None,
         chunk_size=None,
     )
 
@@ -519,7 +518,6 @@ examples:
     # ── Deprecated (kept for backward compat) ────────────────────────
     config.add_argument("--generate-ground-truth", action="store_true", help=argparse.SUPPRESS)
     config.add_argument("--ground-truth-model", type=str, default="gpt-4o", help=argparse.SUPPRESS)
-    config.add_argument("--compare-runs", type=str, metavar="RUN1,RUN2", help=argparse.SUPPRESS)
 
     args = parser.parse_args()
 
@@ -585,11 +583,6 @@ examples:
         # Same as score but just rebuild report
         _score_latest(store)
         return
-
-    if getattr(args, "compare_runs", None):
-        raise NotImplementedError(
-            "--compare-runs is not yet implemented. Manually compare reports under s3://<bucket>/bench/runs/"
-        )
 
     # ── Ensemble-only mode (no model runs) ──────────────────────────────
     if args.ensemble_gt and not args.full:

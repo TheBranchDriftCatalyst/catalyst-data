@@ -290,13 +290,10 @@ python tests/benchmark_harness.py
 python tests/benchmark_harness.py --regen --timeout 600
 
 # With audit logs for Gantt chart visualization
-python tests/benchmark_harness.py --regen --audit-log
+python tests/benchmark_harness.py --regen
 
 # Full methodology: run models -> ensemble ground truth -> score -> report
 python tests/benchmark_harness.py --full
-
-# Compare v1 (legacy) vs v2 (exgraph) pipelines side-by-side
-python tests/benchmark_harness.py --compare
 
 # Generate ensemble ground truth from existing fixtures
 python tests/benchmark_harness.py --ensemble-gt
@@ -315,10 +312,7 @@ The harness supports an interactive mode (run with no flags) that presents a men
 [1] Full methodology (run models -> ensemble GT -> score -> report)
 [2] Regenerate all extraction fixtures
 [3] Generate ensemble ground truth only
-[4] Save detailed audit logs
-[5] Skip cloud models (no API key needed)
-[6] Use exgraph v2 pipeline
-[7] Compare v1 vs v2 (runs both, side-by-side report)
+[4] Skip cloud models (no API key needed)
 ```
 
 ---

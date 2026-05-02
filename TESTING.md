@@ -31,7 +31,7 @@ task bench:chunks:regen:congress                   # bill_chunks (needs CONGRESS
 task bench:chunks:regen:leaks                      # leak_chunks (no creds)
 
 # Full benchmark (single-video, run all models, generate ground truth, score, report):
-PYTHONPATH=. python tests/benchmark_harness.py --full --exgraph
+PYTHONPATH=. python tests/benchmark_harness.py --full
 
 # Multi-video benchmark (per-doc-id extractions for every manifest video):
 PYTHONPATH=. python tests/benchmark_harness.py --all-videos --models gliner-medium
@@ -361,11 +361,10 @@ See [BENCHMARK.md](BENCHMARK.md) for the full extraction benchmark reference, in
 | `CHUNK_OVERLAP` | Default chunker overlap | `200` |
 | `DAGSTER_CODE_LOCATION` | Congress tests | `congress_data` |
 | `PROMPT_REGISTRY_DIR` | Prompt directory | auto-detected |
-| `EXGRAPH_ENABLED` | Enable exgraph v2 pipeline | `false` |
 | `TEST_OUTPUT_ROOT` | Override test output location | `.test-output` |
 | `BENCH_ONLY_DOC_IDS` | Restrict `--all-videos` extraction to a subset (comma-separated `doc_id`s); set by harness when narrowing | -- |
 | `BENCH_SAMPLE_PER_DOMAIN` | Cap chunks per domain in `test_extraction_e2e` and the harness's in-process fixtures. open-leaks materializes 3.6M+ chunks so a full extraction is intractable; set to `0` to disable the cap | `50` |
-| `DAGSTER_IO_BACKEND` | IO manager selection for each code location (`local` writes to `.test-output/<domain>/...` via `LocalJsonIOManager`; `minio` writes to S3 via `MinioIOManager`). `task dev` and the integration tests set `local`; production sets `minio` | `minio` |
+| `DAGSTER_S3_ENDPOINT_URL` | MinIO endpoint — `http://localhost:9000` for the Tilt-managed local container in dev, the cluster Tenant via Tiltfile.prod's port-forward in ops mode | `http://localhost:9000` |
 | `WHISPER_MODEL_CACHE` | Local cache dir for Whisper model weights (env-driven; was previously hard-coded to `/data/whisper-models`). Local dev typically uses `~/.cache/whisper-models` | `~/.cache/whisper-models` |
 | `SAVE_AUDIT_LOG` | Persist per-video audit events when `--audit-log` is set on the harness | `""` (off) |
 | `CATALYST_TELEMETRY` | Force-enable OTEL metrics + tracing export from CLI scripts. Default off outside Dagster — dev tooling stays silent and doesn't try to reach `alloy.monitoring.svc.cluster.local`. Set to `1` / `true` / `yes` / `on` to opt in. Inside Dagster (DAGSTER_RUN_ID/DAGSTER_HOME set) telemetry initializes automatically regardless. | `""` (auto: on inside Dagster, off otherwise) |

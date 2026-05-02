@@ -133,28 +133,11 @@ def media_assertions(chunks, media_mentions, extraction: ExtractionResource):
     ).assertions
 ```
 
-## Strangler Fig Migration
-
-Enable the new pipeline with an environment variable:
+## Benchmarking
 
 ```bash
-# Use old pipeline (default)
-EXGRAPH_ENABLED=false
-
-# Use new pipeline
-EXGRAPH_ENABLED=true
-```
-
-The flag is read by `dagster_io/extraction.py`. Both pipelines produce identical output formats — `extract_validated()` and the benchmark suite work with either.
-
-### Benchmarking
-
-```bash
-# Benchmark with v1 (current):
-PYTHONPATH=. pytest tests/test_extraction_benchmark.py::TestRunAll -v -s
-
-# Benchmark with v2 (exgraph):
-EXGRAPH_ENABLED=true PYTHONPATH=. pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --regen
+# ExGraph is the only extraction pipeline (CD-ys8n closed the strangler fig).
+PYTHONPATH=. pytest tests/test_extraction_benchmark.py::TestRunAll -v -s --regen
 ```
 
 ## Module Reference
@@ -167,7 +150,6 @@ EXGRAPH_ENABLED=true PYTHONPATH=. pytest tests/test_extraction_benchmark.py::Tes
 | `stage.py` | `build_stage_graph()` — generic extract→validate→repair loop |
 | `pipeline.py` | `build_pipeline()` — chains stages, `pipeline_result_to_legacy()` |
 | `resource.py` | ExtractionResource — Dagster ConfigurableResource |
-| `dispatch.py` | Strangler fig dispatcher (EXGRAPH_ENABLED) |
 | `ensemble.py` | EnsembleExtractNode, ConsensusVoter |
 | `nodes/extract.py` | Generic ExtractNode |
 | `nodes/validate.py` | Generic ValidateNode (MCP contract validation) |
