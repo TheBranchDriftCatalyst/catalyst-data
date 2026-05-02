@@ -183,8 +183,23 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
             "segments": merged_segments,
             "speaker_text": _build_speaker_text(merged_segments),
         }
-        seg_key = f"gold/media_ingest/media/media_segment_merge/{doc_id}/data.json"
-        s3.put_object(seg_key, json.dumps(seg_payload, default=str).encode("utf-8"))
+        # MinioIOManager.load_input reads _metadata.json first to determine
+        # format, then data.<ext>. Both have to exist or load_input raises
+        # NoSuchKey.
+        seg_prefix = f"gold/media_ingest/media/media_segment_merge/{doc_id}"
+        seg_payload_bytes = json.dumps(seg_payload, default=str).encode("utf-8")
+        seg_meta = {
+            "format": "json",
+            "size_bytes": len(seg_payload_bytes),
+            "code_location": "media_ingest",
+            "asset_key": "media_segment_merge",
+            "partition": doc_id,
+            "layer": "gold",
+            "upstream_assets": [],
+            "stub": "dev-seed",
+        }
+        s3.put_object(f"{seg_prefix}/_metadata.json", json.dumps(seg_meta).encode("utf-8"))
+        s3.put_object(f"{seg_prefix}/data.json", seg_payload_bytes)
 
         try:
             result = materialize(
@@ -223,16 +238,15 @@ def _seed_congress(limit: int, with_gold: bool, regen: bool) -> dict:
         return {"materialized": 0, "skipped": limit, "errors": 0}
 
     import yaml
-    from congress_data.assets.bills.bronze import (
+    from congress_data.assets.bill_tail import (
         bill_actions,
+        bill_chunks,
         bill_cosponsors,
         bill_detail,
+        bill_document,
         bill_full_text,
         bill_text_versions,
     )
-    from congress_data.assets.bills.silver import bill_chunks, bill_document
-    from congress_data.partitions import bill_partitions  # noqa: F401  -- reserved for re-export
-    from congress_data.resources import CongressAPIResource
     from dagster import DagsterInstance, materialize
 
     from dagster_io import ChunkingResource, EmbeddingResource, select_io_managers
@@ -265,12 +279,7 @@ def _seed_congress(limit: int, with_gold: bool, regen: bool) -> dict:
         return {"materialized": 0, "skipped": 0, "errors": 0}
 
     resources = {
-        **{
-            k: v
-            for k, v in select_io_managers(default_local_dir=".test-output/congress-data").items()
-            if k == "io_manager"
-        },
-        "congress_api": CongressAPIResource(),
+        **select_io_managers(default_local_dir=".test-output/congress-data"),
         "chunking": ChunkingResource(),
         "embeddings": EmbeddingResource(),
         "embedding_seed": EmbeddingResource(),
