@@ -1,3 +1,4 @@
+from media_ingest.assets.bench_overrides_snapshot import bench_overrides_snapshot
 from media_ingest.assets.chunks import media_chunks
 from media_ingest.assets.diarization import media_diarization, media_segment_merge
 from media_ingest.assets.discovery import media_files
@@ -26,4 +27,6 @@ __all__ = [
     # Speaker identity (CD-34j.1)
     "media_speaker_embeddings",
     "media_speaker_profiles",
+    # Bench/training data plumbing (Phase 2/3)
+    "bench_overrides_snapshot",
 ]

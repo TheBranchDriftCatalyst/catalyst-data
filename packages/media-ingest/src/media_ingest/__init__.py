@@ -40,6 +40,7 @@ _k8s_executor = make_k8s_executor("media_ingest")
 _run_status_sensors = make_run_status_sensor("media_ingest")
 
 from media_ingest.assets import (
+    bench_overrides_snapshot,
     media_chunks,
     media_diarization,
     media_documents,
@@ -73,6 +74,9 @@ defs = Definitions(
         # Speaker identity (CD-34j.1)
         media_speaker_embeddings,
         media_speaker_profiles,
+        # Bench/training plumbing — postgres → S3 snapshot for deterministic
+        # training-dataset materialization (Phase 2/3).
+        bench_overrides_snapshot,
     ],
     sensors=[
         media_document_sensor,
