@@ -46,6 +46,27 @@ from tests.shared.report import build_report_json
 from tests.shared.store import BenchmarkStore
 
 
+def _ansi_palette(use_color: bool) -> dict[str, str]:
+    """ANSI escape palette gated on TTY presence — synthwave-leaning.
+
+    Keys are 1-2 char so call-site f-strings stay readable. Returns empty
+    strings when ``use_color`` is false, so log files / piped output stay
+    plain ASCII.
+    """
+    if not use_color:
+        return {k: "" for k in ("x", "k", "m", "c", "y", "g", "e", "r")}
+    return {
+        "x": "\033[0m",  # reset
+        "k": "\033[38;5;245m",  # zinc-ish neutral
+        "m": "\033[38;5;201m",  # synthwave magenta
+        "c": "\033[38;5;51m",  # neon cyan
+        "y": "\033[38;5;227m",  # CRT yellow
+        "g": "\033[38;5;46m",  # signal green
+        "e": "\033[38;5;253m",  # bright eggshell (default value text)
+        "r": "\033[38;5;196m",  # alert red
+    }
+
+
 def _run_model(
     cfg: ModelConfig,
     timeout: int,
@@ -89,7 +110,7 @@ def _run_model(
             sys.executable,
             "-m",
             "pytest",
-            "tests/test_pipeline_integration.py",
+            "tests/test_extraction_e2e.py",
             "-k",
             "extraction_produces_mentions",
             "-v",
@@ -696,41 +717,108 @@ examples:
     n_cloud = sum(1 for m in models if "cloud" in m.tags)
     n_encoder = sum(1 for m in models if "encoder" in m.tags)
 
-    # Honest accounting: in single-video mode we'll only process ONE video
-    # (the integration-test demo). Showing "7 manifest videos" here misleads
-    # users who haven't passed --all-videos. The corpus line scopes to what
-    # will actually run.
+    # The --all-videos extraction subprocess (scripts/bench_extract_per_video.py)
+    # only walks media-ingest chunks per audio_manifest doc_id — it never touches
+    # congress / open-leaks. Scope the displayed count accordingly so we don't
+    # mislead the operator into thinking they're about to extract over 3.6M chunks.
+    media_chunks_in_pool = [c for c in benchmark_chunks if (c.get("metadata") or {}).get("source") == "media_ingest"]
     if args.all_videos:
         scope_label = "multi-video (--all-videos · media-ingest)"
         active_video_label = f"{len(manifest_videos)} manifest video(s)"
-        active_chunks = len(benchmark_chunks)  # merged across all manifest docs
+        active_chunks = len(media_chunks_in_pool)
     else:
         scope_label = "single-video (demo_video)"
         active_video_label = "1 demo video (demo_video.mp4)"
-        # Single-video scope: count chunks that match the demo doc; the
-        # integration test fixture path also feeds a `:full` legacy chunk in
-        # some configurations, so we count both demo doc-id forms.
         active_chunks = sum(
-            1 for c in benchmark_chunks if c.get("document_id") in {"demo-video", "test-demo-video", ""}
+            1 for c in media_chunks_in_pool if c.get("document_id") in {"demo-video", "test-demo-video", ""}
         )
 
-    print(f"\n{'═' * 78}")
-    print("  catalyst-data │ extraction benchmark harness")
-    print(f"  pipeline = {pipeline_label_str:<20} run-label = {pipeline_label or '(auto)'}")
-    print(f"{'─' * 78}")
-    print(f"  models      {len(models):<3} ({n_encoder} encoder · {n_local - n_encoder} local-llm · {n_cloud} cloud)")
-    print(
-        f"  corpus      {active_video_label} · "
-        f"{len(cached_audio_doc_ids)} audio-cached available · "
-        f"{active_chunks} benchmark chunks in scope"
-    )
-    print(f"  scope       {scope_label} · timeout={args.timeout}s · regen={args.regen} · audit={args.audit_log}")
-    print(f"  chunker     chunk_size={chunk_size_str}")
-    print(f"  output      {store.runs_dir.relative_to(ROOT)}/<run-id>/")
-    print(f"{'═' * 78}\n")
-
-    # Create a run for this benchmark session (pipeline_label resolved above for the header)
+    # Create the run BEFORE rendering the header so the run_id can be included.
     run = store.create_run(label=pipeline_label)
+
+    # Resolve every detail the operator might want before kicking off a multi-minute run.
+    candidate_path = getattr(args, "candidates", None)
+    candidate_ids = _load_candidate_chunk_ids(candidate_path) if candidate_path else None
+    cloud_endpoint = next(
+        (m.base_url for m in models if "cloud" in m.tags and m.base_url),
+        os.environ.get("LLM_BASE_URL", "http://litellm.catalyst-llm.svc.cluster.local:4000/v1"),
+    )
+    local_endpoint = next(
+        (m.base_url for m in models if "cloud" not in m.tags and m.base_url),
+        os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+    )
+    embed_provider = os.environ.get("EMBEDDING_PROVIDER", "openai")
+    embed_model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+    telemetry = os.environ.get("CATALYST_TELEMETRY", "0") in ("1", "true", "yes")
+    sample_cap = os.environ.get("BENCH_SAMPLE_PER_DOMAIN") or "—"
+    try:
+        git_sha = (
+            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), stderr=subprocess.DEVNULL)
+            .decode()
+            .strip()
+        )
+    except Exception:
+        git_sha = "unknown"
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+    # ANSI gated on isatty so log files stay clean.
+    _C = _ansi_palette(sys.stdout.isatty())
+
+    banner = (
+        f"{_C['m']}╭─────────────────────────────────────────────────────────────────────────╮{_C['x']}\n"
+        f"{_C['m']}│{_C['x']} {_C['c']}╔═╗╔═╗╔╦╗╔═╗╦ ╦ ╦╔═╗╔╦╗{_C['x']}{_C['k']}-{_C['x']}{_C['c']}╔╦╗╔═╗╔╦╗╔═╗{_C['x']}    "
+        f"{_C['y']}//{_C['x']} {_C['k']}extraction benchmark harness    {_C['x']}{_C['m']}│{_C['x']}\n"
+        f"{_C['m']}│{_C['x']} {_C['c']}║  ╠═╣ ║ ╠═╣║ ╚╦╝╚═╗ ║ {_C['x']}{_C['k']} {_C['x']}{_C['c']} ║║╠═╣ ║ ╠═╣{_C['x']}    "
+        f"{_C['y']}//{_C['x']} {_C['k']}catalyst-dev / dj             {_C['x']}{_C['m']}│{_C['x']}\n"
+        f"{_C['m']}│{_C['x']} {_C['c']}╚═╝╩ ╩ ╩ ╩ ╩╩═╝╩ ╚═╝ ╩ {_C['x']}{_C['k']}-{_C['x']}{_C['c']}═╩╝╩ ╩ ╩ ╩ ╩{_C['x']}    "
+        f"{_C['y']}//{_C['x']} {_C['k']}{git_sha} · py{py_ver}        {_C['x']}{_C['m']}│{_C['x']}\n"
+        f"{_C['m']}╰─────────────────────────────────────────────────────────────────────────╯{_C['x']}"
+    )
+    print()
+    print(banner)
+
+    def _row(label: str, value: str, *, accent: str = _C["e"]) -> str:
+        return f"  {_C['k']}{label:<11}{_C['x']}{accent}{value}{_C['x']}"
+
+    print()
+    print(_row("run_id", str(run.dir.name), accent=_C["c"]))
+    print(_row("pipeline", f"{pipeline_label_str}  ·  label={pipeline_label or '(auto)'}"))
+    print(
+        _row(
+            "models",
+            f"{len(models)}  ·  {n_encoder} encoder · {n_local - n_encoder} local-llm · {n_cloud} cloud",
+        )
+    )
+    print(
+        _row(
+            "corpus",
+            f"{active_video_label}  ·  {len(cached_audio_doc_ids)} audio-cached  ·  {active_chunks} chunks in scope",
+        )
+    )
+    print(_row("scope", f"{scope_label}  ·  timeout={args.timeout}s  ·  regen={args.regen}  ·  audit={args.audit_log}"))
+    print(_row("chunker", f"chunk_size={chunk_size_str}"))
+    print(
+        _row(
+            "candidates",
+            (
+                f"{len(candidate_ids)} chunk_ids  ·  {candidate_path.relative_to(ROOT) if candidate_path and candidate_path.is_relative_to(ROOT) else candidate_path}"
+                if candidate_ids
+                else "(none — full pool)"
+            ),
+            accent=_C["y"] if candidate_ids else _C["k"],
+        )
+    )
+    print(_row("llm cloud", cloud_endpoint, accent=_C["c"]))
+    print(_row("llm local", local_endpoint, accent=_C["c"]))
+    print(_row("embedding", f"{embed_provider}  ·  {embed_model}"))
+    print(_row("sample cap", f"BENCH_SAMPLE_PER_DOMAIN={sample_cap}"))
+    print(
+        _row(
+            "telemetry", f"CATALYST_TELEMETRY={'on' if telemetry else 'off'}", accent=_C["g"] if telemetry else _C["k"]
+        )
+    )
+    print(_row("output", f"{run.dir.relative_to(ROOT)}/"))
+    print()
 
     if args.regen:
         # Clear legacy extraction cached artifacts
