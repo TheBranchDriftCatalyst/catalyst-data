@@ -1,141 +1,60 @@
 #!/usr/bin/env python3
-"""Regenerate per-video audio cache (transcription + diarization).
+"""Regenerate per-video audio fixtures via Dagster materialize.
 
-Reads packages/media-ingest/tests/fixtures/audio_manifest.yaml, runs the production
-transcription dispatcher (_select_backend) + diarization pipeline (_run_diarization
-+ _assign_speakers) on each video, and saves outputs to per-doc-id subdirs:
+Drives ``dagster.materialize`` against the production
+``media_transcriptions`` + ``media_diarization`` + ``media_segment_merge``
+assets — same code path as prod, output lands in S3 (the local
+Tilt-managed MinIO container in dev) at the canonical medallion paths:
 
-    .test-output/media-ingest/pipeline-cache/<doc_id>/0_transcription.json
-                                              <doc_id>/1_diarization.json
+    s3://dagster/gold/media_ingest/media/media_transcriptions/<doc_id>/data.json
+    s3://dagster/gold/media_ingest/media/media_diarization/<doc_id>/data.json
+    s3://dagster/gold/media_ingest/media/media_segment_merge/<doc_id>/data.json
 
-Same code path as production media_transcriptions / media_diarization assets,
-so what the test exercises matches what would deploy. Backend is selected via
-WHISPER_BACKEND env (mlx-whisper on Apple Silicon is the fast path).
+Reads ``packages/media-ingest/tests/fixtures/audio_manifest.yaml`` for the
+list of videos. Pre-seeds ``media_documents`` from the manifest + on-disk
+mp4 sizes (no NFS scanner required) and declares it as a SourceAsset.
 
 Usage::
 
-    HF_TOKEN=hf_xxx python scripts/regen_audio_fixtures.py
-    HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper python scripts/regen_audio_fixtures.py
-    HF_TOKEN=hf_xxx python scripts/regen_audio_fixtures.py --force      # regenerate even if cached
-    HF_TOKEN=hf_xxx python scripts/regen_audio_fixtures.py --only demo-video,inside-the-aipac-pipeline
+    HF_TOKEN=hf_xxx task bench:fixtures:regen
+    HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
+    HF_TOKEN=hf_xxx python scripts/fixtures/regen_audio_fixtures.py --force
+    HF_TOKEN=hf_xxx python scripts/fixtures/regen_audio_fixtures.py --only demo-video,inside-the-aipac-pipeline
 
-Audio sub-stages each video goes through:
-
-  1. Transcription (slow, cached) — Whisper via _select_backend(MediaIngestConfig)
-  2. Diarization  (slow, cached) — pyannote, MPS/CUDA/CPU auto-selected
-  3. Segment merge (fast, NOT cached) — recomputed on benchmark invocation
-  4. Chunking      (fast, NOT cached) — ChunkingResource.chunk_speaker_segments
-
-Steps 1 + 2 are what this script populates. The chunker reads cached output
-and runs in milliseconds when needed.
+Cache check: re-materializing is unconditional when called via this
+script (Dagster's ``materialize`` always re-runs the selected assets).
+``--only`` narrows the partition list, ``--skip-diarization`` runs
+transcription only.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
 from pathlib import Path
 
-# Allow running from repo root without installing
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "packages" / "media-ingest" / "src"))
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "packages" / "media-ingest" / "src"))
+sys.path.insert(0, str(ROOT / "libs" / "dagster-io" / "src"))
+
+# Force the local MinIO endpoint before any dagster_io import — same
+# pattern as scripts/dev/seed_local.py. CATALYST_SEED_S3_ENDPOINT is the
+# explicit override for non-default targets.
+_endpoint_override = os.environ.get("CATALYST_SEED_S3_ENDPOINT")
+os.environ["DAGSTER_S3_ENDPOINT_URL"] = _endpoint_override or "http://localhost:9000"
+os.environ["DAGSTER_S3_ACCESS_KEY"] = os.environ.get("CATALYST_SEED_S3_ACCESS_KEY", "minio")
+os.environ["DAGSTER_S3_SECRET_KEY"] = os.environ.get("CATALYST_SEED_S3_SECRET_KEY", "minio123")
+os.environ["DAGSTER_S3_BUCKET"] = os.environ.get("CATALYST_SEED_S3_BUCKET", "dagster")
+os.environ["DAGSTER_CODE_LOCATION"] = "media_ingest"
 
 import yaml  # noqa: E402
-from media_ingest.assets.diarization import _assign_speakers, _run_diarization  # noqa: E402
-from media_ingest.assets.transcription import _select_backend, _validate_transcription_fidelity  # noqa: E402
-from media_ingest.config import MediaIngestConfig  # noqa: E402
-from tests.shared.store import BenchmarkStore  # noqa: E402
 
 FIXTURE_DIR = ROOT / "packages" / "media-ingest" / "tests" / "fixtures"
 MANIFEST = FIXTURE_DIR / "audio_manifest.yaml"
-
-
-def _build_config() -> MediaIngestConfig:
-    """Same config-from-env shape as the integration test fixture."""
-    return MediaIngestConfig(
-        whisper_backend=os.environ.get("WHISPER_BACKEND", "faster-whisper"),
-        whisper_model=os.environ.get("WHISPER_MODEL", "base"),
-        whisper_device=os.environ.get("WHISPER_DEVICE", "cpu"),
-        whisper_compute_type=os.environ.get("WHISPER_COMPUTE_TYPE", "int8"),
-        mlx_model_id=os.environ.get("MLX_MODEL_ID", "mlx-community/whisper-base-mlx"),
-    )
-
-
-def _transcribe(video_path: Path, doc_id: str, title: str, config: MediaIngestConfig) -> dict:
-    sys.stdout.write("\n" + "=" * 70 + "\n")
-    sys.stdout.write(f"  [regen] {doc_id} — STAGE 1/2: TRANSCRIPTION\n")
-    sys.stdout.write(f"  Backend: {config.whisper_backend}\n")
-    sys.stdout.write(f"  Audio:   {video_path.name}\n")
-    sys.stdout.write("=" * 70 + "\n")
-    sys.stdout.flush()
-
-    print(f"  Loading {config.whisper_backend}...", flush=True)
-    model, resolved_device, model_label, transcribe_fn = _select_backend(config)
-
-    print(f"  Transcribing ({model_label} on {resolved_device})...", flush=True)
-    start = time.monotonic()
-    result = transcribe_fn(model, str(video_path))
-    duration = time.monotonic() - start
-
-    for w in _validate_transcription_fidelity(result, config.whisper_backend, model_label):
-        print(f"\n  ⚠️  {w}", flush=True)
-
-    print(f"  Transcription complete: {len(result['segments'])} segments in {duration:.1f}s", flush=True)
-    return {
-        "document_id": doc_id,
-        "title": title,
-        "text": " ".join(s["text"] for s in result["segments"]),
-        "language": result["language"],
-        "language_probability": result["language_probability"],
-        "duration_s": result["duration_s"],
-        "segments": result["segments"],
-        "segment_count": len(result["segments"]),
-        "source_path": str(video_path),
-        "backend": config.whisper_backend,
-        "model_label": model_label,
-        "resolved_device": resolved_device,
-        "transcribe_time_s": round(duration, 1),
-    }
-
-
-def _diarize(video_path: Path, transcription: dict, doc_id: str, store: BenchmarkStore) -> dict:
-    hf_token = os.environ.get("HF_TOKEN", "")
-    if not hf_token:
-        raise RuntimeError("HF_TOKEN not set — required for pyannote diarization")
-
-    sys.stdout.write("\n" + "=" * 70 + "\n")
-    sys.stdout.write(f"  [regen] {doc_id} — STAGE 2/2: DIARIZATION\n")
-    sys.stdout.write("  Backend: pyannote.audio (auto cuda → mps → cpu)\n")
-    sys.stdout.write("=" * 70 + "\n")
-    sys.stdout.flush()
-
-    # Reuse the local model cache the integration test uses
-    local_cache = str(store.pipeline_cache_dir / "model_cache")
-    os.makedirs(local_cache, exist_ok=True)
-
-    print("  Running pyannote diarization (production code path)...", flush=True)
-    start = time.monotonic()
-    diarization, device = _run_diarization(str(video_path), hf_token, local_cache)
-    segments = _assign_speakers(transcription["segments"], diarization)
-    unique_speakers = {s.get("speaker") for s in segments if s.get("speaker")}
-    duration = time.monotonic() - start
-
-    print(
-        f"  Diarization complete: {len(unique_speakers)} speakers on {device} in {duration:.1f}s",
-        flush=True,
-    )
-    return {
-        **transcription,
-        "segments": segments,
-        "speaker_count": len(unique_speakers),
-        "speakers": sorted(unique_speakers) if unique_speakers else [],
-        "speaker_text": None,
-        "diarization_time_s": round(duration, 1),
-        "diarization_device": device,
-    }
 
 
 def _human(seconds: float) -> str:
@@ -144,13 +63,61 @@ def _human(seconds: float) -> str:
     return f"{int(seconds // 60)}m{int(seconds % 60)}s"
 
 
+def _seed_media_documents_to_s3() -> int:
+    """Pre-seed silver/media_ingest/media/media_documents/data.jsonl from
+    the manifest + on-disk mp4 sizes. Same shape the production
+    media_documents asset would produce, just bypassing the NFS scanner.
+    Returns count of docs written.
+    """
+    from media_ingest.assets.documents import _file_to_document
+
+    from dagster_io.s3_client import S3Client
+
+    s3 = S3Client(
+        endpoint_url=os.environ["DAGSTER_S3_ENDPOINT_URL"],
+        access_key=os.environ["DAGSTER_S3_ACCESS_KEY"],
+        secret_key=os.environ["DAGSTER_S3_SECRET_KEY"],
+        bucket=os.environ["DAGSTER_S3_BUCKET"],
+    )
+
+    videos = (yaml.safe_load(MANIFEST.read_text()) or {}).get("videos", [])
+    docs = []
+    for entry in videos:
+        mp4 = FIXTURE_DIR / entry["file"]
+        if not mp4.exists():
+            continue
+        file_info = {
+            "filename": mp4.name,
+            "source_dir": "/data/metube",
+            "path": f"/data/metube/{mp4.name}",
+            "extension": mp4.suffix,
+            "size_bytes": mp4.stat().st_size,
+            "metadata": {"title": entry.get("title") or mp4.stem, "doc_id": entry["doc_id"]},
+        }
+        docs.append(_file_to_document(file_info).model_dump(mode="json"))
+
+    payload = "\n".join(json.dumps(d, default=str) for d in docs) + ("\n" if docs else "")
+    prefix = "silver/media_ingest/media/media_documents"
+    meta = {
+        "format": "jsonl",
+        "size_bytes": len(payload.encode("utf-8")),
+        "row_count": len(docs),
+        "code_location": "media_ingest",
+        "asset_key": "media_documents",
+        "partition": None,
+        "layer": "silver",
+        "upstream_assets": [],
+        "stub": "regen-audio",
+    }
+    s3.put_object(f"{prefix}/_metadata.json", json.dumps(meta).encode("utf-8"))
+    s3.put_object(f"{prefix}/data.jsonl", payload.encode("utf-8"))
+    return len(docs)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--manifest", type=Path, default=MANIFEST, help=f"Path to manifest YAML (default {MANIFEST})")
     parser.add_argument("--only", default=None, help="Comma-separated list of doc_ids to process (default: all)")
-    parser.add_argument(
-        "--force", action="store_true", help="Regenerate even if cached transcription/diarization exists"
-    )
     parser.add_argument(
         "--skip-diarization",
         action="store_true",
@@ -158,81 +125,114 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if not args.manifest.exists():
-        print(f"error: manifest not found at {args.manifest}", file=sys.stderr)
-        return 2
-    manifest = yaml.safe_load(args.manifest.read_text()) or {}
-    videos = manifest.get("videos") or []
-    if not videos:
-        print(f"error: no videos in manifest {args.manifest}", file=sys.stderr)
+    if not args.skip_diarization and not os.environ.get("HF_TOKEN"):
+        print("ERROR: HF_TOKEN required for diarization. Set HF_TOKEN or pass --skip-diarization.", file=sys.stderr)
         return 2
 
+    if not args.manifest.exists():
+        print(f"ERROR: manifest not found at {args.manifest}", file=sys.stderr)
+        return 2
+
+    raw = yaml.safe_load(args.manifest.read_text()) or {}
+    videos = raw.get("videos", []) or []
     only = set(args.only.split(",")) if args.only else None
     if only:
         videos = [v for v in videos if v["doc_id"] in only]
         if not videos:
             print("error: --only filter matched 0 entries in manifest", file=sys.stderr)
             return 2
-
-    config = _build_config()
-    store = BenchmarkStore()
+    if not videos:
+        print("error: manifest has no videos")
+        return 2
 
     print(f"\n{'─' * 70}")
-    print(f"  Regenerating audio fixtures for {len(videos)} video(s)")
-    print(
-        f"  Backend: {config.whisper_backend}  ({config.mlx_model_id if config.whisper_backend == 'mlx-whisper' else config.whisper_model})"
-    )
-    print(f"  Cache:   {store.pipeline_cache_dir}")
+    print(f"  Regenerating audio fixtures via Dagster materialize for {len(videos)} video(s)")
+    print(f"  Output: s3://{os.environ['DAGSTER_S3_BUCKET']}/gold/media_ingest/media/media_{{transcriptions,diarization,segment_merge}}/<doc_id>/data.json")
+    print(f"  Backend: {os.environ.get('WHISPER_BACKEND', 'faster-whisper')}")
     if args.skip_diarization:
         print("  Skipping diarization (--skip-diarization)")
     print(f"{'─' * 70}\n")
 
+    # Seed media_documents (the silver upstream the gold transcription asset
+    # consumes). Same trick the dev seed uses — pre-write it to S3 + declare
+    # as a SourceAsset for the materialize call below.
+    n_docs = _seed_media_documents_to_s3()
+    print(f"  ✓ media_documents pre-seeded: {n_docs} docs → silver/media_ingest/media/media_documents/data.jsonl")
+
+    # Now drive Dagster materialize. Same code path as prod — Whisper +
+    # pyannote run via the actual asset bodies; output flows through
+    # MinioIOManager to s3://dagster/gold/...
+    from dagster import AssetKey, DagsterInstance, SourceAsset, materialize
+    from media_ingest.assets.diarization import media_diarization, media_segment_merge
+    from media_ingest.assets.transcription import media_transcriptions
+    from media_ingest.config import MediaIngestConfig
+
+    from dagster_io import EmbeddingResource, select_io_managers
+
+    media_documents_source = SourceAsset(
+        key=AssetKey(["media_documents"]),
+        metadata={"layer": "silver"},
+    )
+
+    resources = {
+        **{
+            k: v
+            for k, v in select_io_managers(default_local_dir=".test-output/media-ingest").items()
+            if k in ("io_manager", "optional_io_manager")
+        },
+        # Embeddings aren't actually used by transcription/diarization but the
+        # resources dict in media_ingest/__init__.py declares them, so mirror.
+        "embedding": EmbeddingResource(),
+        "embeddings": EmbeddingResource(),
+        "embedding_seed": EmbeddingResource(),
+    }
+    for key in ("embedding", "embeddings", "embedding_seed"):
+        resources[key].setup_for_execution(None)
+
+    # MediaIngestConfig is read from env (WHISPER_BACKEND, WHISPER_MODEL, etc.)
+    # by the asset body — no override needed here, just make sure env is set.
+    config = MediaIngestConfig()
+    print(f"  Whisper config: backend={config.whisper_backend} model={config.whisper_model} device={config.whisper_device}")
+
+    instance = DagsterInstance.ephemeral()
+    instance.add_dynamic_partitions("media_document", [v["doc_id"] for v in videos])
+
+    selection = [media_documents_source, media_transcriptions]
+    if not args.skip_diarization:
+        selection += [media_diarization, media_segment_merge]
+
     overall_start = time.monotonic()
     succeeded = 0
-    skipped = 0
     failed: list[tuple[str, str]] = []
 
     for entry in videos:
         doc_id = entry["doc_id"]
         title = entry.get("title", doc_id)
-        video_path = (FIXTURE_DIR / entry["file"]).resolve()
-        if not video_path.exists():
-            print(f"  ✗ {doc_id}: source file missing — {video_path}")
-            failed.append((doc_id, "source file missing"))
-            continue
-
-        # Cache check
-        cached_t = store.load_pipeline_artifact("transcription", doc_id=doc_id)
-        cached_d = store.load_pipeline_artifact("diarization", doc_id=doc_id)
-        if not args.force and cached_t and (cached_d or args.skip_diarization):
-            print(f"  ⊘ {doc_id}: already cached (use --force to regenerate)")
-            skipped += 1
-            continue
-
+        print(f"\n  ── {doc_id}  ({title})")
         try:
-            if args.force or not cached_t:
-                transcription = _transcribe(video_path, doc_id, title, config)
-                store.save_pipeline_artifact("transcription", transcription, doc_id=doc_id)
+            result = materialize(
+                selection,
+                resources=resources,
+                partition_key=doc_id,
+                instance=instance,
+                run_config={"resources": {"config": {"config": {}}}} if False else None,  # leave default
+            )
+            if result.success:
+                succeeded += 1
+                print(f"  ✓ {doc_id}: {len(selection) - 1} assets materialized")
             else:
-                print(f"  ↪ {doc_id}: using cached transcription")
-                transcription = cached_t
-
-            if not args.skip_diarization and (args.force or not cached_d):
-                diar = _diarize(video_path, transcription, doc_id, store)
-                store.save_pipeline_artifact("diarization", diar, doc_id=doc_id)
-
-            succeeded += 1
-        except Exception as e:
-            print(f"  ✗ {doc_id}: {type(e).__name__}: {e}", flush=True)
-            failed.append((doc_id, f"{type(e).__name__}: {e}"))
+                failed.append((doc_id, "materialize returned failure"))
+                print(f"  ✗ {doc_id}: materialize returned failure")
+        except Exception as exc:
+            failed.append((doc_id, f"{type(exc).__name__}: {exc}"))
+            print(f"  ✗ {doc_id}: {type(exc).__name__}: {exc}")
 
     total = time.monotonic() - overall_start
     print(f"\n{'─' * 70}")
-    print(f"  Done in {_human(total)}: {succeeded} succeeded, {skipped} skipped, {len(failed)} failed")
+    print(f"  Done in {_human(total)}: {succeeded} succeeded, {len(failed)} failed")
     if failed:
         for doc_id, msg in failed:
             print(f"    ✗ {doc_id}: {msg}")
-    print(f"  Cache root: {store.pipeline_cache_dir}")
     print(f"{'─' * 70}")
     return 1 if failed else 0
 

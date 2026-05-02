@@ -75,10 +75,6 @@ def _leaks_fixtures() -> Path:
     return ROOT / "packages" / "open-leaks" / "tests" / "fixtures"
 
 
-def _diarization_cache_root() -> Path:
-    return Path(os.environ.get("TEST_OUTPUT_ROOT", str(ROOT / ".test-output"))) / "media-ingest" / "pipeline-cache"
-
-
 def _print_header(name: str) -> None:
     print(f"\n{'=' * 70}\n  seed:{name}\n{'=' * 70}")
 
@@ -118,10 +114,10 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
     import yaml
     from dagster import AssetKey, DagsterInstance, SourceAsset, materialize
     from media_ingest.assets.chunks import media_chunks
-    from media_ingest.assets.diarization import _build_speaker_text, _merge_same_speaker_segments
     from media_ingest.partitions import media_partitions
 
     from dagster_io import ChunkingResource, EmbeddingResource, select_io_managers
+    from dagster_io.s3_client import S3Client
 
     if regen:
         _maybe_regen("silver/media_ingest/")
@@ -133,12 +129,25 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
         return {"materialized": 0, "skipped": 0, "errors": 0}
 
     videos = (yaml.safe_load(manifest.read_text()) or {}).get("videos", [])
-    cache_root = _diarization_cache_root()
 
-    # Filter to docs that have diarization cached (Whisper not auto-run).
+    # Filter to docs whose media_segment_merge has been materialized to S3
+    # (run `task bench:fixtures:regen` to populate it via the Dagster
+    # transcription + diarization assets — slow on first run, idempotent
+    # after). Same lookup the asset would do via its IO manager.
+    s3 = S3Client(
+        endpoint_url=os.environ["DAGSTER_S3_ENDPOINT_URL"],
+        access_key=os.environ["DAGSTER_S3_ACCESS_KEY"],
+        secret_key=os.environ["DAGSTER_S3_SECRET_KEY"],
+        bucket=os.environ["DAGSTER_S3_BUCKET"],
+    )
+
+    def _segment_merge_in_s3(doc_id: str) -> bool:
+        key = f"gold/media_ingest/media/media_segment_merge/{doc_id}/_metadata.json"
+        return s3.head_object(key) is not None
+
     available: list[dict] = []
     for entry in videos:
-        if (cache_root / entry["doc_id"] / "1_diarization.json").exists():
+        if _segment_merge_in_s3(entry["doc_id"]):
             available.append(entry)
         if len(available) >= limit:
             break
@@ -146,8 +155,9 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
     skipped = sum(1 for v in videos[: max(limit, len(videos))] if v not in available)
     if not available:
         print(
-            f"  ⊘ no diarization cache under {cache_root}/<doc_id>/1_diarization.json — "
-            "run `task bench:fixtures:regen` to populate it (Whisper + pyannote, slow)"
+            "  ⊘ no media_segment_merge in S3 — run `task bench:fixtures:regen` first "
+            "(materializes media_transcriptions + media_diarization + media_segment_merge "
+            "via Dagster, ~slow on first run)"
         )
         return {"materialized": 0, "skipped": skipped, "errors": 0}
 
@@ -238,32 +248,10 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
     errors = 0
     for entry in available:
         doc_id = entry["doc_id"]
-        diar = json.loads((cache_root / doc_id / "1_diarization.json").read_text())
-        merged_segments = _merge_same_speaker_segments(diar["segments"], gap_threshold_s=7.0)
-        seg_payload = {
-            **diar,
-            "segments": merged_segments,
-            "speaker_text": _build_speaker_text(merged_segments),
-        }
-        # MinioIOManager.load_input reads _metadata.json first to determine
-        # format, then data.<ext>. Both have to exist or load_input raises
-        # NoSuchKey.
-        seg_prefix = f"gold/media_ingest/media/media_segment_merge/{doc_id}"
-        seg_payload_bytes = json.dumps(seg_payload, default=str).encode("utf-8")
-        seg_meta = {
-            "format": "json",
-            "size_bytes": len(seg_payload_bytes),
-            "code_location": "media_ingest",
-            "asset_key": "media_segment_merge",
-            "partition": doc_id,
-            "layer": "gold",
-            "upstream_assets": [],
-            "stub": "dev-seed",
-        }
-        s3.put_object(f"{seg_prefix}/_metadata.json", json.dumps(seg_meta).encode("utf-8"))
-        s3.put_object(f"{seg_prefix}/data.json", seg_payload_bytes)
-
         try:
+            # media_chunks consumes media_segment_merge as upstream — declared
+            # as a SourceAsset since the regen step (task bench:fixtures:regen)
+            # already wrote it to S3. Dagster's IO manager loads it from there.
             result = materialize(
                 [media_segment_merge_source, media_chunks],
                 resources=resources,
