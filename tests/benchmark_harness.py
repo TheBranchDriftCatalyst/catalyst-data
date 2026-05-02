@@ -71,20 +71,28 @@ def _run_model(
     timeout: int,
     store: BenchmarkStore,
     run_id: str,
-    all_videos: bool = False,
+    all_videos: bool = False,  # retained for back-compat; in-process path runs across all domains
 ) -> dict | None:
-    """Run extraction for one model via subprocess.
+    """Run extraction for one model in-process via ``extract_validated``.
 
-    When ``all_videos=False`` (default): pytest fixture chain on tests/demo_video.mp4 (single).
-    When ``all_videos=True``: scripts/bench_extract_per_video.py iterates the manifest.
-    Returns the latest run's aggregate extraction record, loadable via ``store.load_fixture``.
+    Same code path as the production Dagster gold assets
+    (``media_mentions``/``congress_mentions``/``leak_mentions`` all call
+    ``extract_validated`` via the asset_factory). No more subprocess +
+    pytest layer — chunks are pulled from the medallion bucket via
+    ``load_chunks()`` (which globs S3 across all 3 domains) and run
+    directly against ``extract_validated`` with the model's env block
+    set. Output is written via the run-store at
+    ``s3://<bucket>/bench/runs/<run_id>/extractions/extraction_<model>.json``
+    so the report-builder + scoring code is unchanged.
 
-    ``store.local_cache_root`` is propagated as ``CATALYST_RUN_DIR`` so the
-    subprocess's ``conftest.py`` can call ``event_tail.configure_from_env()``
-    and append every audit event to the same on-disk ``events.jsonl`` that
-    the parent harness's ``RunBus`` is tailing. The S3 archive happens once,
-    at run end, via ``run.archive_events()``.
+    ``all_videos`` is retained as a no-op for CLI compatibility — the
+    in-process path is naturally cross-domain (every materialized chunk
+    is a candidate). Use ``BENCH_SAMPLE_PER_DOMAIN`` to cap volume.
     """
+    from dagster_io import TextChunk
+    from dagster_io.extraction import extract_validated
+    from tests.shared.medallion import load_chunks
+
     is_cloud = "cloud" in cfg.tags
     if is_cloud:
         api_key = cfg.api_key or os.environ.get("LLM_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
@@ -93,8 +101,10 @@ def _run_model(
         api_key = "unused"
         base_url = cfg.base_url or "http://localhost:11434/v1"
 
-    env = {
-        **os.environ,
+    # Per-model env. We mutate os.environ for the duration of the
+    # extract_validated call (extract_validated reads LLM_MODEL etc. at
+    # call time) and restore it after so the next model starts clean.
+    overrides = {
         "LLM_MODEL": cfg.model,
         "LLM_BASE_URL": base_url,
         "LLM_API_KEY": api_key,
@@ -104,47 +114,98 @@ def _run_model(
         "LLM_CONTEXT_WINDOW": str(cfg.context_window),
         "LLM_TIMEOUT": str(timeout),
         "PROMPT_REGISTRY_DIR": str(ROOT / "k8s" / "shared" / "prompts"),
-        "PYTHONPATH": str(ROOT),
-        "CATALYST_RUN_DIR": str(store.local_cache_root),
-        "CATALYST_RUN_ID": run_id,
         "CATALYST_BENCH_MODEL": cfg.name,
     }
-
-    if all_videos:
-        cmd = [sys.executable, str(ROOT / "scripts" / "bench_extract_per_video.py")]
-    else:
-        cmd = [
-            sys.executable,
-            "-m",
-            "pytest",
-            "tests/test_extraction_e2e.py",
-            "-k",
-            "extraction_produces_mentions",
-            "-v",
-            "-s",
-            "--no-header",
-            "--tb=short",
-        ]
+    saved = {k: os.environ.get(k) for k in overrides}
+    os.environ.update(overrides)
 
     try:
-        subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(ROOT),
-        )
-        # Both paths write extraction_<model>.json — single-video to legacy fixture, multi-video
-        # to runs/<run>/extractions/extraction_<model>.json (aggregate). load_fixture finds either.
-        run = store.load_run("latest")
-        if all_videos and run is not None:
-            cached = run.load_extraction(cfg.model)
-            if cached:
-                return cached
-        return store.load_fixture(f"extraction_{cfg.model}")
-    except subprocess.TimeoutExpired:
-        return None
+        # Stratified sample so cross-domain runs don't blow up on
+        # open-leaks's 3.6M-chunk corpus.
+        sample_n_raw = os.environ.get("BENCH_SAMPLE_PER_DOMAIN", "50")
+        sample_n: int | None = int(sample_n_raw)
+        if sample_n == 0:
+            sample_n = None
+        medallion_chunks = load_chunks(sample_per_domain=sample_n)
+        if not medallion_chunks:
+            event_tail.append(
+                source="harness",
+                node_name="model_run",
+                status="error",
+                model=cfg.name,
+                details={"reason": "no_chunks_in_medallion", "hint": "run task seed first"},
+            )
+            return None
+
+        eval_chunks = [TextChunk(**c) for c in medallion_chunks]
+        cap = f"{sample_n}/domain" if sample_n is not None else "full"
+        print(f"\n  [{cfg.name}] {len(eval_chunks)} chunks (cap={cap})", flush=True)
+
+        # Same shape extract_validated has always returned. The asset
+        # factory in dagster_io wraps this exact call.
+        start = time.monotonic()
+        try:
+            mentions, assertions = extract_validated(
+                eval_chunks,
+                code_location="media_ingest",  # for metric labels; cross-domain is fine
+                max_concurrency=1,
+            )
+        except Exception as exc:
+            event_tail.append(
+                source="harness",
+                node_name="model_run",
+                status="error",
+                model=cfg.name,
+                details={"reason": type(exc).__name__, "message": str(exc)[:500]},
+            )
+            return None
+        duration = time.monotonic() - start
+
+        pipeline_stats = getattr(extract_validated, "last_stats", {})
+        total_input_chars = sum(len(c.text) for c in eval_chunks)
+        est_input_tokens = total_input_chars // 4
+        est_output_tokens = (len(mentions) + len(assertions)) * 50
+        est_total_tokens = est_input_tokens + est_output_tokens
+        tokens_per_sec = est_total_tokens / duration if duration > 0 else 0
+
+        fixture = {
+            "model": cfg.model,
+            "base_url": base_url,
+            "structured_method": cfg.structured_method,
+            "mentions": [m.model_dump(mode="json") for m in mentions],
+            "assertions": [a.model_dump(mode="json") for a in assertions],
+            "stats": {
+                "chunk_count": len(eval_chunks),
+                "duration_s": round(duration, 1),
+                "total_input_chars": total_input_chars,
+                "est_total_tokens": est_total_tokens,
+                "tokens_per_sec": round(tokens_per_sec, 1),
+                "mention_count": len(mentions),
+                "assertion_count": len(assertions),
+                "mention_retries": pipeline_stats.get("mention_retries", 0),
+                "proposition_retries": pipeline_stats.get("proposition_retries", 0),
+                "errors": pipeline_stats.get("errors", 0),
+                "llm_call_count": pipeline_stats.get("llm_call_count", 0),
+                "pipeline": pipeline_stats.get("pipeline", {}),
+                "audit_events": pipeline_stats.get("audit_events", []) if os.environ.get("SAVE_AUDIT_LOG") else [],
+            },
+        }
+
+        # Save into the run namespace so report/score read from one place.
+        run = store.load_run(run_id)
+        if run is not None:
+            run.save_extraction(cfg.model, fixture)
+        # Also keep top-level extraction cache for ground-truth ensemble
+        # consensus, which reads via store.load_extraction(model).
+        store.save_extraction(cfg.model, fixture)
+        return fixture
+    finally:
+        # Restore env so the next model run isn't poisoned.
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _load_candidate_chunk_ids(path: Path | None) -> list[str] | None:
@@ -484,7 +545,7 @@ examples:
         metavar="PATH",
         default=Path(".test-output/gt-candidates.json"),
         help=(
-            "Path to gt-candidates.json from scripts/sample_gt_candidates.py. "
+            "Path to gt-candidates.json from scripts/benchmark/sample_gt_candidates.py. "
             "When the file exists, ensemble GT generation is restricted to those "
             "chunk_ids. Pass --no-candidates to disable. Default: .test-output/gt-candidates.json."
         ),
@@ -611,8 +672,11 @@ examples:
         models = ALL_MODELS
 
     chunk_size_str = f"{args.chunk_size} tokens" if getattr(args, "chunk_size", None) else "default"
+    # No automatic suffix on run IDs — ExGraph is the only pipeline now (CD-ys8n).
+    # Pass --label NAME for a meaningful suffix on a specific run; otherwise
+    # the run_id is just the bare timestamp (YYYY-MM-DD-HHMMSS).
     pipeline_label_str = "exgraph"
-    pipeline_label = getattr(args, "label", None) or "exgraph"
+    pipeline_label = getattr(args, "label", None) or None
 
     # ── Catalyst data corpus footprint ──────────────────────────────────
     # Inventory the audio cache + manifest so the user sees what they're benchmarking against
@@ -633,7 +697,7 @@ examples:
     n_cloud = sum(1 for m in models if "cloud" in m.tags)
     n_encoder = sum(1 for m in models if "encoder" in m.tags)
 
-    # The --all-videos extraction subprocess (scripts/bench_extract_per_video.py)
+    # The --all-videos extraction subprocess (scripts/benchmark/bench_extract_per_video.py)
     # only walks media-ingest chunks per audio_manifest doc_id — it never touches
     # congress / open-leaks. Scope the displayed count accordingly so we don't
     # mislead the operator into thinking they're about to extract over 3.6M chunks.

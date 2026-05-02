@@ -1,42 +1,64 @@
-"""Read Dagster asset outputs from the local medallion tree.
+"""Read Dagster ``*_chunks`` asset outputs from the medallion S3 bucket.
 
-Each domain's integration test materializes its chunks asset via
-``LocalJsonIOManager`` writing to:
+Each domain's chunks asset writes to the canonical medallion path that
+``MinioIOManager`` produces:
 
-  .test-output/<domain>/<layer>/<code_loc>/<group>/<asset>/[<partition>/]data.jsonl
+    <layer>/<code_loc>/<group>/<asset>/[<partition>/]data.jsonl
 
-This helper globs that tree and merges chunks across all domains. Forward-only:
-no fallback to legacy fixture paths. On a fresh checkout, run the integration
-tests first (``task bench:chunks:regen``) to seed the medallion tree.
+This helper lists the bucket and merges chunks across all domains. After
+Phase 4 there is no local-disk variant — the local Tilt-managed MinIO
+container is the dev backend; the cluster Tenant is prod. Same S3 surface
+either way, controlled by ``DAGSTER_S3_ENDPOINT_URL``.
+
+On a fresh checkout, run ``task seed`` (or just ``task seed:<domain>``)
+to populate the chunks before invoking the bench harness.
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import os
+import re
 
-_OUT_ROOT = Path(__file__).resolve().parents[2] / ".test-output"
-
-# Four glob patterns cover the matrix of (layer × partition state):
-#   silver/gold layers, partitioned/unpartitioned outputs. Layer is per-asset
-#   (media_chunks=gold, bill_chunks/leak_chunks=silver). Partition is per-asset
-#   (media + congress are partitioned by doc_id/bill_id; open-leaks is unpartitioned).
-_PATTERNS = (
-    "*/gold/*/*/*chunks/*/data.jsonl",
-    "*/silver/*/*/*chunks/*/data.jsonl",
-    "*/gold/*/*/*chunks/data.jsonl",
-    "*/silver/*/*/*chunks/data.jsonl",
+# Patterns that match a chunks asset's data.jsonl key. Layer is per-asset
+# (media_chunks=gold; bill_chunks/leak_chunks/congress_chunks=silver), and
+# partition state varies by domain (media + congress are partitioned per
+# doc_id/bill_id, open-leaks is unpartitioned).
+_KEY_RE = re.compile(
+    r"^(?P<layer>silver|gold)/"
+    r"(?P<code_loc>[^/]+)/"
+    r"(?P<group>[^/]+)/"
+    r"(?P<asset>[^/]*chunks)/"
+    r"(?:(?P<partition>[^/]+)/)?"
+    r"data\.jsonl$"
 )
 
 
-def _domain_of(jsonl_path: Path) -> str:
-    """Extract the domain from a medallion path. The first path component
-    relative to ``.test-output/`` is the domain dir (e.g. ``open-leaks``)."""
-    try:
-        rel = jsonl_path.relative_to(_OUT_ROOT)
-        return rel.parts[0] if rel.parts else "unknown"
-    except ValueError:
-        return "unknown"
+def _build_client():
+    """Same client wiring as the rest of the post-Phase-4 dev tooling.
+    DAGSTER_S3_ENDPOINT_URL points at localhost:9000 in dev (set by
+    .envrc), the cluster Tenant in prod-ops mode."""
+    from dagster_io.s3_client import S3Client
+
+    return S3Client(
+        endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
+        access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio"),
+        secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123"),
+        bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),
+    )
+
+
+def _list_chunk_keys(client) -> dict[str, list[str]]:
+    """Return ``{code_location: [keys]}`` for every chunks-asset data file."""
+    by_code_loc: dict[str, list[str]] = {}
+    # Two top-level prefixes — silver and gold — cover all chunks assets.
+    for layer in ("silver", "gold"):
+        for key in client.list_all_objects(f"{layer}/"):
+            m = _KEY_RE.match(key)
+            if not m:
+                continue
+            by_code_loc.setdefault(m.group("code_loc"), []).append(key)
+    return by_code_loc
 
 
 def load_chunks(
@@ -46,42 +68,33 @@ def load_chunks(
     """Load chunks from any ``*_chunks`` asset across all domains.
 
     Args:
-        doc_ids: Filter by each chunk's ``document_id`` field. Works uniformly
-            for partitioned and unpartitioned outputs.
-        sample_per_domain: Cap rows per domain (path-based, not metadata-based,
-            so it's robust when a domain's chunks lack a ``metadata.domain`` tag).
-            When set, the cap is **distributed across partition files** within a
-            domain via round-robin — a domain with 7 partition files and cap=70
-            yields ~10 chunks per file rather than the first 70 chunks of file 1.
-            Critical for benchmarks that span domain variability — open-leaks's
-            3.6M chunks across one file or media-ingest's 1052 chunks across 7
-            videos otherwise sample lopsidedly. Default ``None`` (no cap).
+        doc_ids: Filter by each chunk's ``document_id`` field. Works
+            uniformly for partitioned and unpartitioned outputs.
+        sample_per_domain: Cap rows per domain (key-based, distributes
+            the cap evenly across partition files via round-robin).
+            Critical for benchmarks: open-leaks's 3.6M chunks across one
+            file or media-ingest's chunks across 7 doc_ids would
+            otherwise sample lopsidedly. Default ``None`` (no cap).
 
     Returns ``[]`` if nothing has been materialized yet.
     """
-    # Group jsonl files by domain so we can distribute the cap evenly across files.
-    files_by_domain: dict[str, list[Path]] = {}
-    for pattern in _PATTERNS:
-        for jsonl in _OUT_ROOT.glob(pattern):
-            domain = _domain_of(jsonl)
-            files_by_domain.setdefault(domain, []).append(jsonl)
+    client = _build_client()
+    keys_by_domain = _list_chunk_keys(client)
 
     merged: list[dict] = []
-    for _domain, files in files_by_domain.items():
+    for _domain, keys in keys_by_domain.items():
+        keys_sorted = sorted(keys)
         if sample_per_domain is None:
-            # No cap — read everything, in stable file order
-            for jsonl in sorted(files):
-                merged.extend(_read_jsonl(jsonl, doc_ids))
+            for key in keys_sorted:
+                merged.extend(_read_jsonl(client, key, doc_ids))
             continue
 
-        # Round-robin: pull from each file iteratively until the per-domain cap is met.
-        # Each file gets ~ceil(cap / num_files) rows; if a small file runs out early
-        # the remaining cap rolls over to the others.
-        files_sorted = sorted(files)
-        per_file_quota = max(1, -(-sample_per_domain // len(files_sorted)))  # ceil-div
+        # Round-robin: pull from each key iteratively until the per-domain
+        # cap is met. Each key gets ~ceil(cap / num_keys) rows; if a small
+        # key runs out early the remaining cap rolls over to the others.
+        per_file_quota = max(1, -(-sample_per_domain // len(keys_sorted)))
         per_domain_count = 0
-        # Per-file iterators so we can pull lazily
-        iters = [_iter_jsonl(jsonl, doc_ids) for jsonl in files_sorted]
+        iters = [_iter_jsonl(client, k, doc_ids) for k in keys_sorted]
         active = list(range(len(iters)))
         per_file_taken = [0] * len(iters)
 
@@ -99,9 +112,7 @@ def load_chunks(
                     per_domain_count += 1
                     next_active.append(i)
                 except StopIteration:
-                    pass  # this file is exhausted; drop from active
-            # If we ran a full pass and every file hit its quota, raise the quota
-            # (round-robin spillover) so we still hit the cap when one file is small.
+                    pass
             if all(per_file_taken[i] >= per_file_quota for i in next_active):
                 per_file_quota += 1
             active = next_active
@@ -109,26 +120,32 @@ def load_chunks(
     return merged
 
 
-def _read_jsonl(path: Path, doc_ids: list[str] | None) -> list[dict]:
+def _read_jsonl(client, key: str, doc_ids: list[str] | None) -> list[dict]:
+    try:
+        raw = client.get_object(key)
+    except Exception:
+        return []
     rows: list[dict] = []
-    with open(path) as f:
-        for line in f:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            if doc_ids and row.get("document_id") not in doc_ids:
-                continue
-            rows.append(row)
+    for line in raw.decode("utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if doc_ids and row.get("document_id") not in doc_ids:
+            continue
+        rows.append(row)
     return rows
 
 
-def _iter_jsonl(path: Path, doc_ids: list[str] | None):
+def _iter_jsonl(client, key: str, doc_ids: list[str] | None):
     """Yield chunk dicts one at a time; respects doc_ids filter."""
-    with open(path) as f:
-        for line in f:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            if doc_ids and row.get("document_id") not in doc_ids:
-                continue
-            yield row
+    try:
+        raw = client.get_object(key)
+    except Exception:
+        return
+    for line in raw.decode("utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if doc_ids and row.get("document_id") not in doc_ids:
+            continue
+        yield row

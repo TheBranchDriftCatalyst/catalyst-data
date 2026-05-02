@@ -203,17 +203,15 @@ tasks:
 
   bench:
     desc: "Full benchmark methodology: run models → ground truth → F1 report → viewer"
-    env:
-      PYTHONPATH: "."
+    env: *seed-env
     cmds:
-      - python tests/benchmark_harness.py --full --regen {{.CLI_ARGS}}
+      - mise exec -- python tests/benchmark_harness.py --full --regen {{.CLI_ARGS}}
 
   bench:run:
     desc: "Run extraction benchmarks (skip ground truth regen)"
-    env:
-      PYTHONPATH: "."
+    env: *seed-env
     cmds:
-      - python tests/benchmark_harness.py --regen {{.CLI_ARGS}}
+      - mise exec -- python tests/benchmark_harness.py --regen {{.CLI_ARGS}}
 
   bench:gt-candidates:
     desc: "Run scripts/benchmark/sample_gt_candidates.py against the medallion tree to produce .test-output/gt-candidates.json — extraction-aware diversity sampling, deterministic given seed. Default: --target 200 --seed 42 --score-extractions --diagnostics."
