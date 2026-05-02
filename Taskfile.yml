@@ -13,6 +13,17 @@ tasks:
     cmds:
       - pytest --tb=short --ignore=packages/media-ingest/tests/test_transcription_qa.py
 
+  test:cov:
+    desc: "Run all unit tests with coverage; emits coverage.xml at repo root for scripts/repo_stats.ipynb to pick up"
+    cmds:
+      - >-
+        pytest --tb=short
+        --ignore=packages/media-ingest/tests/test_transcription_qa.py
+        --cov=libs --cov=packages --cov=tests
+        --cov-branch
+        --cov-report=term-missing
+        --cov-report=xml:coverage.xml
+
   test:congress:
     desc: Run congress-data unit tests
     cmds:
@@ -233,12 +244,12 @@ tasks:
       - pytest packages/media-ingest/tests/integration/test_chunks_cpu.py -v -s {{.CLI_ARGS}}
 
   bench:chunks:regen:congress:
-    desc: "Materialize bill_chunks for the congress bill_manifest.yaml partitions. Materializes the full bronze→silver chain (requires CONGRESS_API_KEY)."
+    desc: "Materialize bill_chunks for every entry in packages/congress-data/tests/fixtures/bill_manifest.yaml. Iterates the full 30-bill manifest via TestManifestSweep, runs the full bronze→silver chain per partition. Requires CONGRESS_API_KEY (live API)."
     env:
       PYTHONPATH: "."
       DAGSTER_CODE_LOCATION: congress_data
     cmds:
-      - pytest packages/congress-data/tests/integration/test_pipeline.py -v -s -k test_bill_chunks {{.CLI_ARGS}}
+      - pytest packages/congress-data/tests/integration/test_pipeline.py::TestManifestSweep -v -s {{.CLI_ARGS}}
 
   bench:chunks:regen:leaks:
     desc: "Materialize leak_chunks (unpartitioned, deterministic — no creds required)."

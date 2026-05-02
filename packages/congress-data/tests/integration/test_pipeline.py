@@ -234,6 +234,62 @@ class TestSilver:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Manifest sweep — materialize bill_chunks for every entry in bill_manifest.yaml
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _load_manifest_bill_ids() -> list[str]:
+    """Read packages/congress-data/tests/fixtures/bill_manifest.yaml.
+
+    Returns ``[]`` if the manifest is missing — pytest will then skip the
+    parametrized test rather than erroring at collection time.
+    """
+    import yaml
+
+    p = Path(__file__).resolve().parents[1] / "fixtures" / "bill_manifest.yaml"
+    if not p.exists():
+        return []
+    raw = yaml.safe_load(p.read_text()) or {}
+    return list(raw.get("bills", []))
+
+
+_MANIFEST_BILL_IDS = _load_manifest_bill_ids()
+
+
+class TestManifestSweep:
+    """Materialize bill_chunks for every entry in bill_manifest.yaml.
+
+    Drives ``task bench:chunks:regen:congress`` — produces the medallion-tree
+    output `tests/shared/medallion.load_chunks` reads from. Each bill_id
+    becomes its own pytest test case so pass/fail reports per-partition.
+
+    Failures are not fatal to other partitions: if 117-hr-1234 has no XML on
+    file, that test fails but the other 29 still materialize cleanly.
+    """
+
+    @pytest.mark.skipif(not _MANIFEST_BILL_IDS, reason="bill_manifest.yaml empty or missing")
+    @pytest.mark.parametrize("bill_id", _MANIFEST_BILL_IDS)
+    def test_chunks_for_manifest_partition(self, bill_id, test_resources, output_dir, dagster_instance):
+        _needs_api_key()
+        # Each manifest entry needs its partition registered on the ephemeral instance
+        # before materialize() can resolve it.
+        dagster_instance.add_dynamic_partitions("congress_bill", [bill_id])
+        result = materialize(
+            [bill_detail, bill_text_versions, bill_full_text, bill_document, bill_chunks],
+            resources=test_resources,
+            partition_key=bill_id,
+            instance=dagster_instance,
+        )
+        assert result.success, f"materialize failed for {bill_id}"
+        chunks = result.output_for_node("bill_chunks")
+        assert isinstance(chunks, list)
+        assert len(chunks) >= 1, f"{bill_id} produced 0 chunks"
+        out = output_dir / "silver" / "congress_data" / "bill" / "bill_chunks" / bill_id / "data.jsonl"
+        assert out.exists(), f"materialized output missing at {out}"
+        print(f"\n  {bill_id}: {len(chunks)} chunks → {out.relative_to(output_dir.parent.parent)}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Gold — LLM extraction + embeddings (requires LLM_API_KEY)
 # ═══════════════════════════════════════════════════════════════════════════
 
