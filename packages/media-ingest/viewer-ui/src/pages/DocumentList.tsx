@@ -113,7 +113,7 @@ export default function DocumentList() {
           >
             Media Library
           </h1>
-          <p className="text-sm text-zinc-500 mt-1 flex items-center gap-3">
+          <div className="text-sm text-zinc-500 mt-1 flex items-center gap-3">
             <span data-testid="document-count">{documents.length} documents</span>
             {totalDuration > 0 && (
               <>
@@ -133,7 +133,7 @@ export default function DocumentList() {
                 </span>
               </>
             )}
-          </p>
+          </div>
         </div>
 
         {/* Controls bar */}
