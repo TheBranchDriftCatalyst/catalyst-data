@@ -51,6 +51,21 @@ os.environ["DAGSTER_S3_SECRET_KEY"] = os.environ.get("CATALYST_SEED_S3_SECRET_KE
 os.environ["DAGSTER_S3_BUCKET"] = os.environ.get("CATALYST_SEED_S3_BUCKET", "dagster")
 os.environ["DAGSTER_CODE_LOCATION"] = "media_ingest"
 
+# Whisper + pyannote model caches default to /data/... (the cluster NFS path);
+# redirect to a local writable dir so the assets don't try to mkdir under /data.
+_local_models = ROOT / ".test-output" / "media-ingest" / "model-cache"
+_local_models.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("WHISPER_MODEL_CACHE", str(_local_models / "whisper"))
+os.environ.setdefault("HF_HOME", str(_local_models / "hf"))
+# MediaIngestConfig defaults whisper_backend to "openvino" (Intel GPU, k8s prod).
+# Dev laptops don't have openvino_genai installed and openvino doesn't have an
+# Apple Silicon path. Default to mlx-whisper on Darwin, faster-whisper everywhere
+# else — both work CPU-only and don't require the openvino package.
+import platform  # noqa: E402
+
+if "WHISPER_BACKEND" not in os.environ:
+    os.environ["WHISPER_BACKEND"] = "mlx-whisper" if platform.system() == "Darwin" else "faster-whisper"
+
 import yaml  # noqa: E402
 
 FIXTURE_DIR = ROOT / "packages" / "media-ingest" / "tests" / "fixtures"
@@ -175,7 +190,6 @@ def main() -> int:
     from dagster import AssetKey, DagsterInstance, SourceAsset, materialize
     from media_ingest.assets.diarization import media_diarization, media_segment_merge
     from media_ingest.assets.transcription import media_transcriptions
-    from media_ingest.config import MediaIngestConfig
 
     from dagster_io import EmbeddingResource, select_io_managers
 
@@ -199,11 +213,22 @@ def main() -> int:
     for key in ("embedding", "embeddings", "embedding_seed"):
         resources[key].setup_for_execution(None)
 
-    # MediaIngestConfig is read from env (WHISPER_BACKEND, WHISPER_MODEL, etc.)
-    # by the asset body — no override needed here, just make sure env is set.
-    config = MediaIngestConfig()
+    # MediaIngestConfig is a Dagster Config (per-asset run_config) — NOT
+    # env-driven by default. Build it from env vars here and pass it to
+    # materialize() via run_config so the dev seed picks up WHISPER_BACKEND
+    # etc. that we forced above.
+    backend_default = os.environ["WHISPER_BACKEND"]  # set above
+    media_config = {
+        "whisper_backend": backend_default,
+        "whisper_model": os.environ.get("WHISPER_MODEL", "base"),
+        "whisper_device": os.environ.get("WHISPER_DEVICE", "auto"),
+        "whisper_compute_type": os.environ.get("WHISPER_COMPUTE_TYPE", "int8"),
+        "mlx_model_id": os.environ.get("MLX_MODEL_ID", "mlx-community/whisper-base-mlx"),
+        "hf_token": os.environ.get("HF_TOKEN", ""),
+    }
     print(
-        f"  Whisper config: backend={config.whisper_backend} model={config.whisper_model} device={config.whisper_device}"
+        f"  Whisper config: backend={media_config['whisper_backend']} "
+        f"model={media_config['whisper_model']} device={media_config['whisper_device']}"
     )
 
     instance = DagsterInstance.ephemeral()
@@ -212,6 +237,17 @@ def main() -> int:
     selection = [media_documents_source, media_transcriptions]
     if not args.skip_diarization:
         selection += [media_diarization, media_segment_merge]
+
+    # The asset op_name is auto-derived from the function name. Same config
+    # is reused across transcription/diarization/segment_merge — they all
+    # take a MediaIngestConfig parameter.
+    run_config = {
+        "ops": {
+            "media_transcriptions": {"config": media_config},
+            "media_diarization": {"config": media_config},
+            "media_segment_merge": {"config": media_config},
+        }
+    }
 
     overall_start = time.monotonic()
     succeeded = 0
@@ -227,7 +263,7 @@ def main() -> int:
                 resources=resources,
                 partition_key=doc_id,
                 instance=instance,
-                run_config={"resources": {"config": {"config": {}}}} if False else None,  # leave default
+                run_config=run_config,
             )
             if result.success:
                 succeeded += 1

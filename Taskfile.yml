@@ -263,18 +263,17 @@ tasks:
         pytest packages/media-ingest/tests/integration/test_pipeline_integration.py::test_transcription_produces_segments packages/media-ingest/tests/integration/test_pipeline_integration.py::test_diarization_finds_speakers -v -s
 
   bench:fixtures:regen:
-    desc: "Regenerate per-video audio cache (transcription + diarization) for every video in packages/media-ingest/tests/fixtures/audio_manifest.yaml. Same code path as production, results land in pipeline-cache/<doc_id>/ subdirs."
-    env:
-      PYTHONPATH: "."
+    desc: "Regenerate per-video audio fixtures (transcription + diarization + segment_merge) via Dagster materialize for every video in audio_manifest.yaml. Same code path as production; output lands in s3://dagster/gold/media_ingest/media/media_{transcriptions,diarization,segment_merge}/<doc_id>/."
+    env: *seed-env
     cmds:
       - |
         echo ""
         echo "==============================================================="
-        echo "  Multi-video audio fixture regen"
-        echo "  Backend: ${WHISPER_BACKEND:-faster-whisper}  Model: ${WHISPER_MODEL:-base}"
+        echo "  Multi-video audio fixture regen (via Dagster materialize)"
+        echo "  Backend: ${WHISPER_BACKEND:-mlx-whisper on Darwin / faster-whisper elsewhere}"
         echo "  HF_TOKEN: $([ -n "$HF_TOKEN" ] && echo "set" || echo "MISSING (diarization will fail — set HF_TOKEN)")"
         echo "==============================================================="
-        python scripts/fixtures/regen_audio_fixtures.py {{.CLI_ARGS}}
+        mise exec -- python scripts/fixtures/regen_audio_fixtures.py {{.CLI_ARGS}}
 
   bench:chunks:regen:
     desc: "Materialize the production *_chunks Dagster assets across all 3 domains via LocalJsonIOManager. Output lands at .test-output/<domain>/<layer>/.../*_chunks/<partition>/data.jsonl — same medallion paths MinioIOManager writes in prod. Per-domain targets: bench:chunks:regen:{media,congress,leaks}."

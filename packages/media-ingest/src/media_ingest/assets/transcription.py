@@ -733,10 +733,12 @@ def media_transcriptions(
                 "title": doc.title,
                 "backend": backend,
                 "model": model_label,
-                "segment_count": output.get("segment_count", 0),
+                "segment_count": int(output.get("segment_count", 0)),
                 "language": output.get("language", "unknown"),
-                "duration_s": MetadataValue.float(output.get("duration_s", 0.0)),
-                "transcription_time_s": MetadataValue.float(output.get("transcription_time_s", 0.0)),
+                # mlx-whisper returns numpy.float64 for duration; dagster's
+                # serdes only accepts native python types so coerce explicitly.
+                "duration_s": MetadataValue.float(float(output.get("duration_s", 0.0))),
+                "transcription_time_s": MetadataValue.float(float(output.get("transcription_time_s", 0.0))),
                 "error": output.get("error"),
             },
         )
