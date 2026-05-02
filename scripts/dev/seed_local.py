@@ -172,6 +172,50 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
         bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),
     )
 
+    # ── media_documents seed ────────────────────────────────────────────────
+    # The Media tab in viewer-ui reads silver/media_ingest/media/media_documents/data.jsonl.
+    # That asset's upstream is media_metadata (which comes from media_files, an
+    # NFS scanner). Skip the full discovery chain — synthesize media_metadata
+    # rows directly from the audio manifest + on-disk mp4 sizes, then call
+    # _file_to_document and write the result to silver. This is the same
+    # transform media_documents itself runs; we just bypass the upstream.
+    from media_ingest.assets.documents import _file_to_document
+
+    fixture_dir = _media_fixtures()
+    docs = []
+    for entry in available:
+        mp4 = fixture_dir / entry["file"]
+        if not mp4.exists():
+            continue
+        # Synthesize the file_info shape media_files produces.
+        file_info = {
+            "filename": mp4.name,
+            "source_dir": "/data/metube",  # required prefix for source detection
+            "path": f"/data/metube/{mp4.name}",
+            "extension": mp4.suffix,
+            "size_bytes": mp4.stat().st_size,
+            "metadata": {"title": entry.get("title") or mp4.stem, "doc_id": entry["doc_id"]},
+        }
+        # _file_to_document returns a MediaDocument; serialize via .model_dump for jsonl.
+        docs.append(_file_to_document(file_info).model_dump(mode="json"))
+
+    docs_payload = "\n".join(json.dumps(d, default=str) for d in docs) + ("\n" if docs else "")
+    docs_prefix = "silver/media_ingest/media/media_documents"
+    docs_meta = {
+        "format": "jsonl",
+        "size_bytes": len(docs_payload.encode("utf-8")),
+        "row_count": len(docs),
+        "code_location": "media_ingest",
+        "asset_key": "media_documents",
+        "partition": None,
+        "layer": "silver",
+        "upstream_assets": [],
+        "stub": "dev-seed",
+    }
+    s3.put_object(f"{docs_prefix}/_metadata.json", json.dumps(docs_meta).encode("utf-8"))
+    s3.put_object(f"{docs_prefix}/data.jsonl", docs_payload.encode("utf-8"))
+    print(f"  ✓ media_documents: {len(docs)} doc rows → s3://{s3.bucket}/{docs_prefix}/data.jsonl")
+
     materialized = 0
     errors = 0
     for entry in available:
