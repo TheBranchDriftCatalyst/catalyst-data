@@ -78,7 +78,7 @@ export function useRunStream(): UseRunStreamResult {
 
   useEffect(() => {
     let cancelled = false;
-    let ws: WebSocket | null = null;
+    let sse: EventSource | null = null;
 
     (async () => {
       const port = await busPort();
@@ -94,22 +94,27 @@ export function useRunStream(): UseRunStreamResult {
         return;
       }
 
+      // Use Server-Sent Events through /viewer/api/bench/events/live —
+      // this rides over Vite's stable /viewer/api/* proxy to viewer-api
+      // and tails the on-disk events.jsonl directly. The WS bus is still
+      // the canonical broadcast (lower latency, no polling) but Vite
+      // reads .bus-port at startup, so a bench started after Vite booted
+      // can't reach the WS without restarting Vite. SSE bypasses that.
       try {
-        // Same-origin via Vite's /viewer/bus proxy → 127.0.0.1:<bus_port>/stream
-        const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-        ws = new WebSocket(`${wsScheme}://${window.location.host}/viewer/bus/stream`);
+        sse = new EventSource("/viewer/api/bench/events/live");
       } catch (e) {
-        setError(`ws-open: ${(e as Error).message}`);
+        setError(`sse-open: ${(e as Error).message}`);
         return;
       }
 
-      ws.onopen = () => setConnected(true);
-      ws.onclose = () => setConnected(false);
-      ws.onerror = () => {
-        setError("ws-error");
+      sse.onopen = () => setConnected(true);
+      sse.onerror = () => {
+        // EventSource auto-reconnects; only flip to disconnected so the
+        // UI shows a yellow banner.
         setConnected(false);
+        setError("sse-error");
       };
-      ws.onmessage = (msg) => {
+      sse.onmessage = (msg) => {
         try {
           const ev = JSON.parse(msg.data) as RunEvent;
           setEvents((prev) => [...prev, ev]);
@@ -121,7 +126,7 @@ export function useRunStream(): UseRunStreamResult {
 
     return () => {
       cancelled = true;
-      if (ws) ws.close();
+      if (sse) sse.close();
     };
   }, []);
 

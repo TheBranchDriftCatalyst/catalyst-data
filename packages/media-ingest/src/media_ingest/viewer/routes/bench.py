@@ -188,6 +188,87 @@ def bus_port() -> dict[str, Any]:
     return {"port": port, "active": True}
 
 
+@router.get("/events/live")
+def events_live() -> StreamingResponse:
+    """Server-Sent Events stream of the live ``events.jsonl`` while a run
+    is in flight.
+
+    Why this exists: Vite proxies ``/viewer/bus`` to the run-bus
+    WebSocket port, but Vite reads ``.bus-port`` once at startup. If
+    the bench starts *after* Vite booted, the proxy points at nowhere
+    and the SPA's WS handshake fails. SSE rides over the regular
+    ``/viewer/api/*`` proxy (which Vite has stably wired to viewer-api),
+    so it's robust to Vite-time port resolution issues — handy for the
+    StateInspector + AuditViewer mid-run.
+
+    The endpoint emits each line of ``events.jsonl`` as a single SSE
+    ``data:`` frame and tails the file (poll every 250ms) until the
+    client disconnects.
+    """
+    import asyncio
+    import json as _json
+
+    store = _bench_store()
+    events_path = store.local_cache_root / "events.jsonl"
+
+    async def _stream():
+        # Backfill: emit everything currently on disk first so the SPA
+        # gets the full audit history for the active run, not just events
+        # arriving after the SSE connect.
+        offset = 0
+        if events_path.exists():
+            with events_path.open("rb") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        # Validate JSON before forwarding so a partial last
+                        # line (writer flushed mid-line) doesn't poison the SSE.
+                        _json.loads(line)
+                    except _json.JSONDecodeError:
+                        continue
+                    yield b"data: " + line.rstrip(b"\n") + b"\n\n"
+                offset = f.tell()
+
+        # Tail loop. Poll the file size; when it grows, read + emit the new bytes.
+        # Cheap on local disk (250ms poll); the run-bus already does push, this
+        # is the fallback for clients that can't reach the WS.
+        while True:
+            await asyncio.sleep(0.25)
+            if not events_path.exists():
+                continue
+            try:
+                size = events_path.stat().st_size
+            except OSError:
+                continue
+            if size <= offset:
+                continue
+            with events_path.open("rb") as f:
+                f.seek(offset)
+                buf = f.read(size - offset)
+                offset = f.tell()
+            for line in buf.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue
+                yield b"data: " + line + b"\n\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Disable nginx-style proxy buffering so each event flushes
+            # immediately rather than batching at the proxy layer.
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/extractions")
 def list_top_extractions(
     run_id: str | None = Query(
