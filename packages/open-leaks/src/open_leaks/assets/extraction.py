@@ -103,7 +103,26 @@ def _download_file(
       ``_retry_on_network_error``.
     * **Cache**: if the file already exists *and* its size matches the
       ``Content-Length`` from a HEAD request, skips the download entirely.
+    * **file:// URLs**: bypass HTTP entirely — copy the local file to
+      ``dest`` if it's not already there (or has changed size). Used by
+      the dev seed (``scripts/dev/seed_local.py``) to point at a small
+      bundled fixture without touching archive.org.
     """
+    if url.startswith("file://"):
+        import shutil
+        from urllib.parse import urlparse
+
+        src = Path(urlparse(url).path)
+        if not src.exists():
+            raise FileNotFoundError(f"file:// URL points at missing path: {src}")
+        if not dest.exists() or dest.stat().st_size != src.stat().st_size:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            context.log.info(f"file:// copy: {src} → {dest} ({dest.stat().st_size} bytes)")
+        else:
+            context.log.info(f"file:// cache hit: {dest} ({dest.stat().st_size} bytes)")
+        return dest
+
     if dest.exists() and dest.stat().st_size > 0:
         # Quick validation: ask the server for the expected size so we don't
         # skip a truncated file from a prior crash.

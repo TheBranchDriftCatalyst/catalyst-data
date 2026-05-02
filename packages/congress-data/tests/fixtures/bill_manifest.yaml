@@ -8,12 +8,29 @@
 # mix small/large, recent congresses biased toward 119 > 118 > 117.
 # Each comment cites the bill's actual `policyArea.name` from the
 # Congress.gov API so the corpus diversity is observable, not just claimed.
+
+# `seed_subset:` is what `task seed:congress` materializes — a tiny
+# variety pick (4 distinct bill types, 5 distinct policy areas, sizes
+# from small ceremonial to huge omnibus, across 3 congresses) so a
+# fresh `tilt up` has real silver chunks to render in the SPA without
+# burning through the whole 30-bill manifest.
+seed_subset:
+  - "119-hres-1"        # Congress — small procedural (House rules package), validates the unpartitioned-ish small case
+  - "119-s-146"         # Science, Technology, and Communications — TAKE IT DOWN Act (AI deepfake non-consensual imagery, signed into law May 2025)
+  - "119-hjres-25"      # Taxation — CRA disapproval (small joint resolution, niche policy area)
+  - "118-hr-3935"       # Transportation and Public Works — FAA Reauthorization Act of 2024 (medium-large, technical regulatory text)
+  - "117-hr-5376"       # Economics and Public Finance — Inflation Reduction Act (huge omnibus; stresses chunking + spans many sub-areas)
+
 bills:
   # ── 119th Congress ───────────────────────────────────────────────
   - "119-hr-1"          # Economics and Public Finance — reconciliation tax/spending bill (very large; 575 chunks)
   - "119-hr-22"         # Government Operations and Politics — SAVE Act, voter-citizenship verification
   - "119-s-5"           # Immigration — Laken Riley Act (enacted)
   - "119-s-9"           # Sports and Recreation — Protection of Women and Girls in Sports Act
+  - "119-s-146"         # Science, Technology, and Communications — TAKE IT DOWN Act, AI-deepfake non-consensual imagery (enacted May 2025)
+  - "119-s-720"         # Environmental Protection — Empowering and Enforcing Environmental Justice Act of 2025
+  - "119-hr-2385"       # Science, Technology, and Communications — CREATE AI Act, NAIRR access program
+  - "119-hr-6091"       # Civil Rights and Liberties, Minority Issues — Bivens Act of 2025
   - "119-hres-1"        # Congress — House rules package, 119th Congress (small)
   - "119-sres-15"       # Congress — resolution electing Senate Secretary (small ceremonial)
   - "119-hjres-25"      # Taxation — CRA disapproval of IRS digital-asset broker rule

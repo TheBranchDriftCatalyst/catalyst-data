@@ -14,7 +14,7 @@ tasks:
       - pytest --tb=short --ignore=packages/media-ingest/tests/test_transcription_qa.py
 
   test:cov:
-    desc: "Run all unit tests with coverage; emits coverage.xml at repo root for scripts/repo_stats.ipynb to pick up"
+    desc: "Run all unit tests with coverage; emits coverage.xml at repo root for scripts/analysis/repo_stats.ipynb to pick up"
     cmds:
       - >-
         pytest --tb=short
@@ -162,6 +162,32 @@ tasks:
         print(f'Killed {len(runs)} runs')
         "
 
+  # ── Dev seed ─────────────────────────────────────────────────────────────
+  # Drives Dagster's own materialize() against a small partition-limited
+  # slice of each domain so a fresh `tilt up` has real data to render.
+  # Not an ML seed — for diversity-by-embedding sampling, see
+  # scripts/benchmark/sample_gt_candidates.py instead.
+
+  seed:
+    desc: "Bubble up — populate local MinIO with a representative dev seed across all 3 domains."
+    env: { PYTHONPATH: "." }
+    cmds: [python scripts/dev/seed_local.py --domain all]
+
+  seed:media:
+    desc: "media-ingest dev seed: up to 5 cached audio docs → media_chunks. Skips docs without diarization cache (run task bench:fixtures:regen first)."
+    env: { PYTHONPATH: "." }
+    cmds: [python scripts/dev/seed_local.py --domain media --limit 5]
+
+  seed:congress:
+    desc: "congress-data dev seed: 5 hand-picked variety bills (seed_subset in bill_manifest.yaml) → bill_documents + bill_chunks. Requires CONGRESS_API_KEY."
+    env: { PYTHONPATH: "." }
+    cmds: [python scripts/dev/seed_local.py --domain congress --limit 5]
+
+  seed:leaks:
+    desc: "open-leaks dev seed: 5 cables from packages/open-leaks/tests/fixtures/cablegate_sample.csv → leak_chunks (asset is unpartitioned)."
+    env: { PYTHONPATH: "." }
+    cmds: [python scripts/dev/seed_local.py --domain leaks]
+
   # ── Benchmark ────────────────────────────────────────────────────────────
 
   bench:
@@ -179,7 +205,7 @@ tasks:
       - python tests/benchmark_harness.py --regen {{.CLI_ARGS}}
 
   bench:gt-candidates:
-    desc: "Run scripts/sample_gt_candidates.py against the medallion tree to produce .test-output/gt-candidates.json — extraction-aware diversity sampling, deterministic given seed. Default: --target 200 --seed 42 --score-extractions --diagnostics."
+    desc: "Run scripts/benchmark/sample_gt_candidates.py against the medallion tree to produce .test-output/gt-candidates.json — extraction-aware diversity sampling, deterministic given seed. Default: --target 200 --seed 42 --score-extractions --diagnostics."
     env:
       PYTHONPATH: "."
       OTEL_METRICS_EXPORTER: none
@@ -187,7 +213,7 @@ tasks:
       EMBEDDING_PROVIDER: '{{.EMBEDDING_PROVIDER | default "huggingface"}}'
       EMBEDDING_MODEL: '{{.EMBEDDING_MODEL | default "sentence-transformers/all-mpnet-base-v2"}}'
     cmds:
-      - python scripts/sample_gt_candidates.py --target 200 --seed 42 --score-extractions --diagnostics {{.CLI_ARGS}}
+      - python scripts/benchmark/sample_gt_candidates.py --target 200 --seed 42 --score-extractions --diagnostics {{.CLI_ARGS}}
 
   bench:ground-truth:
     desc: "Generate ensemble consensus ground truth. Auto-restricts to .test-output/gt-candidates.json when present (run task bench:gt-candidates first); pass --no-candidates to use the full pool."
@@ -237,7 +263,7 @@ tasks:
         echo "  Backend: ${WHISPER_BACKEND:-faster-whisper}  Model: ${WHISPER_MODEL:-base}"
         echo "  HF_TOKEN: $([ -n "$HF_TOKEN" ] && echo "set" || echo "MISSING (diarization will fail — set HF_TOKEN)")"
         echo "==============================================================="
-        python scripts/regen_audio_fixtures.py {{.CLI_ARGS}}
+        python scripts/fixtures/regen_audio_fixtures.py {{.CLI_ARGS}}
 
   bench:chunks:regen:
     desc: "Materialize the production *_chunks Dagster assets across all 3 domains via LocalJsonIOManager. Output lands at .test-output/<domain>/<layer>/.../*_chunks/<partition>/data.jsonl — same medallion paths MinioIOManager writes in prod. Per-domain targets: bench:chunks:regen:{media,congress,leaks}."
@@ -312,12 +338,12 @@ tasks:
   stats:
     desc: "Open the repo-stats notebook (AI-bloat detection + churn graphs)"
     cmds:
-      - jupyter lab scripts/repo_stats.ipynb
+      - jupyter lab scripts/analysis/repo_stats.ipynb
 
   stats:run:
     desc: "Execute the repo-stats notebook headlessly and write the rendered copy to /tmp"
     cmds:
-      - jupyter nbconvert --to notebook --execute scripts/repo_stats.ipynb --output /tmp/repo_stats_executed.ipynb
+      - jupyter nbconvert --to notebook --execute scripts/analysis/repo_stats.ipynb --output /tmp/repo_stats_executed.ipynb
 
   dev:congress:
     desc: Run congress-data code server locally
