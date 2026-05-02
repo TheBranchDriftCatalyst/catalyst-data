@@ -551,6 +551,40 @@ export function GroundTruthPanel({
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
+  // Per-chunk reviewed counter. Drives the header indicator + Next-unreviewed
+  // shortcut. Computed from the live gt state so it updates as the reviewer
+  // ticks chunks off; round-trips to disk via the autosave effect.
+  const reviewedCount = useMemo(() => {
+    if (!gt) return 0;
+    return gt.chunks.reduce((n, c) => n + (c.reviewed ? 1 : 0), 0);
+  }, [gt]);
+
+  const handleToggleReviewed = useCallback((origIndex: number, value: boolean) => {
+    setGt((prev) => {
+      if (!prev) return prev;
+      const chunks = [...prev.chunks];
+      const target = chunks[origIndex];
+      if (!target) return prev;
+      chunks[origIndex] = { ...target, reviewed: value };
+      return { ...prev, chunks };
+    });
+  }, []);
+
+  const handleJumpToNextUnreviewed = useCallback(() => {
+    if (!gt || gt.chunks.length === 0) return;
+    // Search forward from selectedChunk+1, wrap to 0 on miss. Bails out when
+    // every chunk is already reviewed (UI handles the disabled state).
+    const total = gt.chunks.length;
+    for (let step = 1; step <= total; step++) {
+      const idx = (selectedChunk + step) % total;
+      const candidate = gt.chunks[idx];
+      if (candidate && !candidate.reviewed) {
+        setSelectedChunk(idx);
+        return;
+      }
+    }
+  }, [gt, selectedChunk]);
+
   const handleChunkChange = useCallback(
     (updated: GroundTruthChunk) => {
       if (!gt) return;
@@ -746,6 +780,22 @@ export function GroundTruthPanel({
           <span className="text-zinc-500">{gt.reference_model}</span>
           <span className="text-zinc-500">{gt.total_mentions} mentions</span>
           <span className="text-zinc-500">{gt.total_propositions} propositions</span>
+          <span
+            className="text-cyan-400/80"
+            title="Per-chunk reviewed count — distinct from the file-level manually_reviewed flag"
+          >
+            {reviewedCount}/{gt.chunks.length} chunks reviewed
+          </span>
+          <button
+            type="button"
+            onClick={handleJumpToNextUnreviewed}
+            disabled={reviewedCount >= gt.chunks.length}
+            className="px-2 py-0.5 border border-white/10 rounded text-zinc-300 hover:bg-white/[0.05] hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400"
+            title="Jump to the next chunk that hasn't been marked reviewed (wraps from the bottom)"
+            aria-label="Jump to next unreviewed chunk"
+          >
+            Next unreviewed →
+          </button>
         </div>
 
         {/* Save controls */}
@@ -833,28 +883,42 @@ export function GroundTruthPanel({
                 No chunks match "{chunkFilter}"
               </div>
             )}
-            {visibleChunks.map(({ chunk, origIndex }) => (
-              <button
-                key={chunk.chunk_id}
-                onClick={() => setSelectedChunk(origIndex)}
-                className={`w-full text-left px-3 py-2 rounded text-xs font-mono transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-                  origIndex === selectedChunk
-                    ? "bg-cyan-500/10 text-zinc-100 border border-cyan-500/20"
-                    : "text-zinc-400 hover:bg-white/[0.03] hover:text-zinc-200"
-                }`}
-                aria-selected={origIndex === selectedChunk}
-              >
-                <div className="flex justify-between items-center">
-                  <span className="truncate max-w-[180px]">{chunk.chunk_id.slice(0, 20)}</span>
-                  <span className="text-zinc-600 flex-shrink-0 ml-2">
-                    {chunk.mentions.length}m {chunk.propositions.length}p
-                  </span>
-                </div>
-                <div className="text-zinc-600 truncate mt-0.5 text-[11px]">
-                  {chunk.text.slice(0, 60)}...
-                </div>
-              </button>
-            ))}
+            {visibleChunks.map(({ chunk, origIndex }) => {
+              const isSelected = origIndex === selectedChunk;
+              const isReviewed = !!chunk.reviewed;
+              // De-emphasize reviewed-but-not-selected rows; selection always
+              // dominates so the reviewer can still find their place.
+              const baseClass = isSelected
+                ? "bg-cyan-500/10 text-zinc-100 border border-cyan-500/20"
+                : isReviewed
+                  ? "text-zinc-500 hover:bg-white/[0.02] hover:text-zinc-300 opacity-60"
+                  : "text-zinc-400 hover:bg-white/[0.03] hover:text-zinc-200";
+              return (
+                <button
+                  key={chunk.chunk_id}
+                  onClick={() => setSelectedChunk(origIndex)}
+                  className={`w-full text-left px-3 py-2 rounded text-xs font-mono transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${baseClass}`}
+                  aria-selected={isSelected}
+                >
+                  <div className="flex justify-between items-center">
+                    <span className="truncate max-w-[160px] flex items-center gap-1">
+                      {isReviewed && (
+                        <span className="text-emerald-400" aria-label="reviewed">
+                          ✓
+                        </span>
+                      )}
+                      {chunk.chunk_id.slice(0, 20)}
+                    </span>
+                    <span className="text-zinc-600 flex-shrink-0 ml-2">
+                      {chunk.mentions.length}m {chunk.propositions.length}p
+                    </span>
+                  </div>
+                  <div className="text-zinc-600 truncate mt-0.5 text-[11px]">
+                    {chunk.text.slice(0, 60)}...
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -866,7 +930,22 @@ export function GroundTruthPanel({
                 <h4 className="text-xs font-mono text-zinc-300">
                   Chunk {selectedChunk + 1}/{gt.chunks.length}
                 </h4>
-                <span className="text-xs font-mono text-zinc-600">{currentChunk.chunk_id}</span>
+                <div className="flex items-center gap-3">
+                  <label
+                    className="flex items-center gap-1.5 text-xs font-mono text-zinc-400 cursor-pointer select-none hover:text-zinc-200"
+                    title="Mark this chunk as reviewed. Distinct from the file-level manually_reviewed flag — tracks per-chunk progress through the GT pass."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!currentChunk.reviewed}
+                      onChange={(e) => handleToggleReviewed(selectedChunk, e.target.checked)}
+                      className="accent-emerald-500"
+                      aria-label="Mark chunk as reviewed"
+                    />
+                    Reviewed
+                  </label>
+                  <span className="text-xs font-mono text-zinc-600">{currentChunk.chunk_id}</span>
+                </div>
               </div>
               <ChunkEditor chunk={currentChunk} onChunkChange={handleChunkChange} />
             </div>

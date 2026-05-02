@@ -178,6 +178,16 @@ export interface GroundTruthChunk {
   text: string;
   mentions: GroundTruthMention[];
   propositions: GroundTruthProposition[];
+  /**
+   * Per-chunk human-review flag. Distinct from the file-level
+   * `manually_reviewed` (which marks the entire GT file as human-edited).
+   * Used by the GT editor to track which chunks the reviewer has worked
+   * through during a 200-chunk pass — drives the "Next unreviewed"
+   * shortcut and visual de-emphasis of completed rows. Optional for
+   * back-compat with files written before this field existed; absent or
+   * false both mean "not yet reviewed."
+   */
+  reviewed?: boolean;
 }
 
 export interface GroundTruthFile {
