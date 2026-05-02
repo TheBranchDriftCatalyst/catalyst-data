@@ -263,8 +263,9 @@ export default function BenchmarkReport() {
   const [selectedEntity, setSelectedEntity] = useState<EntityRow | null>(null);
 
   // Hydrate the source dropdown from the bench API: top-level "Latest" plus
-  // one entry per archived run. The bench routes return 404 cleanly when no
-  // report exists, so a HEAD probe is enough to filter out empty entries.
+  // one entry per archived run. We GET each candidate (HEAD doesn't work —
+  // FastAPI's @router.get doesn't auto-allow HEAD, so it returns 405); the
+  // 404-fast path is cheap because empty buckets resolve in milliseconds.
   useEffect(() => {
     (async () => {
       const sources: ReportSource[] = [...REPORT_SOURCES];
@@ -285,7 +286,7 @@ export default function BenchmarkReport() {
       const checked = await Promise.all(
         sources.map(async (src) => {
           try {
-            const res = await fetch(src.url, { method: "HEAD" });
+            const res = await fetch(src.url);
             return res.ok ? src : null;
           } catch {
             return null;
@@ -309,7 +310,16 @@ export default function BenchmarkReport() {
         if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
         return r.json();
       })
-      .then(setReport)
+      .then((body) => {
+        // Reject malformed/partial reports — happens when somebody writes
+        // a hand-crafted JSON to the bench/ prefix or when an old run is
+        // missing fields a newer SPA expects. Treat it as "no report"
+        // rather than crashing downstream `.some()` / `.map()` calls.
+        if (!body || !Array.isArray(body.models)) {
+          throw new Error("malformed report (missing `models` array)");
+        }
+        setReport(body);
+      })
       .catch((e) =>
         setError(`Could not load benchmark report: ${e.message}. Run the benchmark first.`),
       );
