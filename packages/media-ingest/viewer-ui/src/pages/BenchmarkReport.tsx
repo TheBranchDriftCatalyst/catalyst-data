@@ -15,6 +15,7 @@ import { EntityJsonPanel } from "@/components/benchmark/EntityJsonPanel";
 import { PropositionMatrix } from "@/components/benchmark/PropositionMatrix";
 import { PipelineTable } from "@/components/benchmark/PipelineTable";
 import { AuditViewer } from "@/components/benchmark/AuditViewer";
+import { LiveGantt } from "@/components/benchmark/LiveGantt";
 import { GroundTruthPanel } from "@/components/benchmark/GroundTruthPanel";
 import { TableControls } from "@/components/benchmark/TableControls";
 import { GTSelector } from "@/components/benchmark/GTSelector";
@@ -228,12 +229,11 @@ interface ReportSource {
   url: string;
 }
 
-const REPORT_SOURCES: ReportSource[] = [
-  { label: "Latest Run", url: "/viewer/runs/latest/benchmark-report.json" },
-  { label: "Latest", url: "/viewer/benchmark-report.json" },
-  { label: "v2 (exgraph)", url: "/viewer/compare-v2/media-ingest/benchmark-report.json" },
-  { label: "v1 (legacy)", url: "/viewer/compare-v1/media-ingest/benchmark-report.json" },
-];
+// Report sources are now hydrated dynamically from /viewer/api/bench/runs
+// at mount time — see useEffect below. The "Latest" entry is the top-level
+// report S3 object copied at run end; per-run entries are added as they're
+// discovered.
+const REPORT_SOURCES: ReportSource[] = [{ label: "Latest", url: "/viewer/api/bench/report.json" }];
 
 // ── Main Page ──────────────────────────────────────────────────────────
 export default function BenchmarkReport() {
@@ -262,25 +262,42 @@ export default function BenchmarkReport() {
   const [selectedGT, setSelectedGT] = useState("active");
   const [selectedEntity, setSelectedEntity] = useState<EntityRow | null>(null);
 
-  // Probe which report sources exist
+  // Hydrate the source dropdown from the bench API: top-level "Latest" plus
+  // one entry per archived run. The bench routes return 404 cleanly when no
+  // report exists, so a HEAD probe is enough to filter out empty entries.
   useEffect(() => {
-    Promise.all(
-      REPORT_SOURCES.map(async (src) => {
-        try {
-          const res = await fetch(src.url, { method: "HEAD" });
-          return res.ok ? src : null;
-        } catch {
-          return null;
+    (async () => {
+      const sources: ReportSource[] = [...REPORT_SOURCES];
+      try {
+        const r = await fetch("/viewer/api/bench/runs");
+        if (r.ok) {
+          const body = (await r.json()) as { runs: string[] };
+          for (const id of body.runs) {
+            sources.push({
+              label: `Run ${id}`,
+              url: `/viewer/api/bench/runs/${encodeURIComponent(id)}/report.json`,
+            });
+          }
         }
-      }),
-    ).then((results) => {
-      const available = results.filter((r): r is ReportSource => r !== null);
+      } catch {
+        // bench API down — show only the static "Latest" entry below.
+      }
+      const checked = await Promise.all(
+        sources.map(async (src) => {
+          try {
+            const res = await fetch(src.url, { method: "HEAD" });
+            return res.ok ? src : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const available = checked.filter((r): r is ReportSource => r !== null);
       setAvailableSources(available);
-      // Default to first available
       if (available.length > 0 && !available.find((s) => s.url === reportSource)) {
         setReportSource(available[0]!.url);
       }
-    });
+    })();
   }, []);
 
   // Load the selected report
@@ -305,13 +322,20 @@ export default function BenchmarkReport() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="bg-surface-1 border border-white/5 rounded-lg p-8 max-w-lg text-center">
-          <h2 className="text-lg font-mono text-zinc-200 mb-2">No Benchmark Report</h2>
-          <p className="text-sm text-zinc-500 mb-4">{error}</p>
-          <pre className="text-xs text-zinc-400 bg-surface-0 rounded p-3 text-left">
-            PYTHONPATH=. python tests/benchmark_harness.py --full
-          </pre>
+      <div className="flex flex-col gap-4 p-6">
+        <LiveGantt />
+        <div className="flex items-center justify-center">
+          <div className="bg-surface-1 border border-white/5 rounded-lg p-8 max-w-lg text-center">
+            <h2 className="text-lg font-mono text-zinc-200 mb-2">No Benchmark Report</h2>
+            <p className="text-sm text-zinc-500 mb-4">{error}</p>
+            <pre className="text-xs text-zinc-400 bg-surface-0 rounded p-3 text-left">
+              PYTHONPATH=. python tests/benchmark_harness.py --full
+            </pre>
+            <p className="text-[11px] text-zinc-600 mt-3">
+              The live timeline above streams from the run-bus while a benchmark is in flight — the
+              static report appears once the first model completes.
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -319,8 +343,11 @@ export default function BenchmarkReport() {
 
   if (!report) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-zinc-500 font-mono text-sm">Loading report...</div>
+      <div className="flex flex-col gap-4 p-6">
+        <LiveGantt />
+        <div className="flex items-center justify-center">
+          <div className="text-zinc-500 font-mono text-sm">Loading report...</div>
+        </div>
       </div>
     );
   }
@@ -519,7 +546,12 @@ export default function BenchmarkReport() {
 
           {activeTab === "pipeline" && <PipelineTable models={visibleModels} groupBy={groupBy} />}
 
-          {activeTab === "audit" && <AuditViewer modelNames={report.model_names} />}
+          {activeTab === "audit" && (
+            <div className="space-y-4">
+              <LiveGantt />
+              <AuditViewer modelNames={report.model_names} />
+            </div>
+          )}
 
           {activeTab === "ground-truth" && (
             <GroundTruthPanel selectedGT={selectedGT} onSelectGT={setSelectedGT} />

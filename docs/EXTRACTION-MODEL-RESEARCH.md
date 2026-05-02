@@ -5,6 +5,8 @@
 - **Ticket**: CD-lfe (Implement NuExtract + Gemma 4 model split)
 - **Previous ticket**: CD-cgk (Quality issues with qwen3:30b-a3b)
 
+<!-- NOTE: Thjis codument is pretty outdated -->
+
 ## Problem Statement
 
 Current extraction pipeline uses `qwen3:30b-a3b` (MoE) for both NER and assertion extraction. Quality issues observed:

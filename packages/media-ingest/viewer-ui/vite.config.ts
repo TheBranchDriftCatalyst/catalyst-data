@@ -1,41 +1,40 @@
 import fs from "fs";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
-const GT_DIR = path.resolve(__dirname, "../../../.test-output/media-ingest/ground-truth");
+// The bench harness writes its live run-bus port file under the S3-store's
+// local cache root (see libs/dagster-io/src/dagster_io/bench_store.py:
+// `_default_local_cache_root`). Vite reads it at dev-server startup so the
+// `/viewer/bus` proxy can forward WebSocket traffic to the bus.
+const BUS_PORT_FILE = path.resolve(
+  __dirname,
+  "../../../.test-output/media-ingest/bench-cache/.bus-port",
+);
 
-/** Tiny Vite plugin: handles PUT /viewer/ground-truth/*.json to save GT files during dev. */
-function gtSavePlugin(): Plugin {
-  return {
-    name: "gt-save",
-    configureServer(server) {
-      server.middlewares.use("/viewer/ground-truth", (req, res, next) => {
-        if (req.method !== "PUT") return next();
-        const filename = req.url?.replace(/^\//, "") || "";
-        if (!filename.endsWith(".json") || filename.includes("..")) {
-          res.statusCode = 400;
-          res.end("Bad filename");
-          return;
-        }
-        let body = "";
-        req.on("data", (chunk: Buffer) => (body += chunk.toString()));
-        req.on("end", () => {
-          const target = path.join(GT_DIR, filename);
-          fs.mkdirSync(path.dirname(target), { recursive: true });
-          fs.writeFileSync(target, body, "utf-8");
-          res.statusCode = 200;
-          res.end(JSON.stringify({ saved: target }));
-        });
-      });
-    },
-  };
+function readBusPort(): number | null {
+  try {
+    const raw = fs.readFileSync(BUS_PORT_FILE, "utf-8").trim();
+    const port = parseInt(raw, 10);
+    return Number.isFinite(port) && port > 0 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+const BUS_PORT = readBusPort();
+if (BUS_PORT) {
+  // eslint-disable-next-line no-console
+  console.log(`[vite] bus proxy → http://127.0.0.1:${BUS_PORT} (from .bus-port)`);
+} else {
+  // eslint-disable-next-line no-console
+  console.log("[vite] bus proxy disabled (no .bus-port found — start a bench run to enable live tail)");
 }
 
 export default defineConfig({
   base: "/viewer/",
-  plugins: [react(), tailwindcss(), gtSavePlugin()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -48,6 +47,9 @@ export default defineConfig({
     },
   },
   server: {
+    // Force IPv4 so the bus proxy (target 127.0.0.1) doesn't fail with
+    // EADDRNOTAVAIL when Node tries to bind a dual-stack source socket.
+    host: "127.0.0.1",
     port: 5173,
     proxy: {
       "/viewer/api": {
@@ -58,17 +60,26 @@ export default defineConfig({
         target: "http://localhost:8080",
         changeOrigin: true,
       },
-    },
-    // Allow serving benchmark report JSON from .test-output/
-    fs: {
-      allow: [
-        path.resolve(__dirname),
-        path.resolve(__dirname, "../../../.test-output/media-ingest"),
-      ],
+      // Same-origin proxy for the harness run-bus. The bus port is
+      // read once from `.bus-port` at vite startup — restart the dev
+      // server when starting a new benchmark run. WebSocket upgrade is
+      // enabled so the viewer's LiveGantt can stream live events
+      // without a cross-origin handshake.
+      ...(BUS_PORT
+        ? {
+            // Forward to the bus with the /viewer/bus prefix intact.
+            // The bus mounts duplicate routes under both /<path> and
+            // /viewer/bus/<path> so neither side needs path-rewriting,
+            // which Vite's WebSocket-upgrade proxy doesn't apply.
+            "/viewer/bus": {
+              target: `http://127.0.0.1:${BUS_PORT}`,
+              changeOrigin: true,
+              ws: true,
+            },
+          }
+        : {}),
     },
   },
-  // Serve benchmark-report.json (and other static files) from .test-output/
-  publicDir: path.resolve(__dirname, "../../../.test-output/media-ingest"),
   build: {
     outDir: "dist",
     sourcemap: true,

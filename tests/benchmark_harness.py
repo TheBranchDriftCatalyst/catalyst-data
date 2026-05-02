@@ -4,12 +4,13 @@ Wraps the existing test infrastructure into a clean CLI that:
 1. Runs extraction across all configured models
 2. Computes F1/precision/recall against ground truth (if available)
 3. Generates the benchmark report JSON for the viewer SPA
-4. Optionally saves structured audit logs
+4. Streams every harness/exgraph/langgraph/dagster event into one
+   ``events.jsonl`` per run (consumed live by the viewer's LiveGantt)
 5. Reports latency, throughput, hallucination rate, quality/speed ratio
 
 Usage:
-    # Full benchmark with all flags:
-    python tests/benchmark_harness.py --regen --audit-log --timeout 600
+    # Full benchmark:
+    python tests/benchmark_harness.py --regen --timeout 600
 
     # Quick run (cached fixtures):
     python tests/benchmark_harness.py
@@ -35,6 +36,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from dagster_io import event_tail
 from tests.benchmark_config import ALL_MODELS, LOCAL_MODELS, BenchmarkConfig, ModelConfig
 from tests.shared.extraction_scoring import (
     compute_model_scores,
@@ -70,8 +72,8 @@ def _ansi_palette(use_color: bool) -> dict[str, str]:
 def _run_model(
     cfg: ModelConfig,
     timeout: int,
-    save_audit: bool,
     store: BenchmarkStore,
+    run_id: str,
     all_videos: bool = False,
 ) -> dict | None:
     """Run extraction for one model via subprocess.
@@ -79,6 +81,12 @@ def _run_model(
     When ``all_videos=False`` (default): pytest fixture chain on tests/demo_video.mp4 (single).
     When ``all_videos=True``: scripts/bench_extract_per_video.py iterates the manifest.
     Returns the latest run's aggregate extraction record, loadable via ``store.load_fixture``.
+
+    ``store.local_cache_root`` is propagated as ``CATALYST_RUN_DIR`` so the
+    subprocess's ``conftest.py`` can call ``event_tail.configure_from_env()``
+    and append every audit event to the same on-disk ``events.jsonl`` that
+    the parent harness's ``RunBus`` is tailing. The S3 archive happens once,
+    at run end, via ``run.archive_events()``.
     """
     is_cloud = "cloud" in cfg.tags
     if is_cloud:
@@ -98,9 +106,11 @@ def _run_model(
         "LLM_MAX_TOKENS": str(cfg.max_tokens),
         "LLM_CONTEXT_WINDOW": str(cfg.context_window),
         "LLM_TIMEOUT": str(timeout),
-        "SAVE_AUDIT_LOG": "true" if save_audit else "",
         "PROMPT_REGISTRY_DIR": str(ROOT / "k8s" / "shared" / "prompts"),
         "PYTHONPATH": str(ROOT),
+        "CATALYST_RUN_DIR": str(store.local_cache_root),
+        "CATALYST_RUN_ID": run_id,
+        "CATALYST_BENCH_MODEL": cfg.name,
     }
 
     if all_videos:
@@ -207,14 +217,13 @@ def _interactive_prompt() -> argparse.Namespace:
         ("full", "Full methodology (run models -> ensemble GT -> score -> report)"),
         ("regen", "Regenerate all extraction fixtures"),
         ("ensemble-gt", "Generate ensemble ground truth only"),
-        ("audit-log", "Save detailed audit logs"),
         ("local-only", "Skip cloud models (no API key needed)"),
         ("exgraph", "Use exgraph v2 pipeline (instead of v1 legacy)"),
         ("compare", "Compare v1 vs v2 (runs both, side-by-side report)"),
     ]
 
     for i, (_, desc) in enumerate(options, 1):
-        marker = " *" if (i == 6 and os.environ.get("EXGRAPH_ENABLED") == "true") else ""
+        marker = " *" if (i == 5 and os.environ.get("EXGRAPH_ENABLED") == "true") else ""
         print(f"  [{i}] {desc}{marker}")
     print("  [Enter] Default run (use cached fixtures, score, report)")
     print()
@@ -223,7 +232,6 @@ def _interactive_prompt() -> argparse.Namespace:
 
     args = argparse.Namespace(
         regen=False,
-        audit_log=False,
         timeout=300,
         local_only=False,
         generate_ground_truth=False,
@@ -260,12 +268,10 @@ def _interactive_prompt() -> argparse.Namespace:
             elif choice == "3":
                 args.ensemble_gt = True
             elif choice == "4":
-                args.audit_log = True
-            elif choice == "5":
                 args.local_only = True
-            elif choice == "6":
+            elif choice == "5":
                 os.environ["EXGRAPH_ENABLED"] = "true"
-            elif choice == "7":
+            elif choice == "6":
                 args.compare = True
 
     timeout_raw = input(f"  Timeout per model [{args.timeout}s]: ").strip()
@@ -290,20 +296,16 @@ def _run_comparison(args):
         env = {
             **os.environ,
             "EXGRAPH_ENABLED": env_val,
-            # Still use the main TEST_OUTPUT_ROOT so test_pipeline_integration
-            # saves fixtures to the standard location
-            "TEST_OUTPUT_ROOT": str(store.root.parent),
         }
 
         subprocess.run(
             [sys.executable, __file__, "--regen", "--timeout", str(args.timeout)]
-            + (["--local-only"] if args.local_only else [])
-            + (["--audit-log"] if args.audit_log else []),
+            + (["--local-only"] if args.local_only else []),
             env=env,
             timeout=args.timeout * 20,
         )
 
-    # Load reports from the two most recent runs
+    # Load reports from the two most recent runs (S3-backed).
     runs = store.list_runs()
     if len(runs) < 2:
         print("\n  ERROR: need at least 2 runs for comparison")
@@ -320,15 +322,8 @@ def _run_comparison(args):
     v2 = v2_run.load_report()
 
     if not v1 or not v2:
-        # Fallback: try old compare layout
-        v1_path = store.root / "compare-v1" / "media-ingest" / "benchmark-report.json"
-        v2_path = store.root / "compare-v2" / "media-ingest" / "benchmark-report.json"
-        if v1_path.exists() and v2_path.exists():
-            v1 = json.loads(v1_path.read_text())
-            v2 = json.loads(v2_path.read_text())
-        else:
-            print("\n  ERROR: one or both runs failed to produce a report")
-            return
+        print("\n  ERROR: one or both runs failed to produce a report")
+        return
 
     v1_models = {m["name"]: m for m in v1["models"]}
     v2_models = {m["name"]: m for m in v2["models"]}
@@ -388,9 +383,9 @@ def _list_ground_truths(store: BenchmarkStore) -> None:
     gts = store.list_ground_truths()
     if not gts:
         print("  No ground truth files found.")
-        print(f"  Directory: {store.ground_truth_dir}")
+        print(f"  Location: {store.ground_truth_uri}")
         return
-    print(f"\n  Available ground truths ({store.ground_truth_dir}):")
+    print(f"\n  Available ground truths ({store.ground_truth_uri}):")
     for name in gts:
         gt = store.load_ground_truth(name)
         if gt:
@@ -404,14 +399,53 @@ def _list_ground_truths(store: BenchmarkStore) -> None:
             print(f"    {name}")
 
 
+def _list_models() -> None:
+    """List every model configured in tests/benchmark_config.py.
+
+    Names are what ``--models`` / ``--ner-models`` / ``--spo-models``
+    expect (comma-separated). Grouped by tier so it's obvious which
+    are encoder vs LLM vs cloud.
+    """
+    rows: list[tuple[str, str, str, str]] = []
+    for m in ALL_MODELS:
+        tags = ",".join(m.tags)
+        if "encoder" in m.tags:
+            tier = "encoder"
+        elif "extraction-specialist" in m.tags:
+            tier = "specialist"
+        elif "cloud" in m.tags:
+            tier = "cloud"
+        elif "tier1" in m.tags:
+            tier = "tier1"
+        elif "tier2" in m.tags:
+            tier = "tier2"
+        else:
+            tier = "—"
+        rows.append((tier, m.name, m.model, tags))
+
+    tier_order = {"encoder": 0, "specialist": 1, "tier1": 2, "tier2": 3, "cloud": 4, "—": 9}
+    rows.sort(key=lambda r: (tier_order.get(r[0], 99), r[1]))
+
+    print(
+        f"\n  {len(rows)} models configured ({len(LOCAL_MODELS)} local, {len(ALL_MODELS) - len(LOCAL_MODELS)} cloud):\n"
+    )
+    print(f"    {'tier':<10} {'name':<24} {'model':<32} tags")
+    print(f"    {'-' * 10} {'-' * 24} {'-' * 32} {'-' * 30}")
+    for tier, name, model, tags in rows:
+        print(f"    {tier:<10} {name:<24} {model:<32} {tags}")
+    print()
+    print("  Pass --models <comma-separated names> to run a subset.")
+    print("  Pass --ner-models / --spo-models to scope ensemble GT.\n")
+
+
 def _list_runs(store: BenchmarkStore) -> None:
     """List available benchmark runs."""
     runs = store.list_runs()
     if not runs:
         print("  No benchmark runs found.")
-        print(f"  Directory: {store.runs_dir}")
+        print(f"  Location: {store.runs_uri}")
         return
-    print(f"\n  Available runs ({store.runs_dir}):")
+    print(f"\n  Available runs ({store.runs_uri}):")
     for name in runs:
         run = store.load_run(name)
         if run:
@@ -425,10 +459,8 @@ def _list_runs(store: BenchmarkStore) -> None:
                 print(f"    {name}: {len(extractions)} extractions (no report)")
         else:
             print(f"    {name}")
-    # Show latest symlink target
-    latest = store.runs_dir / "latest"
-    if latest.is_symlink():
-        print(f"\n    latest -> {latest.resolve().name}")
+    if runs:
+        print(f"\n    latest -> {runs[-1]}")
 
 
 def _score_latest(store: BenchmarkStore) -> None:
@@ -470,7 +502,7 @@ def _score_latest(store: BenchmarkStore) -> None:
     report = build_report_json(results, ground_truth=gt, chunk_texts=chunk_texts, store=store)
     run.save_report(report)
     store.save_top_level_report(report)
-    print(f"\n  Report updated: {store.root / 'benchmark-report.json'}")
+    print(f"\n  Report updated: {store.top_report_uri}")
 
 
 def main():
@@ -485,6 +517,7 @@ examples:
   python tests/benchmark_harness.py --ensemble-gt         # GT only
   python tests/benchmark_harness.py --list-gt             # show ground truths
   python tests/benchmark_harness.py --list-runs           # show runs
+  python tests/benchmark_harness.py --list-models         # show configured models
   python tests/benchmark_harness.py --score               # re-score latest
   python tests/benchmark_harness.py --clean               # clean artifacts
 """,
@@ -507,13 +540,17 @@ examples:
     action.add_argument("--list-gt", action="store_true", help="List available ground truth files")
     action.add_argument("--use-gt", type=str, metavar="NAME", help="Set active ground truth by name")
     action.add_argument("--list-runs", action="store_true", help="List timestamped benchmark runs")
+    action.add_argument(
+        "--list-models",
+        action="store_true",
+        help="List configured model names (use with --models / --ner-models / --spo-models)",
+    )
     action.add_argument("--clean", action="store_true", help="Clean cached artifacts (keep true fixtures)")
     action.add_argument("--view", action="store_true", help="Start the benchmark viewer SPA")
 
     # ── Configuration flags ──────────────────────────────────────────
     config = parser.add_argument_group("configuration")
     config.add_argument("--regen", action="store_true", help="Clear and regenerate all extraction artifacts")
-    config.add_argument("--audit-log", action="store_true", help="Save structured audit logs")
     config.add_argument("--timeout", type=int, default=300, help="Per-model timeout in seconds (default: 300)")
     config.add_argument("--local-only", action="store_true", help="Skip cloud models")
     config.add_argument("--exgraph", action="store_true", help="Use exgraph v2 pipeline")
@@ -622,6 +659,10 @@ examples:
         _list_runs(store)
         return
 
+    if getattr(args, "list_models", False):
+        _list_models()
+        return
+
     if getattr(args, "use_gt", None):
         store.set_active_ground_truth(args.use_gt)
         print(f"  Active ground truth set to: {args.use_gt}")
@@ -706,11 +747,7 @@ examples:
             manifest_videos = (_yaml.safe_load(manifest_path.read_text()) or {}).get("videos", []) or []
         except Exception:
             manifest_videos = []
-    cached_audio_doc_ids = (
-        sorted(d.name for d in store.pipeline_cache_dir.iterdir() if d.is_dir() and d.name != "model_cache")
-        if store.pipeline_cache_dir.exists()
-        else []
-    )
+    cached_audio_doc_ids = [d for d in store.list_pipeline_cache_doc_ids() if d != "model_cache"]
     benchmark_chunks = load_chunks()
 
     n_local = sum(1 for m in models if "cloud" not in m.tags)
@@ -735,6 +772,38 @@ examples:
 
     # Create the run BEFORE rendering the header so the run_id can be included.
     run = store.create_run(label=pipeline_label)
+
+    # Bind the unified event-stream writer to this run. Every harness /
+    # exgraph / langgraph / dagster event for the lifetime of this process
+    # appends to <local_cache_root>/events.jsonl — S3 doesn't support
+    # append, so the live tail stays on local disk and is uploaded once
+    # at run end via run.archive_events(). The viewer's bench routes
+    # serve the live tail directly off the FastAPI; replays read the
+    # archived copy from S3.
+    events_path = store.local_cache_root / "events.jsonl"
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    events_path.write_text("")  # forward-only: each run owns the live tail
+    event_tail.configure(events_path, run_id=run.run_id)
+
+    # Spin up the run-bus so the viewer's LiveGantt can subscribe to live
+    # events. Discovery: <local_cache_root>/.bus-port — the viewer's bench
+    # API reads this to forward the WebSocket port.
+    from tests.shared.run_bus import RunBus
+
+    bus = RunBus(events_path=events_path)
+    bus.start()
+    (store.local_cache_root / ".bus-port").write_text(str(bus.port))
+
+    event_tail.append(
+        source="harness",
+        node_name="run_start",
+        status="started",
+        details={
+            "pipeline": pipeline_label or "default",
+            "model_count": len(models),
+            "bus_port": bus.port,
+        },
+    )
 
     # Resolve every detail the operator might want before kicking off a multi-minute run.
     candidate_path = getattr(args, "candidates", None)
@@ -781,7 +850,7 @@ examples:
         return f"  {_C['k']}{label:<11}{_C['x']}{accent}{value}{_C['x']}"
 
     print()
-    print(_row("run_id", str(run.dir.name), accent=_C["c"]))
+    print(_row("run_id", run.run_id, accent=_C["c"]))
     print(_row("pipeline", f"{pipeline_label_str}  ·  label={pipeline_label or '(auto)'}"))
     print(
         _row(
@@ -795,7 +864,7 @@ examples:
             f"{active_video_label}  ·  {len(cached_audio_doc_ids)} audio-cached  ·  {active_chunks} chunks in scope",
         )
     )
-    print(_row("scope", f"{scope_label}  ·  timeout={args.timeout}s  ·  regen={args.regen}  ·  audit={args.audit_log}"))
+    print(_row("scope", f"{scope_label}  ·  timeout={args.timeout}s  ·  regen={args.regen}"))
     print(_row("chunker", f"chunk_size={chunk_size_str}"))
     print(
         _row(
@@ -817,13 +886,13 @@ examples:
             "telemetry", f"CATALYST_TELEMETRY={'on' if telemetry else 'off'}", accent=_C["g"] if telemetry else _C["k"]
         )
     )
-    print(_row("output", f"{run.dir.relative_to(ROOT)}/"))
+    print(_row("output", run.s3_uri))
     print()
 
     if args.regen:
         # Clear legacy extraction cached artifacts
         store.clean_extractions()
-        print(f"  cleared extraction artifacts → {run.dir.relative_to(ROOT)}")
+        print(f"  cleared extraction artifacts → {run.s3_uri}")
         print()
 
     # ── Live results table — one row per model as it finishes ───────────────
@@ -905,7 +974,16 @@ examples:
             f"{'…':>9} {'…':>5} {'…':>9} {'…':>7} {'…':>6} {'…':>5} {'…':>4}\r"
         )
         sys.stdout.flush()
-        fixture = _run_model(cfg, args.timeout, args.audit_log, store, all_videos=args.all_videos)
+        event_tail.append(
+            source="harness",
+            node_name="model_run",
+            status="started",
+            model=cfg.name,
+            details={"tier": tier, "tags": list(cfg.tags)},
+        )
+        t_model_start = time.monotonic()
+        fixture = _run_model(cfg, args.timeout, store, run.run_id, all_videos=args.all_videos)
+        duration_s = time.monotonic() - t_model_start
         if fixture:
             results.append({"model": cfg.name, "fixture": fixture, "tags": cfg.tags})
             _row(idx, cfg.name, tier, "ok", fixture)
@@ -913,27 +991,25 @@ examples:
             # Save to run directory
             run.save_extraction(cfg.model, fixture)
 
-            # Save audit log
-            if args.audit_log:
-                stats = fixture.get("stats", {}) or {}
-                audit_events = stats.get("audit_events", [])
-                if audit_events:
-                    run.save_audit_log(
-                        cfg.name,
-                        {
-                            "model": cfg.model,
-                            "name": cfg.name,
-                            "tags": cfg.tags,
-                            "stats": {k: v for k, v in stats.items() if k != "audit_events"},
-                            "audit_events": audit_events,
-                            "event_count": len(audit_events),
-                        },
-                    )
+            event_tail.append(
+                source="harness",
+                node_name="model_run",
+                status="completed",
+                model=cfg.name,
+                details={"duration_s": duration_s, "stats": fixture.get("stats", {}) or {}},
+            )
 
             # Save incremental report
             _save_incremental_report(results, store)
         else:
             _row(idx, cfg.name, tier, "FAIL", None)
+            event_tail.append(
+                source="harness",
+                node_name="model_run",
+                status="error",
+                model=cfg.name,
+                details={"duration_s": duration_s, "reason": "no_fixture"},
+            )
 
         # Unload local model from Ollama VRAM to free memory for next model
         if "cloud" not in cfg.tags and "encoder" not in cfg.tags:
@@ -981,9 +1057,25 @@ examples:
         }
     )
 
-    # Copy audit logs to top level for viewer
-    if args.audit_log:
-        store.copy_audit_logs_to_top_level(run)
+    event_tail.append(
+        source="harness",
+        node_name="run_end",
+        status="completed",
+        details={"results": len(results), "models": len(models)},
+    )
+
+    # Give the bus a beat to flush the final event over WS, then shut it
+    # down. The events.jsonl on disk remains the canonical replay source.
+    time.sleep(0.5)
+    bus.stop()
+
+    # Archive the local events.jsonl to S3 so future replays of this
+    # specific run survive a later harness invocation truncating the
+    # local cache file at its own run start. The local file is left
+    # in place — the run-bus may still be flushing for a beat.
+    archived_key = run.archive_events()
+    if archived_key:
+        print(f"  events archived to {run.events_uri}")
 
     # ── Run footer — totals across the live table above ─────────────────
     n_ok = len(results)
@@ -1020,10 +1112,9 @@ examples:
         print(f"  groundtruth {gt_label}")
     else:
         print("  groundtruth not available (run with --generate-ground-truth)")
-    print(f"  artifacts   {run.dir.relative_to(ROOT)}/")
-    print(f"  report      {(store.root / 'benchmark-report.json').relative_to(ROOT)}")
-    if args.audit_log:
-        print(f"  audit-logs  {run.audit_dir.relative_to(ROOT)}/")
+    print(f"  artifacts   {run.s3_uri}")
+    print(f"  report      {store.top_report_uri}")
+    print(f"  events      {run.events_uri}")
     print(f"{'═' * 78}")
 
     # Print the full report

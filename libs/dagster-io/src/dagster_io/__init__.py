@@ -1,8 +1,10 @@
 """Shared IO manager, resources, and utilities for Dagster pipelines."""
 
+from dagster_io import event_tail
 from dagster_io.append_io_manager import AppendIOManager
 from dagster_io.asset_factories import LLM_ASSET_K8S_CONFIG
 from dagster_io.asset_factory import EMBEDDING_ASSET_K8S_CONFIG, PipelineConfig, extraction_assets
+from dagster_io.bench_store import S3BenchmarkStore, S3RunStore
 from dagster_io.chunking import (
     PRESET_CONFIGS,
     ChunkConfig,
@@ -85,6 +87,13 @@ from dagster_io.observability import configure_tracing, get_tracer, trace_operat
 from dagster_io.processing_tracker import ProcessingTracker
 from dagster_io.prompts import load_prompt, parse_prompt_file
 from dagster_io.run_status_sensor import make_run_status_sensor
+from dagster_io.semantic_seed import (
+    SemanticChunkingSeed,
+    attach_seed,
+    attach_seeds_batch,
+    build_seed,
+    get_seed,
+)
 
 __all__ = [
     # IO
@@ -195,4 +204,15 @@ __all__ = [
     # Prompts
     "load_prompt",
     "parse_prompt_file",
+    # Unified event stream
+    "event_tail",
+    # S3-backed benchmark store (Phase 2 — single backend across dev/prod)
+    "S3BenchmarkStore",
+    "S3RunStore",
+    # Semantic chunking seeds (deterministic GT sampling — see CD-wnu5)
+    "SemanticChunkingSeed",
+    "build_seed",
+    "attach_seed",
+    "attach_seeds_batch",
+    "get_seed",
 ]

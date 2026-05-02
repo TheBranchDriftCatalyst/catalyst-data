@@ -1,102 +1,93 @@
 import { useState, useEffect, useMemo } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@thebranchdriftcatalyst/catalyst-ui";
-import type { AuditLog, AuditEvent } from "@/types/benchmark";
-
-// ── Stage colors ─────────────────────────────────────────────────────
-
-const STAGE_COLORS: Record<string, string> = {
-  // v2
-  extract_ner: "bg-blue-500",
-  validate_ner: "bg-purple-500",
-  repair_ner: "bg-amber-500",
-  extract_spo: "bg-cyan-500",
-  validate_spo: "bg-violet-500",
-  repair_spo: "bg-orange-500",
-  // v1
-  extract_mentions: "bg-blue-500",
-  validate_mentions: "bg-purple-500",
-  repair_mentions: "bg-amber-500",
-  extract_propositions: "bg-cyan-500",
-  validate_propositions: "bg-violet-500",
-  repair_propositions: "bg-orange-500",
-  // shared
-  persist_artifacts: "bg-emerald-500",
-  failure_handler: "bg-red-500",
-};
+import type { AuditLog, AuditEvent, RunEvent } from "@/types/benchmark";
+import { STAGE_COLORS, groupByChunk } from "./auditChunking";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function sanitizeName(name: string): string {
-  return name.replace(/\//g, "_").replace(/:/g, "_");
-}
-
-async function fetchAuditLog(name: string): Promise<AuditLog | null> {
-  const safeName = sanitizeName(name);
-  // Try runs/latest first (new layout), then top-level (backward compat)
-  const paths = [
-    `/viewer/runs/latest/audit-logs/${safeName}.json`,
-    `/viewer/audit-logs/${safeName}.json`,
-  ];
-  for (const path of paths) {
-    try {
-      const res = await fetch(path);
-      if (res.ok) return res.json();
-    } catch {
-      // try next path
+/**
+ * Filter the unified events.jsonl down to one model's exgraph/langgraph
+ * trail and reshape into the AuditLog the existing GanttChart consumes.
+ * Reads the archived events.jsonl for the latest run from S3 via the
+ * bench API.
+ */
+async function fetchAuditLog(modelName: string): Promise<AuditLog | null> {
+  // Look up the latest run, then fetch its events.jsonl from S3.
+  let latest: string | null = null;
+  try {
+    const r = await fetch("/viewer/api/bench/runs");
+    if (r.ok) {
+      const body = (await r.json()) as { latest: string | null };
+      latest = body.latest ?? null;
     }
+  } catch {
+    return null;
   }
-  return null;
-}
+  if (!latest) return null;
 
-interface ChunkGroup {
-  index: number;
-  events: (AuditEvent & { offsetS: number })[];
-  totalDurationS: number;
-}
-
-function groupByChunk(events: AuditEvent[]): ChunkGroup[] {
-  if (events.length === 0) return [];
-
-  const firstTs = new Date(events[0]!.timestamp).getTime();
-
-  // Group events into chunks by detecting extract_ner/extract_mentions restarts
-  const extractNodes = new Set([
-    "extract_ner",
-    "extract_mentions",
-    "extract_spo",
-    "extract_propositions",
-  ]);
-
-  const groups: ChunkGroup[] = [];
-  let current: (AuditEvent & { offsetS: number })[] = [];
-  let chunkIdx = 0;
-
-  for (const event of events) {
-    const offsetS = (new Date(event.timestamp).getTime() - firstTs) / 1000;
-    const enriched = { ...event, offsetS };
-
-    // New chunk starts when we see an extract node and current group is non-empty
-    // and the previous event wasn't also an extract (handles extract→validate→extract flow)
-    if (
-      extractNodes.has(event.node_name) &&
-      current.length > 0 &&
-      !extractNodes.has(current[current.length - 1]!.node_name)
-    ) {
-      const totalDur = current.reduce((s, e) => s + e.duration_s, 0);
-      groups.push({ index: chunkIdx, events: current, totalDurationS: totalDur });
-      current = [];
-      chunkIdx++;
-    }
-
-    current.push(enriched);
+  let raw: RunEvent[] = [];
+  try {
+    const res = await fetch(`/viewer/api/bench/runs/${encodeURIComponent(latest)}/events.jsonl`);
+    if (!res.ok) return null;
+    const text = await res.text();
+    raw = text
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line) as RunEvent;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is RunEvent => e !== null);
+  } catch {
+    return null;
   }
+  if (raw.length === 0) return null;
 
-  if (current.length > 0) {
-    const totalDur = current.reduce((s, e) => s + e.duration_s, 0);
-    groups.push({ index: chunkIdx, events: current, totalDurationS: totalDur });
-  }
+  const modelEvents = raw.filter(
+    (e) => (e.source === "exgraph" || e.source === "langgraph") && e.model === modelName,
+  );
+  if (modelEvents.length === 0) return null;
 
-  return groups;
+  // Compute per-event duration_s from the gap to the next event in the
+  // same model's stream so the existing GanttChart bar-width logic works.
+  const audit_events: AuditEvent[] = modelEvents.map((e, i) => {
+    const next = modelEvents[i + 1];
+    const duration_s = next
+      ? Math.max((new Date(next.ts).getTime() - new Date(e.ts).getTime()) / 1000, 0)
+      : 0;
+    return {
+      timestamp: e.ts,
+      node_name: e.node_name,
+      status: e.status,
+      duration_s,
+      details: e.details ?? {},
+    };
+  });
+
+  const first = new Date(audit_events[0]!.timestamp).getTime();
+  const last = new Date(audit_events[audit_events.length - 1]!.timestamp).getTime();
+
+  return {
+    model: modelName,
+    name: modelName,
+    tags: [],
+    stats: {
+      mention_count: 0,
+      assertion_count: 0,
+      duration_s: Math.max((last - first) / 1000, 0),
+      tokens_per_sec: 0,
+      mention_retries: audit_events.filter((e) => e.node_name.startsWith("repair_")).length,
+      proposition_retries: 0,
+      errors: audit_events.filter((e) => e.status === "error").length,
+      chunk_count: 0,
+      pipeline: {},
+    },
+    audit_events,
+    event_count: audit_events.length,
+  };
 }
 
 // ── Gantt Chart ──────────────────────────────────────────────────────
@@ -374,7 +365,7 @@ export function AuditViewer({ modelNames }: { modelNames: string[] }) {
     setErrorA(null);
     fetchAuditLog(modelA).then((log) => {
       if (log) setLogA(log);
-      else setErrorA("No audit log (run with --audit-log)");
+      else setErrorA("No events for this model in events.jsonl");
       setLoadingA(false);
     });
   }, [modelA]);
@@ -388,7 +379,7 @@ export function AuditViewer({ modelNames }: { modelNames: string[] }) {
     setErrorB(null);
     fetchAuditLog(modelB).then((log) => {
       if (log) setLogB(log);
-      else setErrorB("No audit log (run with --audit-log)");
+      else setErrorB("No events for this model in events.jsonl");
       setLoadingB(false);
     });
   }, [modelB]);

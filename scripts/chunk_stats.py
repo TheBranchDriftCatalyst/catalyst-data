@@ -35,7 +35,9 @@ def main():
     chunks = load(args.fixtures, "chunks")
 
     if not transcription:
-        print("No fixtures found. Run: pytest tests/test_pipeline_integration.py -v -s")
+        print(
+            "No fixtures found. Run: pytest packages/media-ingest/tests/integration/test_pipeline_integration.py -v -s"
+        )
         return
 
     duration = transcription.get("duration_s", 0)

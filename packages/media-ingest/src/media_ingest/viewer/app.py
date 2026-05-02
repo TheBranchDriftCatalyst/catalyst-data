@@ -22,6 +22,7 @@ from dagster_io.logging import get_logger
 from media_ingest.viewer.routes.annotations import router as annotations_router
 from media_ingest.viewer.routes.annotations import set_store
 from media_ingest.viewer.routes.api import router as api_router
+from media_ingest.viewer.routes.bench import router as bench_router
 from media_ingest.viewer.routes.media import router as media_router
 from media_ingest.viewer.routes.s3_explorer import router as s3_router
 from media_ingest.viewer.services.annotation_store import AnnotationStore
@@ -85,6 +86,7 @@ def create_viewer_app() -> FastAPI:
     app.include_router(annotations_router)
     app.include_router(media_router)
     app.include_router(s3_router)
+    app.include_router(bench_router)
 
     # Initialize annotation store
     store = AnnotationStore()

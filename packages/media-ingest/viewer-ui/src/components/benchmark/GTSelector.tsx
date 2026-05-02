@@ -5,14 +5,6 @@ interface GTListEntry {
   label: string;
 }
 
-const KNOWN_GT_NAMES = [
-  "active",
-  "ensemble-4model",
-  "ensemble-5model",
-  "gpt-4o-single",
-  "manually-reviewed",
-];
-
 export function GTSelector({
   selected,
   onChange,
@@ -23,28 +15,25 @@ export function GTSelector({
   const [entries, setEntries] = useState<GTListEntry[]>([]);
 
   useEffect(() => {
-    Promise.all(
-      KNOWN_GT_NAMES.map(async (name) => {
-        try {
-          const res = await fetch(`/viewer/ground-truth/${name}.json`, { method: "HEAD" });
-          if (res.ok) {
-            return {
-              name,
-              label: name.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-            };
-          }
-        } catch {
-          /* skip */
+    // Hydrate from the bench API instead of probing a hardcoded list. The
+    // server returns whatever ground-truth files actually exist in S3.
+    (async () => {
+      try {
+        const res = await fetch("/viewer/api/bench/ground-truth");
+        if (!res.ok) return;
+        const body = (await res.json()) as { names: string[] };
+        const available = body.names.map((name) => ({
+          name,
+          label: name.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        }));
+        setEntries(available);
+        if (available.length > 0 && !available.find((e) => e.name === selected)) {
+          onChange(available[0]!.name);
         }
-        return null;
-      }),
-    ).then((results) => {
-      const available = results.filter((r): r is GTListEntry => r !== null);
-      setEntries(available);
-      if (available.length > 0 && !available.find((e) => e.name === selected)) {
-        onChange(available[0]!.name);
+      } catch {
+        // bench API down — leave entries empty; the panel handles that.
       }
-    });
+    })();
   }, []);
 
   if (entries.length === 0) return null;

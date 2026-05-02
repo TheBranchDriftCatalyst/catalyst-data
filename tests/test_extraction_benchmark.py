@@ -101,7 +101,7 @@ class TestGroundTruth:
         if not extraction:
             pytest.skip(
                 f"No extraction fixture for model '{model}'. "
-                f"Run: LLM_MODEL={model} pytest tests/test_pipeline_integration.py -k extraction -v -s"
+                f"Run: LLM_MODEL={model} pytest tests/test_extraction_e2e.py -k extraction -v -s"
             )
             return
 
@@ -171,13 +171,13 @@ class TestGroundTruth:
         }
 
         _store.save_ground_truth("active", ground_truth)
-        gt_path = _store.ground_truth_dir / "active.json"
+        gt_uri = f"{_store.ground_truth_uri}active.json"
         print(f"\n  Ground truth generated from {model}:")
         print(f"    {len(gt_chunks)} chunks")
         print(f"    {ground_truth['total_mentions']} mentions")
         print(f"    {ground_truth['total_propositions']} propositions")
-        print(f"    File: {gt_path}")
-        print("\n  *** Review and correct the file, then set manually_reviewed=true ***")
+        print(f"    Object: {gt_uri}")
+        print("\n  *** Review and correct in the viewer, then set manually_reviewed=true ***")
 
     def test_ground_truth_self_check(self):
         """Validate that all ground truth spans match their source text."""
@@ -225,7 +225,7 @@ class TestGroundTruth:
             return
 
         _store.save_ground_truth("active", ground_truth)
-        gt_path = _store.ground_truth_dir / "active.json"
+        gt_uri = f"{_store.ground_truth_uri}active.json"
         config = ground_truth["ensemble_config"]
         print("\n  Ensemble ground truth generated:")
         print(f"    NER models ({len(config['ner_models'])}): {', '.join(config['ner_models'])}")
@@ -234,8 +234,8 @@ class TestGroundTruth:
         print(f"    {ground_truth['chunk_count']} chunks")
         print(f"    {ground_truth['total_mentions']} mentions (consensus)")
         print(f"    {ground_truth['total_propositions']} propositions (consensus)")
-        print(f"    File: {gt_path}")
-        print("\n  *** Review and correct the file, then set manually_reviewed=true ***")
+        print(f"    Object: {gt_uri}")
+        print("\n  *** Review and correct in the viewer, then set manually_reviewed=true ***")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -260,7 +260,7 @@ class TestBenchmark:
         if not ext:
             pytest.skip(
                 f"No extraction fixture for '{model}'. "
-                f"Run: LLM_MODEL={model} pytest tests/test_pipeline_integration.py -k extraction -v -s"
+                f"Run: LLM_MODEL={model} pytest tests/test_extraction_e2e.py -k extraction -v -s"
             )
         return ext
 

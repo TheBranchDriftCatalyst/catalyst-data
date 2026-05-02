@@ -40,7 +40,7 @@ const ENTITY_TYPES = Object.keys(TYPE_COLORS);
 
 async function fetchGT(name: string): Promise<GroundTruthFile | null> {
   try {
-    const res = await fetch(`/viewer/ground-truth/${name}.json`);
+    const res = await fetch(`/viewer/api/bench/ground-truth/${encodeURIComponent(name)}.json`);
     if (!res.ok) return null;
     return res.json();
   } catch {
@@ -623,19 +623,22 @@ export function GroundTruthPanel({
         : snapshot;
       const json = JSON.stringify(exported, null, 2);
 
-      // Try PUT to Vite dev server (writes to disk)
+      // PUT to the bench API — writes to s3://<bucket>/bench/ground-truth/<name>.json
       try {
-        const res = await fetch(`/viewer/ground-truth/${selectedGT}.json`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: json,
-        });
+        const res = await fetch(
+          `/viewer/api/bench/ground-truth/${encodeURIComponent(selectedGT)}.json`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: json,
+          },
+        );
         if (res.ok) {
           setOriginalGt(deepClone(exported));
           return { kind: "saved", at: Date.now() };
         }
       } catch {
-        // Dev server not available — fall back to download
+        // Bench API unreachable — fall back to download
       }
 
       // Fallback: download as file (only meaningful for explicit save)
