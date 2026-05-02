@@ -2,5 +2,43 @@
 # Add additional bill_ids to grow the benchmark corpus. Each must be a
 # valid Congress.gov partition key (format: <congress>-<bill_type>-<number>).
 # Materialization requires CONGRESS_API_KEY (live API call).
+#
+# Selection goals (CD-s4em): cover all 6 bill types (hr, s, hres, sres,
+# hjres, sjres), 12+ distinct policy_areas (Congress.gov classification),
+# mix small/large, recent congresses biased toward 119 > 118 > 117.
+# Each comment cites the bill's actual `policyArea.name` from the
+# Congress.gov API so the corpus diversity is observable, not just claimed.
 bills:
-  - "119-hres-1"
+  # ── 119th Congress ───────────────────────────────────────────────
+  - "119-hr-1"          # Economics and Public Finance — reconciliation tax/spending bill (very large; 575 chunks)
+  - "119-hr-22"         # Government Operations and Politics — SAVE Act, voter-citizenship verification
+  - "119-s-5"           # Immigration — Laken Riley Act (enacted)
+  - "119-s-9"           # Sports and Recreation — Protection of Women and Girls in Sports Act
+  - "119-hres-1"        # Congress — House rules package, 119th Congress (small)
+  - "119-sres-15"       # Congress — resolution electing Senate Secretary (small ceremonial)
+  - "119-hjres-25"      # Taxation — CRA disapproval of IRS digital-asset broker rule
+  - "119-sjres-11"      # Public Lands and Natural Resources — CRA disapproval (small)
+  # ── 118th Congress ───────────────────────────────────────────────
+  - "118-hr-1"          # Energy — Lower Energy Costs Act (large)
+  - "118-hr-2"          # Immigration — Secure the Border Act of 2023 (large)
+  - "118-hr-3746"       # Economics and Public Finance — Fiscal Responsibility Act (debt-ceiling deal)
+  - "118-hr-815"        # Economics and Public Finance — Israel/Ukraine emergency supplemental appropriations
+  - "118-hr-2670"       # Armed Forces and National Security — NDAA FY24 (massive; 61 chunks)
+  - "118-s-2226"        # Armed Forces and National Security — Senate NDAA FY24 companion
+  - "118-hr-7888"       # Armed Forces and National Security — RISAA / FISA Section 702 reauthorization
+  - "118-hr-3935"       # Transportation and Public Works — FAA Reauthorization Act of 2024 (large)
+  - "118-hr-9495"       # Taxation — Stop Terror-Financing & Tax Penalties on American Hostages Act
+  - "118-s-47"          # Water Resources Development — SAND Act of 2023 (small)
+  - "118-hjres-7"       # Emergency Management — terminating the COVID-19 national emergency
+  - "118-sjres-32"      # Finance and Financial Sector — CRA disapproval of DOL ESG retirement rule
+  - "118-hres-1112"     # Immigration — denouncing the Biden administration's immigration policies (small)
+  - "118-sres-100"      # Congress — honoring the life of James T. Broyhill (small ceremonial)
+  # ── 117th Congress ───────────────────────────────────────────────
+  - "117-hr-5376"       # Economics and Public Finance — Inflation Reduction Act (huge; 581 chunks)
+  - "117-hr-3684"       # Transportation and Public Works — Infrastructure Investment and Jobs Act (huge)
+  - "117-hr-1319"       # Economics and Public Finance — American Rescue Plan Act (huge)
+  - "117-s-1605"        # Armed Forces and National Security — NDAA FY22 (large)
+  - "117-hr-3076"       # Government Operations and Politics — Postal Service Reform Act of 2022
+  - "117-hr-2617"       # Economics and Public Finance — Consolidated Appropriations Act 2023 (omnibus, huge)
+  - "117-hjres-23"      # Government Operations and Politics — proposed constitutional amendment (congressional terms)
+  - "117-sjres-22"      # International Affairs — joint resolution to repeal the 2001 AUMF
