@@ -286,6 +286,83 @@ def score_propositions(
     }
 
 
+def score_per_chunk(
+    predicted_mentions: list[dict],
+    gt_mentions: list[dict],
+    predicted_propositions: list[dict] | None = None,
+    gt_propositions: list[dict] | None = None,
+) -> dict[str, dict[str, float]]:
+    """Score predictions chunk-by-chunk against per-chunk ground truth.
+
+    Inputs are flat lists with a ``chunk_id`` field on each item (gold layer
+    convention: provenance.chunk_id, but the scorer only needs the raw key).
+    Returns a dict keyed by chunk_id with a small per-chunk score record:
+
+        {
+          "chunk-42": {
+            "mention_strict_f1": 0.81,
+            "mention_relaxed_f1": 0.91,
+            "proposition_relaxed_f1": 0.5,
+            "predicted_count": 7,
+            "ground_truth_count": 8,
+          },
+          ...
+        }
+
+    DPO consumer (training.dpo_dataset) uses this to pick the
+    closest-to-GT model and the worst-scoring model per chunk to form
+    preference pairs. The proposition scores are optional — pass empty
+    lists if a model only emits mentions.
+    """
+
+    def _chunk_id(item: dict) -> str:
+        prov = item.get("provenance") or {}
+        return prov.get("chunk_id") or item.get("chunk_id") or ""
+
+    # Bucket by chunk
+    pred_m_by_chunk: dict[str, list[dict]] = {}
+    for m in predicted_mentions or []:
+        cid = _chunk_id(m)
+        if cid:
+            pred_m_by_chunk.setdefault(cid, []).append(m)
+
+    gt_m_by_chunk: dict[str, list[dict]] = {}
+    for m in gt_mentions or []:
+        cid = _chunk_id(m)
+        if cid:
+            gt_m_by_chunk.setdefault(cid, []).append(m)
+
+    pred_p_by_chunk: dict[str, list[dict]] = {}
+    for p in predicted_propositions or []:
+        cid = _chunk_id(p)
+        if cid:
+            pred_p_by_chunk.setdefault(cid, []).append(p)
+
+    gt_p_by_chunk: dict[str, list[dict]] = {}
+    for p in gt_propositions or []:
+        cid = _chunk_id(p)
+        if cid:
+            gt_p_by_chunk.setdefault(cid, []).append(p)
+
+    # Score every chunk that appears in either side — chunks the model
+    # didn't extract anything for still count (with 0 precision/recall).
+    all_chunks = set(pred_m_by_chunk) | set(gt_m_by_chunk) | set(pred_p_by_chunk) | set(gt_p_by_chunk)
+
+    out: dict[str, dict[str, float]] = {}
+    for cid in all_chunks:
+        m_scores = score_mentions(pred_m_by_chunk.get(cid, []), gt_m_by_chunk.get(cid, []))
+        p_scores = score_propositions(pred_p_by_chunk.get(cid, []), gt_p_by_chunk.get(cid, []))
+        out[cid] = {
+            "mention_strict_f1": round(m_scores["strict_f1"], 4),
+            "mention_relaxed_f1": round(m_scores["relaxed_f1"], 4),
+            "proposition_strict_f1": round(p_scores["strict_f1"], 4),
+            "proposition_relaxed_f1": round(p_scores["relaxed_f1"], 4),
+            "predicted_count": m_scores["predicted_count"],
+            "ground_truth_count": m_scores["ground_truth_count"],
+        }
+    return out
+
+
 def compute_model_scores(
     fixture: dict,
     gt_mentions: list[dict],

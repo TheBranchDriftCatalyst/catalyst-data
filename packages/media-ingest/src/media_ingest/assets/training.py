@@ -198,50 +198,158 @@ def sft_dataset(context: AssetExecutionContext) -> Output[dict[str, Any]]:
     name="dpo_dataset",
     group_name="media",
     description=(
-        "DPO preference-pair JSONL emitted to s3://<bucket>/bench/training/dpo/<domain>/data.jsonl. "
-        "Stub: emits an empty manifest until the per-chunk F1 scorer + HITL reject signal "
-        "are wired up (CD-foy3 anchor)."
+        "DPO preference-pair JSONL emitted to "
+        "s3://<bucket>/bench/training/dpo/<domain>/data.jsonl. One row per "
+        "(chunk, preferred_model, rejected_model) — preferred = closest-to-GT "
+        "by per-chunk F1, rejected = furthest. Source: bench/runs/<latest>/"
+        "extractions/extraction_<model>.json fan-out, scored chunk-by-chunk "
+        "against bench/ground-truth/active.json via score_per_chunk()."
     ),
     compute_kind="s3",
 )
 def dpo_dataset(context: AssetExecutionContext) -> Output[dict[str, Any]]:
-    """Stub for the DPO preference-pair dataset.
+    """Build DPO preference pairs from per-chunk model-vs-GT F1 deltas.
 
-    Full implementation needs:
-      1. Per-(chunk, model) F1 scoring via tests/shared/extraction_scoring.score_per_chunk()
-         (not yet implemented — see CD-foy3 / the consolidated plan §3.2)
-      2. The viewer_entity_overrides.kind column (merge | reject) so HITL Accept/Reject
-         flips become DPO negatives
-      3. Provenance.extraction_model on every mention (already present per the plan)
+    Pipeline:
+      1. Find the latest bench run; load every extraction_<model>.json
+      2. Load the active GT (bench/ground-truth/active.json)
+      3. For each model, call score_per_chunk(predicted_mentions, gt_mentions)
+      4. For each chunk: find the model with the highest mention_strict_f1
+         (preferred) and the lowest non-empty score (rejected). Skip chunks
+         where only one model produced output (no preference pair to form)
+         or where preferred == rejected (degenerate).
+      5. Emit the preference row with chunk text + preferred/rejected model
+         extractions inline so the trainer doesn't need to re-join later.
 
-    Until then, this asset emits an empty placeholder JSONL so downstream
-    materializations don't 404, plus a manifest documenting what's missing.
+    HITL reject signal (viewer_entity_overrides.kind=reject) is a future
+    extension — once that schema column lands, rejected mention sets get
+    augmented with explicit human rejections. Tracked under CD-thpq.
     """
+    from tests.shared.extraction_scoring import score_per_chunk
+
     bench = S3BenchmarkStore()
+
+    # ── Inputs
+    gt = bench.load_ground_truth("active") or {}
+    gt_chunks = gt.get("chunks", []) or []
+    if not gt_chunks:
+        context.log.warning("No active ground truth — DPO dataset will be empty.")
+
+    gt_mentions_by_chunk: dict[str, list[dict[str, Any]]] = {}
+    gt_propositions_by_chunk: dict[str, list[dict[str, Any]]] = {}
+    chunk_texts: dict[str, str] = {}
+    for c in gt_chunks:
+        cid = c.get("chunk_id")
+        if not cid:
+            continue
+        chunk_texts[cid] = c.get("text", "")
+        # Stamp chunk_id onto each mention/prop so score_per_chunk can bucket them.
+        for m in c.get("mentions", []) or []:
+            m_with_cid = {**m, "chunk_id": cid}
+            gt_mentions_by_chunk.setdefault(cid, []).append(m_with_cid)
+        for p in c.get("propositions", []) or []:
+            p_with_cid = {**p, "chunk_id": cid}
+            gt_propositions_by_chunk.setdefault(cid, []).append(p_with_cid)
+    flat_gt_mentions = [m for ms in gt_mentions_by_chunk.values() for m in ms]
+    flat_gt_propositions = [p for ps in gt_propositions_by_chunk.values() for p in ps]
+
+    latest_run = bench.load_run("latest")
+    if latest_run is None:
+        context.log.warning("No bench run in S3 — DPO dataset will be empty.")
+        models: list[str] = []
+    else:
+        models = latest_run.list_extractions()
+    context.log.info("DPO source: run=%s models=%d", getattr(latest_run, "run_id", None), len(models))
+
+    # ── Score each model chunk-by-chunk
+    per_model_scores: dict[str, dict[str, dict[str, float]]] = {}
+    per_model_extraction: dict[str, dict[str, Any]] = {}
+    for m in models:
+        if latest_run is None:
+            break
+        ext = latest_run.load_extraction(m)
+        if not ext:
+            continue
+        per_model_extraction[m] = ext
+        # Stamp chunk_id onto predicted items so score_per_chunk can bucket them.
+        pred_mentions: list[dict[str, Any]] = []
+        for it in ext.get("mentions", []) or []:
+            cid = (it.get("provenance") or {}).get("chunk_id") or it.get("chunk_id")
+            if cid:
+                pred_mentions.append({**it, "chunk_id": cid})
+        pred_propositions: list[dict[str, Any]] = []
+        for it in ext.get("assertions", []) or ext.get("propositions", []) or []:
+            cid = (it.get("provenance") or {}).get("chunk_id") or it.get("chunk_id")
+            if cid:
+                pred_propositions.append({**it, "chunk_id": cid})
+        per_model_scores[m] = score_per_chunk(pred_mentions, flat_gt_mentions, pred_propositions, flat_gt_propositions)
+
+    # ── Form preference pairs per chunk
+    rows: list[dict[str, Any]] = []
+    for cid, _gt_chunk in {c.get("chunk_id"): c for c in gt_chunks if c.get("chunk_id")}.items():
+        # Per-model F1 on this chunk; default 0.0 if model didn't produce output.
+        scored_models = [(m, per_model_scores.get(m, {}).get(cid, {}).get("mention_strict_f1", 0.0)) for m in models]
+        scored_models = [s for s in scored_models if s[0] in per_model_extraction]
+        if len(scored_models) < 2:
+            continue  # need at least 2 models to form a preference pair
+        scored_models.sort(key=lambda s: s[1], reverse=True)
+        preferred_model, preferred_f1 = scored_models[0]
+        rejected_model, rejected_f1 = scored_models[-1]
+        if preferred_model == rejected_model or preferred_f1 == rejected_f1:
+            continue  # no preference signal
+
+        # Inline the extractions for this chunk so the trainer doesn't re-join.
+        def _filter(ext: dict[str, Any], cid: str) -> dict[str, Any]:
+            def _matches(it: dict[str, Any]) -> bool:
+                return ((it.get("provenance") or {}).get("chunk_id") or it.get("chunk_id")) == cid
+
+            return {
+                "mentions": [m for m in ext.get("mentions", []) or [] if _matches(m)],
+                "propositions": [
+                    p for p in ext.get("assertions", []) or ext.get("propositions", []) or [] if _matches(p)
+                ],
+            }
+
+        rows.append(
+            {
+                "chunk_id": cid,
+                "chunk_text": chunk_texts.get(cid, ""),
+                "preferred": {
+                    "model": preferred_model,
+                    "f1": round(preferred_f1, 4),
+                    "extraction": _filter(per_model_extraction[preferred_model], cid),
+                },
+                "rejected": {
+                    "model": rejected_model,
+                    "f1": round(rejected_f1, 4),
+                    "extraction": _filter(per_model_extraction[rejected_model], cid),
+                },
+                "f1_delta": round(preferred_f1 - rejected_f1, 4),
+                "source": "model-vs-gt",
+            }
+        )
 
     payload: dict[str, Any] = {
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
         "domain": _DOMAIN,
-        "row_count": 0,
-        "status": "stub",
-        "missing": [
-            "per-chunk F1 scorer (score_per_chunk in tests/shared/extraction_scoring)",
-            "viewer_entity_overrides.kind column (merge|reject)",
-        ],
+        "run_id": getattr(latest_run, "run_id", None),
+        "models_scored": list(per_model_extraction.keys()),
+        "row_count": len(rows),
     }
 
+    jsonl = "\n".join(json.dumps(r, default=str) for r in rows) + ("\n" if rows else "")
     domain_key = f"{bench.training_prefix}/dpo/{_DOMAIN}/data.jsonl"
-    bench.client.put_object(domain_key, b"")  # forward-only: empty, not 404
+    bench.client.put_object(domain_key, jsonl.encode("utf-8"))
     domain_uri = f"s3://{bench.bucket}/{domain_key}"
 
-    context.log.info("DPO dataset stub written → %s", domain_uri)
+    context.log.info("DPO dataset: %d preference pairs → %s", len(rows), domain_uri)
 
     return Output(
         payload,
         metadata={
-            "row_count": 0,
-            "status": "stub",
+            "row_count": len(rows),
+            "models_scored": len(per_model_extraction),
             "domain_uri": MetadataValue.path(domain_uri),
         },
     )
