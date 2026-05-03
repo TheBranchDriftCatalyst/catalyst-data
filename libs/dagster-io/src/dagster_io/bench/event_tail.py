@@ -111,6 +111,9 @@ def emit_chunk_text(
     speaker_label: str | None = None,
     temporal_start_ms: float | None = None,
     temporal_end_ms: float | None = None,
+    chunk_index: int | None = None,
+    total_chunks: int | None = None,
+    chunk_metadata: dict[str, Any] | None = None,
     max_chars: int = 4096,
 ) -> None:
     """Emit a one-shot ``chunk_loaded`` event the first time a chunk_id
@@ -119,6 +122,12 @@ def emit_chunk_text(
     capped at ``max_chars`` (default 4 KiB) and a ``truncated`` flag is
     set when the source was longer; the StateInspector uses the inline
     text directly without a side fetch.
+
+    ``chunk_metadata`` carries the chunker's strategy + size/overlap /
+    char-offset / content-hash so the StateInspector right-pane can
+    surface "why is this chunk shaped this way" without re-reading the
+    silver layer. Index + total flow through separately because they're
+    promoted onto the TextChunk model itself, not the metadata bag.
     """
     if not chunk_id or chunk_id in _seen_chunks:
         return
@@ -139,6 +148,9 @@ def emit_chunk_text(
             "speaker_label": speaker_label,
             "temporal_start_ms": temporal_start_ms,
             "temporal_end_ms": temporal_end_ms,
+            "chunk_index": chunk_index,
+            "total_chunks": total_chunks,
+            "chunk_metadata": chunk_metadata or {},
         },
     )
 

@@ -120,23 +120,58 @@ def _build_graph():
     return pipeline, client
 
 
-async def _extract_chunk(graph, chunk_text: str, document_id: str, chunk_id: str, max_retries: int = 3) -> dict:
+async def _extract_chunk(
+    graph,
+    chunk_text: str,
+    document_id: str,
+    chunk_id: str,
+    max_retries: int = 3,
+    *,
+    chunk_index: int | None = None,
+    total_chunks: int | None = None,
+    chunk_metadata: dict | None = None,
+) -> dict:
     """Run the full extraction graph on one chunk.
 
     ``graph`` is the catalyst-exgraph compiled pipeline. We flatten its
     ExGraphState output via ``pipeline_result_to_legacy`` so callers see
     the flat ``accepted_mentions`` / ``accepted_propositions`` / ``status``
     shape they've always consumed — no LegacyAdapter wrapper needed.
+
+    chunk_index / total_chunks / chunk_metadata flow into source_metadata
+    so the ExtractNode can surface them on the chunk_loaded event for the
+    StateInspector's right-pane chunking-strategy view.
     """
     from catalyst_exgraph.pipeline import pipeline_result_to_legacy
 
+    # CATALYST_BENCH_MODEL is the human-readable bench config name set by
+    # the harness (e.g. 'gliner-medium'); LLM_MODEL is the underlying model
+    # id (e.g. 'urchade/gliner_medium-v2.1'). Prefer the bench name so the
+    # StateInspector dropdown shows the same labels as benchmark_config.py.
+    bench_model = os.environ.get("CATALYST_BENCH_MODEL") or os.environ.get("LLM_MODEL", "")
+    cm = chunk_metadata or {}
     state = {
         "raw_text": chunk_text,
         "source_metadata": {
             "document_id": document_id,
             "chunk_id": chunk_id,
+            "chunk_index": chunk_index,
+            "total_chunks": total_chunks,
+            "chunk_metadata": cm,
+            # Promote a few hot fields the ExtractNode already reads so
+            # the existing emit_chunk_text call sites keep working.
+            "domain": cm.get("domain"),
+            "speaker_label": cm.get("speaker"),
+            "temporal_start_ms": (cm.get("start_s") * 1000) if cm.get("start_s") is not None else None,
+            "temporal_end_ms": (cm.get("end_s") * 1000) if cm.get("end_s") is not None else None,
         },
         "max_retries": max_retries,
+        # Threaded into the pipeline state so emit_chunk_extracted_for_state
+        # can tag chunk_extracted events with the bench model — without this,
+        # all events have model=null and the StateInspector can't filter.
+        "model": bench_model,
+        "doc_id": document_id,
+        "chunk_id": chunk_id,
     }
     raw_result = await graph.ainvoke(state)
     result = pipeline_result_to_legacy(raw_result)
@@ -208,7 +243,16 @@ def extract_validated(
         try:
             start = time.monotonic()
             result = loop.run_until_complete(
-                _extract_chunk(graph, chunk.text, chunk.document_id, chunk.chunk_id, max_retries=_max_retries)
+                _extract_chunk(
+                    graph,
+                    chunk.text,
+                    chunk.document_id,
+                    chunk.chunk_id,
+                    max_retries=_max_retries,
+                    chunk_index=getattr(chunk, "index", None),
+                    total_chunks=getattr(chunk, "total_chunks", None),
+                    chunk_metadata=getattr(chunk, "metadata", {}) or {},
+                )
             )
             duration = time.monotonic() - start
             # Attach chunk metadata to result so we can build provenance later.

@@ -72,6 +72,9 @@ class ExtractNode:
                 speaker_label=src.get("speaker_label"),
                 temporal_start_ms=src.get("temporal_start_ms"),
                 temporal_end_ms=src.get("temporal_end_ms"),
+                chunk_index=src.get("chunk_index"),
+                total_chunks=src.get("total_chunks"),
+                chunk_metadata=src.get("chunk_metadata") or {},
             )
 
         logger.info("%s: start, input_len=%d", node_name, len(raw_text))

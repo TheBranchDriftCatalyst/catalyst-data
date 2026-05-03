@@ -172,6 +172,23 @@ export interface PropositionLite {
   confidence?: number;
 }
 
+/** Details payload of a `chunk_loaded` event — what the chunker put on
+ *  disk + what the audio chunker promotes (speaker, time range). The
+ *  chunk_metadata bag is whatever the ChunkingResource attached
+ *  (strategy, chunk_size, chunk_overlap, chunk_char_offset, …). */
+export interface ChunkLoadedDetails {
+  text: string;
+  char_count: number;
+  truncated: boolean;
+  domain: string | null;
+  speaker_label: string | null;
+  temporal_start_ms: number | null;
+  temporal_end_ms: number | null;
+  chunk_index: number | null;
+  total_chunks: number | null;
+  chunk_metadata: Record<string, unknown>;
+}
+
 /** AuditEvent: derived per-model view of RunEvent for the timeline. */
 export interface AuditEvent {
   timestamp: string;
