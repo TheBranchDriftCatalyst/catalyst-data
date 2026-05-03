@@ -127,8 +127,8 @@ export interface EntityRow {
 
 /**
  * A single line from `events.jsonl` — the unified event stream emitted
- * by harness, exgraph, langgraph, and dagster. Every consumer (LiveGantt,
- * AuditViewer, StateInspector) reads this shape.
+ * by harness, exgraph, langgraph, and dagster. Consumers (AuditViewer,
+ * StateInspector) read this shape.
  */
 export interface RunEvent {
   ts: string;

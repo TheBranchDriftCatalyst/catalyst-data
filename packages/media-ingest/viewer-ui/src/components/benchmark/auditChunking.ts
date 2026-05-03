@@ -1,9 +1,9 @@
 /**
  * Shared chunking + color helpers for the audit timeline.
  *
- * Both the post-hoc `AuditViewer` and the live `LiveGantt` consume the
- * same `events.jsonl` shape and group events into chunks the same way,
- * so the same renderer can be reused for replay and live streaming.
+ * `AuditViewer` and `StateInspector` consume the same `events.jsonl`
+ * shape and group events into chunks the same way, so the same renderer
+ * works for replay and live streaming.
  */
 
 import type { AuditEvent } from "@/types/benchmark";
@@ -32,7 +32,7 @@ export const STAGE_COLORS: Record<string, string> = {
   model_run: "bg-fuchsia-500",
 };
 
-/** Lane color by event source (for the LiveGantt's source-grouped rows). */
+/** Lane color by event source (for source-grouped timeline rows). */
 export const SOURCE_COLORS: Record<string, string> = {
   harness: "bg-zinc-500",
   exgraph: "bg-cyan-500",

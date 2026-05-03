@@ -15,7 +15,6 @@ import { EntityJsonPanel } from "@/components/benchmark/EntityJsonPanel";
 import { PropositionMatrix } from "@/components/benchmark/PropositionMatrix";
 import { PipelineTable } from "@/components/benchmark/PipelineTable";
 import { AuditViewer } from "@/components/benchmark/AuditViewer";
-import { LiveGantt } from "@/components/benchmark/LiveGantt";
 import { GroundTruthPanel } from "@/components/benchmark/GroundTruthPanel";
 import { TableControls } from "@/components/benchmark/TableControls";
 import { GTSelector } from "@/components/benchmark/GTSelector";
@@ -332,20 +331,13 @@ export default function BenchmarkReport() {
 
   if (error) {
     return (
-      <div className="flex flex-col gap-4 p-6">
-        <LiveGantt />
-        <div className="flex items-center justify-center">
-          <div className="bg-surface-1 border border-white/5 rounded-lg p-8 max-w-lg text-center">
-            <h2 className="text-lg font-mono text-zinc-200 mb-2">No Benchmark Report</h2>
-            <p className="text-sm text-zinc-500 mb-4">{error}</p>
-            <pre className="text-xs text-zinc-400 bg-surface-0 rounded p-3 text-left">
-              PYTHONPATH=. python tests/benchmark_harness.py --full
-            </pre>
-            <p className="text-[11px] text-zinc-600 mt-3">
-              The live timeline above streams from the run-bus while a benchmark is in flight — the
-              static report appears once the first model completes.
-            </p>
-          </div>
+      <div className="flex items-center justify-center p-6">
+        <div className="bg-surface-1 border border-white/5 rounded-lg p-8 max-w-lg text-center">
+          <h2 className="text-lg font-mono text-zinc-200 mb-2">No Benchmark Report</h2>
+          <p className="text-sm text-zinc-500 mb-4">{error}</p>
+          <pre className="text-xs text-zinc-400 bg-surface-0 rounded p-3 text-left">
+            PYTHONPATH=. python tests/benchmark_harness.py --full
+          </pre>
         </div>
       </div>
     );
@@ -353,11 +345,8 @@ export default function BenchmarkReport() {
 
   if (!report) {
     return (
-      <div className="flex flex-col gap-4 p-6">
-        <LiveGantt />
-        <div className="flex items-center justify-center">
-          <div className="text-zinc-500 font-mono text-sm">Loading report...</div>
-        </div>
+      <div className="flex items-center justify-center p-6">
+        <div className="text-zinc-500 font-mono text-sm">Loading report...</div>
       </div>
     );
   }
@@ -558,7 +547,6 @@ export default function BenchmarkReport() {
 
           {activeTab === "audit" && (
             <div className="space-y-4">
-              <LiveGantt />
               <AuditViewer modelNames={report.model_names} />
             </div>
           )}
