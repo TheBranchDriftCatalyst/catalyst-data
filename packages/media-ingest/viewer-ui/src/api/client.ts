@@ -168,6 +168,20 @@ export async function bulkCreateAnnotations(
 export interface S3Folder {
   prefix: string;
   name: string;
+  /** Aggregated size across all descendant objects (only when fetched with `with_stats=true`). */
+  total_size?: number;
+  /** Number of descendant files (only when fetched with `with_stats=true`). */
+  file_count?: number;
+  /** Most-recent `last_modified` of any descendant (only when fetched with `with_stats=true`). */
+  last_modified?: string;
+}
+
+export interface S3PrefixStats {
+  total_size: number;
+  file_count: number;
+  folder_count: number;
+  immediate_files: number;
+  last_modified: string;
 }
 
 export interface S3File {
@@ -183,6 +197,22 @@ export interface S3ListResult {
   files: S3File[];
   truncated: boolean;
 }
+
+export interface S3FolderStats {
+  total_size: number;
+  file_count: number;
+  last_modified: string;
+}
+
+export type S3FolderStatsResponse =
+  | {
+      prefix: string;
+      status: "ready";
+      age_seconds: number;
+      folder_stats: Record<string, S3FolderStats>;
+      prefix_stats: S3PrefixStats;
+    }
+  | { prefix: string; status: "computing" };
 
 export interface S3ReadResult {
   key: string;
@@ -217,6 +247,10 @@ export function fetchS3List(prefix = "", delimiter = "/"): Promise<S3ListResult>
   return apiFetch<S3ListResult>(
     `/s3/list?prefix=${encodeURIComponent(prefix)}&delimiter=${encodeURIComponent(delimiter)}`,
   );
+}
+
+export function fetchS3FolderStats(prefix = ""): Promise<S3FolderStatsResponse> {
+  return apiFetch<S3FolderStatsResponse>(`/s3/folder_stats?prefix=${encodeURIComponent(prefix)}`);
 }
 
 export function fetchS3Read(key: string, maxLines = 500): Promise<S3ReadResult> {
