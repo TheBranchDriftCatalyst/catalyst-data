@@ -2,8 +2,8 @@
  * Global top navigation bar.
  *
  * Lives at the page root above both the sidebar and the main content,
- * so cross-page navigation (Media, Entity Overrides, S3, Benchmarks,
- * State Inspector) is always reachable and isn't visually nested
+ * so cross-page navigation (Media, S3, Benchmarks, State Inspector)
+ * is always reachable and isn't visually nested
  * inside the Media Explorer sidebar — which previously made it look
  * like those pages were sub-views of the media list.
  *
@@ -16,7 +16,6 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   Activity,
-  ArrowRightLeft,
   BarChart3,
   Boxes,
   ChevronDown,
@@ -40,7 +39,6 @@ interface NavItem {
 
 const ITEMS: NavItem[] = [
   { to: "/", label: "Media", icon: Tv2 },
-  { to: "/overrides", label: "Entity Overrides", icon: ArrowRightLeft },
   { to: "/s3", label: "S3 Explorer", icon: Database },
   { to: "/benchmarks", label: "Benchmarks", icon: BarChart3, prefix: true },
   { to: "/benchmarks/state", label: "State Inspector", icon: Activity },

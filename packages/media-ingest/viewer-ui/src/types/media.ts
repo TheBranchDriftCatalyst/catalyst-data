@@ -5,6 +5,8 @@ export interface MediaDocument {
   source_path: string;
   document_type: string;
   domain: string;
+  /** Backend-resolved streaming URL (preferred over client-side construction). */
+  media_url?: string;
   thumbnail_url?: string;
   metadata: {
     extension: string;

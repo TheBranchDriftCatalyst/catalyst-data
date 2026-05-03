@@ -11,6 +11,8 @@ GET /viewer/api/documents/{document_id}/assertions     — S-P-O triples
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, HTTPException
 
 from dagster_io.logging import get_logger
@@ -19,6 +21,8 @@ from media_ingest.viewer.services.s3_data import S3DataService
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/viewer/api", tags=["viewer-api"])
+
+_VIDEO_EXTS = frozenset({".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v"})
 
 # Singleton data service — created once, reused across requests
 _data_service: S3DataService | None = None
@@ -46,8 +50,13 @@ def list_documents() -> list[dict]:
         media_url = svc.resolve_media_url(source_path)
         if media_url:
             doc["media_url"] = media_url
-            # Add thumbnail URL for video files
-            if doc.get("metadata", {}).get("has_video"):
+            # Add thumbnail URL for video files — check has_video flag first,
+            # then fall back to extension so stale docs without has_video still
+            # get thumbnails (e.g. data seeded before the flag was added).
+            meta = doc.get("metadata", {})
+            ext = (meta.get("extension") or os.path.splitext(source_path)[1]).lower()
+            is_video = bool(meta.get("has_video")) or ext in _VIDEO_EXTS
+            if is_video:
                 doc["thumbnail_url"] = media_url.replace("/viewer/media/", "/viewer/media/thumbnail/")
 
     return docs
@@ -68,6 +77,11 @@ def get_document(document_id: str) -> dict:
     media_url = svc.resolve_media_url(source_path)
     if media_url:
         doc["media_url"] = media_url
+        meta = doc.get("metadata", {})
+        ext = (meta.get("extension") or os.path.splitext(source_path)[1]).lower()
+        is_video = bool(meta.get("has_video")) or ext in _VIDEO_EXTS
+        if is_video:
+            doc["thumbnail_url"] = media_url.replace("/viewer/media/", "/viewer/media/thumbnail/")
 
     return doc
 

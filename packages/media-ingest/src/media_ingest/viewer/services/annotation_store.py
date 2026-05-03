@@ -51,19 +51,6 @@ CREATE TABLE IF NOT EXISTS viewer_speaker_mappings (
 );
 CREATE INDEX IF NOT EXISTS idx_vsm_doc ON viewer_speaker_mappings(document_id);
 
-CREATE TABLE IF NOT EXISTS viewer_entity_overrides (
-    override_id TEXT PRIMARY KEY,
-    alias_text TEXT NOT NULL,
-    target_name TEXT NOT NULL,
-    entity_type TEXT NOT NULL,
-    reviewer TEXT DEFAULT '',
-    notes TEXT DEFAULT '',
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_veo_active ON viewer_entity_overrides(is_active);
-CREATE INDEX IF NOT EXISTS idx_veo_alias ON viewer_entity_overrides(alias_text);
 """
 
 
@@ -258,71 +245,3 @@ class AnnotationStore:
             return True
 
         return self._safe(_upsert, False)
-
-    # ── Entity Overrides (HITL alias merges) ─────────────────────────────
-
-    def list_entity_overrides(self, active_only: bool = True) -> list[dict]:
-        def _query(conn):
-            sql = (
-                "SELECT override_id, alias_text, target_name, entity_type, reviewer, notes, is_active, created_at, updated_at "
-                "FROM viewer_entity_overrides"
-            )
-            if active_only:
-                sql += " WHERE is_active = true"
-            sql += " ORDER BY entity_type, target_name, alias_text"
-            rows = conn.execute(sql).fetchall()
-            return [
-                {
-                    "override_id": r[0],
-                    "alias_text": r[1],
-                    "target_name": r[2],
-                    "entity_type": r[3],
-                    "reviewer": r[4],
-                    "notes": r[5],
-                    "is_active": r[6],
-                    "created_at": r[7].isoformat() if r[7] else None,
-                    "updated_at": r[8].isoformat() if r[8] else None,
-                }
-                for r in rows
-            ]
-
-        return self._safe(_query, [])
-
-    def create_entity_override(self, data: dict) -> dict | None:
-        def _insert(conn):
-            oid = data.get("override_id", str(uuid.uuid4()))
-            conn.execute(
-                "INSERT INTO viewer_entity_overrides (override_id, alias_text, target_name, entity_type, reviewer, notes) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (
-                    oid,
-                    data["alias_text"],
-                    data["target_name"],
-                    data["entity_type"],
-                    data.get("reviewer", ""),
-                    data.get("notes", ""),
-                ),
-            )
-            return {"override_id": oid, **data}
-
-        return self._safe(_insert)
-
-    def delete_entity_override(self, override_id: str) -> bool:
-        def _delete(conn):
-            conn.execute(
-                "DELETE FROM viewer_entity_overrides WHERE override_id = %s",
-                (override_id,),
-            )
-            return True
-
-        return self._safe(_delete, False)
-
-    def toggle_entity_override(self, override_id: str, is_active: bool) -> dict | None:
-        def _update(conn):
-            conn.execute(
-                "UPDATE viewer_entity_overrides SET is_active = %s, updated_at = NOW() WHERE override_id = %s",
-                (is_active, override_id),
-            )
-            return {"override_id": override_id, "is_active": is_active}
-
-        return self._safe(_update)

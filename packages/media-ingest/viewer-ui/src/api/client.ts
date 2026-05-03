@@ -75,12 +75,16 @@ export async function updateSpeakerName(
 }
 
 /**
- * Constructs the media streaming URL for a document.
- * The backend serves files at /viewer/media/{source}/{relative_path}
+ * Returns the media streaming URL for a document.
+ *
+ * Prefers the backend-resolved `media_url` field (already correct for both
+ * prod NFS and dev fixture overrides). Falls back to client-side construction
+ * from source_path for documents that pre-date the field.
  */
 export function getMediaUrl(doc: MediaDocument): string {
-  // source_path is the full NFS path like /data/metube/Some Video.mp4
-  // We need to extract the relative path after /data/{source}/
+  if (doc.media_url) return doc.media_url;
+
+  // Legacy fallback: source_path is the full NFS path /data/metube/Some Video.mp4
   const sourcePath = doc.source_path;
   const prefix = `/data/${doc.source}/`;
   const relativePath = sourcePath.startsWith(prefix)
@@ -159,68 +163,6 @@ export async function bulkCreateAnnotations(
   return res.json();
 }
 
-// ── Entity Override endpoints (HITL alias merges) ────────────────────────
-
-export interface EntityOverride {
-  override_id: string;
-  alias_text: string;
-  target_name: string;
-  entity_type: string;
-  reviewer: string;
-  notes: string;
-  is_active: boolean;
-  created_at: string | null;
-  updated_at: string | null;
-}
-
-export function fetchEntityOverrides(activeOnly = true): Promise<EntityOverride[]> {
-  return apiFetch<EntityOverride[]>(`/entity-overrides?active_only=${activeOnly}`);
-}
-
-export async function createEntityOverride(payload: {
-  alias_text: string;
-  target_name: string;
-  entity_type: string;
-  notes?: string;
-}): Promise<EntityOverride> {
-  const res = await fetch(`${API_BASE}/entity-overrides`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`API ${res.status}: ${text}`);
-  }
-  return res.json();
-}
-
-export async function deleteEntityOverride(overrideId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/entity-overrides/${encodeURIComponent(overrideId)}`, {
-    method: "DELETE",
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`API ${res.status}: ${text}`);
-  }
-}
-
-export async function toggleEntityOverride(
-  overrideId: string,
-  isActive: boolean,
-): Promise<EntityOverride> {
-  const res = await fetch(`${API_BASE}/entity-overrides/${encodeURIComponent(overrideId)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ is_active: isActive }),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`API ${res.status}: ${text}`);
-  }
-  return res.json();
-}
-
 // ── S3 Explorer endpoints ─────────────────────────────────────────────────
 
 export interface S3Folder {
@@ -254,6 +196,23 @@ export interface S3ReadResult {
   preview?: string;
 }
 
+export interface S3SearchHit {
+  key: string;
+  name: string;
+  size: number;
+  last_modified: string;
+  score: number;
+  /** Indices into `key` of matched query characters (for highlighting). */
+  match_indices: number[];
+}
+
+export interface S3SearchResult {
+  q: string;
+  prefix: string;
+  total: number;
+  hits: S3SearchHit[];
+}
+
 export function fetchS3List(prefix = "", delimiter = "/"): Promise<S3ListResult> {
   return apiFetch<S3ListResult>(
     `/s3/list?prefix=${encodeURIComponent(prefix)}&delimiter=${encodeURIComponent(delimiter)}`,
@@ -262,6 +221,18 @@ export function fetchS3List(prefix = "", delimiter = "/"): Promise<S3ListResult>
 
 export function fetchS3Read(key: string, maxLines = 500): Promise<S3ReadResult> {
   return apiFetch<S3ReadResult>(`/s3/read?key=${encodeURIComponent(key)}&max_lines=${maxLines}`);
+}
+
+export function fetchS3Search(q: string, prefix = "", limit = 200): Promise<S3SearchResult> {
+  return apiFetch<S3SearchResult>(
+    `/s3/search?q=${encodeURIComponent(q)}&prefix=${encodeURIComponent(prefix)}&limit=${limit}`,
+  );
+}
+
+/** URL for streaming raw object bytes (for `<img>`, `<audio>`, `<video>`, downloads). */
+export function s3RawUrl(key: string, download = false): string {
+  const base = `/viewer/api/s3/raw?key=${encodeURIComponent(key)}`;
+  return download ? `${base}&download=true` : base;
 }
 
 /** File extensions that should render as video */

@@ -6,7 +6,6 @@ import Sidebar from "@/components/Sidebar";
 import { TopNav } from "@/components/TopNav";
 import DocumentList from "@/pages/DocumentList";
 import PlayerPage from "@/pages/Player";
-import EntityOverrides from "@/pages/EntityOverrides";
 import S3Explorer from "@/pages/S3Explorer";
 import BenchmarkReport from "@/pages/BenchmarkReport";
 import { StateInspector } from "@/pages/StateInspector";
@@ -21,9 +20,9 @@ const queryClient = new QueryClient({
 });
 
 /** Pages that legitimately need the document-list sidebar context. The
- *  rest of the routes (Entity Overrides, S3 Explorer, Benchmarks,
- *  State Inspector) are global and shouldn't render the media sidebar
- *  at all — it just made them feel nested inside Media Explorer. */
+ *  rest of the routes (S3 Explorer, Benchmarks, State Inspector) are
+ *  global and shouldn't render the media sidebar at all — it just made
+ *  them feel nested inside Media Explorer. */
 const SIDEBAR_ROUTES = ["/", "/player"];
 
 function shouldShowSidebar(pathname: string): boolean {
@@ -57,7 +56,6 @@ function AppShell({
           <Routes>
             <Route path="/" element={<DocumentList />} />
             <Route path="/player/:documentId" element={<PlayerPage />} />
-            <Route path="/overrides" element={<EntityOverrides />} />
             <Route path="/s3" element={<S3Explorer />} />
             <Route path="/benchmarks" element={<BenchmarkReport />} />
             <Route path="/benchmarks/state" element={<StateInspector />} />
