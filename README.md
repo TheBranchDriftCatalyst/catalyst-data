@@ -61,7 +61,7 @@ See **[TESTING.md](TESTING.md)** for the full testing guide, including:
 
 ```bash
 # One-time: compress raw fixture videos to keep the working tree small
-python scripts/compress_fixtures.py packages/media-ingest/tests/fixtures/
+python scripts/fixtures/compress_fixtures.py packages/media-ingest/tests/fixtures/
 
 # Pre-warm the per-doc-id audio cache for every manifest video
 HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
@@ -73,7 +73,7 @@ task bench:chunks:regen
 
 # Run the benchmark — single-video flow (default) or multi-video flow
 task bench                         # single-video, all models, ensemble GT, F1 report
-task bench -- --all-videos --models gliner-medium  # multi-video extraction (per doc_id)
+task bench -- --all-videos --ensemble gliner-medium  # multi-video extraction (per doc_id)
 
 # View results
 task bench:view                    # SPA at http://localhost:5173/viewer/benchmarks

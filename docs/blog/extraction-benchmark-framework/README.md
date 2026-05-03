@@ -331,6 +331,16 @@ The harness supports an interactive mode (run with no flags) that presents a men
 
 ---
 
+## 2026-05 update — v4 ensemble extraction shipped
+
+The "What's Next — Ensemble consensus voting at extraction time" item from the original post has shipped as of commit `9c3c854`. The single-NER pass described throughout this post has been replaced by a parallel encoder ensemble + consensus node in the v4 extraction pipeline. The bench CLI flags have changed accordingly: `--models` is removed; the role-split flags `--ensemble` (Phase 1 NER consensus voters) and `--spo-models` (Phase 4 SPO models over consensus output) replace it.
+
+For the full architecture of v4 — consensus voting algorithm, SPO provenance block, per-encoder fixtures, and the four new bench knobs (`--ensemble-quorum`, `--ensemble-only`, `--spo-only`, `--no-consensus`) — see the canonical EDC pipeline architecture post: [edc-pipeline-architecture](../edc-pipeline-architecture/README.md).
+
+The benchmark numbers in this post (12-model, 7-chunk original run) remain accurate for the v3 single-NER-pass pipeline. v4 validation numbers will appear in the EDC architecture post once the first ensemble bench run completes.
+
+---
+
 ## 2026-04 update — what changed since the original post
 
 The framework above describes the original 7-chunk / 3-domain / 12-model run. A

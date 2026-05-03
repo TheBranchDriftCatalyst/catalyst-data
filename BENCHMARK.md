@@ -159,6 +159,15 @@ All models are defined in `tests/benchmark_config.py`.
 - **tier2** -- strong empirical performers in our extraction pipeline
 - **cloud** -- cloud API models via LiteLLM proxy (require `LLM_API_KEY`)
 
+**v4 role mapping** — which tags go to which flag:
+
+| Tags | Default role | Flag |
+|------|-------------|------|
+| `encoder`, `extraction-specialist` | NER consensus voters (Phase 1) | `--ensemble` |
+| `tier1`, `tier2`, `cloud` | SPO extraction over consensus output (Phase 4) | `--spo-models` |
+
+Models in `--ensemble` never run SPO. Models in `--spo-models` never run NER — they consume the consensus mentions produced by the ensemble. Each `--ensemble` model also produces its own independent per-model fixture (`extraction_<encoder>.json`) so per-encoder F1-vs-GT is computable in isolation, in addition to the shared `extraction_ensemble.json` (consensus fixture) that competes head-to-head with the per-model rows in the report.
+
 **Structured output methods:**
 - `function_calling` -- OpenAI tool/function calling (default for cloud)
 - `json_mode` -- forces JSON output via `response_format` (default for local)
@@ -329,6 +338,35 @@ URL: `http://localhost:5173/viewer/benchmarks`
 | `--no-consensus` | v3 fairness path: run each `--ensemble` model as a standalone NER+SPO pipeline (no consensus vote). |
 
 `--ensemble-only`, `--spo-only`, and `--no-consensus` are mutually exclusive.
+
+### Four Knobs: When to Use Each
+
+**`--ensemble-quorum K`** overrides the default consensus threshold `ceil(N/2)`. Use cases:
+- `--ensemble-quorum 1` — maximum recall: any single encoder finding an entity is enough. Useful when annotating new domains where coverage is sparse and you want to cast a wide net for human review.
+- `--ensemble-quorum 5` (with 5 encoders) — maximum precision: all encoders must agree. Useful when generating high-confidence GT seeds for DPO.
+- Default (`ceil(N/2) = 3` with 5 encoders) — balanced; PII types always use K=1 regardless of this override.
+
+**`--ensemble-only`** skips Phase 4 entirely. No SPO model runs. Use when you are iterating on the encoder panel or quorum threshold and only care about NER quality. Produces `extraction_<encoder>.json` for each encoder and `extraction_ensemble.json`. Run is fast — encoders at ~6-60s each, concurrent.
+
+**`--spo-only --run-id <id>`** loads the cached consensus from a previous run's `ClusterCache` and runs only Phase 4. Use when you have a new SPO model or modified SPO prompt to test and don't want to re-pay the NER cost. The `--run-id` must point to a run that has a populated `consensus.json` cache entry.
+
+**`--no-consensus`** runs the v3 fairness path: each model in `--ensemble` gets its own NER → cluster → pack → SPO pipeline with no cross-model voting. Use for A/B comparison: "does ensemble+SPO beat single-model NER+SPO end-to-end?" Each model produces a fully independent fixture. Results are comparable with v3 benchmark runs on the same corpus.
+
+### Per-Encoder and Ensemble Fixtures in the Report
+
+Under v4, a bench run produces multiple NER fixture rows in `benchmark-report.json`:
+
+| Fixture | What it measures |
+|---------|-----------------|
+| `extraction_gliner-medium.json` | gliner-medium's independent Phase 1 NER quality |
+| `extraction_gliner-large.json` | gliner-large's independent Phase 1 NER quality |
+| `extraction_gliner-pii.json` | gliner-pii's independent Phase 1 NER quality (PII recall focus) |
+| `extraction_nuextract-2.0-8b.json` | nuextract-2.0-8b's independent Phase 1 NER quality |
+| `extraction_universalner-7b.json` | universalner-7b's independent Phase 1 NER quality |
+| `extraction_ensemble.json` | Consensus output — competes head-to-head with each per-model row |
+| `extraction_<spo-model>.json` | SPO quality given the consensus input (one per `--spo-models` entry) |
+
+The report viewer ranks all rows together so the ensemble row's recall can be compared against each individual encoder's recall directly. The expectation is that `extraction_ensemble.json` shows higher recall than any individual encoder, because it is the quorum-filtered union of all five.
 
 ## Task Commands
 

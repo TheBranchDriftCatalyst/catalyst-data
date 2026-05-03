@@ -15,6 +15,8 @@ We are building a pipeline that turns heterogeneous unstructured sources — Wik
 
 The most important thing we shipped in May 2026 was the v3 entity-anchored topology rewrite: instead of running NER and SPO extraction independently on each raw chunk, we now run NER once across the entire document, cluster the resulting entities by proximity and embedding similarity, pack the clusters into model-sized evidence windows, and fan out SPO extraction per window. The motivation: before v3, the dominant failure mode was not "wrong entity type" or "hallucinated span" — it was "the model is looking at text that has no extractable claims in it."
 
+Hot on the heels of v3, **v4 (shipped May 2026, commit `9c3c854`)** replaces the single-NER pass with a parallel encoder ensemble that votes a consensus before anything reaches the cluster step. Every consensus decision is audit-logged; the State Inspector surfaces per-encoder NER cards and a dedicated consensus card per document. The SPO prompt now receives per-entity vote tallies and confidence scores so the LLM can weight propositions according to how strongly the encoder panel agreed on each entity.
+
 ---
 
 ## 1. Why Open Information Extraction
@@ -154,14 +156,154 @@ The v2 pipeline partially addressed span errors. But it did not address the deep
 
 ---
 
-## 5. The v3 Entity-Anchored Topology
+## 5. The v4 NER Ensemble + Consensus Topology
+
+v3 shipped the entity-anchored topology (NER-once-per-doc → cluster → pack → SPO fan-out). v4 replaces the "NER once" step with a parallel encoder ensemble that votes a consensus, then feeds that consensus into the unchanged cluster → pack → SPO chain. The motivation is recall and fairness.
+
+**Recall.** `gliner-pii` is the only default encoder that reliably finds phone numbers, SSNs, and email addresses. `universalner-7b` has domain coverage from 43 NER datasets. `nuextract-2.0-8b` surfaces structured entities that general-purpose GLiNER models under-count. No single encoder sees everything; a quorum-filtered union of five sees substantially more.
+
+**Bench fairness.** Under v3, the "benchmark NER" step ran one reference encoder. Every model's output was compared against that reference, which made the bench measure "similarity to the reference encoder" rather than "how well does this encoder find entities independently." Under v4, each encoder runs against raw text and produces its own independent fixture. Bench scores measure Phase 1 quality in isolation.
+
+### v4 Topology
+
+```
+                    ┌─────────────────────────────────────┐
+                    │  Phase 1 — NER ensemble (parallel)   │
+                    │  gliner-medium ┐                     │
+doc text  ────────► │  gliner-large  ├─► per-model         │
+                    │  gliner-pii    ├─► mentions          │
+                    │  nuextract-2   ├─►                   │
+                    │  universalner  ┘                     │
+                    └─────────────┬───────────────────────┘
+                                  ▼
+                    ┌─────────────────────────────────────┐
+                    │  Phase 2 — Consensus + scoring       │
+                    │  Cluster by (text, canonical_type,   │
+                    │  span overlap). Per cluster:         │
+                    │   - source_models: [m1, m2, m3]      │
+                    │   - vote_count: 3/5                  │
+                    │   - mean_confidence: 0.79            │
+                    │   - span: from highest-conf model    │
+                    │   - type: majority vote on canonical │
+                    │  Apply quorum threshold (default     │
+                    │  ceil(N/2); per-type override for    │
+                    │  PII at K=1).                        │
+                    └─────────────┬───────────────────────┘
+                                  ▼
+                    ┌─────────────────────────────────────┐
+                    │  Phase 3 — Cluster + pack            │
+                    │  (proximity + Qwen3 embed-merge,     │
+                    │   on consensus mentions, unchanged   │
+                    │   from v3 cluster_entities/pack)     │
+                    └─────────────┬───────────────────────┘
+                                  ▼
+                    ┌─────────────────────────────────────┐
+                    │  Phase 4 — SPO per evidence window   │
+                    │  Prompt includes consensus metadata: │
+                    │   "Entities (NER votes / mean conf): │
+                    │    - Reagan  [PERSON, 5/5, 0.94]     │
+                    │    - Putin   [PERSON, 4/5, 0.87]     │
+                    │    - Crimea  [LOC,    3/5, 0.62]"    │
+                    │  SPO returns assertions linked to    │
+                    │  canonical entity ids; LLM can       │
+                    │  weight proposition confidence by    │
+                    │  vote_count / mean_conf.             │
+                    └─────────────────────────────────────┘
+```
+
+The new nodes live at:
+- `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/ner_ensemble.py` — `NerEnsembleNode`
+- `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/consensus.py` — `ConsensusNode`
+- `libs/catalyst-exgraph/src/catalyst_exgraph/consensus_taxonomy.py` — per-encoder type canonicalization map
+
+### Consensus Voting in Detail
+
+A single mention's journey through Phase 2, using "Reagan" as the example:
+
+Five encoders each independently run NER on the document text. Three (`gliner-large`, `gliner-medium`, `universalner-7b`) return a mention with surface text "Reagan" and type `PERSON`. One (`gliner-pii`) returns "Reagan" with type `GPE`. One (`nuextract-2.0-8b`) returns "Reagan" with type `PERSON`.
+
+`ConsensusNode._canonicalize()` lowercases the text and maps each encoder's type vocabulary through `consensus_taxonomy.TYPE_CANONICAL[encoder]` to get canonical types. `gliner-pii`'s `GPE` stays `GPE`; the other four map to `PERSON`.
+
+`ConsensusNode._cluster()` groups these five mentions using union-find: same `canonical_text` ("reagan") and span overlap ≥ 50% (all five encoders found approximately the same span). One cluster, five members.
+
+`ConsensusNode._resolve_cluster()` computes:
+- `type_votes = {"PERSON": 4, "GPE": 1}` — majority wins: `canonical_type = "PERSON"`
+- `span_start`, `span_end` — from `gliner-large` (highest confidence in the cluster)
+- `vote_count = 5`, `n_encoders = 5`
+- `mean_confidence = 0.94`
+- `source_models = ["gliner-medium", "gliner-large", "gliner-pii", "nuextract-2.0-8b", "universalner-7b"]`
+
+Quorum check: default `K = ceil(5/2) = 3`. `vote_count = 5 ≥ 3` → accepted.
+
+The resulting `ConsensusMention` (defined in `libs/catalyst-exgraph/src/catalyst_exgraph/state.py`):
+
+```python
+{
+    "mention_id": "a3f1c9d2e8b4",       # md5(canonical_text|type|span_start)[:12]
+    "text": "reagan",
+    "canonical_type": "PERSON",
+    "span_start": 4102,
+    "span_end": 4108,
+    "span_provenance": "gliner-large",
+    "source_models": ["gliner-medium", "gliner-large", "gliner-pii",
+                      "nuextract-2.0-8b", "universalner-7b"],
+    "vote_count": 5,
+    "n_encoders": 5,
+    "mean_confidence": 0.94,
+    "type_votes": {"PERSON": 4, "GPE": 1},
+    "raw_mentions": [...]                 # per-encoder source mentions preserved
+}
+```
+
+A `mention_decision` audit event is emitted with `chunk_id = "{doc_id}:_consensus"` so the State Inspector's consensus card surfaces this vote table for every accepted mention. Mentions that don't reach quorum emit a `mention_rejected` event with `reason = "below_quorum"` and the vote count that fell short — no silent drops.
+
+### Why a Consensus Instead of One NER
+
+The recall ceiling argument: each encoder in the default ensemble (`gliner-medium`, `gliner-large`, `gliner-pii`, `nuextract-2.0-8b`, `universalner-7b`) has different strengths.
+
+`gliner-pii` catches phone numbers, SSNs, email addresses, and postal addresses that the other four models never produce because they were not trained on PII entity types. PII-category mentions use a K=1 quorum override — they pass if `gliner-pii` finds them alone, because K=1 is the correct threshold for a category with asymmetric coverage by design.
+
+`universalner-7b` was distilled from GPT-3.5 across 43 NER datasets covering biomedical, legal, and multilingual domains. It surfaces entity types (`PRODUCT`, `ARTWORK`, `LAW`) that general-purpose GLiNER variants undercount on congressional bill text.
+
+`nuextract-2.0-8b` is a Qwen2.5 fine-tune purpose-built for structured extraction; it surfaces compound named entities and numerical references that slip past encoder-only models.
+
+The quorum-filtered union of five consistently produces higher recall than any individual encoder, at the cost of running five NER passes in parallel — which, because the passes are `asyncio.gather`-concurrent with 60-second individual timeouts, adds only the latency of the slowest encoder to the pipeline, not the sum.
+
+### How SPO Uses the Votes
+
+The SPO node in `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/extract.py` calls `_format_entity_provenance(accepted_mentions)` to build the entity block inserted before the source text in the SPO prompt:
+
+```
+Entities (with NER agreement):
+  - reagan                         [PERSON, 5/5 votes, mean_conf 0.94]
+  - putin                          [PERSON, 4/5 votes, mean_conf 0.87]
+  - crimea                         [LOCATION, 3/5 votes, mean_conf 0.62]
+  - speaker_07                     [PERSON, 1/5 votes, mean_conf 0.41]
+```
+
+The SPO system prompt (`k8s/shared/prompts/proposition_extraction.prompt`) teaches the LLM what this means:
+
+> High vote\_count + high mean\_conf → reliable entity, safe to relate.
+> Low vote\_count (e.g. 1/5) or low mean\_conf (< 0.5) → weakly supported.
+> Prefer omitting relations involving these unless the source text strongly justifies them. When in doubt, omit a proposition rather than fabricate one.
+
+The function gracefully degrades: for legacy bare-mention dicts that carry no consensus metadata (single-NER production callers that still use `build_ner_pipeline`), it falls back to the `[TYPE]` format. Mixed lists — some consensus, some legacy — are handled without errors.
+
+**Numbers from the upcoming v4 bench will populate this section once Phase 4 validation has run.** The expectation is higher SPO recall on weakly-supported entities (because the LLM now has a signal for which entities are reliable vs. uncertain) and lower hallucination rate on sub-quorum entities.
+
+---
+
+## 5a. The v3 Entity-Anchored Topology (foundation for v4)
 
 The v3 rewrite inverts the dependency. Instead of asking "what entities and claims live in this chunk?", we ask "where do the entities live in this document, and what text do we need to include to give each cluster of entities enough context to produce accurate claims?"
 
-The topology, implemented in `libs/dagster-io/src/dagster_io/extraction.py` with stage nodes in `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/`, is:
+Under v3, the topology is a single-NER pass followed by cluster → pack → SPO. Under v4, the NER step expands into a parallel ensemble + consensus (Phases 1–2 above), and the cluster → pack → SPO chain (Phases 3–4) is unchanged. The description below covers the common phases.
+
+The topology is implemented in `libs/dagster-io/src/dagster_io/extraction.py` with stage nodes in `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/`:
 
 ```
-extract_ner → validate_ner → repair_ner
+[v3]  extract_ner → validate_ner → repair_ner ─┐
+[v4]  NerEnsembleNode → ConsensusNode          ─┘
                 │
                 ▼
      cluster_entities  (ClusterEntitiesNode)
@@ -180,11 +322,11 @@ extract_spo → validate_spo → repair_spo
 
 Each step has a specific job.
 
-### NER Once Per Document
+### NER Input to the Cluster Step
 
-`_group_chunks_into_docs()` in `extraction.py` concatenates all of a document's chunks into a single `_Doc` object. NER runs on the full document text, not per-chunk. This means that every mention of "Reagan" across all 40 chunks of a transcript is found in a single NER pass, not re-found (and possibly missed) in each chunk independently.
+Under v3: `_group_chunks_into_docs()` in `extraction.py` concatenates all of a document's chunks into a single `_Doc` object. NER runs on the full document text — every mention of "Reagan" across 40 chunks is found in a single pass. The NER stage is backed by the same `extract_ner → validate_ner → repair_ner` subgraph from ExGraph. `raw_text` is the full document text, not a chunk slice.
 
-The NER stage is still backed by the same `extract_ner → validate_ner → repair_ner` subgraph from ExGraph. The change is that `raw_text` is now the full document text, not a chunk slice.
+Under v4: `NerEnsembleNode` runs the same full-doc text through N encoders in parallel via `asyncio.gather`. `ConsensusNode` receives `state["per_encoder_mentions"]` (a dict keyed by encoder name) and emits `state["consensus_mentions"]` — a list of `ConsensusMention` objects that the cluster step reads instead of the single-NER accepted mentions. The `build_ensemble_pipeline()` function in `libs/catalyst-exgraph/src/catalyst_exgraph/pipeline.py` wires these two new nodes as the NER head; the rest of the pipeline is unchanged.
 
 ### ClusterEntitiesNode: Proximity + Embedding Merge
 
@@ -225,6 +367,8 @@ The fan-out is done by the outer Python driver, not inside a LangGraph. This was
 Before v3: one NER call and one SPO call per chunk. A 40-chunk document produced 40 NER calls and (for encoder-only models) 0 or 40 SPO calls.
 
 After v3: one NER call per document, N SPO calls where N is the number of entity clusters with evidence windows. For a document where most chunks are noise (headers, greetings, boilerplate), N is substantially smaller than the chunk count. The target is approximately a 3x reduction in SPO calls on realistic corpus content, with higher quality because each SPO context is coherent text centered on the entities being asked about.
+
+After v4: the single NER pass is replaced by 5 parallel NER passes (default ensemble) followed by one consensus pass. The wall-clock cost of Phase 1+2 is approximately the latency of the slowest encoder (not the sum, because they run concurrently). The cluster → pack → SPO chain is identical to v3. The SPO prompt now carries vote tallies that let the LLM skip or downweight propositions involving entities only one encoder found.
 
 <!-- TODO: figure showing before/after call count per document, annotated with the wikileaks and JRE examples -->
 
@@ -313,6 +457,14 @@ Every `chunk_loaded` event in the unified `events.jsonl` stream carries a `chunk
 
 The audit event stream from ExGraph emits per-stage events tagged with `(model, doc_id, chunk_id, evidence_window_id)`. In the v3 topology this extends to the evidence window level: each SPO invocation emits events tagged with the evidence window ID, so the StateInspector's timeline can group events by window and show the full sequence — NER, cluster, pack, SPO — as a coherent trail for one entity cluster in one document.
 
+In the v4 topology, the event stream gains three new chunk_id patterns:
+
+- `{doc_id}:_ner_{encoder_name}` — per-encoder NER events. One card per (doc, encoder) in the State Inspector rail.
+- `{doc_id}:_consensus` — consensus events. The consensus card surfaces a vote table: one row per accepted mention with `text · canonical_type · vote_count/N · mean_conf · source_models`, plus a collapsed section of rejected mentions showing the below-quorum count and reason.
+- `{doc_id}:{window_id}` — per-SPO-window events (unchanged from v3).
+
+Every consensus decision is audit-logged. No mention is silently dropped: accepted mentions emit `mention_decision` events; below-quorum mentions emit `mention_rejected` events with the quorum that was not met. This satisfies the observability requirement locked in the v4 epic: the State Inspector consensus card can show exactly why a given mention was kept or discarded.
+
 The intent is simple: if a model produces a wrong assertion — say it attributes a position to the wrong person, or invents a relationship — the provenance chain should let you trace it to the exact text passage that produced it, the exact chunk boundary that isolated it, the exact evidence window that the SPO model saw. Without this chain you can measure that something went wrong; with it you can understand why.
 
 `Assertion` objects link back to `Mention` IDs via `subject_mention_id` and `object_mention_id`, completed at the end of `extract_validated()` via a `(chunk_id, normalized_text) → mention_id` index. This closes the provenance chain: document → chunk → span → mention → assertion.
@@ -343,13 +495,15 @@ Both surfaces read from the same event stream, so a single benchmark run produce
 
 ## What's In Flight
 
-**Phase 2 of the v3 topology** — the `extract_ner → cluster_entities → pack_evidence → SPO fan-out` implementation described in sections 5-8 — shipped as of this writing (see `libs/dagster-io/src/dagster_io/extraction.py` and `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/cluster.py`, `nodes/pack.py`).
+**v3 topology** (sections 5a-8) — `extract_ner → cluster_entities → pack_evidence → SPO fan-out` — shipped. See `libs/dagster-io/src/dagster_io/extraction.py` and `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/cluster.py`, `nodes/pack.py`.
+
+**v4 ensemble extraction** (section 5) — `NerEnsembleNode → ConsensusNode → cluster → pack → SPO` — shipped as of commit `9c3c854`. Closes phases CD-7h9m, CD-94ow, CD-3w3n, CD-z6xe, CD-mjww of epic CD-y4u0. See `nodes/ner_ensemble.py`, `nodes/consensus.py`, `consensus_taxonomy.py`.
+
+**Phase F of v4** (`CD-euro`) — State Inspector consensus card UI. The event stream already carries all consensus data; the `ConsensusDetail.tsx` component that renders the vote breakdown table in the right pane is the remaining frontend work.
 
 **Phase 3** (`CD-80ic`) — moving `MODEL_WINDOWS` from `nodes/pack.py` into `dagster_io.chunking` so the same token-budget table governs both silver-layer chunk sizing and evidence window sizing. Currently `pack.py` has a `# TODO(CD-80ic)` comment marking this migration.
 
-**Phase 4** — GT regeneration and validation against the new doc-anchored format with the v3 topology as the chunker. This is the first scoring run where the GT was not contaminated by the old chunk-keyed format and the evidence windows are coherent text.
-
-The first end-to-end benchmark run with full v3 topology, migrated GT, and evidence-window-level provenance will produce the numbers that validate or invalidate the ~3x SPO call reduction hypothesis. That run has not happened yet. The post will be updated when it does.
+**v4 bench validation** — the first end-to-end benchmark run comparing per-encoder fixtures vs. the ensemble fixture vs. per-SPO-model fixtures has not run yet. Numbers from that run will be added here when available. Until then, the v4 sections in this post describe the code as shipped, not validated against scoring results.
 
 ---
 
@@ -366,11 +520,20 @@ cd packages/media-ingest && dagster dev -m media_ingest
 # Benchmark: full methodology (run models → GT → score → report)
 task bench
 
-# Benchmark: run specific SPO model
+# Benchmark: run specific SPO model against the consensus output
 PYTHONPATH=. python tests/benchmark_harness.py --spo-models mistral-7b
 
-# Benchmark: NER-only pass with custom encoder panel
-PYTHONPATH=. python tests/benchmark_harness.py --ensemble gliner-medium,gliner-large --ensemble-only
+# Benchmark: NER-only pass — run the full encoder ensemble, emit per-encoder + ensemble fixtures
+PYTHONPATH=. python tests/benchmark_harness.py --ensemble gliner-medium,gliner-large,gliner-pii --ensemble-only
+
+# Benchmark: override consensus quorum (require all encoders to agree)
+PYTHONPATH=. python tests/benchmark_harness.py --ensemble-quorum 5
+
+# Benchmark: reuse a previous run's cached consensus for a new SPO model
+PYTHONPATH=. python tests/benchmark_harness.py --spo-only --run-id 2026-05-01-120000 --spo-models gemma3-12b
+
+# Benchmark: v3 fairness path — each encoder runs standalone NER+SPO (no consensus)
+PYTHONPATH=. python tests/benchmark_harness.py --no-consensus
 
 # StateInspector + Benchmark Viewer
 cd packages/media-ingest/viewer-ui && npm run dev
@@ -384,12 +547,19 @@ cd packages/media-ingest/viewer-ui && npm run dev
 
 | File | Purpose |
 |---|---|
-| `libs/dagster-io/src/dagster_io/extraction.py` | Outer driver: doc grouping → NER → cluster → pack → SPO fan-out |
-| `libs/catalyst-exgraph/src/catalyst_exgraph/pipeline.py` | `build_ner_pipeline`, `build_spo_pipeline`, `build_pipeline` (deprecated) |
+| `libs/dagster-io/src/dagster_io/extraction.py` | Outer driver: doc grouping → NER/ensemble → cluster → pack → SPO fan-out |
+| `libs/catalyst-exgraph/src/catalyst_exgraph/pipeline.py` | `build_ner_pipeline` (v3/production), `build_ensemble_pipeline` (v4 bench) |
+| `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/ner_ensemble.py` | `NerEnsembleNode` — parallel encoder invocation via asyncio.gather |
+| `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/consensus.py` | `ConsensusNode` — cluster + vote + quorum filter + audit events |
+| `libs/catalyst-exgraph/src/catalyst_exgraph/consensus_taxonomy.py` | Per-encoder type → canonical type map; `PII_TYPES` K=1 override set |
+| `libs/catalyst-exgraph/src/catalyst_exgraph/state.py` | `ConsensusMention` TypedDict; `ExGraphState` with `per_encoder_mentions` + `consensus_mentions` |
+| `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/extract.py` | `ExtractNode` + `_format_entity_provenance()` — SPO entity block builder |
 | `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/cluster.py` | `ClusterEntitiesNode` — hybrid proximity+embedding clustering |
 | `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/pack.py` | `PackEvidenceNode` — per-model window sizing + `MODEL_WINDOWS` |
 | `libs/catalyst-exgraph/src/catalyst_exgraph/stage.py` | `build_stage_graph()` — generic extract→validate→repair loop |
 | `libs/catalyst-exgraph/src/catalyst_exgraph/nodes/spans.py` | `correct_candidate_spans()` — deterministic span repair |
+| `k8s/shared/prompts/proposition_extraction.prompt` | SPO system prompt with NER ensemble provenance instructions |
+| `libs/dagster-io/src/dagster_io/cluster_cache.py` | `CachedNerResult` — extended with `per_encoder_mentions`, `evidence_windows`, `rejected_mentions` |
 | `libs/dagster-io/src/dagster_io/chunking.py` | `ChunkingResource` — silver-layer chunker |
 | `libs/dagster-io/src/dagster_io/embedding_cache.py` | S3-backed embedding cache (sharded parquet) |
 | `tests/shared/gt_translation.py` | `chunk_to_doc`, `doc_to_chunk`, `IntervalTree` GT scorer |

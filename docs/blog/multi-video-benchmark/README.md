@@ -308,4 +308,31 @@ task bench:pipeline:warm
 
 ---
 
+---
+
+## v4 update — ensemble extraction and new CLI flags
+
+The multi-video extraction flow described in this post still works, but the `--models` flag used in the Stage 4 examples has been removed. As of commit `9c3c854`, the bench CLI splits model roles explicitly:
+
+- `--ensemble <encoders>` — NER Phase 1 consensus voters (default: all `encoder` + `extraction-specialist` tagged models)
+- `--spo-models <llms>` — SPO Phase 4 models that consume the consensus output (default: all `tier1` + `tier2` + `cloud` tagged models)
+
+Update the Stage 4 command from the original post:
+
+```bash
+# Before (v3 — no longer works):
+# PYTHONPATH=. python tests/benchmark_harness.py --all-videos --models gliner-medium
+
+# After (v4):
+PYTHONPATH=. python tests/benchmark_harness.py --all-videos --ensemble gliner-medium
+# or to also run SPO:
+PYTHONPATH=. python tests/benchmark_harness.py --all-videos \
+  --ensemble gliner-medium,gliner-large,gliner-pii \
+  --spo-models gemma3-12b
+```
+
+For the full v4 topology and consensus voting details, see [edc-pipeline-architecture](../edc-pipeline-architecture/README.md).
+
+---
+
 *See also: [extraction-benchmark-framework](../extraction-benchmark-framework/README.md) for the original 12-model benchmark framework, [BENCHMARK.md](../../../BENCHMARK.md) for the full benchmark reference, [TESTING.md](../../../TESTING.md) for the integration test layout.*
