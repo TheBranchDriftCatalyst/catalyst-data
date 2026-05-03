@@ -73,6 +73,74 @@ def _wav_silence(duration_seconds: float = 0.05, sample_rate: int = 8000) -> byt
     return buf.getvalue()
 
 
+def _jsonl(rows: list[dict]) -> bytes:
+    import json as _json
+
+    return ("\n".join(_json.dumps(r) for r in rows) + "\n").encode("utf-8")
+
+
+CONGRESS_DOCS = [
+    {
+        "id": "fixture-hr-1",
+        "title": "H.R. 1 — For The People Act (fixture)",
+        "source": "fixture",
+        "source_path": "dev/fixtures/congress/hr-1.txt",
+        "domain": "congress",
+        "document_type": "bill",
+        "metadata": {"chamber": "house", "congress_num": 117},
+    },
+    {
+        "id": "fixture-s-1",
+        "title": "S. 1 — Freedom to Vote Act (fixture)",
+        "source": "fixture",
+        "source_path": "dev/fixtures/congress/s-1.txt",
+        "domain": "congress",
+        "document_type": "bill",
+        "metadata": {"chamber": "senate", "congress_num": 117},
+    },
+    {
+        "id": "fixture-hr-3076",
+        "title": "H.R. 3076 — Postal Service Reform (fixture)",
+        "source": "fixture",
+        "source_path": "dev/fixtures/congress/hr-3076.txt",
+        "domain": "congress",
+        "document_type": "bill",
+        "metadata": {"chamber": "house", "congress_num": 117},
+    },
+]
+
+
+LEAK_DOCS = [
+    {
+        "id": "fixture-leak-001",
+        "title": "Internal memo — TestCorp (fixture)",
+        "source": "fixture",
+        "source_path": "dev/fixtures/leaks/memo-001.txt",
+        "domain": "leaks",
+        "document_type": "memo",
+        "metadata": {"organization": "TestCorp", "leak_date": "2025-08-15"},
+    },
+    {
+        "id": "fixture-leak-002",
+        "title": "Quarterly briefing — TestCorp (fixture)",
+        "source": "fixture",
+        "source_path": "dev/fixtures/leaks/briefing-002.txt",
+        "domain": "leaks",
+        "document_type": "briefing",
+        "metadata": {"organization": "TestCorp", "leak_date": "2025-09-02"},
+    },
+    {
+        "id": "fixture-leak-003",
+        "title": "Email thread — Acme Inc (fixture)",
+        "source": "fixture",
+        "source_path": "dev/fixtures/leaks/email-003.txt",
+        "domain": "leaks",
+        "document_type": "email",
+        "metadata": {"organization": "Acme Inc", "leak_date": "2025-10-11"},
+    },
+]
+
+
 def main() -> None:
     c = S3Client(
         endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
@@ -82,9 +150,18 @@ def main() -> None:
     )
 
     fixtures: list[tuple[str, bytes]] = [
+        # S3 Explorer fixtures (markdown / image / audio view-modes)
         ("dev/fixtures/README.md", README_MD.encode("utf-8")),
         ("dev/fixtures/sample.png", _png_1x1_red()),
         ("dev/fixtures/sample.wav", _wav_silence()),
+        # Documents-tab fixtures: silver/<code_location>/<group>/<asset>/data.jsonl
+        # paths the DocumentsService reads from. Without these the congress
+        # + leaks browsers render an empty list against the local seed.
+        (
+            "silver/congress_data/congress/congress_documents/data.jsonl",
+            _jsonl(CONGRESS_DOCS),
+        ),
+        ("silver/open_leaks/leaks/leak_documents/data.jsonl", _jsonl(LEAK_DOCS)),
     ]
     for key, body in fixtures:
         c.put_object(key, body)

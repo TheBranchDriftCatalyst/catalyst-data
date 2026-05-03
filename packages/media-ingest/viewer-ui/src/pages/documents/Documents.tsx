@@ -1,74 +1,97 @@
-import { Navigate, NavLink, useParams } from "react-router-dom";
-import { FileText, Newspaper, Tv2 } from "lucide-react";
+import { useEffect } from "react";
+import { Navigate, NavLink, useNavigate, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { FileText, Newspaper, Tv2, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import MediaIngestList from "./media-ingest/MediaIngestList";
-import CongressList from "./congress-wtf/CongressList";
-import LeaksList from "./open-leaks/LeaksList";
+import { fetchDomains } from "@/api/client";
+import type { Domain } from "@/types/document";
+import MediaList from "./media/MediaIngestList";
+import CongressList from "./congress/CongressList";
+import LeaksList from "./leaks/LeaksList";
 
-type Domain = "media-ingest" | "congress-wtf" | "open-leaks";
+/** Per-slug icon. Pure presentation; the registry endpoint owns slug+label
+ *  but icons stay client-side since the backend has no business shipping
+ *  lucide bindings. New domains get a generic FileText fallback below. */
+const ICONS: Record<string, LucideIcon> = {
+  media: Tv2,
+  congress: FileText,
+  leaks: Newspaper,
+};
 
-interface DomainTab {
-  domain: Domain;
-  label: string;
-  icon: typeof FileText;
-}
+/** Per-slug list component. New domains plug in here once their wrapper
+ *  ships under `pages/documents/<slug>/`. */
+const LISTS: Record<string, React.ComponentType> = {
+  media: MediaList,
+  congress: CongressList,
+  leaks: LeaksList,
+};
 
-const TABS: DomainTab[] = [
-  { domain: "media-ingest", label: "media-ingest", icon: Tv2 },
-  { domain: "congress-wtf", label: "congress-wtf", icon: FileText },
-  { domain: "open-leaks", label: "open-leaks", icon: Newspaper },
-];
+const FALLBACK_DOMAIN = "media";
 
-const DEFAULT_DOMAIN: Domain = "media-ingest";
-
-/** Top-level Documents page. Hosts a NavLink-row of per-domain sub-tabs
- *  whose URL is `/documents/<domain>` so deep-links and back/forward
- *  replay the user's domain choice. Each sub-tab renders its own list
- *  component — backend endpoints differ per domain. */
+/** Top-level Documents page. The sub-tab row reads the live domain
+ *  registry (`/viewer/api/domains`) so adding a new domain on the backend
+ *  surfaces here automatically — no client-side mapping table. URL slug
+ *  matches the API slug (e.g. `/documents/congress` ↔ `/viewer/api/congress/documents`). */
 export default function Documents() {
   const { domain } = useParams<{ domain?: string }>();
+  const navigate = useNavigate();
 
-  if (!domain) return <Navigate to={`/documents/${DEFAULT_DOMAIN}`} replace />;
+  const { data: domains, isLoading } = useQuery({
+    queryKey: ["domains"],
+    queryFn: fetchDomains,
+    staleTime: 5 * 60_000,
+  });
 
-  if (!TABS.some((t) => t.domain === domain)) {
-    return <Navigate to={`/documents/${DEFAULT_DOMAIN}`} replace />;
-  }
+  // Redirect unknown / missing domain once the registry is loaded.
+  useEffect(() => {
+    if (!domains || isLoading) return;
+    if (!domain) {
+      navigate(`/documents/${FALLBACK_DOMAIN}`, { replace: true });
+      return;
+    }
+    if (!domains.some((d) => d.slug === domain)) {
+      navigate(`/documents/${FALLBACK_DOMAIN}`, { replace: true });
+    }
+  }, [domain, domains, isLoading, navigate]);
 
-  const active = domain as Domain;
+  if (!domain) return <Navigate to={`/documents/${FALLBACK_DOMAIN}`} replace />;
+
+  const ListComponent = LISTS[domain];
 
   return (
     <div className="flex flex-col h-full">
-      {/* Sub-tab row. Mirrors the visual language used by Player.tsx Tabs
-       *  (h-9, border-b, px-3 triggers) so it feels native. URL-driven via
-       *  NavLink so /documents/<domain> is the source of truth. */}
+      {/* Sub-tab row, registry-driven. Mirrors the visual language used
+       *  by Player.tsx Tabs (h-9, border-b, px-3 triggers). URL is the
+       *  source of truth via NavLink. */}
       <div
         data-testid="documents-subtabs"
         className="flex items-center h-9 border-b border-white/5 bg-surface-1 flex-shrink-0"
       >
-        {TABS.map(({ domain: d, label, icon: Icon }) => (
-          <NavLink
-            key={d}
-            to={`/documents/${d}`}
-            data-testid={`documents-subtab-${d}`}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center gap-1.5 px-3 h-full text-xs font-mono transition-colors border-b-2 -mb-px",
-                isActive
-                  ? "border-cyan-400 text-cyan-300 bg-white/[0.03]"
-                  : "border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.02]",
-              )
-            }
-          >
-            <Icon className="h-3.5 w-3.5" />
-            {label}
-          </NavLink>
-        ))}
+        {(domains ?? []).map((d: Domain) => {
+          const Icon = ICONS[d.slug] ?? FileText;
+          return (
+            <NavLink
+              key={d.slug}
+              to={`/documents/${d.slug}`}
+              data-testid={`documents-subtab-${d.slug}`}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center gap-1.5 px-3 h-full text-xs font-mono transition-colors border-b-2 -mb-px",
+                  isActive
+                    ? "border-cyan-400 text-cyan-300 bg-white/[0.03]"
+                    : "border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.02]",
+                )
+              }
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {d.label}
+            </NavLink>
+          );
+        })}
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden">
-        {active === "media-ingest" && <MediaIngestList />}
-        {active === "congress-wtf" && <CongressList />}
-        {active === "open-leaks" && <LeaksList />}
+        {ListComponent ? <ListComponent /> : null}
       </div>
     </div>
   );

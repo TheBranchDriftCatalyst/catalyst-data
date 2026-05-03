@@ -4,7 +4,6 @@ import { ArrowLeft, ExternalLink, AlertCircle } from "lucide-react";
 import { Badge, Button, Card, CardContent, ScrollArea } from "@thebranchdriftcatalyst/catalyst-ui";
 import { fetchDomainDocument, fetchDomains } from "@/api/client";
 import { JsonTree } from "@/pages/s3/detail-views/JsonTree";
-import { apiSlugForRoute } from "./domains";
 
 /** Generic detail page for non-media domains. Reads `:domain` and `:id`
  *  from the route, fetches via the per-domain factory endpoint, and
@@ -13,15 +12,14 @@ import { apiSlugForRoute } from "./domains";
  *  exact silver path the row lives in.
  *
  *  Media-ingest documents have their own player surface; this page is
- *  what congress-wtf + open-leaks land on instead. */
+ *  what congress + leaks land on instead. */
 export default function DomainDocumentDetail() {
   const { domain: routeSlug, id } = useParams<{ domain: string; id: string }>();
-  const apiSlug = routeSlug ? apiSlugForRoute(routeSlug) : null;
 
   const docQuery = useQuery({
-    queryKey: ["doc", apiSlug, id],
-    queryFn: () => fetchDomainDocument(apiSlug!, id!),
-    enabled: Boolean(apiSlug && id),
+    queryKey: ["doc", routeSlug, id],
+    queryFn: () => fetchDomainDocument(routeSlug!, id!),
+    enabled: Boolean(routeSlug && id),
   });
 
   const domainsQuery = useQuery({
@@ -32,9 +30,6 @@ export default function DomainDocumentDetail() {
 
   if (!routeSlug || !id) {
     return <ErrorBlock title="Missing route params" />;
-  }
-  if (!apiSlug) {
-    return <ErrorBlock title={`Unknown domain "${routeSlug}"`} />;
   }
   if (docQuery.isLoading) {
     return (
@@ -54,7 +49,7 @@ export default function DomainDocumentDetail() {
   }
 
   const doc = docQuery.data;
-  const domain = domainsQuery.data?.find((d) => d.slug === apiSlug);
+  const domain = domainsQuery.data?.find((d) => d.slug === routeSlug);
   // Build the S3 Explorer deep-link to the silver row's containing folder.
   const silverPrefix = domain
     ? `silver/${domain.code_location}/${domain.group}/${domain.asset}/`

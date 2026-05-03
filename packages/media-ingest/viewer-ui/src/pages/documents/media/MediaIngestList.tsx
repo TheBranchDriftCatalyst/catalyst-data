@@ -22,7 +22,7 @@ export default function MediaIngestList() {
 
   return (
     <DomainDocumentList
-      domainSlug="media-ingest"
+      domainSlug="media"
       heading="Media Library"
       documents={documents}
       isLoading={isLoading}

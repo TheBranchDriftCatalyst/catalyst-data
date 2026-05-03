@@ -25,7 +25,7 @@ const queryClient = new QueryClient({
  *  domains and global pages (S3 Explorer, Benchmarks, …) don't get it. */
 function shouldShowSidebar(pathname: string): boolean {
   return (
-    pathname.startsWith("/documents/media-ingest") ||
+    pathname.startsWith("/documents/media") ||
     pathname.startsWith("/player/")
   );
 }
@@ -56,8 +56,8 @@ function AppShell({
             {/* Root → default Documents domain. Forward-only — no /
              *  legacy redirect; smoke tests updated to land directly on
              *  /documents/<domain>. */}
-            <Route path="/" element={<Navigate to="/documents/media-ingest" replace />} />
-            <Route path="/documents" element={<Navigate to="/documents/media-ingest" replace />} />
+            <Route path="/" element={<Navigate to="/documents/media" replace />} />
+            <Route path="/documents" element={<Navigate to="/documents/media" replace />} />
             <Route path="/documents/:domain" element={<Documents />} />
             {/* Generic per-doc detail page for non-media domains. Media-
              *  ingest still routes to /player/:id (the cards in

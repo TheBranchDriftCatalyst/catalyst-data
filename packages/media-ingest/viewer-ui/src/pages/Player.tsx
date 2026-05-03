@@ -212,7 +212,7 @@ export default function PlayerPage() {
             {errors.map((e) => (e as Error).message).join("; ") || "Document not found"}
           </p>
           <Button variant="outline" asChild>
-            <Link to="/documents/media-ingest" className="gap-2">
+            <Link to="/documents/media" className="gap-2">
               <ArrowLeft className="h-4 w-4" />
               Back to library
             </Link>
@@ -230,7 +230,7 @@ export default function PlayerPage() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon-sm" asChild>
-                <Link to="/documents/media-ingest" data-testid="back-button">
+                <Link to="/documents/media" data-testid="back-button">
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
               </Button>

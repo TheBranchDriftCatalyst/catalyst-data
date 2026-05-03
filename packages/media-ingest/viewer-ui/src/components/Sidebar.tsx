@@ -117,7 +117,7 @@ export default function Sidebar({ className = "", collapsed = false, onToggle }:
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-white/5">
         <Link
-          to="/documents/media-ingest"
+          to="/documents/media"
           className="text-sm font-semibold text-zinc-200 hover:text-white transition-colors flex items-center gap-2"
           style={{ fontFamily: "var(--font-display)" }}
         >

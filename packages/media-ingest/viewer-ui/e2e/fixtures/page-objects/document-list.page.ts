@@ -20,7 +20,7 @@ export class DocumentListPage {
   }
 
   async goto() {
-    await this.page.goto("/viewer/documents/media-ingest");
+    await this.page.goto("/viewer/documents/media");
     await this.page.waitForLoadState("networkidle");
   }
 

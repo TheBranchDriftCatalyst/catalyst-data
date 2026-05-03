@@ -8,12 +8,12 @@ import {
 
 test.describe("Smoke Tests @smoke", () => {
   test("Documents page loads media-ingest sub-tab and shows documents", async ({ page }) => {
-    await page.goto("/viewer/documents/media-ingest");
+    await page.goto("/viewer/documents/media");
     await page.waitForLoadState("networkidle");
 
     // Sub-tab row + active tab indicator
     await expect(page.getByTestId("documents-subtabs")).toBeVisible();
-    await expect(page.getByTestId("documents-subtab-media-ingest")).toBeVisible();
+    await expect(page.getByTestId("documents-subtab-media")).toBeVisible();
 
     await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
 
@@ -24,15 +24,15 @@ test.describe("Smoke Tests @smoke", () => {
     expect(count).toBeGreaterThanOrEqual(MIN_DOC_COUNT);
   });
 
-  test("Root URL redirects to /documents/media-ingest", async ({ page }) => {
+  test("Root URL redirects to /documents/media", async ({ page }) => {
     await page.goto("/viewer/");
     await page.waitForLoadState("networkidle");
-    expect(page.url()).toContain("/documents/media-ingest");
+    expect(page.url()).toContain("/documents/media");
     await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
   });
 
   test("Documents search filters media-ingest documents", async ({ page }) => {
-    await page.goto("/viewer/documents/media-ingest");
+    await page.goto("/viewer/documents/media");
     await page.waitForLoadState("networkidle");
 
     const searchInput = page.getByPlaceholder("Search by title...");
@@ -48,36 +48,36 @@ test.describe("Smoke Tests @smoke", () => {
   });
 
   test("Sub-tab navigation: media-ingest → congress-wtf → open-leaks", async ({ page }) => {
-    await page.goto("/viewer/documents/media-ingest");
+    await page.goto("/viewer/documents/media");
     await page.waitForLoadState("networkidle");
 
     // Each non-media domain now uses the same generic list UI as media-
     // ingest. Whether the count is 0 or N depends on the local seed; the
     // assertion just verifies the page rendered the list shell rather than
     // a "backend not wired up" placeholder.
-    await page.getByTestId("documents-subtab-congress-wtf").click();
-    await expect(page).toHaveURL(/\/documents\/congress-wtf$/);
+    await page.getByTestId("documents-subtab-congress").click();
+    await expect(page).toHaveURL(/\/documents\/congress$/);
     await expect(
-      page.locator('[data-testid="document-list-page"][data-domain="congress-wtf"]'),
+      page.locator('[data-testid="document-list-page"][data-domain="congress"]'),
     ).toBeVisible();
-    await expect(page.getByTestId("documents-congress-wtf-placeholder")).toHaveCount(0);
+    await expect(page.getByTestId("documents-congress-placeholder")).toHaveCount(0);
 
-    await page.getByTestId("documents-subtab-open-leaks").click();
-    await expect(page).toHaveURL(/\/documents\/open-leaks$/);
+    await page.getByTestId("documents-subtab-leaks").click();
+    await expect(page).toHaveURL(/\/documents\/leaks$/);
     await expect(
-      page.locator('[data-testid="document-list-page"][data-domain="open-leaks"]'),
+      page.locator('[data-testid="document-list-page"][data-domain="leaks"]'),
     ).toBeVisible();
-    await expect(page.getByTestId("documents-open-leaks-placeholder")).toHaveCount(0);
+    await expect(page.getByTestId("documents-leaks-placeholder")).toHaveCount(0);
 
-    await page.getByTestId("documents-subtab-media-ingest").click();
-    await expect(page).toHaveURL(/\/documents\/media-ingest$/);
+    await page.getByTestId("documents-subtab-media").click();
+    await expect(page).toHaveURL(/\/documents\/media$/);
     await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
   });
 
   test("Unknown domain redirects to default media-ingest", async ({ page }) => {
     await page.goto("/viewer/documents/does-not-exist");
     await page.waitForLoadState("networkidle");
-    expect(page.url()).toContain("/documents/media-ingest");
+    expect(page.url()).toContain("/documents/media");
   });
 
   test("Player page loads for canonical document", async ({ page }) => {
@@ -102,7 +102,7 @@ test.describe("Smoke Tests @smoke", () => {
   });
 
   test("Navigation: media-ingest list -> Player -> Back", async ({ page }) => {
-    await page.goto("/viewer/documents/media-ingest");
+    await page.goto("/viewer/documents/media");
     await page.waitForLoadState("networkidle");
 
     const docLink = page.locator(`a[href='/viewer/player/${CANONICAL_DOC_ID}']`).first();
@@ -115,7 +115,7 @@ test.describe("Smoke Tests @smoke", () => {
 
     // Back arrow lives in the player and now points at the documents list.
     const backLink = page
-      .locator("a[href='/viewer/documents/media-ingest'], a[href='/viewer/documents']")
+      .locator("a[href='/viewer/documents/media'], a[href='/viewer/documents']")
       .first();
     await backLink.click();
     await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
@@ -170,5 +170,80 @@ test.describe("Smoke Tests @smoke", () => {
     expect(resp.status()).toBe(200);
     const docs = await resp.json();
     expect(Array.isArray(docs)).toBe(true);
+  });
+
+  // ── Per-domain document browsers (UI sees local seed data) ──────────────
+
+  test.describe("Document browsers @smoke", () => {
+    /** Minimum count enforced for each domain — local seed has 5 media,
+     *  3 congress, 3 leaks. Override per-CI if a deployment has more. */
+    const MIN_PER_DOMAIN = parseInt(process.env.MIN_PER_DOMAIN ?? "3", 10);
+
+    test("media browser renders cards from local seed", async ({ page }) => {
+      await page.goto("/viewer/documents/media");
+      await page.waitForLoadState("networkidle");
+      const list = page.locator('[data-testid="document-list-page"][data-domain="media"]');
+      await expect(list).toBeVisible({ timeout: 15_000 });
+      const cards = list.locator("[data-testid^='document-card-']");
+      await expect(cards.first()).toBeVisible({ timeout: 15_000 });
+      expect(await cards.count()).toBeGreaterThanOrEqual(MIN_PER_DOMAIN);
+      // Cards are <Link>s — media domain points at the player.
+      await expect(cards.first()).toHaveAttribute("href", /\/player\//);
+    });
+
+    test("congress browser renders cards from local seed + click → detail", async ({ page }) => {
+      await page.goto("/viewer/documents/congress");
+      await page.waitForLoadState("networkidle");
+      const list = page.locator('[data-testid="document-list-page"][data-domain="congress"]');
+      await expect(list).toBeVisible({ timeout: 15_000 });
+      const cards = list.locator("[data-testid^='document-card-']");
+      await expect(cards.first()).toBeVisible({ timeout: 15_000 });
+      expect(await cards.count()).toBeGreaterThanOrEqual(MIN_PER_DOMAIN);
+      // Domain-specific docs route to the generic detail page, not /player.
+      await expect(cards.first()).toHaveAttribute("href", /\/documents\/congress\//);
+
+      // Click the first card → land on the generic detail page.
+      await cards.first().click();
+      await expect(page).toHaveURL(/\/documents\/congress\//);
+      await expect(page.getByTestId("doc-detail-metadata")).toBeVisible({ timeout: 15_000 });
+    });
+
+    test("leaks browser renders cards from local seed + click → detail", async ({ page }) => {
+      await page.goto("/viewer/documents/leaks");
+      await page.waitForLoadState("networkidle");
+      const list = page.locator('[data-testid="document-list-page"][data-domain="leaks"]');
+      await expect(list).toBeVisible({ timeout: 15_000 });
+      const cards = list.locator("[data-testid^='document-card-']");
+      await expect(cards.first()).toBeVisible({ timeout: 15_000 });
+      expect(await cards.count()).toBeGreaterThanOrEqual(MIN_PER_DOMAIN);
+      await expect(cards.first()).toHaveAttribute("href", /\/documents\/leaks\//);
+
+      await cards.first().click();
+      await expect(page).toHaveURL(/\/documents\/leaks\//);
+      await expect(page.getByTestId("doc-detail-metadata")).toBeVisible({ timeout: 15_000 });
+    });
+
+    test("search filters work on each domain (per-domain queryKey isolation)", async ({ page }) => {
+      // Quick regression for the React Query cache key — switching domains
+      // mid-search should not leak the previous domain's results into the
+      // new one. Tests the `["documents", domain]` query key shape.
+      await page.goto("/viewer/documents/congress");
+      await page.waitForLoadState("networkidle");
+      const congressCards = page
+        .locator('[data-testid="document-list-page"][data-domain="congress"]')
+        .locator("[data-testid^='document-card-']");
+      await expect(congressCards.first()).toBeVisible({ timeout: 10_000 });
+      const congressCount = await congressCards.count();
+
+      await page.getByTestId("documents-subtab-leaks").click();
+      await expect(page).toHaveURL(/\/documents\/leaks$/);
+      const leakCards = page
+        .locator('[data-testid="document-list-page"][data-domain="leaks"]')
+        .locator("[data-testid^='document-card-']");
+      await expect(leakCards.first()).toBeVisible({ timeout: 10_000 });
+      const leakCount = await leakCards.count();
+      expect(leakCount).toBeGreaterThanOrEqual(MIN_PER_DOMAIN);
+      expect(congressCount).toBeGreaterThanOrEqual(MIN_PER_DOMAIN);
+    });
   });
 });
