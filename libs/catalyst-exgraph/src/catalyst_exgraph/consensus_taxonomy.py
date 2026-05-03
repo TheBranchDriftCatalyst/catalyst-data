@@ -193,12 +193,29 @@ TYPE_CANONICAL: dict[str, dict[str, str]] = {
         "CREDIT_CARD": "CREDIT_CARD",
         "ADDRESS": "ADDRESS",
         "DOB": "DOB",
-        # Common non-PII that gliner-pii sometimes emits
-        "organization": "ORG",
+        # General-NER labels that gliner-pii emits when the bench prompts it
+        # with the full ensemble label set (it shares the GLiNER engine with
+        # gliner-medium/large, so any label in the prompt vocabulary is fair
+        # game). Mirror gliner-medium's canonical-passthrough block.
         "ORG": "ORG",
-        "location": "LOC",
+        "ORGANIZATION": "ORG",
         "LOC": "LOC",
+        "LOCATION": "LOC",
+        "GPE": "GPE",
+        "DATE": "DATE",
+        "LAW": "LAW",
+        "EVENT": "EVENT",
+        "MONEY": "MONEY",
+        "NORP": "NORP",
+        "FACILITY": "FACILITY",
+        "DOCUMENT": "DOCUMENT",
+        "BOOK": "BOOK",
+        "ROLE": "ROLE",
+        "STRATEGIC_ASSET": "STRATEGIC_ASSET",
+        "FINANCIAL_INSTRUMENT": "FINANCIAL_INSTRUMENT",
         "OTHER": "OTHER",
+        "organization": "ORG",
+        "location": "LOC",
     },
     # ── nuextract-2.0-8b ───────────────────────────────────────────────────
     # NuExtract returns structured JSON with title-case category labels.
@@ -213,12 +230,16 @@ TYPE_CANONICAL: dict[str, dict[str, str]] = {
         "GPE": "GPE",
         "LOC": "LOC",
         "DATE": "DATE",
+        "LAW": "LAW",
         "EVENT": "EVENT",
         "MONEY": "MONEY",
         "NORP": "NORP",
         "FACILITY": "FACILITY",
         "DOCUMENT": "DOCUMENT",
+        "BOOK": "BOOK",
         "ROLE": "ROLE",
+        "STRATEGIC_ASSET": "STRATEGIC_ASSET",
+        "FINANCIAL_INSTRUMENT": "FINANCIAL_INSTRUMENT",
         "OTHER": "OTHER",
         # Title-case raw NuExtract categories
         "Person": "PERSON",
