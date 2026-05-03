@@ -20,10 +20,12 @@
     "test:e2e:coverage:report": "open test-results/coverage/index.html"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
     "@tanstack/react-query": "^5.62.0",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.24",
     "@thebranchdriftcatalyst/catalyst-ui": "^2.1.1",
+    "@xyflow/react": "^12.10.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.0"
