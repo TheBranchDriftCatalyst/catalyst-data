@@ -13,7 +13,11 @@
     "format:check": "prettier --check src/",
     "test:e2e": "npx playwright test",
     "test:e2e:smoke": "npx playwright test --grep @smoke",
-    "test:e2e:ui": "npx playwright test --ui"
+    "test:e2e:ui": "npx playwright test --ui",
+    "//test:e2e:coverage": "Build prod bundle, run tests against vite preview (clean source maps), open the V8 coverage report. Backend (FastAPI :8080) must be running.",
+    "test:e2e:coverage": "yarn build && (vite preview --port 4173 --host 127.0.0.1 & echo $! > /tmp/.vite-preview.pid; sleep 2; VIEWER_URL=http://127.0.0.1:4173 npx playwright test; status=$?; kill $(cat /tmp/.vite-preview.pid) 2>/dev/null; rm -f /tmp/.vite-preview.pid; exit $status)",
+    "test:e2e:report": "open test-results/monocart/index.html",
+    "test:e2e:coverage:report": "open test-results/coverage/index.html"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",
@@ -35,6 +39,7 @@
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.0",
     "globals": "^15.0.0",
+    "monocart-reporter": "^2.10.1",
     "prettier": "^3.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.7.0",

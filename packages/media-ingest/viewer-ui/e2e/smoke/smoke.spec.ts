@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../fixtures/coverage";
 import {
   CANONICAL_DOC_ID,
   CANONICAL_DOC_TITLE,

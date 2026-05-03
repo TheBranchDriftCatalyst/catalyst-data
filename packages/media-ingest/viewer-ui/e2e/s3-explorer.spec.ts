@@ -16,7 +16,7 @@
  * data, which is true for every catalyst-data env (dev + prod).
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures/coverage";
 import { S3ExplorerPage } from "./fixtures/page-objects/s3-explorer.page";
 
 const API = "/viewer/api/s3";

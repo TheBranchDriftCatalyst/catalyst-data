@@ -4,6 +4,10 @@ node_modules/
 # Build output
 dist/
 
+# Playwright + coverage outputs
+test-results/
+playwright-report/
+
 # IDE
 .vscode/
 .idea/
