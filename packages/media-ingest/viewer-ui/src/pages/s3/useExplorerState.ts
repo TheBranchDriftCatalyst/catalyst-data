@@ -3,6 +3,9 @@ import { useSearchParams } from "react-router-dom";
 
 export type SearchScope = "prefix" | "bucket";
 export type SortKey = "name" | "size" | "modified";
+/** View mode for the file preview pane. The pane filters this list down to
+ *  the modes that apply to the selected file's kind. */
+export type ViewMode = "table" | "tree" | "raw" | "markdown" | "code";
 
 export interface ExplorerState {
   prefix: string;
@@ -11,6 +14,7 @@ export interface ExplorerState {
   scope: SearchScope;
   sort: SortKey;
   sortDesc: boolean;
+  view: ViewMode | null;
 }
 
 /** Single source of truth for explorer state — backed by URL search params.
@@ -32,6 +36,7 @@ export function useExplorerState(): ExplorerState & {
   setQuery: (q: string) => void;
   setScope: (s: SearchScope) => void;
   setSort: (s: SortKey, desc?: boolean) => void;
+  setView: (v: ViewMode | null) => void;
   toggleScope: () => void;
 } {
   const [params, setParams] = useSearchParams();
@@ -44,6 +49,7 @@ export function useExplorerState(): ExplorerState & {
       scope: (params.get("scope") as SearchScope) ?? "prefix",
       sort: (params.get("sort") as SortKey) ?? "name",
       sortDesc: params.get("desc") === "1",
+      view: (params.get("view") as ViewMode | null) ?? null,
     }),
     [params],
   );
@@ -96,6 +102,7 @@ export function useExplorerState(): ExplorerState & {
         }),
       [update],
     ),
+    setView: useCallback((v: ViewMode | null) => update({ view: v }), [update]),
     toggleScope: useCallback(() => {
       const next = state.scope === "prefix" ? "bucket" : "prefix";
       update({ scope: next === "prefix" ? null : next });

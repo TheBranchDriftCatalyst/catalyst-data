@@ -170,8 +170,8 @@ test.describe("S3 Explorer", () => {
       const headers = await table.locator("thead th").count();
       expect(headers).toBeGreaterThan(0);
 
-      // Toggle to raw.
-      await s3.preview.getByRole("button", { name: /Switch to raw JSON/ }).click();
+      // Toggle to raw via the new view-toggle button group.
+      await page.getByTestId("s3-view-raw").click();
       await expect(s3.preview.locator("pre")).toBeVisible();
     });
 
@@ -319,6 +319,108 @@ test.describe("S3 Explorer", () => {
       await page.goForward();
       await page.waitForLoadState("networkidle");
       await expect(page).toHaveURL(/[?&]p=silver%2F/);
+    });
+  });
+
+  // ── 6b. View modes ───────────────────────────────────────────────────
+
+  test.describe("View modes", () => {
+    /** Helper: open the JSONL data file under media_documents/. */
+    async function openJsonlPreview(page: import("@playwright/test").Page) {
+      const s3 = new S3ExplorerPage(page);
+      await s3.goto("silver/media_ingest/media/media_documents/");
+      await page.waitForLoadState("networkidle");
+      await page.getByRole("button", { name: /data\.jsonl/ }).first().click();
+      await expect(s3.preview).toBeVisible();
+      return s3;
+    }
+
+    test("JSONL exposes Table / Tree / Raw toggles", async ({ page }) => {
+      await openJsonlPreview(page);
+      await expect(page.getByTestId("s3-view-toggle")).toBeVisible();
+      await expect(page.getByTestId("s3-view-table")).toBeVisible();
+      await expect(page.getByTestId("s3-view-tree")).toBeVisible();
+      await expect(page.getByTestId("s3-view-raw")).toBeVisible();
+    });
+
+    test("JSONL Table view renders <table> with headers and rows", async ({ page }) => {
+      const s3 = await openJsonlPreview(page);
+      // Table is the default — no toggle click needed.
+      await expect(page.getByTestId("s3-view-table")).toHaveAttribute("data-active", "true");
+      const table = s3.preview.locator("table");
+      await expect(table).toBeVisible({ timeout: 10_000 });
+      expect(await table.locator("thead th").count()).toBeGreaterThan(0);
+      expect(await table.locator("tbody tr").count()).toBeGreaterThan(0);
+    });
+
+    test("JSONL Tree view renders collapsible nodes; click toggles open/closed", async ({
+      page,
+    }) => {
+      const s3 = await openJsonlPreview(page);
+      await page.getByTestId("s3-view-tree").click();
+      await expect(page).toHaveURL(/[?&]view=tree/);
+      // The tree renders a top-level array opener "[".
+      await expect(s3.preview.locator("text=[").first()).toBeVisible();
+      // ChevronDown icon means at least one node is currently expanded.
+      await expect(s3.preview.locator("svg.lucide-chevron-down").first()).toBeVisible();
+    });
+
+    test("JSONL Raw view renders <pre> with serialized content", async ({ page }) => {
+      const s3 = await openJsonlPreview(page);
+      await page.getByTestId("s3-view-raw").click();
+      await expect(page).toHaveURL(/[?&]view=raw/);
+      await expect(s3.preview.locator("pre")).toBeVisible();
+      // No <table> in raw view.
+      await expect(s3.preview.locator("table")).toHaveCount(0);
+    });
+
+    test("?view= query param survives a page reload", async ({ page }) => {
+      const s3 = await openJsonlPreview(page);
+      await page.getByTestId("s3-view-tree").click();
+      await expect(page).toHaveURL(/[?&]view=tree/);
+      await page.reload();
+      await page.waitForLoadState("networkidle");
+      await expect(s3.preview).toBeVisible();
+      await expect(page.getByTestId("s3-view-tree")).toHaveAttribute("data-active", "true");
+    });
+
+    test("JSON file shows Tree / Raw toggles (no Table)", async ({ page }) => {
+      const s3 = new S3ExplorerPage(page);
+      // Find a single-doc JSON to preview — _metadata.json is always present.
+      await s3.goto("silver/media_ingest/media/media_documents/");
+      await page.waitForLoadState("networkidle");
+      const meta = page.getByRole("button", { name: /_metadata\.json/ }).first();
+      if ((await meta.count()) === 0) test.skip();
+      await meta.click();
+      await expect(s3.preview).toBeVisible();
+      await expect(page.getByTestId("s3-view-tree")).toBeVisible();
+      await expect(page.getByTestId("s3-view-raw")).toBeVisible();
+      await expect(page.getByTestId("s3-view-table")).toHaveCount(0);
+      // Default is tree.
+      await expect(page.getByTestId("s3-view-tree")).toHaveAttribute("data-active", "true");
+    });
+
+    test("Markdown file: Rendered (default) and Raw toggles work", async ({ page }) => {
+      // Use the API to find a .md key, then open it via deep-link.
+      const list = await (await page.request.get("/viewer/api/s3/search?q=.md&prefix=&limit=10")).json();
+      const mdHit = (list.hits ?? []).find((h: { key: string }) => h.key.endsWith(".md"));
+      if (!mdHit) test.skip();
+      const s3 = new S3ExplorerPage(page);
+      await page.goto(
+        `/viewer/s3?p=${encodeURIComponent(
+          mdHit.key.split("/").slice(0, -1).join("/") + "/",
+        )}&key=${encodeURIComponent(mdHit.key)}`,
+      );
+      await page.waitForLoadState("networkidle");
+      await expect(s3.preview).toBeVisible();
+      await expect(page.getByTestId("s3-view-markdown")).toBeVisible();
+      await expect(page.getByTestId("s3-view-raw")).toBeVisible();
+      // Rendered is default — assert it activates a heading or paragraph.
+      await expect(page.getByTestId("s3-view-markdown")).toHaveAttribute("data-active", "true");
+
+      await page.getByTestId("s3-view-raw").click();
+      await expect(page).toHaveURL(/[?&]view=raw/);
+      await expect(s3.preview.locator("pre")).toBeVisible();
     });
   });
 

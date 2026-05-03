@@ -1,30 +1,86 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Badge, Button, ScrollArea } from "@thebranchdriftcatalyst/catalyst-ui";
-import { Copy, Check, Download, ExternalLink, LayoutGrid, FileText } from "lucide-react";
+import { CodeBlock } from "@thebranchdriftcatalyst/catalyst-ui/components/CodeBlock";
+import { MarkdownRenderer } from "@thebranchdriftcatalyst/catalyst-ui/components/MarkdownRenderer";
+import {
+  Copy,
+  Check,
+  Download,
+  ExternalLink,
+  FileText,
+  LayoutGrid,
+  ListTree,
+  Code2,
+  BookOpen,
+} from "lucide-react";
 import { fetchS3Read, s3RawUrl } from "@/api/client";
 import type { S3File } from "@/api/client";
+import { cn } from "@/lib/utils";
 import { JsonlTable } from "./JsonlTable";
+import { JsonTree } from "./JsonTree";
 import { MediaPreview } from "./MediaPreview";
-import { fileKind, formatBytes, parseMediaDeepLink } from "./utils";
+import { fileKind, formatBytes, parseMediaDeepLink, extOf, type FileKind } from "./utils";
+import type { ViewMode } from "./useExplorerState";
 
 interface PreviewProps {
   file: S3File;
+  view: ViewMode | null;
+  onViewChange: (v: ViewMode | null) => void;
   onClose: () => void;
 }
 
 type CopyTarget = "key" | "s3url";
 
-/** Right-pane file preview. Routes by `fileKind(name)` to the right renderer
- *  and surfaces deep-links / download / copy affordances in a sticky header.
+/** Per-file-kind view-mode menu. The first entry is the default when the
+ *  user hasn't picked a `?view=` for the current file. Each entry is a
+ *  `(label, icon, view)` triple — the toggle button group reads from this. */
+const VIEW_OPTIONS: Record<FileKind, { mode: ViewMode; label: string; icon: typeof FileText }[]> = {
+  jsonl: [
+    { mode: "table", label: "Table", icon: LayoutGrid },
+    { mode: "tree", label: "Tree", icon: ListTree },
+    { mode: "raw", label: "Raw", icon: FileText },
+  ],
+  json: [
+    { mode: "tree", label: "Tree", icon: ListTree },
+    { mode: "raw", label: "Raw", icon: FileText },
+  ],
+  text: [
+    { mode: "markdown", label: "Rendered", icon: BookOpen },
+    { mode: "raw", label: "Raw", icon: FileText },
+  ],
+  code: [
+    { mode: "code", label: "Code", icon: Code2 },
+    { mode: "raw", label: "Raw", icon: FileText },
+  ],
+  // Media kinds + binary don't get a toggle — they have one canonical view.
+  image: [],
+  audio: [],
+  video: [],
+  binary: [],
+};
+
+/** Resolve which view the body should render: explicit `view` param if it
+ *  applies to this kind, else the kind's default (first option), else null. */
+function resolveView(kind: FileKind, requested: ViewMode | null): ViewMode | null {
+  const opts = VIEW_OPTIONS[kind];
+  if (opts.length === 0) return null;
+  if (requested && opts.some((o) => o.mode === requested)) return requested;
+  return opts[0]!.mode;
+}
+
+/** Right-pane file preview. Routes by `fileKind(name)` and the active view
+ *  to the right renderer; surfaces deep-links / download / copy affordances
+ *  in a sticky header. View-mode toggles persist via URL `?view=...`.
  */
-export function Preview({ file, onClose }: PreviewProps) {
+export function Preview({ file, view, onViewChange, onClose }: PreviewProps) {
   const [copied, setCopied] = useState<CopyTarget | null>(null);
-  const [viewMode, setViewMode] = useState<"table" | "raw">("table");
 
   const kind = fileKind(file.name);
   const deepLink = parseMediaDeepLink(file.key);
+  const activeView = resolveView(kind, view);
+  const viewOptions = VIEW_OPTIONS[kind];
 
   // Skip the read query for media kinds — they stream via /raw directly.
   const fetchable = kind !== "image" && kind !== "audio" && kind !== "video";
@@ -55,19 +111,8 @@ export function Preview({ file, onClose }: PreviewProps) {
               {formatBytes(file.size)}
             </Badge>
 
-            {kind === "jsonl" && content && Array.isArray(content.data) && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                title={viewMode === "table" ? "Switch to raw JSON" : "Switch to table view"}
-                onClick={() => setViewMode(viewMode === "table" ? "raw" : "table")}
-              >
-                {viewMode === "table" ? (
-                  <FileText className="h-3.5 w-3.5" />
-                ) : (
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                )}
-              </Button>
+            {viewOptions.length > 0 && (
+              <ViewToggle options={viewOptions} active={activeView} onChange={onViewChange} />
             )}
 
             {deepLink && (
@@ -131,8 +176,49 @@ export function Preview({ file, onClose }: PreviewProps) {
           </div>
         )}
 
-        {fetchable && content && <PreviewBody content={content} kind={kind} viewMode={viewMode} />}
+        {fetchable && content && (
+          <PreviewBody content={content} kind={kind} view={activeView} fileName={file.name} />
+        )}
       </div>
+    </div>
+  );
+}
+
+function ViewToggle({
+  options,
+  active,
+  onChange,
+}: {
+  options: { mode: ViewMode; label: string; icon: typeof FileText }[];
+  active: ViewMode | null;
+  onChange: (v: ViewMode | null) => void;
+}) {
+  return (
+    <div
+      data-testid="s3-view-toggle"
+      className="flex items-center bg-surface-2 rounded border border-white/5 overflow-hidden"
+    >
+      {options.map(({ mode, label, icon: Icon }) => {
+        const isActive = active === mode;
+        return (
+          <button
+            key={mode}
+            data-testid={`s3-view-${mode}`}
+            data-active={isActive ? "true" : "false"}
+            title={`View as ${label}`}
+            onClick={() => onChange(isActive ? null : mode)}
+            className={cn(
+              "flex items-center gap-1 px-2 h-6 text-[10px] font-mono transition-colors",
+              isActive
+                ? "bg-cyan-500/15 text-cyan-300"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5",
+            )}
+          >
+            <Icon className="h-3 w-3" />
+            {label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -140,11 +226,13 @@ export function Preview({ file, onClose }: PreviewProps) {
 function PreviewBody({
   content,
   kind,
-  viewMode,
+  view,
+  fileName,
 }: {
   content: Awaited<ReturnType<typeof fetchS3Read>>;
-  kind: ReturnType<typeof fileKind>;
-  viewMode: "table" | "raw";
+  kind: FileKind;
+  view: ViewMode | null;
+  fileName: string;
 }) {
   if (content.error) {
     return (
@@ -157,30 +245,98 @@ function PreviewBody({
     );
   }
 
-  if (kind === "jsonl" && Array.isArray(content.data) && viewMode === "table") {
-    return (
-      <div className="flex flex-col h-full">
-        {content.truncated && (
-          <div className="px-4 py-2 text-xs text-amber-400 border-b border-white/5">
-            Showing {content.data.length} of {content.total_lines ?? "many"} rows (truncated)
+  // ── JSONL ──────────────────────────────────────────────────────────────
+  if (kind === "jsonl" && Array.isArray(content.data)) {
+    if (view === "table") {
+      return (
+        <div className="flex flex-col h-full">
+          {content.truncated && (
+            <div className="px-4 py-2 text-xs text-amber-400 border-b border-white/5">
+              Showing {content.data.length} of {content.total_lines ?? "many"} rows (truncated)
+            </div>
+          )}
+          <div className="flex-1 min-h-0">
+            <JsonlTable rows={content.data as Record<string, unknown>[]} />
           </div>
-        )}
-        <div className="flex-1 min-h-0">
-          <JsonlTable rows={content.data as Record<string, unknown>[]} />
         </div>
-      </div>
-    );
+      );
+    }
+    if (view === "tree") {
+      return (
+        <ScrollArea className="h-full">
+          {content.truncated && <TruncationBanner content={content} />}
+          <JsonTree data={content.data} collapseDepth={1} />
+        </ScrollArea>
+      );
+    }
+    // raw
+    return <RawPre content={content} />;
   }
 
+  // ── JSON ───────────────────────────────────────────────────────────────
+  if (kind === "json" && content.data != null) {
+    if (view === "tree") {
+      return (
+        <ScrollArea className="h-full">
+          <JsonTree data={content.data} collapseDepth={2} />
+        </ScrollArea>
+      );
+    }
+    return <RawPre content={content} />;
+  }
+
+  // ── Markdown / text ────────────────────────────────────────────────────
+  if (kind === "text" && typeof content.data === "string") {
+    if (view === "markdown" && extOf(fileName) === "md") {
+      return (
+        <ScrollArea className="h-full">
+          <div className="p-4 prose prose-invert prose-sm max-w-none">
+            <MarkdownRenderer content={content.data} />
+          </div>
+        </ScrollArea>
+      );
+    }
+    return <RawPre content={content} />;
+  }
+
+  // ── Code ───────────────────────────────────────────────────────────────
+  if (kind === "code" && typeof content.data === "string") {
+    if (view === "code") {
+      return (
+        <ScrollArea className="h-full">
+          <div className="p-2">
+            <CodeBlock
+              code={content.data}
+              language={extOf(fileName) || "txt"}
+              showLineNumbers
+              showCopyButton
+              useCardContext={false}
+            />
+          </div>
+        </ScrollArea>
+      );
+    }
+    return <RawPre content={content} />;
+  }
+
+  // ── Fallback (binary / unknown) ────────────────────────────────────────
+  return <RawPre content={content} />;
+}
+
+function TruncationBanner({ content }: { content: Awaited<ReturnType<typeof fetchS3Read>> }) {
+  const shown = Array.isArray(content.data) ? content.data.length : "partial";
+  return (
+    <div className="px-4 py-2 text-xs text-amber-400 border-b border-white/5">
+      Showing {shown} of {content.total_lines ?? "many"} lines (truncated)
+    </div>
+  );
+}
+
+function RawPre({ content }: { content: Awaited<ReturnType<typeof fetchS3Read>> }) {
   return (
     <ScrollArea className="h-full">
       <div className="p-4">
-        {content.truncated && (
-          <div className="text-xs text-amber-400 mb-2">
-            Showing {Array.isArray(content.data) ? (content.data as unknown[]).length : "partial"}{" "}
-            of {content.total_lines ?? "many"} lines (truncated)
-          </div>
-        )}
+        {content.truncated && <TruncationBanner content={content} />}
         {content.preview && !content.data && (
           <div className="text-sm text-zinc-500 font-mono">{content.preview}</div>
         )}

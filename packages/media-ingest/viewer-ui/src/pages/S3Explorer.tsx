@@ -448,7 +448,12 @@ export default function S3Explorer() {
           </div>
 
           {selectedFile && (
-            <Preview file={selectedFile} onClose={() => state.setSelectedKey(null)} />
+            <Preview
+              file={selectedFile}
+              view={state.view}
+              onViewChange={state.setView}
+              onClose={() => state.setSelectedKey(null)}
+            />
           )}
         </div>
       </div>
