@@ -25,7 +25,7 @@ if os.environ.get("DAGSTER_IS_CODE_SERVER", "").lower() in ("1", "true"):
 
     threading.Thread(target=_start_viewer, daemon=True, name="media-viewer").start()
 
-from dagster import Definitions
+from dagster import Definitions, EnvVar
 
 from dagster_io import (
     ChunkingResource,
@@ -103,16 +103,38 @@ defs = Definitions(
             for k, v in select_io_managers(default_local_dir=".test-output/media-ingest").items()
             if k in ("io_manager", "optional_io_manager")
         },
-        "chunking": ChunkingResource(),
-        "llm": LLMResource(),
+        "chunking": ChunkingResource(
+            chunk_size=EnvVar.int("CHUNK_SIZE"),
+            chunk_overlap=EnvVar.int("CHUNK_OVERLAP"),
+        ),
+        "llm": LLMResource(
+            base_url=EnvVar("LLM_BASE_URL"),
+            api_key=EnvVar("LLM_API_KEY"),
+            model=EnvVar("LLM_MODEL"),
+        ),
         # Both keys point at the same resource: media_chunks asset signature uses
         # ``embedding`` (singular); other media assets use ``embeddings`` (plural).
-        "embedding": EmbeddingResource(),
-        "embeddings": EmbeddingResource(),
+        "embedding": EmbeddingResource(
+            provider=EnvVar("EMBEDDING_PROVIDER"),
+            base_url=EnvVar("EMBEDDING_BASE_URL"),
+            api_key=EnvVar("EMBEDDING_API_KEY"),
+            model=EnvVar("EMBEDDING_MODEL"),
+        ),
+        "embeddings": EmbeddingResource(
+            provider=EnvVar("EMBEDDING_PROVIDER"),
+            base_url=EnvVar("EMBEDDING_BASE_URL"),
+            api_key=EnvVar("EMBEDDING_API_KEY"),
+            model=EnvVar("EMBEDDING_MODEL"),
+        ),
         # Seed embedder for SemanticChunkingSeed — separate registration so the
         # model can diverge from production without affecting downstream
         # similarity quality (CD-wnu5 picks the long-term default; today it
         # tracks production at text-embedding-3-small).
-        "embedding_seed": EmbeddingResource(),
+        "embedding_seed": EmbeddingResource(
+            provider=EnvVar("EMBEDDING_PROVIDER"),
+            base_url=EnvVar("EMBEDDING_BASE_URL"),
+            api_key=EnvVar("EMBEDDING_API_KEY"),
+            model=EnvVar("EMBEDDING_MODEL"),
+        ),
     },
 )

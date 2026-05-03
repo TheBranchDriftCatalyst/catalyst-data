@@ -12,7 +12,6 @@ Used by: bill_actions, bill_cosponsors, member_sponsored, member_cosponsored.
 from __future__ import annotations
 
 import json
-import os
 import typing
 from datetime import UTC, datetime
 
@@ -33,10 +32,10 @@ class AppendIOManager(ConfigurableIOManager):
     load_input globs all event files for the partition and dedupes.
     """
 
-    endpoint_url: str = os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://minio.minio.svc.cluster.local")
-    access_key: str = os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio")
-    secret_key: str = os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123")
-    bucket: str = os.environ.get("DAGSTER_S3_BUCKET", "dagster")
+    endpoint_url: str = "http://minio.minio.svc.cluster.local"
+    access_key: str = "minio"
+    secret_key: str = "minio123"
+    bucket: str = "dagster"
 
     _client: S3Client | None = PrivateAttr(default=None)
 

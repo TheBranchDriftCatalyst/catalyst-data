@@ -9,7 +9,6 @@ S3 assets that can coexist without overwriting each other.
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 
 from dagster import ConfigurableResource
@@ -79,9 +78,9 @@ class EmbeddingConfigResource(ConfigurableResource):
     can route data to config-specific S3 paths.
     """
 
-    chunk_size: int = int(os.environ.get("CHUNK_SIZE", "1000"))
-    chunk_overlap: int = int(os.environ.get("CHUNK_OVERLAP", "200"))
-    embedding_model: str = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+    embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int | None = None
     prepend_title: bool = True
 

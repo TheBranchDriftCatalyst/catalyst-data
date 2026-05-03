@@ -13,7 +13,6 @@ legal text gets larger chunks).
 from __future__ import annotations
 
 import hashlib
-import os
 from collections import Counter
 from dataclasses import dataclass
 
@@ -175,8 +174,8 @@ class ChunkingResource(ConfigurableResource):
             chunks = chunking.passthrough(doc_id, title, content)
     """
 
-    chunk_size: int = int(os.environ.get("CHUNK_SIZE", "1000"))
-    chunk_overlap: int = int(os.environ.get("CHUNK_OVERLAP", "200"))
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
     prepend_title: bool = True
 
     def _splitter(

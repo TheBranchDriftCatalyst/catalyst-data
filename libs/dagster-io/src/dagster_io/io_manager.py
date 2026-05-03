@@ -54,10 +54,10 @@ class MinioIOManager(ConfigurableIOManager):
     MinIO bucket versioning, manifest tracking.
     """
 
-    endpoint_url: str = os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://minio.minio.svc.cluster.local")
-    access_key: str = os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio")
-    secret_key: str = os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123")
-    bucket: str = os.environ.get("DAGSTER_S3_BUCKET", "dagster")
+    endpoint_url: str = "http://minio.minio.svc.cluster.local"
+    access_key: str = "minio"
+    secret_key: str = "minio123"
+    bucket: str = "dagster"
 
     _client: S3Client | None = PrivateAttr(default=None)
 
@@ -264,7 +264,6 @@ class MinioIOManager(ConfigurableIOManager):
         config_key: str | None,
     ) -> None:
         """Stream-serialize large JSONL datasets to a temp file, then multipart upload to S3."""
-        import os
 
         count = len(obj) if hasattr(obj, "__len__") else 0
         context.log.info(

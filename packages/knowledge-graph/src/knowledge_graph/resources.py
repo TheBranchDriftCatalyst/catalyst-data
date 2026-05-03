@@ -1,7 +1,6 @@
 """Graph database resources — Neo4j + PostgreSQL dual-write."""
 
 import json
-import os
 from typing import Any
 
 from dagster import ConfigurableResource
@@ -68,16 +67,16 @@ class GraphDBResource(ConfigurableResource):
     """
 
     # PostgreSQL
-    pg_host: str = os.environ.get("KG_PG_HOST", "postgres-knowledge.catalyst-data.svc.cluster.local")
-    pg_port: int = int(os.environ.get("KG_PG_PORT", "5432"))
-    pg_database: str = os.environ.get("KG_PG_DATABASE", "knowledge_graph")
-    pg_user: str = os.environ.get("KG_PG_USER", "kg")
-    pg_password: str = os.environ.get("KG_PG_PASSWORD", "kg-homelab")
+    pg_host: str = "postgres-knowledge.catalyst-data.svc.cluster.local"
+    pg_port: int = 5432
+    pg_database: str = "knowledge_graph"
+    pg_user: str = "kg"
+    pg_password: str = "kg-homelab"
 
     # Neo4j
-    neo4j_uri: str = os.environ.get("NEO4J_URI", "bolt://neo4j.catalyst-data.svc.cluster.local:7687")
-    neo4j_user: str = os.environ.get("NEO4J_USER", "neo4j")
-    neo4j_password: str = os.environ.get("NEO4J_PASSWORD", "neo4j-homelab")
+    neo4j_uri: str = "bolt://neo4j.catalyst-data.svc.cluster.local:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "neo4j-homelab"
 
     def _pg_conn(self):
         import psycopg

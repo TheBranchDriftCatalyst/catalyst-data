@@ -102,10 +102,10 @@ class ExtractionResource(ConfigurableResource):
     optional ensemble, and domain-specific prompts.
     """
 
-    ner_model: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    ner_model: str = "gpt-4o-mini"
     """Model for NER/mention extraction (e.g. 'gliner', 'mistral:latest')."""
 
-    spo_model: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    spo_model: str = "gpt-4o-mini"
     """Model for SPO/proposition extraction (e.g. 'mistral:latest', 'llama3.1:8b')."""
 
     prompt_dir: str = ""

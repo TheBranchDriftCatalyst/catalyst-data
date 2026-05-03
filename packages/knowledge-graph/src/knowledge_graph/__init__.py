@@ -13,7 +13,7 @@ configure_logging()
 configure_tracing(service_name="catalyst-data.knowledge_graph")
 start_metrics_server()
 
-from dagster import Definitions, DynamicPartitionsDefinition, SourceAsset
+from dagster import Definitions, DynamicPartitionsDefinition, EnvVar, SourceAsset
 
 from dagster_io import (
     MinioIOManager,
@@ -104,12 +104,31 @@ defs = Definitions(
     ],
     executor=_executor,
     resources={
-        "io_manager": MinioIOManager(),
+        "io_manager": MinioIOManager(
+            endpoint_url=EnvVar("DAGSTER_S3_ENDPOINT_URL"),
+            access_key=EnvVar("DAGSTER_S3_ACCESS_KEY"),
+            secret_key=EnvVar("DAGSTER_S3_SECRET_KEY"),
+            bucket=EnvVar("DAGSTER_S3_BUCKET"),
+        ),
         # Used via AssetIn(input_manager_key="optional_io_manager") for
         # cross-source inputs that may not yet be materialized (e.g. the
         # congress/leak entity_candidates and assertions inputs to the
         # platinum assets). Returns None on NoSuchKey instead of raising.
-        "optional_io_manager": OptionalMinioIOManager(),
-        "graph_db": GraphDBResource(),
+        "optional_io_manager": OptionalMinioIOManager(
+            endpoint_url=EnvVar("DAGSTER_S3_ENDPOINT_URL"),
+            access_key=EnvVar("DAGSTER_S3_ACCESS_KEY"),
+            secret_key=EnvVar("DAGSTER_S3_SECRET_KEY"),
+            bucket=EnvVar("DAGSTER_S3_BUCKET"),
+        ),
+        "graph_db": GraphDBResource(
+            pg_host=EnvVar("KG_PG_HOST"),
+            pg_port=EnvVar.int("KG_PG_PORT"),
+            pg_database=EnvVar("KG_PG_DATABASE"),
+            pg_user=EnvVar("KG_PG_USER"),
+            pg_password=EnvVar("KG_PG_PASSWORD"),
+            neo4j_uri=EnvVar("NEO4J_URI"),
+            neo4j_user=EnvVar("NEO4J_USER"),
+            neo4j_password=EnvVar("NEO4J_PASSWORD"),
+        ),
     },
 )

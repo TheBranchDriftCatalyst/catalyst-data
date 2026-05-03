@@ -8,7 +8,7 @@ configure_logging()
 configure_tracing(service_name="catalyst-data.open_leaks")
 start_metrics_server()
 
-from dagster import Definitions
+from dagster import Definitions, EnvVar
 
 from dagster_io import (
     ChunkingResource,
@@ -59,11 +59,28 @@ defs = Definitions(
             for k, v in select_io_managers(default_local_dir=".test-output/open-leaks").items()
             if k == "io_manager"
         },
-        "chunking": ChunkingResource(),
-        "llm": LLMResource(),
-        "embeddings": EmbeddingResource(),
+        "chunking": ChunkingResource(
+            chunk_size=EnvVar.int("CHUNK_SIZE"),
+            chunk_overlap=EnvVar.int("CHUNK_OVERLAP"),
+        ),
+        "llm": LLMResource(
+            base_url=EnvVar("LLM_BASE_URL"),
+            api_key=EnvVar("LLM_API_KEY"),
+            model=EnvVar("LLM_MODEL"),
+        ),
+        "embeddings": EmbeddingResource(
+            provider=EnvVar("EMBEDDING_PROVIDER"),
+            base_url=EnvVar("EMBEDDING_BASE_URL"),
+            api_key=EnvVar("EMBEDDING_API_KEY"),
+            model=EnvVar("EMBEDDING_MODEL"),
+        ),
         # Seed embedder for SemanticChunkingSeed (CD-wnu5 picks the long-term
         # default; today it tracks production at text-embedding-3-small).
-        "embedding_seed": EmbeddingResource(),
+        "embedding_seed": EmbeddingResource(
+            provider=EnvVar("EMBEDDING_PROVIDER"),
+            base_url=EnvVar("EMBEDDING_BASE_URL"),
+            api_key=EnvVar("EMBEDDING_API_KEY"),
+            model=EnvVar("EMBEDDING_MODEL"),
+        ),
     },
 )

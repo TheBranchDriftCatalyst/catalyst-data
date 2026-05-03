@@ -110,17 +110,17 @@ class LLMResource(ConfigurableResource):
             chat_model = llm.get_model()
     """
 
-    base_url: str = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1")
-    api_key: str = os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
-    model: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
-    temperature: float = float(os.environ.get("LLM_TEMPERATURE", "0.0"))
-    max_tokens: int = int(os.environ.get("LLM_MAX_TOKENS", "16384"))
-    context_window: int = int(os.environ.get("LLM_CONTEXT_WINDOW", "4096"))
+    base_url: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    model: str = "gpt-4o-mini"
+    temperature: float = 0.0
+    max_tokens: int | None = None
+    context_window: int | None = None
 
     _chat_model: ChatOpenAI = PrivateAttr()
 
-    max_retries: int = int(os.environ.get("LLM_MAX_RETRIES", "5"))
-    request_timeout: float = float(os.environ.get("LLM_REQUEST_TIMEOUT", "300"))
+    max_retries: int | None = None
+    request_timeout: float | None = None
 
     # Code location for LiteLLM metadata labels
     _code_location: str = PrivateAttr(default="")
@@ -133,9 +133,9 @@ class LLMResource(ConfigurableResource):
             api_key=self.api_key or "unused",
             model=self.model,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            max_retries=self.max_retries,
-            timeout=self.request_timeout,
+            max_tokens=self.max_tokens if self.max_tokens is not None else 16384,
+            max_retries=self.max_retries if self.max_retries is not None else 5,
+            timeout=self.request_timeout if self.request_timeout is not None else 300.0,
             model_kwargs={
                 "extra_body": {
                     "metadata": {
@@ -422,22 +422,17 @@ class EmbeddingResource(ConfigurableResource):
             vectors = embeddings.embed(["hello world", "another doc"])
     """
 
-    provider: str = os.environ.get("EMBEDDING_PROVIDER", "openai")
-    base_url: str = os.environ.get(
-        "EMBEDDING_BASE_URL",
-        os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1"),
-    )
-    api_key: str = os.environ.get(
-        "EMBEDDING_API_KEY",
-        os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", "")),
-    )
-    model: str = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
-    dimensions: int = int(os.environ.get("EMBEDDING_DIMENSIONS", "768"))
-    batch_size: int = int(os.environ.get("EMBEDDING_BATCH_SIZE", "100"))
+    provider: str = "openai"
+    base_url: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    model: str = "text-embedding-3-small"
+    dimensions: int | None = None
+    batch_size: int | None = None
 
     _embeddings: Any = PrivateAttr()
 
     def setup_for_execution(self, context) -> None:  # noqa: ANN001
+        effective_batch_size = self.batch_size if self.batch_size is not None else 100
         logger.info(
             "Initializing EmbeddingResource provider=%s model=%s",
             self.provider,
@@ -454,7 +449,7 @@ class EmbeddingResource(ConfigurableResource):
                 base_url=self.base_url,
                 api_key=self.api_key or "unused",
                 model=self.model,
-                chunk_size=self.batch_size,
+                chunk_size=effective_batch_size,
             )
 
     def get_embeddings(self) -> Any:
@@ -463,15 +458,16 @@ class EmbeddingResource(ConfigurableResource):
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of texts, processing internally in batches with progress logging."""
+        effective_batch_size = self.batch_size if self.batch_size is not None else 100
         logger.info(
             "Embedding %d texts with model=%s (batch_size=%d)",
             len(texts),
             self.model,
-            self.batch_size,
+            effective_batch_size,
         )
         all_vectors: list[list[float]] = []
-        for batch_start in range(0, len(texts), self.batch_size):
-            batch = texts[batch_start : batch_start + self.batch_size]
+        for batch_start in range(0, len(texts), effective_batch_size):
+            batch = texts[batch_start : batch_start + effective_batch_size]
             # Retry with exponential backoff for rate limits (429)
             for attempt in range(4):
                 try:
