@@ -23,6 +23,7 @@ import {
   Code2,
   Database,
   ExternalLink,
+  FileText,
   HardDrive,
   Tv2,
   Workflow,
@@ -38,7 +39,7 @@ interface NavItem {
 }
 
 const ITEMS: NavItem[] = [
-  { to: "/", label: "Media", icon: Tv2 },
+  { to: "/documents", label: "Documents", icon: FileText, prefix: true },
   { to: "/s3", label: "S3 Explorer", icon: Database },
   { to: "/benchmarks", label: "Benchmarks", icon: BarChart3, prefix: true },
   { to: "/benchmarks/state", label: "State Inspector", icon: Activity },

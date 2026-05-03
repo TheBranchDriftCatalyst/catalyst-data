@@ -7,9 +7,13 @@ import {
 } from "../fixtures/constants";
 
 test.describe("Smoke Tests @smoke", () => {
-  test("DocumentList page loads and shows documents", async ({ page }) => {
-    await page.goto("/viewer/");
+  test("Documents page loads media-ingest sub-tab and shows documents", async ({ page }) => {
+    await page.goto("/viewer/documents/media-ingest");
     await page.waitForLoadState("networkidle");
+
+    // Sub-tab row + active tab indicator
+    await expect(page.getByTestId("documents-subtabs")).toBeVisible();
+    await expect(page.getByTestId("documents-subtab-media-ingest")).toBeVisible();
 
     await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
 
@@ -20,27 +24,50 @@ test.describe("Smoke Tests @smoke", () => {
     expect(count).toBeGreaterThanOrEqual(MIN_DOC_COUNT);
   });
 
-  test("DocumentList search filters documents", async ({ page }) => {
+  test("Root URL redirects to /documents/media-ingest", async ({ page }) => {
     await page.goto("/viewer/");
     await page.waitForLoadState("networkidle");
+    expect(page.url()).toContain("/documents/media-ingest");
+    await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
+  });
 
-    // Use the main content search (not sidebar)
+  test("Documents search filters media-ingest documents", async ({ page }) => {
+    await page.goto("/viewer/documents/media-ingest");
+    await page.waitForLoadState("networkidle");
+
     const searchInput = page.getByPlaceholder("Search by title...");
     await expect(searchInput).toBeVisible();
 
-    // Count cards before (main content heading area)
     await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
 
     await searchInput.fill("Full Show");
-    // Wait for filter to apply
     await page.waitForTimeout(500);
 
-    // The heading should still be visible
     await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
-
-    // After filtering, there should be fewer documents visible
-    // Check that "Full Show" document is visible
     await expect(page.getByRole("heading", { name: /Full Show/ }).first()).toBeVisible();
+  });
+
+  test("Sub-tab navigation: media-ingest → congress-wtf → open-leaks", async ({ page }) => {
+    await page.goto("/viewer/documents/media-ingest");
+    await page.waitForLoadState("networkidle");
+
+    await page.getByTestId("documents-subtab-congress-wtf").click();
+    await expect(page).toHaveURL(/\/documents\/congress-wtf$/);
+    await expect(page.getByTestId("documents-congress-wtf-placeholder")).toBeVisible();
+
+    await page.getByTestId("documents-subtab-open-leaks").click();
+    await expect(page).toHaveURL(/\/documents\/open-leaks$/);
+    await expect(page.getByTestId("documents-open-leaks-placeholder")).toBeVisible();
+
+    await page.getByTestId("documents-subtab-media-ingest").click();
+    await expect(page).toHaveURL(/\/documents\/media-ingest$/);
+    await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
+  });
+
+  test("Unknown domain redirects to default media-ingest", async ({ page }) => {
+    await page.goto("/viewer/documents/does-not-exist");
+    await page.waitForLoadState("networkidle");
+    expect(page.url()).toContain("/documents/media-ingest");
   });
 
   test("Player page loads for canonical document", async ({ page }) => {
@@ -64,24 +91,23 @@ test.describe("Smoke Tests @smoke", () => {
     await expect(page.getByRole("tab", { name: /Entities/ })).toBeVisible();
   });
 
-  test("Navigation: DocumentList -> Player -> Back", async ({ page }) => {
-    await page.goto("/viewer/");
+  test("Navigation: media-ingest list -> Player -> Back", async ({ page }) => {
+    await page.goto("/viewer/documents/media-ingest");
     await page.waitForLoadState("networkidle");
 
-    // Click the canonical document (find by URL)
     const docLink = page.locator(`a[href='/viewer/player/${CANONICAL_DOC_ID}']`).first();
     await expect(docLink).toBeVisible();
     await docLink.click();
 
-    // Verify player loaded
     const title = page.getByRole("heading", { level: 1 }).filter({ hasText: /Full Show/i });
     await expect(title).toBeVisible({ timeout: 15_000 });
     expect(page.url()).toContain(`/player/${CANONICAL_DOC_ID}`);
 
-    // Go back — find the back arrow link
-    const backLink = page.locator("a[href='/viewer']").first();
+    // Back arrow lives in the player and now points at the documents list.
+    const backLink = page
+      .locator("a[href='/viewer/documents/media-ingest'], a[href='/viewer/documents']")
+      .first();
     await backLink.click();
-
     await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
   });
 
