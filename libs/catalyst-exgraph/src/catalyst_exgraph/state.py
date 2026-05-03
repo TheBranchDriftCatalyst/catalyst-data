@@ -11,6 +11,50 @@ from enum import StrEnum
 from typing import Any, TypedDict
 
 
+class EntityCluster(TypedDict, total=False):
+    """A cluster of related entities identified in a document.
+
+    Produced by ClusterEntitiesNode (Phase 2, CD-j6d3).
+    """
+
+    cluster_id: str
+    """Unique identifier for this cluster."""
+
+    mention_indices: list[int]
+    """Indices into stages.ner.accepted for the mentions in this cluster."""
+
+    doc_char_start: int
+    """Bounding-box start (doc-char offset) of the cluster."""
+
+    doc_char_end: int
+    """Bounding-box end (doc-char offset) of the cluster."""
+
+
+class EvidenceWindow(TypedDict, total=False):
+    """A text window packed around an entity cluster for SPO extraction.
+
+    Produced by PackEvidenceNode (Phase 2, CD-j6d3).
+    """
+
+    window_id: str
+    """Unique identifier for this evidence window."""
+
+    doc_char_start: int
+    """Start offset of the evidence window in the source document."""
+
+    doc_char_end: int
+    """End offset of the evidence window in the source document."""
+
+    text: str
+    """The evidence window text (may be a sub-string of the full doc)."""
+
+    mention_indices: list[int]
+    """Indices into stages.ner.accepted for the mentions in this window."""
+
+    cluster_id: str
+    """The cluster whose bounding box seeded this window."""
+
+
 class ExGraphStatus(StrEnum):
     """Status of the extraction graph execution."""
 
@@ -102,3 +146,13 @@ class ExGraphState(TypedDict, total=False):
 
     error: str
     """Error message if pipeline failed."""
+
+    # ── Phase 2: Entity-anchored flow (CD-j6d3) ─────────────────────────────
+    entity_clusters: list[EntityCluster]
+    """Entity clusters produced by ClusterEntitiesNode."""
+
+    evidence_windows: list[EvidenceWindow]
+    """Evidence windows produced by PackEvidenceNode."""
+
+    evidence_window_id: str
+    """Set when running the SPO sub-graph for one specific evidence window."""

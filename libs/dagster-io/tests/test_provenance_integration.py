@@ -76,59 +76,163 @@ def _mock_extraction_result(chunk: FakeChunk) -> dict:
     # Pick entities from the text
     if "Piers Morgan" in text:
         mentions = [
-            {"text": "Piers Morgan", "mention_type": "PERSON", "span_start": 0, "span_end": 12,
-             "document_id": chunk.document_id, "chunk_id": chunk.chunk_id, "confidence": 0.95},
-            {"text": "Nick Fuentes", "mention_type": "PERSON", "span_start": 28, "span_end": 40,
-             "document_id": chunk.document_id, "chunk_id": chunk.chunk_id, "confidence": 0.92},
-            {"text": "London", "mention_type": "GPE", "span_start": 44, "span_end": 50,
-             "document_id": chunk.document_id, "chunk_id": chunk.chunk_id, "confidence": 0.99},
+            {
+                "text": "Piers Morgan",
+                "mention_type": "PERSON",
+                "span_start": 0,
+                "span_end": 12,
+                "document_id": chunk.document_id,
+                "chunk_id": chunk.chunk_id,
+                "confidence": 0.95,
+            },
+            {
+                "text": "Nick Fuentes",
+                "mention_type": "PERSON",
+                "span_start": 28,
+                "span_end": 40,
+                "document_id": chunk.document_id,
+                "chunk_id": chunk.chunk_id,
+                "confidence": 0.92,
+            },
+            {
+                "text": "London",
+                "mention_type": "GPE",
+                "span_start": 44,
+                "span_end": 50,
+                "document_id": chunk.document_id,
+                "chunk_id": chunk.chunk_id,
+                "confidence": 0.99,
+            },
         ]
         propositions = [
             {"subject": "Piers Morgan", "predicate": "interviewed", "object": "Nick Fuentes", "confidence": 0.95},
         ]
     elif "CHIPS" in text:
         mentions = [
-            {"text": "CHIPS and Science Act", "mention_type": "LAW", "span_start": 17, "span_end": 37,
-             "document_id": chunk.document_id, "chunk_id": chunk.chunk_id, "confidence": 0.98},
-            {"text": "$52 billion", "mention_type": "MONEY", "span_start": 65, "span_end": 76,
-             "document_id": chunk.document_id, "chunk_id": chunk.chunk_id, "confidence": 0.97},
+            {
+                "text": "CHIPS and Science Act",
+                "mention_type": "LAW",
+                "span_start": 17,
+                "span_end": 37,
+                "document_id": chunk.document_id,
+                "chunk_id": chunk.chunk_id,
+                "confidence": 0.98,
+            },
+            {
+                "text": "$52 billion",
+                "mention_type": "MONEY",
+                "span_start": 65,
+                "span_end": 76,
+                "document_id": chunk.document_id,
+                "chunk_id": chunk.chunk_id,
+                "confidence": 0.97,
+            },
         ]
         propositions = [
-            {"subject": "CHIPS and Science Act", "predicate": "authorizes", "object": "$52 billion", "confidence": 0.96},
+            {
+                "subject": "CHIPS and Science Act",
+                "predicate": "authorizes",
+                "object": "$52 billion",
+                "confidence": 0.96,
+            },
         ]
     else:  # leaks
         mentions = [
-            {"text": "Maya Trading Company", "mention_type": "ORG", "span_start": 0, "span_end": 20,
-             "document_id": chunk.document_id, "chunk_id": chunk.chunk_id, "confidence": 0.90},
-            {"text": "Djibouti", "mention_type": "GPE", "span_start": 58, "span_end": 66,
-             "document_id": chunk.document_id, "chunk_id": chunk.chunk_id, "confidence": 0.93},
+            {
+                "text": "Maya Trading Company",
+                "mention_type": "ORG",
+                "span_start": 0,
+                "span_end": 20,
+                "document_id": chunk.document_id,
+                "chunk_id": chunk.chunk_id,
+                "confidence": 0.90,
+            },
+            {
+                "text": "Djibouti",
+                "mention_type": "GPE",
+                "span_start": 58,
+                "span_end": 66,
+                "document_id": chunk.document_id,
+                "chunk_id": chunk.chunk_id,
+                "confidence": 0.93,
+            },
         ]
         propositions = [
-            {"subject": "Maya Trading Company", "predicate": "exported_through", "object": "Djibouti", "confidence": 0.85},
+            {
+                "subject": "Maya Trading Company",
+                "predicate": "exported_through",
+                "object": "Djibouti",
+                "confidence": 0.85,
+            },
         ]
 
     return {
-        "accepted_mentions": mentions,
-        "accepted_propositions": propositions,
-        "status": "completed",
-        "mention_retry_count": 0,
-        "proposition_retry_count": 0,
+        "mentions": mentions,
+        "propositions": propositions,
     }
 
 
 def _run_extraction(chunk: FakeChunk, code_location: str):
-    """Run extract_validated with mocked graph, return (mentions, assertions)."""
-    mock_result = _mock_extraction_result(chunk)
+    """Run extract_validated with mocked pipelines (Phase 2), return (mentions, assertions)."""
+    raw = _mock_extraction_result(chunk)
+    mentions = raw["mentions"]
+    propositions = raw["propositions"]
 
-    with patch("dagster_io.extraction._build_graph") as mock_build:
-        mock_graph = MagicMock()
+    # NER pipeline result (Phase 2 format)
+    ner_result = {
+        "stages": {
+            "ner": {
+                "accepted": mentions,
+                "retry_count": 0,
+                "status": "completed",
+            }
+        },
+        "evidence_windows": [
+            {
+                "window_id": "win-0000",
+                "text": chunk.text,
+                "mention_indices": list(range(len(mentions))),
+                "cluster_id": "cluster-0000",
+                "doc_char_start": 0,
+                "doc_char_end": len(chunk.text),
+            }
+        ],
+        "entity_clusters": [],
+        "audit_events": [],
+        "status": "completed",
+    }
 
-        async def fake_ainvoke(state):
-            return mock_result
+    # SPO pipeline result (Phase 2 format)
+    spo_result = {
+        "stages": {
+            "spo": {
+                "accepted": propositions,
+                "retry_count": 0,
+                "status": "completed",
+            }
+        },
+        "audit_events": [],
+        "status": "completed",
+    }
 
-        mock_graph.ainvoke = fake_ainvoke
-        mock_build.return_value = (mock_graph, MagicMock())
+    mock_ner = MagicMock()
+    mock_spo = MagicMock()
+    mock_client = MagicMock()
+    mock_client.structured_method = "mock"
 
+    async def _ner_ainvoke(state):
+        return ner_result
+
+    async def _spo_ainvoke(state):
+        return spo_result
+
+    mock_ner.ainvoke = _ner_ainvoke
+    mock_spo.ainvoke = _spo_ainvoke
+
+    with patch(
+        "dagster_io.extraction._build_pipelines",
+        return_value=(mock_ner, mock_spo, mock_client, None),
+    ):
         return extract_validated([chunk], code_location, max_concurrency=1)
 
 
@@ -175,12 +279,8 @@ class TestProvenanceByDomain:
         mentions, _ = _run_extraction(chunk, code_location)
 
         for m in mentions:
-            assert m.provenance.span_start is not None, (
-                f"[{domain}] Provenance.span_start missing for '{m.text}'"
-            )
-            assert m.provenance.span_end is not None, (
-                f"[{domain}] Provenance.span_end missing for '{m.text}'"
-            )
+            assert m.provenance.span_start is not None, f"[{domain}] Provenance.span_start missing for '{m.text}'"
+            assert m.provenance.span_end is not None, f"[{domain}] Provenance.span_end missing for '{m.text}'"
             assert m.provenance.span_start < m.provenance.span_end
 
     def test_provenance_has_extraction_model(self, chunk, code_location, domain):
@@ -189,8 +289,7 @@ class TestProvenanceByDomain:
 
         for m in mentions:
             assert m.provenance.extraction_model != "", (
-                f"[{domain}] Provenance.extraction_model is empty — "
-                f"must record which LLM produced this extraction"
+                f"[{domain}] Provenance.extraction_model is empty — must record which LLM produced this extraction"
             )
 
     def test_provenance_has_code_location(self, chunk, code_location, domain):
@@ -199,8 +298,7 @@ class TestProvenanceByDomain:
 
         for m in mentions:
             assert m.provenance.code_location == code_location, (
-                f"[{domain}] Provenance.code_location should be '{code_location}', "
-                f"got '{m.provenance.code_location}'"
+                f"[{domain}] Provenance.code_location should be '{code_location}', got '{m.provenance.code_location}'"
             )
 
     def test_assertions_have_provenance(self, chunk, code_location, domain):
@@ -210,8 +308,7 @@ class TestProvenanceByDomain:
 
         for a in assertions:
             assert a.provenance is not None, (
-                f"[{domain}] Assertion '{a.subject_text} → {a.predicate} → {a.object_text}' "
-                f"has no provenance"
+                f"[{domain}] Assertion '{a.subject_text} → {a.predicate} → {a.object_text}' has no provenance"
             )
             assert a.provenance.code_location == code_location
             assert a.provenance.extraction_model != ""
@@ -227,8 +324,7 @@ class TestProvenanceByDomain:
                 f"[{domain}] Assertion subject '{a.subject_text}' not linked to a mention"
             )
             assert a.subject_mention_id in mention_ids, (
-                f"[{domain}] Assertion subject_mention_id '{a.subject_mention_id}' "
-                f"not found in extracted mentions"
+                f"[{domain}] Assertion subject_mention_id '{a.subject_mention_id}' not found in extracted mentions"
             )
 
 
@@ -240,9 +336,7 @@ class TestMediaSpecificProvenance:
         mentions, _ = _run_extraction(MEDIA_CHUNK, "media_ingest")
 
         for m in mentions:
-            assert m.provenance.temporal_start_ms == 120500, (
-                "temporal_start_ms should be 120500 (120.5s * 1000)"
-            )
+            assert m.provenance.temporal_start_ms == 120500, "temporal_start_ms should be 120500 (120.5s * 1000)"
             assert m.provenance.temporal_end_ms == 180000
 
     def test_media_has_speaker_label(self):

@@ -63,6 +63,7 @@ def append(
     chunk_id: str | None = None,
     retry_count: int | None = None,
     code_location: str | None = None,
+    evidence_window_id: str | None = None,
     state: dict[str, Any] | None = None,
     details: dict[str, Any] | None = None,
 ) -> None:
@@ -76,6 +77,11 @@ def append(
     candidate_count, errors, retry delta, provenance completeness) —
     bounded so the JSONL stays scannable. Full chunk text is emitted
     once per chunk via ``emit_chunk_text`` and joined by ``chunk_id``.
+
+    Phase 2 (CD-j6d3): ``evidence_window_id`` is set for SPO-scoped events
+    (running inside an evidence window) and ``None`` for NER-scoped events.
+    The StateInspector will use this to group events by
+    ``(model, doc_id, evidence_window_id)`` in a follow-up issue.
     """
     if _path is None:
         raise RuntimeError("event_tail.configure() must be called before append()")
@@ -92,6 +98,7 @@ def append(
         "chunk_id": chunk_id,
         "retry_count": retry_count,
         "code_location": code_location,
+        "evidence_window_id": evidence_window_id,
         "state": state or {},
         "details": details or {},
     }

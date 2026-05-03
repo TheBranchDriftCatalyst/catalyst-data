@@ -312,16 +312,20 @@ function ChunkEditor({
     setEditingProp(chunk.propositions.length);
   };
 
+  // Resolve text from either the legacy `text` field or the new `text_excerpt` field.
+  // The bench API's translate-on-read always sets both, but we guard here for safety.
+  const chunkText = chunk.text ?? chunk.text_excerpt ?? "";
+
   // Highlight mentions in text
   const highlightedText = useMemo(() => {
-    if (!chunk.mentions.length) return <span className="text-zinc-300">{chunk.text}</span>;
+    if (!chunk.mentions.length) return <span className="text-zinc-300">{chunkText}</span>;
 
     const sorted = [...chunk.mentions]
       .map((m, i) => ({ ...m, origIdx: i }))
       .filter((m) => m.span_start != null && m.span_end != null)
       .sort((a, b) => a.span_start! - b.span_start!);
 
-    if (sorted.length === 0) return <span className="text-zinc-300">{chunk.text}</span>;
+    if (sorted.length === 0) return <span className="text-zinc-300">{chunkText}</span>;
 
     const parts: React.ReactNode[] = [];
     let lastEnd = 0;
@@ -334,7 +338,7 @@ function ChunkEditor({
       if (start > lastEnd) {
         parts.push(
           <span key={`pre-${i}`} className="text-zinc-300">
-            {chunk.text.slice(lastEnd, start)}
+            {chunkText.slice(lastEnd, start)}
           </span>,
         );
       }
@@ -351,23 +355,23 @@ function ChunkEditor({
           title={`${m.mention_type} — click to edit`}
           onClick={() => setEditingMention(isEditing ? null : m.origIdx)}
         >
-          {chunk.text.slice(start, end)}
+          {chunkText.slice(start, end)}
         </mark>,
       );
 
       lastEnd = end;
     }
 
-    if (lastEnd < chunk.text.length) {
+    if (lastEnd < chunkText.length) {
       parts.push(
         <span key="tail" className="text-zinc-300">
-          {chunk.text.slice(lastEnd)}
+          {chunkText.slice(lastEnd)}
         </span>,
       );
     }
 
     return <>{parts}</>;
-  }, [chunk, editingMention]);
+  }, [chunk, chunkText, editingMention]);
 
   return (
     <div className="space-y-3">
@@ -499,8 +503,10 @@ export function GroundTruthPanel({
     return JSON.stringify(gt) !== JSON.stringify(originalGt);
   }, [gt, originalGt]);
 
-  // Filtered chunk list: substring match on chunk_id (case-insensitive). The
-  // filter is informational only — it does not mutate the GT file or shift
+  // Filtered chunk list: substring match on chunk_id OR doc_id (case-insensitive).
+  // Supports both the legacy chunk-keyed format (chunk.chunk_id) and the new
+  // doc-anchored format (chunk.doc_id / chunk.legacy_chunk_id).
+  // The filter is informational only — it does not mutate the GT file or shift
   // indices; we keep the original index alongside each visible entry so
   // selection + keyboard nav still address the underlying array.
   const visibleChunks = useMemo<VisibleChunkEntry[]>(() => {
@@ -508,7 +514,11 @@ export function GroundTruthPanel({
     const all: VisibleChunkEntry[] = gt.chunks.map((chunk, origIndex) => ({ chunk, origIndex }));
     const q = chunkFilter.trim().toLowerCase();
     if (!q) return all;
-    return all.filter(({ chunk }) => chunk.chunk_id.toLowerCase().includes(q));
+    return all.filter(({ chunk }) => {
+      // Support legacy chunk_id and new doc_id + legacy_chunk_id fields
+      const id = (chunk.chunk_id ?? chunk.legacy_chunk_id ?? chunk.doc_id ?? "").toLowerCase();
+      return id.includes(q);
+    });
   }, [gt, chunkFilter]);
 
   // GT list discovery is handled by GTSelector component
@@ -898,7 +908,7 @@ export function GroundTruthPanel({
                   : "text-zinc-400 hover:bg-white/[0.03] hover:text-zinc-200";
               return (
                 <button
-                  key={chunk.chunk_id}
+                  key={chunk.chunk_id ?? chunk.doc_id ?? origIndex}
                   onClick={() => setSelectedChunk(origIndex)}
                   className={`w-full text-left px-3 py-2 rounded text-xs font-mono transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${baseClass}`}
                   aria-selected={isSelected}
@@ -910,14 +920,14 @@ export function GroundTruthPanel({
                           ✓
                         </span>
                       )}
-                      {chunk.chunk_id.slice(0, 20)}
+                      {(chunk.chunk_id ?? chunk.legacy_chunk_id ?? chunk.doc_id ?? "").slice(0, 20)}
                     </span>
                     <span className="text-zinc-600 flex-shrink-0 ml-2">
                       {chunk.mentions.length}m {chunk.propositions.length}p
                     </span>
                   </div>
                   <div className="text-zinc-600 truncate mt-0.5 text-[11px]">
-                    {chunk.text.slice(0, 60)}...
+                    {(chunk.text ?? chunk.text_excerpt ?? "").slice(0, 60)}...
                   </div>
                 </button>
               );
@@ -947,7 +957,12 @@ export function GroundTruthPanel({
                     />
                     Reviewed
                   </label>
-                  <span className="text-xs font-mono text-zinc-600">{currentChunk.chunk_id}</span>
+                  <span className="text-xs font-mono text-zinc-600">
+                    {currentChunk.chunk_id ??
+                      currentChunk.legacy_chunk_id ??
+                      currentChunk.doc_id ??
+                      ""}
+                  </span>
                 </div>
               </div>
               <ChunkEditor chunk={currentChunk} onChunkChange={handleChunkChange} />

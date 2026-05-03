@@ -74,13 +74,20 @@ def make_audit_event(
     duration_s: float | None = None,
     **details: Any,
 ) -> dict[str, Any]:
-    """Create an audit event for an exgraph node and emit it to the tail."""
+    """Create an audit event for an exgraph node and emit it to the tail.
+
+    Phase 2 (CD-j6d3): reads ``state["evidence_window_id"]`` and propagates
+    it through the emitted event.  NER-scoped events leave it ``None``; SPO
+    events (running inside an evidence window) carry the window id so the
+    StateInspector can group events by ``(model, doc_id, evidence_window_id)``.
+    """
     s = state or {}
     model = s.get("model")
     src_meta = s.get("source_metadata") or {}
     doc_id = s.get("doc_id") or src_meta.get("document_id")
     chunk_idx = s.get("chunk_idx")
     chunk_id = s.get("chunk_id") or src_meta.get("chunk_id")
+    evidence_window_id: str | None = s.get("evidence_window_id")
 
     stage_name = ""
     for prefix in ("extract_", "validate_", "repair_"):
@@ -102,6 +109,7 @@ def make_audit_event(
         "chunk_idx": chunk_idx,
         "chunk_id": chunk_id,
         "retry_count": retry_count,
+        "evidence_window_id": evidence_window_id,
         "details": details,
     }
 
@@ -114,6 +122,7 @@ def make_audit_event(
         chunk_idx=chunk_idx,
         chunk_id=chunk_id,
         retry_count=retry_count,
+        evidence_window_id=evidence_window_id,
         state=state_summary,
         details={**details, "duration_s": duration_s} if duration_s is not None else details,
     )

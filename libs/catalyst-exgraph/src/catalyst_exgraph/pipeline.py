@@ -14,6 +14,13 @@ Usage:
         mcp_client=mcp_client,
     )
     result = await pipeline.ainvoke({"raw_text": text, "source_metadata": {...}})
+
+Phase 2 (CD-j6d3) adds:
+    ``build_ner_pipeline`` — extract_ner → validate_ner → repair_ner →
+                             cluster_entities → pack_evidence
+    ``build_spo_pipeline`` — extract_spo → validate_spo → repair_spo
+
+The legacy ``build_pipeline`` is kept for backward-compat but is deprecated.
 """
 
 from __future__ import annotations
@@ -100,12 +107,110 @@ class _StageRunner:
         }
 
 
+def build_ner_pipeline(
+    ner_config: StageConfig,
+    client: ExtractionClient,
+    mcp_client: Any,
+    embedder: Any = None,
+    cache: Any = None,
+    chunk_config: ChunkConfig | None = None,
+) -> Any:
+    """Build the NER half of the entity-anchored pipeline (Phase 2, CD-j6d3).
+
+    Graph: extract_ner → validate_ner → repair_ner → cluster_entities → pack_evidence
+
+    Args:
+        ner_config:   StageConfig for the NER stage.
+        client:       ExtractionClient for the NER stage.
+        mcp_client:   MCP contract validation client.
+        embedder:     Optional EmbeddingResource (Qwen3-8B, provider=local).
+                      When ``None`` the embedding-merge step in ClusterEntitiesNode
+                      is skipped — only proximity clustering runs.
+        cache:        Optional EmbeddingCache.  Defaults to a fresh in-memory cache.
+        chunk_config: Optional ChunkConfig.  When provided, a ChunkNode is prepended.
+
+    Returns:
+        Compiled LangGraph ready for ``ainvoke()``.
+    """
+    from catalyst_exgraph.nodes.cluster import ClusterEntitiesNode
+    from catalyst_exgraph.nodes.pack import PackEvidenceNode
+
+    graph = StateGraph(ExGraphState)
+    node_names: list[str] = []
+
+    if chunk_config is not None:
+        from catalyst_exgraph.nodes.chunk import ChunkNode
+
+        graph.add_node("chunk", ChunkNode(chunk_config))
+        node_names.append("chunk")
+
+    # NER stage runner
+    ner_runner = _StageRunner(ner_config, client, mcp_client, prev_stage_name=None)
+    graph.add_node("stage_ner", ner_runner)
+    node_names.append("stage_ner")
+
+    # Phase 2 nodes
+    graph.add_node("cluster_entities", ClusterEntitiesNode(embedder=embedder, cache=cache))
+    node_names.append("cluster_entities")
+
+    graph.add_node("pack_evidence", PackEvidenceNode())
+    node_names.append("pack_evidence")
+
+    graph.set_entry_point(node_names[0])
+    for i in range(len(node_names) - 1):
+        graph.add_edge(node_names[i], node_names[i + 1])
+    graph.add_edge(node_names[-1], END)
+
+    return graph.compile()
+
+
+def build_spo_pipeline(
+    spo_config: StageConfig,
+    client: ExtractionClient,
+    mcp_client: Any,
+    chunk_config: ChunkConfig | None = None,
+) -> Any:
+    """Build the SPO half of the entity-anchored pipeline (Phase 2, CD-j6d3).
+
+    Graph: extract_spo → validate_spo → repair_spo
+
+    The pipeline expects ``state["upstream_context"]["accepted_mentions"]`` to
+    be pre-populated with the NER accepted mentions for the evidence window.
+
+    Args:
+        spo_config:   StageConfig for the SPO stage.
+        client:       ExtractionClient for the SPO stage.
+        mcp_client:   MCP contract validation client.
+        chunk_config: Ignored (SPO runs on pre-packed evidence windows).
+
+    Returns:
+        Compiled LangGraph ready for ``ainvoke()``.
+    """
+    if spo_config.skip:
+        graph = StateGraph(ExGraphState)
+        graph.add_node("passthrough_spo", _noop)
+        graph.set_entry_point("passthrough_spo")
+        graph.add_edge("passthrough_spo", END)
+        return graph.compile()
+
+    graph = StateGraph(ExGraphState)
+    spo_runner = _StageRunner(spo_config, client, mcp_client, prev_stage_name="ner")
+    graph.add_node("stage_spo", spo_runner)
+    graph.set_entry_point("stage_spo")
+    graph.add_edge("stage_spo", END)
+    return graph.compile()
+
+
 def build_pipeline(
     stages: list[StageConfig],
     clients: dict[str, ExtractionClient] | ExtractionClient,
     mcp_client: Any,
     chunk_config: ChunkConfig | None = None,
 ) -> Any:
+    """DEPRECATED — use ``build_ner_pipeline`` + ``build_spo_pipeline`` instead.
+
+    Kept for backward-compat; Phase 4 cleanup (CD-j6d3 follow-up) will remove.
+    """
     """Build a compiled multi-stage extraction pipeline.
 
     Args:

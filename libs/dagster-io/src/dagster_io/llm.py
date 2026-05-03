@@ -4,6 +4,7 @@ Built on LangChain so every code location gets:
 - ChatOpenAI for completions (works with LiteLLM proxy, Ollama, vLLM, OpenAI)
 - OpenAIEmbeddings for vector embeddings (same backend flexibility)
 - Optional HuggingFace local embeddings via ``dagster-io[huggingface]``
+- Optional local sentence-transformers (Qwen3-8B + MPS) via ``dagster-io[local-embed]``
 
 Configure via environment variables or Dagster launchpad.
 """
@@ -411,9 +412,18 @@ class LLMResource(ConfigurableResource):
 class EmbeddingResource(ConfigurableResource):
     """Embedding resource shared across all code locations.
 
-    Uses LangChain's OpenAIEmbeddings by default (works with LiteLLM proxy,
-    Ollama, vLLM, OpenAI). Set ``provider="huggingface"`` for local
-    sentence-transformers (requires ``dagster-io[huggingface]``).
+    Supported providers:
+
+    * ``openai`` (default) — OpenAI API or any OpenAI-compatible endpoint.
+    * ``litellm`` — preset for the LiteLLM proxy at ``LITELLM_BASE_URL``
+      (default ``http://litellm:4000/v1``).
+    * ``ollama`` — preset for a local Ollama server at ``OLLAMA_BASE_URL``
+      (default ``http://localhost:11434/v1``).
+    * ``local`` — sentence-transformers + MPS, default model
+      ``Qwen/Qwen3-Embedding-8B`` @ 2048 dims.  Requires
+      ``dagster-io[local-embed]``.
+    * ``huggingface`` — legacy LangChain HuggingFaceEmbeddings.  Deprecated;
+      use ``local`` instead (logs a warning).
 
     Usage in assets::
 
@@ -428,8 +438,12 @@ class EmbeddingResource(ConfigurableResource):
     model: str = "text-embedding-3-small"
     dimensions: int | None = None
     batch_size: int | None = None
+    enable_cache: bool = True
+    instruction: str | None = None
 
-    _embeddings: Any = PrivateAttr()
+    _embeddings: Any = PrivateAttr(default=None)
+    _st_model: Any = PrivateAttr(default=None)
+    _embedding_cache: Any = PrivateAttr(default=None)
 
     def setup_for_execution(self, context) -> None:  # noqa: ANN001
         effective_batch_size = self.batch_size if self.batch_size is not None else 100
@@ -438,19 +452,99 @@ class EmbeddingResource(ConfigurableResource):
             self.provider,
             self.model,
         )
-        if self.provider == "huggingface":
+        if self.provider == "local":
+            try:
+                import torch
+                from sentence_transformers import SentenceTransformer
+            except ImportError as exc:
+                raise ImportError(
+                    "provider='local' requires the local-embed extra: pip install 'dagster-io[local-embed]'"
+                ) from exc
+            device = "mps" if torch.backends.mps.is_available() else "cpu"
+            logger.info("Loading local SentenceTransformer model=%s device=%s", self.model, device)
+            self._st_model = SentenceTransformer(
+                self.model,
+                device=device,
+                model_kwargs={"torch_dtype": torch.float16},
+            )
+            logger.info(
+                "Local model loaded native_dim=%d",
+                self._st_model.get_sentence_embedding_dimension(),
+            )
+            # Wire up S3 embedding cache when enabled
+            if self.enable_cache:
+                try:
+                    from dagster_io.embedding_cache import EmbeddingCache
+
+                    self._embedding_cache = EmbeddingCache()
+                    logger.info("EmbeddingCache initialised (S3-backed)")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("EmbeddingCache init failed — running without cache: %s", exc)
+        elif self.provider == "ollama":
+            base_url = self.base_url or os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+            self._embeddings = OpenAIEmbeddings(
+                base_url=base_url,
+                api_key="ollama",
+                model=self.model,
+                chunk_size=effective_batch_size,
+            )
+        elif self.provider == "litellm":
+            base_url = self.base_url or os.environ.get("LITELLM_BASE_URL", "http://litellm:4000/v1")
+            self._embeddings = OpenAIEmbeddings(
+                base_url=base_url,
+                api_key=self.api_key or "unused",
+                model=self.model,
+                chunk_size=effective_batch_size,
+            )
+        elif self.provider == "huggingface":
+            logger.warning(
+                "provider='huggingface' is deprecated — switch to provider='local' "
+                "with dagster-io[local-embed] for sentence-transformers support."
+            )
             from langchain_huggingface import HuggingFaceEmbeddings
 
             self._embeddings = HuggingFaceEmbeddings(
                 model_name=self.model,
             )
         else:
+            # openai (default) and any other OpenAI-compatible endpoint
             self._embeddings = OpenAIEmbeddings(
                 base_url=self.base_url,
                 api_key=self.api_key or "unused",
                 model=self.model,
                 chunk_size=effective_batch_size,
             )
+
+    # ── Internal helpers ────────────────────────────────────────────────────
+
+    def _apply_instruction(self, texts: list[str]) -> list[str]:
+        """Optionally prefix texts with a Qwen3-style instruction header."""
+        if not self.instruction:
+            return texts
+        prefix = f"Instruct: {self.instruction}\nQuery: "
+        return [prefix + t for t in texts]
+
+    def _embed_local(self, texts: list[str]) -> list[list[float]]:
+        """Encode via sentence-transformers with optional Matryoshka truncation."""
+        import numpy as np
+
+        encoded_texts = self._apply_instruction(texts)
+        vectors = self._st_model.encode(
+            encoded_texts,
+            batch_size=self.batch_size or 16,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+        target_dim = self.dimensions or 2048
+        if vectors.shape[1] > target_dim:
+            # Matryoshka truncation: slice to target_dim then re-normalise
+            vectors = vectors[:, :target_dim]
+            norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+            vectors = vectors / np.maximum(norms, 1e-12)
+        return vectors.tolist()
+
+    # ── Public API (signatures must not change) ─────────────────────────────
 
     def get_embeddings(self) -> Any:
         """Return the underlying LangChain embeddings model for use in chains."""
@@ -465,6 +559,21 @@ class EmbeddingResource(ConfigurableResource):
             self.model,
             effective_batch_size,
         )
+
+        # ── local provider: sentence-transformers path ───────────────────
+        if self.provider == "local":
+            if self._embedding_cache is not None:
+                model_key = self.model.replace("/", "--")
+                target_dim = self.dimensions or 2048
+                return self._embedding_cache.get_or_compute(
+                    texts,
+                    model=model_key,
+                    dim=target_dim,
+                    compute=self._embed_local,
+                )
+            return self._embed_local(texts)
+
+        # ── OpenAI / LiteLLM / Ollama / HuggingFace path ────────────────
         all_vectors: list[list[float]] = []
         for batch_start in range(0, len(texts), effective_batch_size):
             batch = texts[batch_start : batch_start + effective_batch_size]
@@ -490,7 +599,7 @@ class EmbeddingResource(ConfigurableResource):
                         raise
             all_vectors.extend(vectors)
             EMBEDDING_VECTORS_CREATED.labels(provider=self.provider, model=self.model).inc(len(vectors))
-            processed = min(batch_start + self.batch_size, len(texts))
+            processed = min(batch_start + effective_batch_size, len(texts))
             logger.info(
                 "Embedding progress: %d/%d texts (%.0f%%)",
                 processed,
@@ -507,6 +616,8 @@ class EmbeddingResource(ConfigurableResource):
     def embed_single(self, text: str) -> list[float]:
         """Embed a single text string (uses query embedding for better retrieval)."""
         logger.debug("Embedding single text len=%d model=%s", len(text), self.model)
+        if self.provider == "local":
+            return self._embed_local([text])[0]
         result = self._embeddings.embed_query(text)
         EMBEDDING_VECTORS_CREATED.labels(provider=self.provider, model=self.model).inc(1)
         return result

@@ -223,11 +223,24 @@ export interface PropositionRow {
 
 // ── Ground Truth (full data, not just the summary meta) ──────────────
 
+/**
+ * Phase 0 (CD-9wno): mentions carry absolute doc-frame spans so GT survives
+ * any future chunker change.  `span_start`/`span_end` are chunk-relative and
+ * used only transiently in the editor UI; they are NOT stored in S3.
+ */
 export interface GroundTruthMention {
   text: string;
   mention_type: string;
-  span_start: number | null;
-  span_end: number | null;
+  /** Absolute doc-frame start (new format). */
+  doc_char_start?: number | null;
+  /** Absolute doc-frame end (new format). */
+  doc_char_end?: number | null;
+  /**
+   * Chunk-relative spans — present only in the editor UI after a
+   * translate-on-read pass from the bench API.  NOT persisted in S3.
+   */
+  span_start?: number | null;
+  span_end?: number | null;
   confidence: number;
 }
 
@@ -239,9 +252,38 @@ export interface GroundTruthProposition {
   evidence?: string;
 }
 
+/**
+ * Doc-anchored GT entry (new format, Phase 0 CD-9wno).
+ *
+ * The join key is `(doc_id, [doc_char_start, doc_char_end))` via IntervalTree.
+ * `legacy_chunk_id` is retained for diagnostics only — not a join key.
+ *
+ * The SPA editor works chunk-by-chunk; the bench API translates doc-frame
+ * spans → chunk-frame on read and chunk-frame → doc-frame on save, so the
+ * editing experience is unchanged from the operator's perspective.
+ */
 export interface GroundTruthChunk {
-  chunk_id: string;
-  text: string;
+  /** New: parent document id.  Replaces `chunk_id` as the join key. */
+  doc_id: string;
+  /** New: absolute start in parent document (char offset, inclusive). */
+  doc_char_start: number | null;
+  /** New: absolute end in parent document (char offset, exclusive). */
+  doc_char_end: number | null;
+  /** Human-readable excerpt — not the join key. */
+  text_excerpt: string;
+  /**
+   * Diagnostic only — the old chunk_id from which this entry was derived.
+   * Not used for scoring or GT join operations.
+   */
+  legacy_chunk_id?: string;
+  /**
+   * Back-compat alias for `legacy_chunk_id`.  Some older UI paths read
+   * `chunk.chunk_id`; the API sets both so existing components don't break
+   * until the editor is updated to use `doc_id`.
+   */
+  chunk_id?: string;
+  /** Back-compat alias for `text_excerpt` (used by ChunkEditor). */
+  text?: string;
   mentions: GroundTruthMention[];
   propositions: GroundTruthProposition[];
   /**
@@ -253,7 +295,7 @@ export interface GroundTruthChunk {
    * back-compat with files written before this field existed; absent or
    * false both mean "not yet reviewed."
    */
-  reviewed?: boolean;
+  reviewed?: boolean | null;
 }
 
 export interface GroundTruthFile {

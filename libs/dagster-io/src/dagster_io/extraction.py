@@ -1,8 +1,14 @@
 """Validated extraction via LangGraph — shared helper for all code locations.
 
-Wraps the catalyst-langgraph-aio extraction graph (extract → validate → repair)
-and runs it per-chunk with concurrency. This replaces raw llm.invoke_batch() calls
-so ALL extractions get MCP contract validation and span-checked repair.
+Phase 2 (CD-j6d3): entity-anchored flow.
+
+Flow per doc:
+    chunks → doc grouping → NER once per doc → cluster_entities → pack_evidence
+    → SPO fan-out per evidence window → persist
+
+The outer driver ``extract_validated`` groups input chunks by ``document_id``,
+runs a single NER pass per doc (so clustering is done on the full doc entity
+set rather than per-chunk), then fans out SPO extraction once per evidence window.
 
 Usage in Dagster assets:
     from dagster_io.extraction import extract_validated
@@ -10,8 +16,6 @@ Usage in Dagster assets:
     mentions, assertions = extract_validated(
         chunks=media_chunks,
         code_location="media_ingest",
-        mention_prompt=MENTION_SYSTEM_PROMPT,
-        assertion_prompt=ASSERTION_SYSTEM_PROMPT,
         max_concurrency=5,
     )
 """
@@ -20,6 +24,7 @@ import asyncio
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import (
@@ -29,6 +34,16 @@ from dagster_io.metrics import (
 )
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _Doc:
+    """A reconstructed document from one or more chunks."""
+
+    doc_id: str
+    full_text: str
+    chunks: list  # original TextChunk objects in index order
+    chunk_metadata: dict  # metadata from first chunk (representative)
 
 
 def _build_pipeline_breakdown(audit_events: list[dict]) -> dict:
@@ -74,12 +89,86 @@ def _build_pipeline_breakdown(audit_events: list[dict]) -> dict:
     return stages
 
 
-def _build_graph():
-    """Build the extraction graph via catalyst-exgraph.
+def _group_chunks_into_docs(chunks: list) -> list[_Doc]:
+    """Group input chunks by ``document_id``, concatenate text in chunk-index order.
 
-    The legacy v1 catalyst-langgraph-aio graph + the EXGRAPH_ENABLED toggle
-    were removed when ExGraph became the only supported pipeline (CD-ys8n).
+    Each ``_Doc`` contains the full concatenated text for the document so that
+    NER runs once on the complete doc rather than per-chunk.
+
+    If a chunk has no ``document_id``, it is treated as its own single-chunk doc.
     """
+    from collections import defaultdict
+
+    groups: dict[str, list] = defaultdict(list)
+    for chunk in chunks:
+        doc_id = getattr(chunk, "document_id", None) or "unknown"
+        groups[doc_id].append(chunk)
+
+    docs: list[_Doc] = []
+    for doc_id, doc_chunks in groups.items():
+        # Sort by chunk index (if available)
+        sorted_chunks = sorted(doc_chunks, key=lambda c: getattr(c, "index", 0))
+        full_text = "\n\n".join(getattr(c, "text", "") or "" for c in sorted_chunks)
+        first_meta = getattr(sorted_chunks[0], "metadata", {}) or {}
+        docs.append(_Doc(doc_id=doc_id, full_text=full_text, chunks=sorted_chunks, chunk_metadata=first_meta))
+
+    return docs
+
+
+def _build_pipelines():
+    """Build the NER pipeline, SPO pipeline, LLM client, and optional embedder.
+
+    Phase 2 (CD-j6d3): returns (ner_pipeline, spo_pipeline, client, embedder).
+    The NER pipeline runs cluster+pack after NER.  The SPO pipeline runs
+    per evidence window.
+    """
+    from catalyst_exgraph.config import StageConfig, ner_stage_config, spo_stage_config
+    from catalyst_exgraph.pipeline import build_ner_pipeline, build_spo_pipeline
+    from catalyst_exgraph.resource import _build_mcp_client, _resolve_client
+
+    _llm_model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    _llm_base_url = os.environ.get("LLM_BASE_URL")
+    _llm_api_key = os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+    logger.info("_build_pipelines: model=%s, base_url=%s", _llm_model_name, _llm_base_url)
+    client = _resolve_client(_llm_model_name, base_url=_llm_base_url, api_key=_llm_api_key)
+    mcp_client = _build_mcp_client()
+
+    is_encoder = any(x in _llm_model_name.lower() for x in ("gliner", "nuextract", "universalner", "uniner"))
+
+    ner_config = ner_stage_config(model=_llm_model_name, max_retries=0 if is_encoder else 3)
+    spo_config = spo_stage_config(model=_llm_model_name, max_retries=3, skip=is_encoder)
+
+    prompt_dir = os.environ.get("PROMPT_REGISTRY_DIR")
+    if prompt_dir:
+        ner_config = StageConfig(**{**ner_config.__dict__, "prompt_dir": prompt_dir})
+        spo_config = StageConfig(**{**spo_config.__dict__, "prompt_dir": prompt_dir})
+
+    # Optional embedder for cluster merge (Qwen3-8B via EmbeddingResource)
+    embedder = None
+    try:
+        from dagster_io.llm import EmbeddingResource
+
+        _embed_provider = os.environ.get("EMBED_PROVIDER", "local")
+        embedder = EmbeddingResource(provider=_embed_provider, enable_cache=True)
+        logger.info("_build_pipelines: embedding merge enabled, provider=%s", _embed_provider)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("_build_pipelines: embedder not available (%s) — proximity-only clustering", exc)
+
+    ner_pipeline = build_ner_pipeline(ner_config, client, mcp_client, embedder=embedder)
+    spo_pipeline = build_spo_pipeline(spo_config, client, mcp_client)
+
+    logger.info(
+        "_build_pipelines: ner+cluster+pack pipeline + spo pipeline (model=%s, encoder=%s)",
+        _llm_model_name,
+        is_encoder,
+    )
+    return ner_pipeline, spo_pipeline, client, embedder
+
+
+# Keep _build_graph for callers that still use the legacy combined pipeline path.
+# Deprecated — Phase 4 cleanup (CD-j6d3 follow-up) will remove.
+def _build_graph():
+    """DEPRECATED — use ``_build_pipelines()`` instead."""
     from catalyst_exgraph.config import StageConfig, ner_stage_config, spo_stage_config
     from catalyst_exgraph.pipeline import build_pipeline
     from catalyst_exgraph.resource import _build_mcp_client, _resolve_client
@@ -87,12 +176,10 @@ def _build_graph():
     _llm_model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
     _llm_base_url = os.environ.get("LLM_BASE_URL")
     _llm_api_key = os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
-    logger.info("_build_graph: model=%s, base_url=%s", _llm_model_name, _llm_base_url)
     client = _resolve_client(_llm_model_name, base_url=_llm_base_url, api_key=_llm_api_key)
     mcp_client = _build_mcp_client()
 
     is_encoder = any(x in _llm_model_name.lower() for x in ("gliner", "nuextract", "universalner", "uniner"))
-
     ner_config = ner_stage_config(model=_llm_model_name, max_retries=0 if is_encoder else 3)
     spo_config = spo_stage_config(model=_llm_model_name, max_retries=3, skip=is_encoder)
 
@@ -107,17 +194,115 @@ def _build_graph():
     chunk_config = ChunkConfig(model_context_tokens=context_window)
 
     pipeline = build_pipeline([ner_config, spo_config], client, mcp_client, chunk_config=chunk_config)
-
-    logger.info(
-        "_build_graph: catalyst-exgraph pipeline (model=%s, encoder=%s, context_window=%d)",
-        _llm_model_name,
-        is_encoder,
-        context_window,
-    )
-    # The exgraph pipeline exposes an ``ainvoke`` returning ExGraphState; the
-    # extract/dispatch shim used to wrap it in _LegacyAdapter to flatten the
-    # output. We now flatten in _extract_chunk directly so there's no shim.
     return pipeline, client
+
+
+async def _process_doc(
+    ner_pipeline,
+    spo_pipeline,
+    doc: "_Doc",
+    bench_model: str,
+    max_retries: int = 3,
+) -> dict:
+    """Process one document end-to-end: NER → cluster → pack → SPO fan-out.
+
+    Returns a dict with:
+        mentions: list[dict]
+        propositions: list[dict]
+        audit_events: list[dict]
+        mention_retries: int
+        proposition_retries: int
+        status: str
+    """
+    cm = doc.chunk_metadata or {}
+    first_chunk = doc.chunks[0] if doc.chunks else None
+    first_chunk_id = getattr(first_chunk, "chunk_id", "") if first_chunk else ""
+
+    # ── NER pass — once per doc ───────────────────────────────────────────
+    ner_state_input = {
+        "raw_text": doc.full_text,
+        "doc_id": doc.doc_id,
+        "model": bench_model,
+        "source_metadata": {
+            "document_id": doc.doc_id,
+            "chunk_id": first_chunk_id,
+            "chunk_index": 0,
+            "total_chunks": len(doc.chunks),
+            "chunk_metadata": cm,
+            "domain": cm.get("domain"),
+            "speaker_label": cm.get("speaker"),
+            "temporal_start_ms": (cm.get("start_s") * 1000) if cm.get("start_s") is not None else None,
+            "temporal_end_ms": (cm.get("end_s") * 1000) if cm.get("end_s") is not None else None,
+        },
+        "max_retries": max_retries,
+    }
+    ner_result = await ner_pipeline.ainvoke(ner_state_input)
+
+    accepted_mentions: list[dict] = (ner_result.get("stages") or {}).get("ner", {}).get("accepted") or []
+    evidence_windows: list[dict] = ner_result.get("evidence_windows") or []
+    ner_audit: list[dict] = ner_result.get("audit_events") or []
+    ner_retries = (ner_result.get("stages") or {}).get("ner", {}).get("retry_count", 0)
+
+    all_propositions: list[dict] = []
+    spo_audit: list[dict] = []
+    spo_retries_total = 0
+    spo_status = "completed"
+
+    # ── SPO fan-out per evidence window ───────────────────────────────────
+    for window in evidence_windows:
+        window_id = window.get("window_id", "")
+        mention_indices: list[int] = window.get("mention_indices") or []
+        window_mentions = [accepted_mentions[i] for i in mention_indices if i < len(accepted_mentions)]
+
+        spo_state_input = {
+            "raw_text": window.get("text", ""),
+            "doc_id": doc.doc_id,
+            "evidence_window_id": window_id,
+            "model": bench_model,
+            "source_metadata": {
+                "document_id": doc.doc_id,
+                "chunk_id": first_chunk_id,
+                "chunk_index": 0,
+                "total_chunks": len(doc.chunks),
+                "chunk_metadata": cm,
+                "domain": cm.get("domain"),
+                "speaker_label": cm.get("speaker"),
+                "temporal_start_ms": (cm.get("start_s") * 1000) if cm.get("start_s") is not None else None,
+                "temporal_end_ms": (cm.get("end_s") * 1000) if cm.get("end_s") is not None else None,
+            },
+            "upstream_context": {"accepted_mentions": window_mentions},
+            "stages": ner_result.get("stages", {}),
+            "max_retries": max_retries,
+        }
+        spo_result = await spo_pipeline.ainvoke(spo_state_input)
+
+        spo_accepted: list[dict] = (spo_result.get("stages") or {}).get("spo", {}).get("accepted") or []
+        all_propositions.extend(spo_accepted)
+        spo_audit.extend(spo_result.get("audit_events") or [])
+        spo_retries_total += (spo_result.get("stages") or {}).get("spo", {}).get("retry_count", 0)
+        if spo_result.get("status") == "failed":
+            spo_status = "failed"
+
+    # Determine overall status
+    status = (
+        "failed"
+        if ner_result.get("status") == "failed" or spo_status == "failed"
+        else "completed"
+    )
+
+    return {
+        "mentions": accepted_mentions,
+        "propositions": all_propositions,
+        "audit_events": ner_audit + spo_audit,
+        "mention_retries": ner_retries,
+        "proposition_retries": spo_retries_total,
+        "status": status,
+        "_doc_id": doc.doc_id,
+        "_chunk_metadata": cm,
+        "_chunk_id": first_chunk_id,
+        "_chunk_text": doc.full_text,
+        "_chunk_document_id": doc.doc_id,
+    }
 
 
 async def _extract_chunk(
@@ -185,6 +370,271 @@ async def _extract_chunk(
     }
 
 
+async def _process_doc_spo_only(
+    spo_pipeline,
+    doc: "_Doc",
+    cached_clusters: list,
+    bench_model: str,
+    max_retries: int = 3,
+) -> dict:
+    """Run SPO fan-out only for a doc using pre-computed clusters.
+
+    Mirrors ``_process_doc`` but skips the NER pass entirely — clusters are
+    provided from the caller's cache so this is cheap (no embedding, no NER).
+    Returns the same dict shape as ``_process_doc`` with an empty
+    ``mentions`` list (the caller accumulates those from the shared NER pass).
+
+    Phase 3 (CD-80ic).
+    """
+    cm = doc.chunk_metadata or {}
+    first_chunk = doc.chunks[0] if doc.chunks else None
+    first_chunk_id = getattr(first_chunk, "chunk_id", "") if first_chunk else ""
+
+    # Reconstruct evidence windows from clusters for the *target* model.
+    # We do this by running the pack_evidence node with the target model name
+    # so window sizes reflect the current target model's context budget.
+    from catalyst_exgraph.nodes.pack import PackEvidenceNode
+
+    pack_node = PackEvidenceNode()
+    pack_state: dict = {
+        "raw_text": doc.full_text,
+        "doc_id": doc.doc_id,
+        "model": bench_model,
+        "entity_clusters": cached_clusters,
+        "stages": {},
+        "audit_events": [],
+    }
+    pack_result = await pack_node(pack_state)
+    evidence_windows: list[dict] = pack_result.get("evidence_windows") or []
+
+    all_propositions: list[dict] = []
+    spo_audit: list[dict] = []
+    spo_retries_total = 0
+    spo_status = "completed"
+
+    for window in evidence_windows:
+        window_id = window.get("window_id", "")
+        spo_state_input = {
+            "raw_text": window.get("text", ""),
+            "doc_id": doc.doc_id,
+            "evidence_window_id": window_id,
+            "model": bench_model,
+            "source_metadata": {
+                "document_id": doc.doc_id,
+                "chunk_id": first_chunk_id,
+                "chunk_index": 0,
+                "total_chunks": len(doc.chunks),
+                "chunk_metadata": cm,
+                "domain": cm.get("domain"),
+                "speaker_label": cm.get("speaker"),
+                "temporal_start_ms": (cm.get("start_s") * 1000) if cm.get("start_s") is not None else None,
+                "temporal_end_ms": (cm.get("end_s") * 1000) if cm.get("end_s") is not None else None,
+            },
+            "upstream_context": {"accepted_mentions": []},
+            "stages": {},
+            "max_retries": max_retries,
+        }
+        spo_result = await spo_pipeline.ainvoke(spo_state_input)
+
+        spo_accepted: list[dict] = (spo_result.get("stages") or {}).get("spo", {}).get("accepted") or []
+        all_propositions.extend(spo_accepted)
+        spo_audit.extend(spo_result.get("audit_events") or [])
+        spo_retries_total += (spo_result.get("stages") or {}).get("spo", {}).get("retry_count", 0)
+        if spo_result.get("status") == "failed":
+            spo_status = "failed"
+
+    return {
+        "mentions": [],  # caller provides shared NER mentions
+        "propositions": all_propositions,
+        "audit_events": spo_audit,
+        "mention_retries": 0,
+        "proposition_retries": spo_retries_total,
+        "status": "failed" if spo_status == "failed" else "completed",
+        "_doc_id": doc.doc_id,
+        "_chunk_metadata": cm,
+        "_chunk_id": first_chunk_id,
+        "_chunk_text": doc.full_text,
+        "_chunk_document_id": doc.doc_id,
+    }
+
+
+def extract_with_shared_clusters(
+    docs: list["_Doc"],
+    cached_clusters: "dict[str, list]",
+    *,
+    code_location: str,
+    max_concurrency: int = 5,
+    max_retries: int = 3,
+) -> "tuple[list, list]":
+    """Run SPO fan-out per cached cluster for the current LLM_MODEL — skips NER.
+
+    Phase 3 entry point for the bench harness two-phase flow (CD-80ic).
+    NER + clustering has already been performed (Phase A); this function only
+    runs the cheap ``pack_evidence → SPO fan-out`` step per doc using the
+    caller-supplied cluster cache.
+
+    Args:
+        docs: ``_Doc`` objects produced by ``_group_chunks_into_docs``.
+        cached_clusters: ``{doc_id: list[EntityCluster]}`` from Phase A.
+            Docs without an entry in this dict are silently skipped (no SPO
+            output for that doc).
+        code_location: For metrics labeling.
+        max_concurrency: Max parallel doc-level SPO tasks.
+        max_retries: Max repair attempts per SPO stage per evidence window.
+
+    Returns:
+        ``([], assertion_models)`` — mentions are empty because the caller
+        accumulates them from the shared NER pass (Phase A).  Only assertions
+        are produced here.
+    """
+    from dagster_io.models import Assertion, Provenance
+
+    if not docs:
+        return [], []
+
+    _llm_model = os.environ.get("LLM_MODEL", "unknown")
+    bench_model = os.environ.get("CATALYST_BENCH_MODEL") or _llm_model
+
+    _ner_pipeline, spo_pipeline, _llm_client, _embedder = _build_pipelines()
+
+    all_assertions: list[dict] = []
+    all_audit_events: list[dict] = []
+    completed = 0
+    errors = 0
+    total_proposition_retries = 0
+
+    logger.info(
+        "extract_with_shared_clusters (Phase 3): %d docs, concurrency=%d, code_location=%s, model=%s",
+        len(docs),
+        max_concurrency,
+        code_location,
+        bench_model,
+    )
+
+    def _run_doc_spo(doc_idx: int, doc: "_Doc") -> tuple[int, dict]:
+        clusters = cached_clusters.get(doc.doc_id)
+        if clusters is None:
+            logger.debug("extract_with_shared_clusters: no clusters for doc_id=%s — skipping", doc.doc_id)
+            return doc_idx, {
+                "mentions": [],
+                "propositions": [],
+                "audit_events": [],
+                "mention_retries": 0,
+                "proposition_retries": 0,
+                "status": "skipped",
+                "_doc_id": doc.doc_id,
+                "_chunk_metadata": doc.chunk_metadata or {},
+                "_chunk_id": getattr(doc.chunks[0], "chunk_id", "") if doc.chunks else "",
+                "_chunk_text": doc.full_text,
+                "_chunk_document_id": doc.doc_id,
+            }
+        loop = asyncio.new_event_loop()
+        try:
+            start = time.monotonic()
+            result = loop.run_until_complete(
+                _process_doc_spo_only(
+                    spo_pipeline,
+                    doc,
+                    clusters,
+                    bench_model=bench_model,
+                    max_retries=max_retries,
+                )
+            )
+            duration = time.monotonic() - start
+            LLM_REQUEST_DURATION.labels(model=_llm_model, operation="spo_only").observe(duration)
+            LLM_REQUESTS.labels(model=_llm_model, operation="spo_only", status="success").inc()
+            return doc_idx, result
+        except Exception as e:
+            LLM_REQUESTS.labels(model=_llm_model, operation="spo_only", status="error").inc()
+            logger.error("SPO-only extraction failed for doc %s: %s", doc.doc_id, e)
+            raise
+        finally:
+            loop.close()
+
+    from concurrent.futures import as_completed
+
+    with ThreadPoolExecutor(max_workers=max_concurrency) as pool:
+        futures = {pool.submit(_run_doc_spo, i, doc): i for i, doc in enumerate(docs)}
+        for future in as_completed(futures):
+            doc_idx, result = future.result()
+            chunk_meta = result.get("_chunk_metadata", {})
+            chunk_id = result.get("_chunk_id", "")
+            chunk_doc_id = result.get("_chunk_document_id", "")
+
+            for a in result["propositions"]:
+                a["_chunk_metadata"] = chunk_meta
+                a["_chunk_id"] = chunk_id
+                a["_chunk_document_id"] = chunk_doc_id
+
+            all_assertions.extend(result["propositions"])
+            all_audit_events.extend(result.get("audit_events", []))
+            total_proposition_retries += result.get("proposition_retries", 0)
+
+            if result["status"] == "failed":
+                errors += 1
+
+            completed += 1
+
+    # Build Assertion domain models
+    assertion_models = []
+    for a in all_assertions:
+        chunk_meta = a.pop("_chunk_metadata", {})
+        chunk_id_from_meta = a.pop("_chunk_id", "")
+        a_chunk_doc_id = a.pop("_chunk_document_id", "")
+        a_doc_id = a_chunk_doc_id or a.get("document_id", "")
+        a_cid = chunk_id_from_meta or ""
+        a_start_s = chunk_meta.get("start_s")
+        a_end_s = chunk_meta.get("end_s")
+        a_speaker = chunk_meta.get("speaker")
+
+        a_prov = Provenance(
+            source_document_id=a_doc_id,
+            chunk_id=a_cid,
+            temporal_start_ms=int(a_start_s * 1000) if a_start_s is not None else None,
+            temporal_end_ms=int(a_end_s * 1000) if a_end_s is not None else None,
+            speaker_label=a_speaker,
+            extraction_method="llm",
+            extraction_model=_llm_model,
+            code_location=code_location,
+        )
+
+        subj_text = a.get("subject") or a.get("subject_text") or ""
+        obj_text = a.get("object") or a.get("object_text") or ""
+
+        assertion_models.append(
+            Assertion(
+                subject_text=subj_text,
+                subject_mention_id="",
+                predicate=a.get("predicate", ""),
+                object_text=obj_text,
+                object_mention_id="",
+                confidence=a.get("confidence", 1.0),
+                negated=a.get("negated", False),
+                hedged=a.get("hedged", False),
+                qualifiers=a.get("qualifiers", {}),
+                provenance=a_prov,
+            )
+        )
+
+    logger.info(
+        "extract_with_shared_clusters complete: %d assertions from %d docs (%d failures, %d retries)",
+        len(assertion_models),
+        len(docs),
+        errors,
+        total_proposition_retries,
+    )
+
+    extract_with_shared_clusters.last_stats = {
+        "doc_count": len(docs),
+        "assertion_count": len(assertion_models),
+        "proposition_retries": total_proposition_retries,
+        "errors": errors,
+        "audit_events": all_audit_events,
+    }
+
+    return [], assertion_models
+
+
 def extract_validated(
     chunks: list,
     code_location: str,
@@ -194,17 +644,21 @@ def extract_validated(
 ) -> tuple[list, list]:
     """Run validated extraction on a list of TextChunk objects.
 
-    Uses the LangGraph extraction graph with MCP contract validation
-    and repair cycles. Runs chunks concurrently.
+    Phase 2 (CD-j6d3): entity-anchored flow.
+    Chunks are grouped by document_id → NER once per doc → cluster_entities →
+    pack_evidence → SPO fan-out per evidence window.
 
-    Domain-specific prompts are loaded automatically from PROMPT_REGISTRY_DIR
-    (each Docker image bakes in shared + domain-specific .prompt files).
+    Concurrency is at the doc level (unit of work = one full doc end-to-end).
+    Within a doc, SPO windows run sequentially (the cluster→pack→fan-out chain
+    shares state).
+
+    Domain-specific prompts are loaded automatically from PROMPT_REGISTRY_DIR.
 
     Args:
         chunks: List of TextChunk objects (must have .text, .document_id, .chunk_id).
         code_location: For metrics labeling.
-        max_concurrency: Max parallel extraction graphs.
-        max_retries: Max repair attempts per chunk.
+        max_concurrency: Max parallel doc-level extraction tasks.
+        max_retries: Max repair attempts per stage per evidence window.
 
     Returns:
         (all_mentions, all_assertions) — flattened lists of Mention and
@@ -216,12 +670,16 @@ def extract_validated(
         return [], []
 
     _llm_model = os.environ.get("LLM_MODEL", "unknown")
+    bench_model = os.environ.get("CATALYST_BENCH_MODEL") or _llm_model
 
-    graph, llm_client = _build_graph()
-    # Encoder/specialist models (GLiNER, NuExtract, UniversalNER) produce
-    # deterministic output — repair loops are pointless. Skip retries.
+    ner_pipeline, spo_pipeline, llm_client, _embedder = _build_pipelines()
+    # Encoder/specialist models produce deterministic output — skip retries.
     _is_encoder = getattr(llm_client, "structured_method", "") in ("gliner", "nuextract", "universalner")
     _max_retries = 0 if _is_encoder else max_retries
+
+    # Group chunks → docs
+    docs = _group_chunks_into_docs(chunks)
+
     all_mentions: list[dict] = []
     all_assertions: list[dict] = []
     all_audit_events: list[dict] = []
@@ -231,45 +689,35 @@ def extract_validated(
     total_proposition_retries = 0
 
     logger.info(
-        "Starting validated extraction: %d chunks, concurrency=%d, code_location=%s",
+        "Starting validated extraction (Phase 2 entity-anchored): %d chunks → %d docs, "
+        "concurrency=%d, code_location=%s",
         len(chunks),
+        len(docs),
         max_concurrency,
         code_location,
     )
 
-    def _run_chunk(idx: int, chunk) -> tuple[int, dict]:
-        """Run one chunk through the extraction graph (sync wrapper for async)."""
+    def _run_doc(doc_idx: int, doc: "_Doc") -> tuple[int, dict]:
+        """Run one doc end-to-end through the entity-anchored pipeline (sync wrapper)."""
         loop = asyncio.new_event_loop()
         try:
             start = time.monotonic()
             result = loop.run_until_complete(
-                _extract_chunk(
-                    graph,
-                    chunk.text,
-                    chunk.document_id,
-                    chunk.chunk_id,
+                _process_doc(
+                    ner_pipeline,
+                    spo_pipeline,
+                    doc,
+                    bench_model=bench_model,
                     max_retries=_max_retries,
-                    chunk_index=getattr(chunk, "index", None),
-                    total_chunks=getattr(chunk, "total_chunks", None),
-                    chunk_metadata=getattr(chunk, "metadata", {}) or {},
                 )
             )
             duration = time.monotonic() - start
-            # Attach chunk metadata to result so we can build provenance later.
-            # Carry chunk.text + chunk.document_id explicitly so post-extraction
-            # context computation and document_id fallback work without a second
-            # join against the chunk list.
-            chunk_meta = getattr(chunk, "metadata", {}) or {}
-            result["_chunk_metadata"] = chunk_meta
-            result["_chunk_id"] = getattr(chunk, "chunk_id", "")
-            result["_chunk_text"] = getattr(chunk, "text", "") or ""
-            result["_chunk_document_id"] = getattr(chunk, "document_id", "") or ""
             LLM_REQUEST_DURATION.labels(model=_llm_model, operation="validated_extraction").observe(duration)
             LLM_REQUESTS.labels(model=_llm_model, operation="validated_extraction", status="success").inc()
-            return idx, result
+            return doc_idx, result
         except Exception as e:
             LLM_REQUESTS.labels(model=_llm_model, operation="validated_extraction", status="error").inc()
-            logger.error("Extraction failed for chunk %d: %s", idx, e)
+            logger.error("Extraction failed for doc %s: %s", doc.doc_id, e)
             raise
         finally:
             loop.close()
@@ -277,14 +725,15 @@ def extract_validated(
     from concurrent.futures import as_completed
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as pool:
-        futures = {pool.submit(_run_chunk, i, chunk): i for i, chunk in enumerate(chunks)}
+        futures = {pool.submit(_run_doc, i, doc): i for i, doc in enumerate(docs)}
         for future in as_completed(futures):
-            idx, result = future.result()  # raises on permanent failure
+            doc_idx, result = future.result()  # raises on permanent failure
             chunk_meta = result.get("_chunk_metadata", {})
             chunk_id = result.get("_chunk_id", "")
             chunk_text = result.get("_chunk_text", "")
             chunk_doc_id = result.get("_chunk_document_id", "")
-            # Tag each mention/assertion with its source chunk metadata
+
+            # Tag each mention/assertion with its source doc/chunk metadata
             for m in result["mentions"]:
                 m["_chunk_metadata"] = chunk_meta
                 m["_chunk_id"] = chunk_id
@@ -294,22 +743,23 @@ def extract_validated(
                 a["_chunk_metadata"] = chunk_meta
                 a["_chunk_id"] = chunk_id
                 a["_chunk_document_id"] = chunk_doc_id
+
             all_mentions.extend(result["mentions"])
             all_assertions.extend(result["propositions"])
             all_audit_events.extend(result.get("audit_events", []))
-            total_mention_retries += result["mention_retries"]
-            total_proposition_retries += result["proposition_retries"]
+            total_mention_retries += result.get("mention_retries", 0)
+            total_proposition_retries += result.get("proposition_retries", 0)
 
             if result["status"] == "failed":
                 errors += 1
 
             completed += 1
-            if completed % 50 == 0 or completed == len(chunks):
+            if completed % 50 == 0 or completed == len(docs):
                 logger.info(
-                    "Validated extraction progress: %d/%d (%.0f%%)%s",
+                    "Validated extraction progress: %d/%d docs (%.0f%%)%s",
                     completed,
-                    len(chunks),
-                    completed / len(chunks) * 100,
+                    len(docs),
+                    completed / len(docs) * 100,
                     f" ({errors} failures)" if errors else "",
                 )
 
@@ -429,10 +879,11 @@ def extract_validated(
         )
 
     logger.info(
-        "Validated extraction complete: %d mentions, %d assertions from %d chunks "
+        "Validated extraction complete: %d mentions, %d assertions from %d docs (%d chunks) "
         "(%d mention retries, %d proposition retries, %d failures)",
         len(mention_models),
         len(assertion_models),
+        len(docs),
         len(chunks),
         total_mention_retries,
         total_proposition_retries,
@@ -444,16 +895,19 @@ def extract_validated(
 
     # Stash stats for callers that need them (e.g. benchmark tests).
     # Does not change the return signature — production assets are unaffected.
-    # Include chunk_config info if exgraph pipeline was used
     _context_window = int(os.environ.get("LLM_CONTEXT_WINDOW", "4096"))
 
     # Total LLM calls across the run. Validators are deterministic (no LLM),
-    # so we count only the four LLM-calling LangGraph nodes. Two-tier:
+    # so we count only the extract/repair nodes.  Two-tier:
     #   1. Audit events (exact, when audit logging is on)
-    #   2. Derived from chunks + retries (when audit isn't captured)
-    # Encoder runs (e.g. gliner) bypass this code path entirely; they end up
-    # at 0 LLM calls here and the harness reports inference_calls separately.
+    #   2. Derived from docs + retries (when audit isn't captured)
+    # Phase 2: base is 1 NER per doc + N SPO (one per evidence window).
     _LLM_NODES = {
+        "extract_ner",
+        "repair_ner",
+        "extract_spo",
+        "repair_spo",
+        # Legacy node names kept for backward-compat with old audit events
         "mention_extractor",
         "repair_mention_extractor",
         "proposition_extractor",
@@ -461,7 +915,7 @@ def extract_validated(
     }
     audit_call_count = sum(1 for e in all_audit_events if e.get("node_name") in _LLM_NODES)
     derived_call_count = (
-        completed * 2  # base: 1 NER + 1 SPO per successful chunk
+        completed  # 1 NER per doc minimum
         + total_mention_retries
         + total_proposition_retries
     )
@@ -469,6 +923,7 @@ def extract_validated(
 
     extract_validated.last_stats = {
         "chunk_count": len(chunks),
+        "doc_count": len(docs),
         "mention_count": len(mention_models),
         "assertion_count": len(assertion_models),
         "mention_retries": total_mention_retries,

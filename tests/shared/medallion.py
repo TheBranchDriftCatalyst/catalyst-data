@@ -120,6 +120,55 @@ def load_chunks(
     return merged
 
 
+def load_doc_texts(
+    doc_ids: list[str] | None = None,
+    sample_per_domain: int | None = None,
+) -> list[dict]:
+    """Load full doc texts by concatenating chunks per doc_id in index order.
+
+    Returns a list of dicts:
+    ``{doc_id, full_text, code_location, domain, chunks: [...]}``
+    where ``chunks`` are the original chunk dicts in index order.
+
+    Args:
+        doc_ids: Optional filter — same semantics as ``load_chunks(doc_ids=...)``.
+        sample_per_domain: Cap chunks per domain before grouping (same as
+            ``load_chunks(sample_per_domain=...)``, applied before grouping
+            so heavy domains don't dominate the doc list).
+
+    Returns ``[]`` if nothing has been materialized yet.
+    """
+    from collections import defaultdict
+
+    raw_chunks = load_chunks(doc_ids=doc_ids, sample_per_domain=sample_per_domain)
+    if not raw_chunks:
+        return []
+
+    # Group by document_id, preserving insertion order for stable iteration.
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for chunk in raw_chunks:
+        did = chunk.get("document_id") or "unknown"
+        groups[did].append(chunk)
+
+    docs: list[dict] = []
+    for did, chunks in groups.items():
+        # Sort by chunk index so concatenation is deterministic.
+        sorted_chunks = sorted(chunks, key=lambda c: c.get("index", 0))
+        full_text = "\n\n".join(c.get("text", "") or "" for c in sorted_chunks)
+        first_meta = sorted_chunks[0].get("metadata") or {}
+        docs.append(
+            {
+                "doc_id": did,
+                "full_text": full_text,
+                "code_location": first_meta.get("code_location") or first_meta.get("source") or "",
+                "domain": first_meta.get("domain") or first_meta.get("source") or "",
+                "chunks": sorted_chunks,
+            }
+        )
+
+    return docs
+
+
 def _read_jsonl(client, key: str, doc_ids: list[str] | None) -> list[dict]:
     try:
         raw = client.get_object(key)

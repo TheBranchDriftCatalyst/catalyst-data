@@ -177,7 +177,7 @@ def generate_ensemble_ground_truth(
         candidates: Optional list of ``chunk_id`` values to restrict the ensemble
             to. When set, only chunks whose chunk_id is in this list participate
             in voting — used to scope GT generation to the diversity-sampled
-            seed produced by ``scripts/sample_gt_candidates.py`` rather than
+            seed produced by ``scripts/benchmark/sample_gt_candidates.py`` rather than
             running consensus over the full 3.6M-chunk corpus. Default ``None``
             (process every chunk).
 
@@ -201,7 +201,7 @@ def generate_ensemble_ground_truth(
         return None
 
     # Restrict to the diversity-sampled seed when a candidate list is provided.
-    # This is the link between scripts/sample_gt_candidates.py output and the
+    # This is the link between scripts/benchmark/sample_gt_candidates.py output and the
     # ensemble GT generator — without it, ensemble runs over every materialized
     # chunk (3.6M with open-leaks), which is intractable.
     if candidates is not None:
@@ -296,12 +296,48 @@ def generate_ensemble_ground_truth(
             else []
         )
 
+        # Build doc-anchored GT entry (Phase 0, CD-9wno).
+        # The join key is (doc_id, doc_char_start, doc_char_end) via IntervalTree;
+        # legacy_chunk_id is retained for diagnostics only.
+        chunk_metadata = chunk.get("metadata") or {}
+        doc_char_offset = chunk_metadata.get("chunk_char_offset")
+        doc_char_start: int | None = doc_char_offset
+        doc_char_end: int | None = doc_char_offset + len(source_text) if doc_char_offset is not None else None
+
+        # Translate per-mention spans from chunk-relative to doc-frame
+        doc_anchored_mentions = []
+        for m in consensus_mentions:
+            s, e = m.get("span_start"), m.get("span_end")
+            if s is not None and e is not None and doc_char_offset is not None:
+                m_doc_start = doc_char_offset + s
+                m_doc_end = doc_char_offset + e
+            else:
+                m_doc_start = None
+                m_doc_end = None
+            doc_anchored_mentions.append(
+                {
+                    **{k: v for k, v in m.items() if k not in ("span_start", "span_end")},
+                    "doc_char_start": m_doc_start,
+                    "doc_char_end": m_doc_end,
+                }
+            )
+
+        doc_id = chunk.get("document_id") or cid.rsplit(":chunk-", 1)[0]
+
         gt_chunks.append(
             {
-                "chunk_id": cid,
+                "doc_id": doc_id,
+                "doc_char_start": doc_char_start,
+                "doc_char_end": doc_char_end,
+                "text_excerpt": source_text,
+                # Back-compat aliases: existing harness/test code reads chunk["text"]
+                # and chunk["chunk_id"]; these aliases keep them working without changes.
                 "text": source_text,
-                "mentions": consensus_mentions,
+                "chunk_id": cid,
+                "legacy_chunk_id": cid,
+                "mentions": doc_anchored_mentions,
                 "propositions": consensus_propositions,
+                "reviewed": None,
             }
         )
 

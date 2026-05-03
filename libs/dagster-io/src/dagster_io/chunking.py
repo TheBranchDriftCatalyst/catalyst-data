@@ -28,6 +28,82 @@ logger = get_logger(__name__)
 
 DEFAULT_SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
 
+# ---------------------------------------------------------------------------
+# Per-model context window registry (Phase 3, CD-80ic)
+# ---------------------------------------------------------------------------
+
+MODEL_WINDOWS: dict[str, int] = {
+    # Encoder models (sub-word, short windows)
+    "gliner-medium": 320,
+    "gliner-large": 320,
+    "gliner-small": 256,
+    "gliner-pii": 320,
+    "nuextract-1.5": 3500,
+    "nuextract-2.0-8b": 7500,
+    "nuextract": 512,
+    "universalner-7b": 7500,
+    "universalner": 512,
+    "uniner": 512,
+    # Small LLMs
+    "phi3": 2048,
+    "phi-3": 2048,
+    "gemma3-2b": 4096,
+    "gemma3-4b": 8192,
+    "qwen2.5-1.5b": 4096,
+    "qwen2.5-3b": 8192,
+    "llama3.2": 4096,
+    # Mid LLMs
+    "mistral": 8192,
+    "llama3.1-8b": 8192,
+    "qwen2.5-7b": 16384,
+    "gemma3-9b": 16384,
+    "gemma3-12b": 24576,
+    "qwen3-8b": 24576,
+    "llama3.1-70b": 24576,
+    # Large LLMs
+    "gpt-4o-mini": 32768,
+    "gpt-4o": 65536,
+    "gpt-4": 32768,
+    "claude-3-haiku": 65536,
+    "claude-haiku": 16000,
+    "claude-3-sonnet": 131072,
+    "claude-3-opus": 131072,
+}
+
+
+def window_for_model(name: str) -> int:
+    """Look up the target context window for a model name.
+
+    Performs an exact match first, then longest-substring fallback so
+    ``gemma3-12b`` matches before the shorter ``gemma3`` prefix.
+    Falls back to heuristic-based defaults if the name isn't registered.
+
+    Examples::
+
+        >>> window_for_model("gliner-medium")
+        320
+        >>> window_for_model("gemma3-12b")
+        24576
+        >>> window_for_model("unknown-model")
+        4000
+    """
+    if not name:
+        return 4000
+    n = name.lower()
+    # Exact match
+    if n in MODEL_WINDOWS:
+        return MODEL_WINDOWS[n]
+    # Longest-substring match (avoids prefix collision e.g. gpt-4 vs gpt-4o)
+    candidates = [(k, v) for k, v in MODEL_WINDOWS.items() if k in n]
+    if candidates:
+        return max(candidates, key=lambda x: len(x[0]))[1]
+    # Pattern-based heuristic fallback
+    if "gliner" in n:
+        return 320
+    if "gemma" in n or "claude" in n or "gpt" in n:
+        return 16000
+    return 4000  # safe default
+
 
 # ---------------------------------------------------------------------------
 # Speaker-segment chunking helpers (used by ChunkingResource.chunk_speaker_segments)

@@ -1,6 +1,6 @@
 # Seed Generation — Ground-Truth Candidate Sampling
 
-This document explains how `scripts/sample_gt_candidates.py` picks the
+This document explains how `scripts/benchmark/sample_gt_candidates.py` picks the
 chunks that get human-annotated for benchmarking and SFT/DPO training.
 The output (`.test-output/gt-candidates.json`) is the **seed** that
 drives the entire RLHF loop — get this set wrong and every downstream
@@ -42,7 +42,7 @@ The sampler combines three signals to do better:
 Single command, deterministic given `--seed`:
 
 ```bash
-python scripts/sample_gt_candidates.py --target 200 --seed 42
+python scripts/benchmark/sample_gt_candidates.py --target 200 --seed 42
 ```
 
 Per-domain stages:
@@ -101,8 +101,8 @@ So:
 you change the algorithm, prove it by:
 
 ```bash
-python scripts/sample_gt_candidates.py --target 200 --seed 42 --output /tmp/a.json
-python scripts/sample_gt_candidates.py --target 200 --seed 42 --output /tmp/b.json
+python scripts/benchmark/sample_gt_candidates.py --target 200 --seed 42 --output /tmp/a.json
+python scripts/benchmark/sample_gt_candidates.py --target 200 --seed 42 --output /tmp/b.json
 diff /tmp/a.json /tmp/b.json   # must be empty
 ```
 
@@ -327,3 +327,87 @@ Until CD-s4em + CD-oa7k ship, the practical pool ceiling is `28 + 4 +
 5000 = 5032` chunks, of which the sampler picks 200. The sample is
 deterministically diverse within that ceiling but won't reach genuine
 200-chunk SFT scale until those upstream tickets land.
+
+---
+
+## Ground Truth Format — v2 (doc-anchored, Phase 0 CD-9wno)
+
+**Status**: shipped as of Phase 0. Existing GT files must be migrated via
+`scripts/migrate_gt_to_doc_anchored.py` before v3 topology work begins.
+
+### Why
+
+The old GT format anchored each entry to a `chunk_id`.  When the chunker
+changes (v3 rewrite, CD-rwlq), every existing GT entry is orphaned — the
+new chunker produces different `chunk_id` values for the same doc content.
+
+The new format anchors to absolute document character positions
+(`doc_char_start` / `doc_char_end`), so GT survives any chunker change as
+long as the source document bytes are stable.
+
+### New GT entry shape
+
+```json
+{
+  "doc_id": "joe-rogan-2284",
+  "doc_char_start": 18432,
+  "doc_char_end": 19280,
+  "text_excerpt": "...human-readable excerpt, not the join key...",
+  "legacy_chunk_id": "joe-rogan-2284:chunk-7",
+  "mentions": [
+    {
+      "text": "Alex Jones",
+      "mention_type": "PERSON",
+      "doc_char_start": 18450,
+      "doc_char_end": 18460,
+      "confidence": 0.95
+    }
+  ],
+  "propositions": [...],
+  "reviewed": null
+}
+```
+
+The **join key** is `(doc_id, IntervalTree of [doc_char_start, doc_char_end))`.
+`legacy_chunk_id` is diagnostic only and not a scoring key.
+
+### Scoring join (new)
+
+At score time, for each model-output chunk:
+
+1. Look up `gt_index[chunk.document_id]` — an `IntervalTree`.
+2. Query `[chunk_char_offset, chunk_char_offset + len(chunk.text))`.
+3. For each overlapping GT entry, subtract `chunk_char_offset` from each
+   mention's `doc_char_start/end` to get chunk-relative spans, then score.
+4. Edge case: GT entry overlaps multiple chunks (overlap region) — score
+   against the chunk with the largest overlap; log duplicates at DEBUG.
+
+See `tests/shared/gt_translation.py` for the helper implementations and
+`tests/test_gt_scoring_invariant.py` for the invariant test.
+
+### Migration script
+
+```bash
+# Dry run — preview what would change
+python scripts/migrate_gt_to_doc_anchored.py --dry-run
+
+# Migrate all GT files (MinIO/Tilt must be running)
+python scripts/migrate_gt_to_doc_anchored.py
+```
+
+Originals are backed up to
+`s3://dagster/bench/ground-truth/_backup_pre_v3/<name>.json` before
+overwriting.  The script is idempotent — files already in the new format
+are skipped.
+
+### Viewer-UI behaviour
+
+The SPA editor works in chunk-relative coordinates (unchanged).  The bench
+API (`packages/media-ingest/src/media_ingest/viewer/routes/bench.py`):
+
+- **GET** `/viewer/api/bench/ground-truth/<name>.json` — translates
+  doc-frame spans to chunk-relative `span_start/span_end` on the fly.
+- **PUT** `/viewer/api/bench/ground-truth/<name>.json` — translates
+  incoming chunk-relative spans back to doc-frame before persisting.
+
+Both paths degrade gracefully when chunk metadata is unavailable.

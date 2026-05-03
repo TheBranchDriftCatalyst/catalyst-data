@@ -66,12 +66,102 @@ def _ansi_palette(use_color: bool) -> dict[str, str]:
     }
 
 
+def _phase_a_build_cluster_cache(
+    sample_n: int | None,
+    ner_ref_model: str | None = None,
+) -> tuple[list, dict]:
+    """Phase A: NER + cluster once per (doc, ner_ref_model).
+
+    Runs the full NER pipeline on each document using the reference NER model
+    (default: ``gliner-large``, overridden by ``BENCH_NER_REF_MODEL`` env var).
+    Stores the resulting entity_clusters keyed by doc_id in a ClusterCache.
+
+    Returns ``(docs, cluster_cache_dict)`` where ``cluster_cache_dict`` maps
+    ``doc_id → list[EntityCluster]`` for all processed docs.
+
+    Phase 3 (CD-80ic).
+    """
+
+    from dagster_io.cluster_cache import ClusterCache
+    from dagster_io.extraction import _build_pipelines, _group_chunks_into_docs
+
+    ref_model = ner_ref_model or os.environ.get("BENCH_NER_REF_MODEL", "gliner-large")
+
+    # Override LLM_MODEL for the NER-reference pass, then restore
+    saved_llm = os.environ.get("LLM_MODEL")
+    os.environ["LLM_MODEL"] = ref_model
+    os.environ["CATALYST_BENCH_MODEL"] = ref_model
+
+    try:
+        medallion_chunks = load_chunks(sample_per_domain=sample_n)
+        if not medallion_chunks:
+            return [], {}
+
+        from dagster_io import TextChunk
+
+        eval_chunks = [TextChunk(**c) for c in medallion_chunks]
+        docs = _group_chunks_into_docs(eval_chunks)
+
+        ner_pipeline, _spo_pipeline, _client, _embedder = _build_pipelines()
+        cluster_cache = ClusterCache()
+        params: dict = {}  # threshold / proximity_radius for cache keying
+        cluster_by_doc: dict[str, list] = {}
+
+        for doc in docs:
+            clusters = cluster_cache.get_or_compute(
+                doc_id=doc.doc_id,
+                doc_text=doc.full_text,
+                ner_model=ref_model,
+                params=params,
+                compute_fn=lambda _d=doc: _run_ner_and_cluster(ner_pipeline, _d, ref_model),
+            )
+            cluster_by_doc[doc.doc_id] = clusters
+
+        return docs, cluster_by_doc
+    finally:
+        if saved_llm is None:
+            os.environ.pop("LLM_MODEL", None)
+        else:
+            os.environ["LLM_MODEL"] = saved_llm
+
+
+def _run_ner_and_cluster(ner_pipeline, doc, bench_model: str) -> list:
+    """Synchronous wrapper: run NER pipeline and return entity_clusters for a doc."""
+    import asyncio as _asyncio
+
+    loop = _asyncio.new_event_loop()
+    try:
+        ner_state_input = {
+            "raw_text": doc.full_text,
+            "doc_id": doc.doc_id,
+            "model": bench_model,
+            "source_metadata": {
+                "document_id": doc.doc_id,
+                "chunk_id": "",
+                "chunk_index": 0,
+                "total_chunks": len(doc.chunks),
+                "chunk_metadata": doc.chunk_metadata or {},
+                "domain": (doc.chunk_metadata or {}).get("domain"),
+                "speaker_label": (doc.chunk_metadata or {}).get("speaker"),
+                "temporal_start_ms": None,
+                "temporal_end_ms": None,
+            },
+            "max_retries": 0,
+        }
+        ner_result = loop.run_until_complete(ner_pipeline.ainvoke(ner_state_input))
+        return ner_result.get("entity_clusters") or []
+    finally:
+        loop.close()
+
+
 def _run_model(
     cfg: ModelConfig,
     timeout: int,
     store: BenchmarkStore,
     run_id: str,
     all_videos: bool = False,  # retained for back-compat; in-process path runs across all domains
+    shared_docs: list | None = None,
+    shared_clusters: dict | None = None,
 ) -> dict | None:
     """Run extraction for one model in-process via ``extract_validated``.
 
@@ -126,43 +216,90 @@ def _run_model(
         sample_n: int | None = int(sample_n_raw)
         if sample_n == 0:
             sample_n = None
-        medallion_chunks = load_chunks(sample_per_domain=sample_n)
-        if not medallion_chunks:
-            event_tail.append(
-                source="harness",
-                node_name="model_run",
-                status="error",
-                model=cfg.name,
-                details={"reason": "no_chunks_in_medallion", "hint": "run task seed first"},
-            )
-            return None
 
-        eval_chunks = [TextChunk(**c) for c in medallion_chunks]
-        cap = f"{sample_n}/domain" if sample_n is not None else "full"
-        print(f"\n  [{cfg.name}] {len(eval_chunks)} chunks (cap={cap})", flush=True)
-
-        # Same shape extract_validated has always returned. The asset
-        # factory in dagster_io wraps this exact call.
         start = time.monotonic()
-        try:
-            mentions, assertions = extract_validated(
-                eval_chunks,
-                code_location="media_ingest",  # for metric labels; cross-domain is fine
-                max_concurrency=1,
-            )
-        except Exception as exc:
-            event_tail.append(
-                source="harness",
-                node_name="model_run",
-                status="error",
-                model=cfg.name,
-                details={"reason": type(exc).__name__, "message": str(exc)[:500]},
-            )
-            return None
-        duration = time.monotonic() - start
 
-        pipeline_stats = getattr(extract_validated, "last_stats", {})
-        total_input_chars = sum(len(c.text) for c in eval_chunks)
+        if shared_clusters is not None and shared_docs is not None:
+            # ── Phase B: re-pack evidence windows per target model from cached clusters ──
+            # NER already done in Phase A; only run SPO fan-out.
+            from dagster_io.extraction import extract_with_shared_clusters
+
+            if not shared_docs:
+                event_tail.append(
+                    source="harness",
+                    node_name="model_run",
+                    status="error",
+                    model=cfg.name,
+                    details={"reason": "no_docs_in_phase_a", "hint": "run Phase A first"},
+                )
+                return None
+
+            cap = f"{sample_n}/domain (phase-b)" if sample_n is not None else "full (phase-b)"
+            print(f"\n  [{cfg.name}] {len(shared_docs)} docs from Phase A (cap={cap})", flush=True)
+
+            try:
+                _phase_b_mentions, assertions = extract_with_shared_clusters(
+                    shared_docs,
+                    shared_clusters,
+                    code_location="media_ingest",
+                    max_concurrency=1,
+                )
+            except Exception as exc:
+                event_tail.append(
+                    source="harness",
+                    node_name="model_run",
+                    status="error",
+                    model=cfg.name,
+                    details={"reason": type(exc).__name__, "message": str(exc)[:500]},
+                )
+                return None
+            # In Phase B, mentions come from the shared NER pass (stored in
+            # shared_clusters caller context).  The harness fixture records
+            # assertions only; mention scoring uses the GT from Phase A.
+            mentions = []
+            pipeline_stats = getattr(extract_with_shared_clusters, "last_stats", {})
+            eval_chunk_count = sum(len(d.chunks) for d in shared_docs)
+        else:
+            # ── Legacy path: full NER + SPO in one shot ──────────────────────────
+            medallion_chunks = load_chunks(sample_per_domain=sample_n)
+            if not medallion_chunks:
+                event_tail.append(
+                    source="harness",
+                    node_name="model_run",
+                    status="error",
+                    model=cfg.name,
+                    details={"reason": "no_chunks_in_medallion", "hint": "run task seed first"},
+                )
+                return None
+
+            eval_chunks = [TextChunk(**c) for c in medallion_chunks]
+            cap = f"{sample_n}/domain" if sample_n is not None else "full"
+            print(f"\n  [{cfg.name}] {len(eval_chunks)} chunks (cap={cap})", flush=True)
+
+            try:
+                mentions, assertions = extract_validated(
+                    eval_chunks,
+                    code_location="media_ingest",
+                    max_concurrency=1,
+                )
+            except Exception as exc:
+                event_tail.append(
+                    source="harness",
+                    node_name="model_run",
+                    status="error",
+                    model=cfg.name,
+                    details={"reason": type(exc).__name__, "message": str(exc)[:500]},
+                )
+                return None
+            pipeline_stats = getattr(extract_validated, "last_stats", {})
+            eval_chunk_count = len(eval_chunks)
+
+        duration = time.monotonic() - start
+        # eval_chunk_count is set by both branches above; compute stats from it
+        total_input_chars = eval_chunk_count * 1000  # approximate when no eval_chunks list
+        if shared_clusters is None:
+            # Have the real eval_chunks list from legacy path
+            total_input_chars = sum(len(c.text) for c in eval_chunks)
         est_input_tokens = total_input_chars // 4
         est_output_tokens = (len(mentions) + len(assertions)) * 50
         est_total_tokens = est_input_tokens + est_output_tokens
@@ -175,7 +312,7 @@ def _run_model(
             "mentions": [m.model_dump(mode="json") for m in mentions],
             "assertions": [a.model_dump(mode="json") for a in assertions],
             "stats": {
-                "chunk_count": len(eval_chunks),
+                "chunk_count": eval_chunk_count,
                 "duration_s": round(duration, 1),
                 "total_input_chars": total_input_chars,
                 "est_total_tokens": est_total_tokens,
@@ -881,6 +1018,31 @@ examples:
                 flush=True,
             )
 
+    # ── Phase A: NER + cluster ONCE per (doc, ner_ref_model) ────────────────
+    # This is the expensive step.  Cache hits make subsequent runs free.
+    # Controlled by BENCH_NER_REF_MODEL (default: gliner-large).
+    # When the medallion is empty, _phase_a_build_cluster_cache returns ({},)
+    # and the per-model loop falls back to the legacy full-pipeline path.
+    sample_n_raw = os.environ.get("BENCH_SAMPLE_PER_DOMAIN", "50")
+    _bench_sample_n: int | None = int(sample_n_raw) if sample_n_raw else None
+    if _bench_sample_n == 0:
+        _bench_sample_n = None
+
+    print("  Phase A: building cluster cache (NER once per doc)...", flush=True)
+    t_phase_a = time.monotonic()
+    _shared_docs, _shared_clusters = _phase_a_build_cluster_cache(
+        sample_n=_bench_sample_n,
+        ner_ref_model=os.environ.get("BENCH_NER_REF_MODEL"),
+    )
+    _phase_a_duration = time.monotonic() - t_phase_a
+    print(
+        f"  Phase A complete: {len(_shared_docs)} docs, "
+        f"{sum(len(v) for v in _shared_clusters.values())} total clusters "
+        f"in {_phase_a_duration:.1f}s",
+        flush=True,
+    )
+    print()
+
     results = []
     t0 = time.monotonic()
 
@@ -925,7 +1087,18 @@ examples:
             details={"tier": tier, "tags": list(cfg.tags)},
         )
         t_model_start = time.monotonic()
-        fixture = _run_model(cfg, args.timeout, store, run.run_id, all_videos=args.all_videos)
+        # Phase B: pass shared clusters when Phase A succeeded; fall back to
+        # legacy full-pipeline path when no clusters are available.
+        _use_phase_b = bool(_shared_clusters)
+        fixture = _run_model(
+            cfg,
+            args.timeout,
+            store,
+            run.run_id,
+            all_videos=args.all_videos,
+            shared_docs=_shared_docs if _use_phase_b else None,
+            shared_clusters=_shared_clusters if _use_phase_b else None,
+        )
         duration_s = time.monotonic() - t_model_start
         if fixture:
             results.append({"model": cfg.name, "fixture": fixture, "tags": cfg.tags})

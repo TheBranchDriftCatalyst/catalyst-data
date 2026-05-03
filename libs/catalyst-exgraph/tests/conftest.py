@@ -242,3 +242,32 @@ def populated_stage_result() -> StageResult:
 @pytest.fixture
 def sample_source_text() -> str:
     return "Alice met Bob at the park. Later Alice called Bob."
+
+
+# ── event_tail fixture — configure the writer to a temp file ─────────────────
+
+
+@pytest.fixture(autouse=True)
+def configure_event_tail(tmp_path):
+    """Configure event_tail to a temp file for every test.
+
+    Resets module-level state before and after the test so test isolation
+    is maintained.  ``autouse=True`` so every test in the package gets this
+    without opting in.
+    """
+    import dagster_io.bench.event_tail as _et
+
+    # Reset to unconfigured state
+    _et._path = None
+    _et._run_id = None
+    _et._seen_chunks = set()
+
+    tail_path = tmp_path / "events.jsonl"
+    _et.configure(str(tail_path), run_id="test-run")
+
+    yield
+
+    # Reset after test
+    _et._path = None
+    _et._run_id = None
+    _et._seen_chunks = set()
