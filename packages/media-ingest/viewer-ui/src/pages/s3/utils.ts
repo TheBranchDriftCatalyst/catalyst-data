@@ -113,7 +113,7 @@ export function parseMediaDeepLink(key: string): { family: string; documentId: s
 }
 
 import type { S3File, S3Folder } from "@/api/client";
-import type { SortKey } from "./useExplorerState";
+import type { SortKey } from "./hooks/useExplorerState";
 
 /** Sort folders + files by the chosen criterion.
  *

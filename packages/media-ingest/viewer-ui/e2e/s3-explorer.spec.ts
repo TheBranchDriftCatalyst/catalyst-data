@@ -400,6 +400,47 @@ test.describe("S3 Explorer", () => {
       await expect(page.getByTestId("s3-view-tree")).toHaveAttribute("data-active", "true");
     });
 
+    test("Image file: inline <img> renders via /raw, no view toggle", async ({ page }) => {
+      const s3 = new S3ExplorerPage(page);
+      await page.goto(
+        "/viewer/s3?p=dev%2Ffixtures%2F&key=dev%2Ffixtures%2Fsample.png",
+      );
+      await page.waitForLoadState("networkidle");
+      await expect(s3.preview).toBeVisible();
+      // No view-mode toggle for media — single canonical view.
+      await expect(page.getByTestId("s3-view-toggle")).toHaveCount(0);
+      // The inline <img> points at the streaming /raw endpoint.
+      const img = s3.preview.locator("img");
+      await expect(img).toBeVisible();
+      await expect(img).toHaveAttribute(
+        "src",
+        /\/viewer\/api\/s3\/raw\?key=dev%2Ffixtures%2Fsample\.png/,
+      );
+      // Browser actually loads it — naturalWidth >0 confirms decoded bytes.
+      await expect
+        .poll(async () => img.evaluate((el) => (el as HTMLImageElement).naturalWidth), {
+          timeout: 10_000,
+        })
+        .toBeGreaterThan(0);
+    });
+
+    test("Audio file: <audio> with controls renders via /raw", async ({ page }) => {
+      const s3 = new S3ExplorerPage(page);
+      await page.goto(
+        "/viewer/s3?p=dev%2Ffixtures%2F&key=dev%2Ffixtures%2Fsample.wav",
+      );
+      await page.waitForLoadState("networkidle");
+      await expect(s3.preview).toBeVisible();
+      await expect(page.getByTestId("s3-view-toggle")).toHaveCount(0);
+      const audio = s3.preview.locator("audio");
+      await expect(audio).toBeVisible();
+      await expect(audio).toHaveAttribute("controls", "");
+      await expect(audio).toHaveAttribute(
+        "src",
+        /\/viewer\/api\/s3\/raw\?key=dev%2Ffixtures%2Fsample\.wav/,
+      );
+    });
+
     test("Markdown file: Rendered (default) and Raw toggles work", async ({ page }) => {
       // Use the API to find a .md key, then open it via deep-link.
       const list = await (await page.request.get("/viewer/api/s3/search?q=.md&prefix=&limit=10")).json();

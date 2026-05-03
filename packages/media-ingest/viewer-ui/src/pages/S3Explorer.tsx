@@ -20,14 +20,14 @@ import {
   type S3SearchHit,
 } from "@/api/client";
 import { cn } from "@/lib/utils";
-import { HotkeysOverlay } from "./s3/HotkeysOverlay";
-import { Listing } from "./s3/Listing";
-import { PinnedRail } from "./s3/PinnedRail";
-import { Preview } from "./s3/Preview";
-import { SearchResults } from "./s3/SearchResults";
-import { useDebouncedValue } from "./s3/useDebouncedValue";
-import { useExplorerState, type SortKey } from "./s3/useExplorerState";
-import { useRecentPrefixes } from "./s3/useRecentPrefixes";
+import { HotkeysOverlay } from "./s3/panels/HotkeysOverlay";
+import { Listing } from "./s3/panels/Listing";
+import { PinnedRail } from "./s3/panels/PinnedRail";
+import { SearchResults } from "./s3/panels/SearchResults";
+import { Preview } from "./s3/detail-views/Preview";
+import { useDebouncedValue } from "./s3/hooks/useDebouncedValue";
+import { useExplorerState, type SortKey } from "./s3/hooks/useExplorerState";
+import { useRecentPrefixes } from "./s3/hooks/useRecentPrefixes";
 import { formatBytes, formatDate, layerColor, sortListing } from "./s3/utils";
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
