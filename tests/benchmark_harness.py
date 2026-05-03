@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -34,7 +35,22 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from dagster_io import event_tail
+from tests._bench_tui import BenchLiveUI, DequeHandler
 from tests.benchmark_config import ALL_MODELS, LOCAL_MODELS, BenchmarkConfig, ModelConfig
+
+# ── Default encoder/SPO lists — resolved from benchmark_config tags ──────────
+
+
+def _default_ensemble() -> list[str]:
+    """Encoders that vote in Phase 1 NER consensus (encoder or extraction-specialist tags)."""
+    return [m.name for m in ALL_MODELS if "encoder" in m.tags or "extraction-specialist" in m.tags]
+
+
+def _default_spo() -> list[str]:
+    """Models that run Phase 4 SPO (tier1, tier2, or cloud tags)."""
+    return [m.name for m in ALL_MODELS if any(t in m.tags for t in ("tier1", "tier2", "cloud"))]
+
+
 from tests.shared.extraction_scoring import (
     compute_model_scores,
     print_benchmark_report,
@@ -69,75 +85,283 @@ def _ansi_palette(use_color: bool) -> dict[str, str]:
 def _phase_a_build_cluster_cache(
     sample_n: int | None,
     ner_ref_model: str | None = None,
-) -> tuple[list, dict]:
-    """Phase A: NER + cluster once per (doc, ner_ref_model).
+    store: BenchmarkStore | None = None,
+    ensemble_models: list[str] | None = None,
+    quorum: int | None = None,
+) -> tuple[list, dict, dict, dict]:
+    """Phase A: NER ensemble + cluster once per doc.
 
-    Runs the full NER pipeline on each document using the reference NER model
-    (default: ``gliner-large``, overridden by ``BENCH_NER_REF_MODEL`` env var).
-    Stores the resulting entity_clusters keyed by doc_id in a ClusterCache.
+    v4 (CD-z6xe): Runs the ensemble pipeline (``build_ensemble_pipeline``) on
+    each document, using all encoder-tagged models from ENCODER_MODELS +
+    EXTRACTION_MODELS as the ensemble panel.  For each doc the function:
 
-    Returns ``(docs, cluster_cache_dict)`` where ``cluster_cache_dict`` maps
-    ``doc_id → list[EntityCluster]`` for all processed docs.
+    1. Runs ``build_ensemble_pipeline`` to get per_encoder_mentions,
+       consensus_mentions, entity_clusters, evidence_windows, and
+       rejected_mentions.
+    2. Saves a per-encoder extraction fixture for each encoder so ``_run_model``
+       can return it directly without rerunning NER.
+    3. Saves an ``extraction_ensemble`` fixture with the consensus mentions.
+    4. Stores the full ``CachedNerResult`` (including v4 fields) in the
+       ClusterCache so warm cache hits return everything.
 
-    Phase 3 (CD-80ic).
+    Returns ``(docs, cluster_by_doc, mentions_by_doc, per_encoder_by_doc)`` where:
+      - ``cluster_by_doc``: ``{doc_id → list[EntityCluster]}``
+      - ``mentions_by_doc``: ``{doc_id → list[consensus_mention_dict]}``
+        (the consensus set that flows into SPO extraction)
+      - ``per_encoder_by_doc``: ``{encoder_name → {doc_id → list[mention_dict]}}``
+        (raw per-encoder mentions for observability / fixture saving)
+
+    Backwards-compat note: the old ``(docs, cluster_by_doc, mentions_by_doc)``
+    3-tuple callers are broken by this change intentionally — only
+    ``_phase_a_build_cluster_cache`` is called from ``main()`` in this file.
     """
 
     from dagster_io.cluster_cache import ClusterCache
-    from dagster_io.extraction import _build_pipelines, _group_chunks_into_docs
+    from dagster_io.extraction import _group_chunks_into_docs
 
-    ref_model = ner_ref_model or os.environ.get("BENCH_NER_REF_MODEL", "gliner-large")
+    # Resolve the encoder panel from benchmark_config — encoder-tagged models
+    # only.  extraction-specialist models that are NOT encoder-tagged use Ollama
+    # and run as LLM-tier in Phase B, not as part of the ensemble.
+    from tests.benchmark_config import ENCODER_MODELS, get_model_by_name
 
-    # Override LLM_MODEL for the NER-reference pass, then restore
-    saved_llm = os.environ.get("LLM_MODEL")
-    os.environ["LLM_MODEL"] = ref_model
-    os.environ["CATALYST_BENCH_MODEL"] = ref_model
+    if ensemble_models is not None:
+        # Explicit list from --ensemble flag; resolve each name to a ModelConfig
+        encoder_cfgs = []
+        for name in ensemble_models:
+            cfg = get_model_by_name(name)
+            if cfg:
+                encoder_cfgs.append(cfg)
+            else:
+                print(f"  WARNING: ensemble model '{name}' not found in benchmark_config.py — skipping")
+    else:
+        encoder_cfgs = [m for m in ENCODER_MODELS if "encoder" in m.tags]
+
+    # Fall back to single-encoder "ensemble" (gliner-large) when the list is
+    # empty so the harness still produces something useful.
+    if not encoder_cfgs:
+        fallback_name = ner_ref_model or os.environ.get("BENCH_NER_REF_MODEL", "gliner-large")
+        fallback_cfg = get_model_by_name(fallback_name)
+        if fallback_cfg:
+            encoder_cfgs = [fallback_cfg]
 
     try:
         medallion_chunks = load_chunks(sample_per_domain=sample_n)
         if not medallion_chunks:
-            return [], {}
+            return [], {}, {}, {}
 
         from dagster_io import TextChunk
 
         eval_chunks = [TextChunk(**c) for c in medallion_chunks]
         docs = _group_chunks_into_docs(eval_chunks)
 
-        ner_pipeline, _spo_pipeline, _client, _embedder = _build_pipelines()
+        # Build ensemble pipeline
+        ensemble_pipeline = _build_ensemble_pipeline_for_phase_a(encoder_cfgs, quorum=quorum)
+
         cluster_cache = ClusterCache()
-        params: dict = {}  # threshold / proximity_radius for cache keying
+        params: dict = {}
         cluster_by_doc: dict[str, list] = {}
+        mentions_by_doc: dict[str, list] = {}
+        # per_encoder_by_doc[encoder_name][doc_id] = list[mention_dict]
+        per_encoder_by_doc: dict[str, dict[str, list]] = {m.name: {} for m in encoder_cfgs}
 
         for doc in docs:
-            clusters = cluster_cache.get_or_compute(
+            # Check warm cache first (skips ensemble run entirely on re-runs)
+            cache_key_model = "ensemble_v4"
+            cached = cluster_cache.get(
                 doc_id=doc.doc_id,
                 doc_text=doc.full_text,
-                ner_model=ref_model,
+                ner_model=cache_key_model,
                 params=params,
-                compute_fn=lambda _d=doc: _run_ner_and_cluster(ner_pipeline, _d, ref_model),
             )
-            cluster_by_doc[doc.doc_id] = clusters
+            if cached is not None and cached.per_encoder_mentions:
+                # Warm hit — already has v4 fields
+                cluster_by_doc[doc.doc_id] = cached.clusters
+                mentions_by_doc[doc.doc_id] = cached.mentions
+                for enc_name, enc_mentions in cached.per_encoder_mentions.items():
+                    per_encoder_by_doc.setdefault(enc_name, {})[doc.doc_id] = enc_mentions
+                continue
 
-        return docs, cluster_by_doc
-    finally:
-        if saved_llm is None:
-            os.environ.pop("LLM_MODEL", None)
-        else:
-            os.environ["LLM_MODEL"] = saved_llm
+            # Cold miss — run the ensemble pipeline
+            ner_result = _run_ensemble_for_doc(ensemble_pipeline, doc, encoder_cfgs)
+
+            cluster_by_doc[doc.doc_id] = ner_result.clusters
+            mentions_by_doc[doc.doc_id] = ner_result.mentions
+
+            for enc_name, enc_mentions in ner_result.per_encoder_mentions.items():
+                per_encoder_by_doc.setdefault(enc_name, {})[doc.doc_id] = enc_mentions
+
+            # Store v4 result in the cluster cache
+            cluster_cache.put(
+                doc_id=doc.doc_id,
+                doc_text=doc.full_text,
+                ner_model=cache_key_model,
+                params=params,
+                result=ner_result,
+            )
+
+        # ── Save per-encoder fixtures so _run_model can return them directly ──
+        if store is not None:
+            for enc_cfg in encoder_cfgs:
+                enc_name = enc_cfg.name
+                enc_docs_mentions = per_encoder_by_doc.get(enc_name, {})
+                all_enc_mentions = []
+                for _doc_id, enc_mentions in enc_docs_mentions.items():
+                    all_enc_mentions.extend(enc_mentions)
+                enc_fixture = {
+                    "model": enc_cfg.model,
+                    "base_url": enc_cfg.base_url or "",
+                    "structured_method": enc_cfg.structured_method,
+                    "mentions": all_enc_mentions,
+                    "assertions": [],
+                    "stats": {
+                        "chunk_count": sum(len(d.chunks) for d in docs),
+                        "duration_s": 0.0,
+                        "mention_count": len(all_enc_mentions),
+                        "assertion_count": 0,
+                        "phase": "a_encoder",
+                    },
+                }
+                store.save_fixture(f"extraction_{enc_cfg.model}", enc_fixture)
+
+            # ── Save ensemble fixture ──────────────────────────────────────────
+            all_consensus_mentions = []
+            for doc_mentions in mentions_by_doc.values():
+                all_consensus_mentions.extend(doc_mentions)
+            ensemble_fixture = {
+                "model": "ensemble",
+                "base_url": "",
+                "structured_method": "ensemble",
+                "mentions": all_consensus_mentions,
+                "assertions": [],
+                "stats": {
+                    "chunk_count": sum(len(d.chunks) for d in docs),
+                    "duration_s": 0.0,
+                    "mention_count": len(all_consensus_mentions),
+                    "assertion_count": 0,
+                    "phase": "a_ensemble",
+                    "n_encoders": len(encoder_cfgs),
+                },
+            }
+            store.save_fixture("extraction_ensemble", ensemble_fixture)
+
+        return docs, cluster_by_doc, mentions_by_doc, per_encoder_by_doc
+
+    except Exception:
+        # Propagate — Phase A failure is not silently swallowed
+        raise
 
 
-def _run_ner_and_cluster(ner_pipeline, doc, bench_model: str) -> list:
-    """Synchronous wrapper: run NER pipeline and return entity_clusters for a doc."""
+def _build_ensemble_pipeline_for_phase_a(encoder_cfgs: list, quorum: int | None = None):
+    """Build a ``build_ensemble_pipeline`` instance for the Phase A encoder panel.
+
+    Resolves one ExtractionClient per encoder using ``_resolve_client`` and
+    wraps each in a ``ner_stage_config`` with ``model_override=encoder_name``
+    and ``max_retries=0`` (encoders are deterministic).
+
+    ``quorum`` overrides the default ``ceil(N/2)`` in ConsensusNode when set.
+    """
+    from catalyst_exgraph.config import ner_stage_config
+    from catalyst_exgraph.pipeline import build_ensemble_pipeline
+    from catalyst_exgraph.resource import _build_mcp_client, _resolve_client
+
+    mcp_client = _build_mcp_client()
+    encoder_stage_cfgs = []
+    clients: dict = {}
+
+    for enc_cfg in encoder_cfgs:
+        # Each encoder gets a StageConfig with model_override = bench model name
+        # so NerEnsembleNode keys per_encoder_mentions by the bench name.
+        stage_cfg = ner_stage_config(model=enc_cfg.model, max_retries=0)
+        # Rebuild with model_override=enc_cfg.name for ensemble keying
+        from catalyst_exgraph.config import StageConfig
+
+        stage_cfg = StageConfig(**{**stage_cfg.__dict__, "model_override": enc_cfg.name})
+        encoder_stage_cfgs.append(stage_cfg)
+        client = _resolve_client(enc_cfg.model, base_url=enc_cfg.base_url or None, api_key=None)
+        clients[enc_cfg.name] = client
+
+    return build_ensemble_pipeline(
+        encoders=encoder_stage_cfgs,
+        clients=clients,
+        mcp_client=mcp_client,
+        embedder=None,  # proximity-only clustering in Phase A
+        quorum=quorum,
+    )
+
+
+def _run_ensemble_for_doc(ensemble_pipeline, doc, encoder_cfgs: list):
+    """Synchronous wrapper: run ensemble pipeline for one doc, return CachedNerResult."""
     import asyncio as _asyncio
+
+    from dagster_io.cluster_cache import CachedNerResult
 
     loop = _asyncio.new_event_loop()
     try:
+        doc_ner_chunk_id = f"{doc.doc_id}:_doc_ensemble"
+        state_input = {
+            "raw_text": doc.full_text,
+            "doc_id": doc.doc_id,
+            "chunk_id": doc_ner_chunk_id,
+            "model": "ensemble",
+            "source_metadata": {
+                "document_id": doc.doc_id,
+                "chunk_id": doc_ner_chunk_id,
+                "chunk_index": 0,
+                "total_chunks": len(doc.chunks),
+                "chunk_metadata": doc.chunk_metadata or {},
+                "domain": (doc.chunk_metadata or {}).get("domain"),
+                "speaker_label": (doc.chunk_metadata or {}).get("speaker"),
+                "temporal_start_ms": None,
+                "temporal_end_ms": None,
+            },
+            "max_retries": 0,
+        }
+        result = loop.run_until_complete(ensemble_pipeline.ainvoke(state_input))
+
+        clusters = result.get("entity_clusters") or []
+        # Consensus mentions are the canonical set for SPO
+        consensus_mentions = result.get("consensus_mentions") or []
+        per_encoder_mentions: dict[str, list] = result.get("per_encoder_mentions") or {}
+        evidence_windows: list = result.get("evidence_windows") or []
+        rejected_mentions: list = result.get("rejected_mentions") or []
+
+        return CachedNerResult(
+            clusters=clusters,
+            mentions=consensus_mentions,
+            per_encoder_mentions=per_encoder_mentions,
+            evidence_windows=evidence_windows,
+            rejected_mentions=rejected_mentions,
+        )
+    finally:
+        loop.close()
+
+
+def _run_ner_and_cluster(ner_pipeline, doc, bench_model: str):
+    """Synchronous wrapper: run NER pipeline and return a CachedNerResult for a doc.
+
+    Legacy single-NER path — still used when Phase A falls back to a single
+    encoder (e.g. ENCODER_MODELS is empty and only a ref_model is available).
+    Not called on the normal v4 ensemble path.
+    """
+    import asyncio as _asyncio
+
+    from dagster_io.cluster_cache import CachedNerResult
+
+    loop = _asyncio.new_event_loop()
+    try:
+        # Phase A is doc-scoped — NER runs over the full concatenated doc.
+        # Use a stable synthetic chunk_id (`{doc_id}:_doc_ner`) so events emit
+        # with a non-empty chunk_id; otherwise the StateInspector rail rejects
+        # them and the inspector looks empty during Phase A.
+        doc_ner_chunk_id = f"{doc.doc_id}:_doc_ner"
         ner_state_input = {
             "raw_text": doc.full_text,
             "doc_id": doc.doc_id,
+            "chunk_id": doc_ner_chunk_id,
             "model": bench_model,
             "source_metadata": {
                 "document_id": doc.doc_id,
-                "chunk_id": "",
+                "chunk_id": doc_ner_chunk_id,
                 "chunk_index": 0,
                 "total_chunks": len(doc.chunks),
                 "chunk_metadata": doc.chunk_metadata or {},
@@ -149,7 +373,9 @@ def _run_ner_and_cluster(ner_pipeline, doc, bench_model: str) -> list:
             "max_retries": 0,
         }
         ner_result = loop.run_until_complete(ner_pipeline.ainvoke(ner_state_input))
-        return ner_result.get("entity_clusters") or []
+        clusters = ner_result.get("entity_clusters") or []
+        mentions = (ner_result.get("stages") or {}).get("ner", {}).get("accepted") or []
+        return CachedNerResult(clusters=clusters, mentions=mentions)
     finally:
         loop.close()
 
@@ -162,26 +388,70 @@ def _run_model(
     all_videos: bool = False,  # retained for back-compat; in-process path runs across all domains
     shared_docs: list | None = None,
     shared_clusters: dict | None = None,
+    shared_mentions: dict | None = None,
+    phase_a_encoder_names: set[str] | None = None,
 ) -> dict | None:
-    """Run extraction for one model in-process via ``extract_validated``.
+    """Run extraction for one model in-process.
 
-    Same code path as the production Dagster gold assets
-    (``media_mentions``/``congress_mentions``/``leak_mentions`` all call
-    ``extract_validated`` via the asset_factory). No more subprocess +
-    pytest layer — chunks are pulled from the medallion bucket via
-    ``load_chunks()`` (which globs S3 across all 3 domains) and run
-    directly against ``extract_validated`` with the model's env block
-    set. Output is written via the run-store at
-    ``s3://<bucket>/bench/runs/<run_id>/extractions/extraction_<model>.json``
-    so the report-builder + scoring code is unchanged.
+    v4 routing (CD-z6xe):
+    - **Encoder-tier** (``"encoder"`` in cfg.tags or model name is in the
+      Phase A encoder panel ``phase_a_encoder_names``): the per-encoder fixture
+      was already saved during Phase A.  Read it back from the store and return
+      immediately — no SPO work needed.
+    - **Synthetic ``ensemble`` model**: read ``extraction_ensemble`` fixture
+      saved by Phase A and return it directly.
+    - **LLM-tier** (everything else): run Phase B SPO via
+      ``extract_with_shared_clusters`` over the cached evidence_windows +
+      consensus_mentions.  Same path as v3, just renamed semantically.
+
+    If an encoder-tier model is NOT in the Phase A ensemble (i.e. it was
+    requested via --models but isn't one of the v4 encoder_cfgs), the legacy
+    ``extract_validated`` path is used so the user can still bench an encoder
+    independently of the consensus set.
 
     ``all_videos`` is retained as a no-op for CLI compatibility — the
-    in-process path is naturally cross-domain (every materialized chunk
-    is a candidate). Use ``BENCH_SAMPLE_PER_DOMAIN`` to cap volume.
+    in-process path is naturally cross-domain.  Use ``BENCH_SAMPLE_PER_DOMAIN``
+    to cap volume.
     """
     from dagster_io import TextChunk
     from dagster_io.extraction import extract_validated
     from tests.shared.medallion import load_chunks
+
+    # ── Encoder-tier shortcut: return the pre-saved Phase A fixture ──────────
+    # For any model with "encoder" in its tags that participated in Phase A,
+    # _phase_a_build_cluster_cache already saved the per-encoder fixture.
+    # Return it immediately (no SPO, no LLM calls).
+    _is_encoder_tier = "encoder" in cfg.tags or "extraction-specialist" in cfg.tags
+    _in_phase_a_panel = phase_a_encoder_names is not None and cfg.name in phase_a_encoder_names
+
+    if _is_encoder_tier and _in_phase_a_panel:
+        fixture = store.load_fixture(f"extraction_{cfg.model}")
+        if fixture is not None:
+            run = store.load_run(run_id)
+            if run is not None:
+                run.save_extraction(cfg.model, fixture)
+            store.save_extraction(cfg.model, fixture)
+            return fixture
+        # Pre-saved fixture missing — fall through to the legacy path below so
+        # we still produce output rather than silently returning None.
+
+    # ── Synthetic "ensemble" model: return the ensemble fixture from Phase A ─
+    if cfg.name == "ensemble" or cfg.model == "ensemble":
+        fixture = store.load_fixture("extraction_ensemble")
+        if fixture is not None:
+            run = store.load_run(run_id)
+            if run is not None:
+                run.save_extraction("ensemble", fixture)
+            store.save_extraction("ensemble", fixture)
+            return fixture
+        event_tail.append(
+            source="harness",
+            node_name="model_run",
+            status="error",
+            model=cfg.name,
+            details={"reason": "ensemble_fixture_missing", "hint": "run Phase A first"},
+        )
+        return None
 
     is_cloud = "cloud" in cfg.tags
     if is_cloud:
@@ -220,8 +490,8 @@ def _run_model(
         start = time.monotonic()
 
         if shared_clusters is not None and shared_docs is not None:
-            # ── Phase B: re-pack evidence windows per target model from cached clusters ──
-            # NER already done in Phase A; only run SPO fan-out.
+            # ── LLM-tier Phase B: SPO fan-out over cached consensus mentions ──
+            # NER already done in Phase A via ensemble; only run SPO.
             from dagster_io.extraction import extract_with_shared_clusters
 
             if not shared_docs:
@@ -238,9 +508,10 @@ def _run_model(
             print(f"\n  [{cfg.name}] {len(shared_docs)} docs from Phase A (cap={cap})", flush=True)
 
             try:
-                _phase_b_mentions, assertions = extract_with_shared_clusters(
+                mentions, assertions = extract_with_shared_clusters(
                     shared_docs,
                     shared_clusters,
+                    shared_mentions=shared_mentions,
                     code_location="media_ingest",
                     max_concurrency=1,
                 )
@@ -253,14 +524,11 @@ def _run_model(
                     details={"reason": type(exc).__name__, "message": str(exc)[:500]},
                 )
                 return None
-            # In Phase B, mentions come from the shared NER pass (stored in
-            # shared_clusters caller context).  The harness fixture records
-            # assertions only; mention scoring uses the GT from Phase A.
-            mentions = []
             pipeline_stats = getattr(extract_with_shared_clusters, "last_stats", {})
             eval_chunk_count = sum(len(d.chunks) for d in shared_docs)
         else:
             # ── Legacy path: full NER + SPO in one shot ──────────────────────────
+            # Used for: encoder-tier models NOT in Phase A panel, and any fallback.
             medallion_chunks = load_chunks(sample_per_domain=sample_n)
             if not medallion_chunks:
                 event_tail.append(
@@ -429,9 +697,13 @@ def _interactive_prompt() -> argparse.Namespace:
         gt_model="gpt-4o",
         ensemble_gt=False,
         full=False,
-        models=None,
-        ner_models=None,
+        ensemble=None,
         spo_models=None,
+        ensemble_quorum=None,
+        ensemble_only=False,
+        spo_only=False,
+        no_consensus=False,
+        run_id=None,
         label=None,
         list_gt=False,
         list_runs=False,
@@ -500,9 +772,8 @@ def _list_ground_truths(store: BenchmarkStore) -> None:
 def _list_models() -> None:
     """List every model configured in tests/benchmark_config.py.
 
-    Names are what ``--models`` / ``--ner-models`` / ``--spo-models``
-    expect (comma-separated). Grouped by tier so it's obvious which
-    are encoder vs LLM vs cloud.
+    Names are what ``--ensemble`` / ``--spo-models`` expect (comma-separated).
+    Grouped by tier so it's obvious which are encoder vs LLM vs cloud.
     """
     rows: list[tuple[str, str, str, str]] = []
     for m in ALL_MODELS:
@@ -532,8 +803,8 @@ def _list_models() -> None:
     for tier, name, model, tags in rows:
         print(f"    {tier:<10} {name:<24} {model:<32} {tags}")
     print()
-    print("  Pass --models <comma-separated names> to run a subset.")
-    print("  Pass --ner-models / --spo-models to scope ensemble GT.\n")
+    print("  Pass --ensemble <comma-separated names> to override the NER encoder panel.")
+    print("  Pass --spo-models <comma-separated names> to override the SPO model panel.\n")
 
 
 def _list_runs(store: BenchmarkStore) -> None:
@@ -609,15 +880,20 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 examples:
-  python tests/benchmark_harness.py                       # interactive mode
-  python tests/benchmark_harness.py --full                # full methodology
-  python tests/benchmark_harness.py --models mistral-7b,gliner-large
-  python tests/benchmark_harness.py --ensemble-gt         # GT only
-  python tests/benchmark_harness.py --list-gt             # show ground truths
-  python tests/benchmark_harness.py --list-runs           # show runs
-  python tests/benchmark_harness.py --list-models         # show configured models
-  python tests/benchmark_harness.py --score               # re-score latest
-  python tests/benchmark_harness.py --clean               # clean artifacts
+  python tests/benchmark_harness.py                                  # interactive mode
+  python tests/benchmark_harness.py --full                           # full methodology
+  python tests/benchmark_harness.py --ensemble gliner-medium,gliner-large
+  python tests/benchmark_harness.py --spo-models gemma3-12b,gpt-4o
+  python tests/benchmark_harness.py --ensemble-only                  # NER bench only
+  python tests/benchmark_harness.py --spo-only --run-id 2024-01-01-120000
+  python tests/benchmark_harness.py --no-consensus                   # v3 fairness path
+  python tests/benchmark_harness.py --ensemble-quorum 2             # override quorum
+  python tests/benchmark_harness.py --ensemble-gt                    # GT only
+  python tests/benchmark_harness.py --list-gt                        # show ground truths
+  python tests/benchmark_harness.py --list-runs                      # show runs
+  python tests/benchmark_harness.py --list-models                    # show configured models
+  python tests/benchmark_harness.py --score                          # re-score latest
+  python tests/benchmark_harness.py --clean                          # clean artifacts
 """,
     )
 
@@ -640,7 +916,7 @@ examples:
     action.add_argument(
         "--list-models",
         action="store_true",
-        help="List configured model names (use with --models / --ner-models / --spo-models)",
+        help="List configured model names (use with --ensemble / --spo-models)",
     )
     action.add_argument("--clean", action="store_true", help="Clean cached artifacts (keep true fixtures)")
     action.add_argument("--view", action="store_true", help="Start the benchmark viewer SPA")
@@ -658,6 +934,12 @@ examples:
         "Default: single-video pytest fixture path.",
     )
     config.add_argument("--label", type=str, metavar="NAME", help="Label for this run (used in runs/ dir name)")
+    config.add_argument(
+        "--run-id",
+        type=str,
+        metavar="ID",
+        help="Existing run ID to load (required by --spo-only)",
+    )
     config.add_argument(
         "--chunk-size",
         type=int,
@@ -694,23 +976,60 @@ examples:
         const=None,
         help="Run ensemble GT against the full chunk pool, ignoring gt-candidates.json.",
     )
-    config.add_argument(
-        "--models",
+
+    # ── Ensemble / SPO role-split flags ─────────────────────────────
+    ensemble_group = parser.add_argument_group("ensemble / SPO role split")
+    ensemble_group.add_argument(
+        "--ensemble",
         type=str,
         metavar="LIST",
-        help="Run only specific models (comma-separated names from benchmark_config)",
+        help=(
+            "Comma-separated encoder names that vote in Phase 1 NER consensus. "
+            "Each also produces an individual per-model fixture for F1-vs-GT scoring. "
+            "Default: all models with 'encoder' or 'extraction-specialist' tags."
+        ),
     )
-    config.add_argument(
-        "--ner-models",
-        type=str,
-        metavar="LIST",
-        help="Override ensemble NER panel (comma-separated model names)",
-    )
-    config.add_argument(
+    ensemble_group.add_argument(
         "--spo-models",
         type=str,
         metavar="LIST",
-        help="Override ensemble SPO panel (comma-separated model names)",
+        help=(
+            "Comma-separated model names that consume consensus and run Phase 4 SPO. "
+            "Default: all models with 'tier1', 'tier2', or 'cloud' tags."
+        ),
+    )
+    ensemble_group.add_argument(
+        "--ensemble-quorum",
+        type=int,
+        metavar="K",
+        help=(
+            "Override consensus quorum for ConsensusNode (default: ceil(N/2)). "
+            "Must satisfy 1 ≤ K ≤ N where N is the number of --ensemble encoders."
+        ),
+    )
+
+    # ── Phase-skip mutex group ───────────────────────────────────────
+    phase_mutex = parser.add_mutually_exclusive_group()
+    phase_mutex.add_argument(
+        "--ensemble-only",
+        action="store_true",
+        help="Skip Phase 4 SPO entirely. Run Phase 1 NER consensus only; produce per-encoder + ensemble fixtures.",
+    )
+    phase_mutex.add_argument(
+        "--spo-only",
+        action="store_true",
+        help=(
+            "Skip Phase 1+2. Load cached consensus from --run-id's ClusterCache and run Phase 4 SPO only. "
+            "Requires --run-id."
+        ),
+    )
+    phase_mutex.add_argument(
+        "--no-consensus",
+        action="store_true",
+        help=(
+            "v3 fairness path: run each --ensemble model as a standalone NER+SPO pipeline "
+            "(no consensus vote). Each produces its own NER + clusters + SPO."
+        ),
     )
 
     # ── Deprecated (kept for backward compat) ────────────────────────
@@ -718,6 +1037,10 @@ examples:
     config.add_argument("--ground-truth-model", type=str, default="gpt-4o", help=argparse.SUPPRESS)
 
     args = parser.parse_args()
+
+    # ── Post-parse validation ────────────────────────────────────────
+    if args.spo_only and not args.run_id:
+        parser.error("--spo-only requires --run-id <id>")
 
     # Propagate --sample-per-domain to the test_extraction_e2e fixture and any
     # subprocess we launch (the per-video extraction script reads from medallion
@@ -782,31 +1105,87 @@ examples:
         _score_latest(store)
         return
 
-    # ── Ensemble-only mode (no model runs) ──────────────────────────────
+    # ── Resolve ensemble / SPO lists early (needed for --ensemble-gt standalone too) ──
+    if getattr(args, "ensemble", None):
+        ensemble_model_names = [n.strip() for n in args.ensemble.split(",")]
+    else:
+        ensemble_model_names = _default_ensemble()
+
+    if not ensemble_model_names:
+        parser.error("no ensemble encoders configured; pass --ensemble or check benchmark_config.py tags")
+
+    ensemble_quorum: int | None = getattr(args, "ensemble_quorum", None)
+    if ensemble_quorum is not None:
+        n_ensemble = len(ensemble_model_names)
+        if not (1 <= ensemble_quorum <= n_ensemble):
+            parser.error(
+                f"--ensemble-quorum {ensemble_quorum} out of range: "
+                f"must satisfy 1 ≤ K ≤ {n_ensemble} (number of --ensemble encoders)"
+            )
+
+    if getattr(args, "spo_models", None):
+        spo_model_names = [n.strip() for n in args.spo_models.split(",")]
+    else:
+        spo_model_names = _default_spo()
+
+    # ── Ensemble GT-only mode (no model runs) ───────────────────────────────
     if args.ensemble_gt and not args.full:
-        ner_override = args.ner_models.split(",") if getattr(args, "ner_models", None) else None
-        spo_override = args.spo_models.split(",") if getattr(args, "spo_models", None) else None
-        # Temporarily patch the generation call
         candidates = _load_candidate_chunk_ids(args.candidates)
-        _run_ensemble_gt(store, ner_models=ner_override, spo_models=spo_override, candidates=candidates)
+        _run_ensemble_gt(
+            store,
+            ner_models=ensemble_model_names if getattr(args, "ensemble", None) else None,
+            spo_models=spo_model_names if getattr(args, "spo_models", None) else None,
+            candidates=candidates,
+        )
         return
 
-    # Determine which models to run
-    if getattr(args, "models", None):
-        from tests.benchmark_config import get_model_by_name
+    # ── Synthetic model stub for the "ensemble" virtual model ────────────────
+    # The ensemble consensus fixture from Phase A is always included in the
+    # benchmark table as a synthetic entry so it shows up in F1 scoring.
+    _ENSEMBLE_SYNTHETIC_CFG = ModelConfig(
+        name="ensemble",
+        model="ensemble",
+        base_url="",
+        structured_method="ensemble",
+        tags=["encoder", "ensemble", "v4"],
+    )
 
-        requested = [n.strip() for n in args.models.split(",")]
-        models = []
-        for name in requested:
-            cfg = get_model_by_name(name)
-            if cfg:
-                models.append(cfg)
-            else:
-                print(f"  WARNING: model '{name}' not found in benchmark_config.py")
+    # ── Determine which models to run based on mode ───────────────────────────
+    if args.no_consensus:
+        # v3 fairness: each ensemble encoder runs standalone NER+SPO
+        from tests.benchmark_config import get_model_by_name as _get_model
+
+        models = [_get_model(n) for n in ensemble_model_names if _get_model(n)]
+        if not models:
+            parser.error("--no-consensus: none of the --ensemble model names resolved in benchmark_config.py")
+    elif args.ensemble_only:
+        # NER bench only — Phase A encoders + synthetic ensemble fixture; no SPO models
+        from tests.benchmark_config import get_model_by_name as _get_model
+
+        encoder_models = [_get_model(n) for n in ensemble_model_names if _get_model(n)]
+        models = encoder_models + [_ENSEMBLE_SYNTHETIC_CFG]
+    elif args.spo_only:
+        # Phase 4 SPO only — load cached ClusterCache from --run-id
+        from tests.benchmark_config import get_model_by_name as _get_model
+
+        models = [_get_model(n) for n in spo_model_names if _get_model(n)]
+        if not models:
+            parser.error("--spo-only: none of the --spo-models names resolved in benchmark_config.py")
     elif args.local_only:
         models = LOCAL_MODELS
     else:
-        models = ALL_MODELS
+        # Default: encoder panel + SPO models + ensemble virtual
+        from tests.benchmark_config import get_model_by_name as _get_model
+
+        encoder_models = [_get_model(n) for n in ensemble_model_names if _get_model(n)]
+        spo_models_resolved = [_get_model(n) for n in spo_model_names if _get_model(n)]
+        # Deduplicate (an encoder could also appear in spo_models)
+        seen: set[str] = set()
+        models = []
+        for m in encoder_models + spo_models_resolved + [_ENSEMBLE_SYNTHETIC_CFG]:
+            if m.name not in seen:
+                seen.add(m.name)
+                models.append(m)
 
     chunk_size_str = f"{args.chunk_size} tokens" if getattr(args, "chunk_size", None) else "default"
     # No automatic suffix on run IDs — ExGraph is the only pipeline now (CD-ys8n).
@@ -975,170 +1354,228 @@ examples:
         print(f"  cleared extraction artifacts → {run.s3_uri}")
         print()
 
-    # ── Live results table — one row per model as it finishes ───────────────
-    HEADER = (
-        f"  {'#':>2} {'model':<22} {'tier':<8} {'status':<8} "
-        f"{'mentions':>9} {'spo':>5} {'time':>9} {'tok/s':>7} {'calls':>6} {'retry':>5} {'err':>4}"
-    )
-    print(HEADER)
-    print(f"  {'─' * len(HEADER.lstrip())}")
-
-    def _tier_label(tags: list[str]) -> str:
-        if "encoder" in tags:
-            return "ENC"
-        if "extraction-specialist" in tags:
-            return "SPEC"
-        if "cloud" in tags:
-            return "CLOUD"
-        if "tier1" in tags:
-            return "T1"
-        if "tier2" in tags:
-            return "T2"
-        return "LLM"
-
-    def _row(idx: int, name: str, tier: str, status: str, fixture: dict | None) -> None:
-        if fixture:
-            s = fixture.get("stats", {}) or {}
-            mentions = s.get("mention_count", 0)
-            spo = s.get("assertion_count", 0)
-            duration = s.get("duration_s", 0.0)
-            tok_s = s.get("tokens_per_sec", 0.0)
-            calls = s.get("llm_call_count", 0) or 0
-            retries = (s.get("mention_retries", 0) or 0) + (s.get("proposition_retries", 0) or 0)
-            errors = s.get("errors", 0) or 0
-            print(
-                f"  {idx:>2} {name:<22} {tier:<8} {status:<8} "
-                f"{mentions:>9} {spo:>5} {duration:>8.1f}s {tok_s:>7.0f} {calls:>6} {retries:>5} {errors:>4}",
-                flush=True,
-            )
-        else:
-            print(
-                f"  {idx:>2} {name:<22} {tier:<8} {status:<8} "
-                f"{'—':>9} {'—':>5} {'—':>9} {'—':>7} {'—':>6} {'—':>5} {'—':>4}",
-                flush=True,
-            )
-
-    # ── Phase A: NER + cluster ONCE per (doc, ner_ref_model) ────────────────
-    # This is the expensive step.  Cache hits make subsequent runs free.
-    # Controlled by BENCH_NER_REF_MODEL (default: gliner-large).
-    # When the medallion is empty, _phase_a_build_cluster_cache returns ({},)
-    # and the per-model loop falls back to the legacy full-pipeline path.
+    # ── Phase A + per-model loop — wrapped in rich.Live two-pane TUI ────────
+    # BenchLiveUI auto-detects TTY; non-TTY (CI / Tilt log pipes) falls back
+    # to plain column-aligned printing equivalent to the old _row() output.
     sample_n_raw = os.environ.get("BENCH_SAMPLE_PER_DOMAIN", "50")
     _bench_sample_n: int | None = int(sample_n_raw) if sample_n_raw else None
     if _bench_sample_n == 0:
         _bench_sample_n = None
 
-    print("  Phase A: building cluster cache (NER once per doc)...", flush=True)
-    t_phase_a = time.monotonic()
-    _shared_docs, _shared_clusters = _phase_a_build_cluster_cache(
-        sample_n=_bench_sample_n,
-        ner_ref_model=os.environ.get("BENCH_NER_REF_MODEL"),
+    sample_cap_display = f"{_bench_sample_n}/domain" if _bench_sample_n is not None else "full"
+
+    # pipeline_label is the user-supplied label (may be None); pipeline_label_str
+    # is the always-set pipeline name (e.g. "exgraph"). The TUI wants a string.
+    _pipeline_display = f"{pipeline_label_str} · label={pipeline_label}" if pipeline_label else pipeline_label_str
+    ui = BenchLiveUI(
+        run_id=run.run_id,
+        pipeline=_pipeline_display,
+        models=models,
+        sample_cap=sample_cap_display,
     )
-    _phase_a_duration = time.monotonic() - t_phase_a
-    print(
-        f"  Phase A complete: {len(_shared_docs)} docs, "
-        f"{sum(len(v) for v in _shared_clusters.values())} total clusters "
-        f"in {_phase_a_duration:.1f}s",
-        flush=True,
-    )
-    print()
+
+    # Capture library log records (transformers warnings, sentence-transformers
+    # progress, httpx errors, etc.) into the UI's log panel without losing
+    # them from the underlying stderr — DequeHandler appends to the deque
+    # alongside whatever the root logger is already doing.
+    _deque_handler = DequeHandler(ui._log_buffer)
+    _deque_handler.setFormatter(logging.Formatter("%(name)s  %(message)s"))
+    logging.getLogger().addHandler(_deque_handler)
 
     results = []
     t0 = time.monotonic()
 
-    for idx, cfg in enumerate(models, 1):
-        tier = _tier_label(cfg.tags)
-        # Skip cloud if no key
-        if "cloud" in cfg.tags:
-            api_key = cfg.api_key or os.environ.get("LLM_API_KEY", "")
-            if not api_key:
-                _row(idx, cfg.name, tier, "skip", None)
-                continue
-
-        # Check cache
-        cached = store.load_fixture(f"extraction_{cfg.model}")
-        if cached and not args.regen:
-            results.append({"model": cfg.name, "fixture": cached, "tags": cfg.tags})
-            run.save_extraction(cfg.model, cached)
-            _row(idx, cfg.name, tier, "cached", cached)
-            continue
-
-        # Check endpoint
-        if cfg.base_url and "cloud" not in cfg.tags:
-            import urllib.request
-
-            try:
-                urllib.request.urlopen(urllib.request.Request(f"{cfg.base_url}/models", method="GET"), timeout=3)
-            except Exception:
-                _row(idx, cfg.name, tier, "no-endpt", None)
-                continue
-
-        # In-flight marker (overwritten by the result row when subprocess returns)
-        sys.stdout.write(
-            f"  {idx:>2} {cfg.name:<22} {tier:<8} {'running…':<8} "
-            f"{'…':>9} {'…':>5} {'…':>9} {'…':>7} {'…':>6} {'…':>5} {'…':>4}\r"
-        )
-        sys.stdout.flush()
-        event_tail.append(
-            source="harness",
-            node_name="model_run",
-            status="started",
-            model=cfg.name,
-            details={"tier": tier, "tags": list(cfg.tags)},
-        )
-        t_model_start = time.monotonic()
-        # Phase B: pass shared clusters when Phase A succeeded; fall back to
-        # legacy full-pipeline path when no clusters are available.
-        _use_phase_b = bool(_shared_clusters)
-        fixture = _run_model(
-            cfg,
-            args.timeout,
-            store,
-            run.run_id,
-            all_videos=args.all_videos,
-            shared_docs=_shared_docs if _use_phase_b else None,
-            shared_clusters=_shared_clusters if _use_phase_b else None,
-        )
-        duration_s = time.monotonic() - t_model_start
-        if fixture:
-            results.append({"model": cfg.name, "fixture": fixture, "tags": cfg.tags})
-            _row(idx, cfg.name, tier, "ok", fixture)
-
-            # Save to run directory
-            run.save_extraction(cfg.model, fixture)
-
-            event_tail.append(
-                source="harness",
-                node_name="model_run",
-                status="completed",
-                model=cfg.name,
-                details={"duration_s": duration_s, "stats": fixture.get("stats", {}) or {}},
-            )
-
-            # Save incremental report
-            _save_incremental_report(results, store)
+    with ui:
+        # ── Phase A — NER ensemble + cluster ────────────────────────────────
+        if args.spo_only:
+            # --spo-only: skip Phase A entirely; load existing cluster cache from --run-id.
+            # The ClusterCache is an in-process warm cache keyed by doc_id+text — loading
+            # the run record primes the local cache file at its canonical path so
+            # _phase_a_build_cluster_cache warm-hits on any subsequent call.
+            ui.log(f"--spo-only: loading ClusterCache from run {args.run_id} (skipping Phase 1)…")
+            _spo_only_run = store.load_run(args.run_id)
+            if _spo_only_run is None:
+                print(f"\n  ERROR: run '{args.run_id}' not found in store. Run --list-runs to see available runs.")
+                return
+            # Warm Phase A shared state from pre-saved ensemble fixture in the target run
+            _ensemble_fixture = _spo_only_run.load_extraction("ensemble") or store.load_fixture("extraction_ensemble")
+            if _ensemble_fixture is None:
+                print(f"\n  ERROR: no ensemble fixture in run '{args.run_id}'. Re-run Phase A first.")
+                return
+            # Reconstruct minimal shared state so the LLM-tier SPO path works
+            _shared_docs: list = []
+            _shared_clusters: dict = {}
+            _shared_mentions: dict = {}
+            _per_encoder_by_doc: dict = {}
+            _phase_a_encoder_names: set[str] = set()
+            ui.log(f"--spo-only: run {args.run_id} loaded; running Phase 4 SPO only")
         else:
-            _row(idx, cfg.name, tier, "FAIL", None)
+            ui.log("Phase A: building cluster cache (NER ensemble once per doc)…")
+            t_phase_a = time.monotonic()
+            _shared_docs, _shared_clusters, _shared_mentions, _per_encoder_by_doc = _phase_a_build_cluster_cache(
+                sample_n=_bench_sample_n,
+                ner_ref_model=os.environ.get("BENCH_NER_REF_MODEL"),
+                store=store,
+                ensemble_models=ensemble_model_names if getattr(args, "ensemble", None) else None,
+                quorum=ensemble_quorum,
+            )
+            _phase_a_duration = time.monotonic() - t_phase_a
+            _total_phase_a_mentions = sum(len(v) for v in _shared_mentions.values())
+            _total_phase_a_clusters = sum(len(v) for v in _shared_clusters.values())
+            # Collect the names of all encoders that participated in the Phase A ensemble
+            # so _run_model can distinguish "encoder in panel" from "encoder not in panel".
+            _phase_a_encoder_names: set[str] = set(_per_encoder_by_doc.keys())
+            ui.log(
+                f"Phase A complete: {len(_shared_docs)} docs, "
+                f"{_total_phase_a_clusters} clusters, "
+                f"{_total_phase_a_mentions} consensus mentions, "
+                f"{len(_phase_a_encoder_names)} encoders "
+                f"in {_phase_a_duration:.1f}s"
+            )
+
+            if args.ensemble_only:
+                ui.log("--ensemble-only: Phase A complete. Skipping Phase 4 SPO.")
+
+        # ── Phase B — per-model SPO fan-out ─────────────────────────────────
+        for cfg in models:
+            tier = BenchLiveUI._compute_tier(cfg.tags)
+
+            # --ensemble-only: only run encoder-tier + synthetic ensemble; skip SPO LLMs
+            _is_encoder_or_ensemble = (
+                "encoder" in cfg.tags
+                or "extraction-specialist" in cfg.tags
+                or cfg.name == "ensemble"
+                or cfg.model == "ensemble"
+            )
+            if args.ensemble_only and not _is_encoder_or_ensemble:
+                ui.set_status(cfg.name, "skip")
+                ui.log(f"[{cfg.name}] skipped — --ensemble-only")
+                continue
+
+            # Skip cloud if no key
+            if "cloud" in cfg.tags:
+                api_key = cfg.api_key or os.environ.get("LLM_API_KEY", "")
+                if not api_key:
+                    ui.set_status(cfg.name, "skip")
+                    ui.log(f"[{cfg.name}] skipped — no API key")
+                    continue
+
+            # Encoder-tier models in the Phase A panel use the pre-saved fixture.
+            # Don't treat them as "cached" in the usual sense — they always
+            # hit the shortcut path in _run_model and never reach the endpoint
+            # check below.  Skip the cache check to let _run_model do routing.
+            _is_encoder_in_panel = (
+                "encoder" in cfg.tags or "extraction-specialist" in cfg.tags
+            ) and cfg.name in _phase_a_encoder_names
+            _is_synthetic_ensemble = cfg.name == "ensemble" or cfg.model == "ensemble"
+
+            # Check cache for LLM-tier models only (encoders always use Phase A output)
+            if not _is_encoder_in_panel and not _is_synthetic_ensemble:
+                cached = store.load_fixture(f"extraction_{cfg.model}")
+                if cached and not args.regen:
+                    results.append({"model": cfg.name, "fixture": cached, "tags": cfg.tags})
+                    run.save_extraction(cfg.model, cached)
+                    ui.set_status(cfg.name, "cached", fixture=cached)
+                    ui.log(f"[{cfg.name}] loaded from cache")
+                    continue
+
+            # Check endpoint (LLM-tier only — encoders/ensemble have no HTTP endpoint)
+            if not _is_encoder_in_panel and not _is_synthetic_ensemble and cfg.base_url and "cloud" not in cfg.tags:
+                import urllib.request
+
+                try:
+                    urllib.request.urlopen(
+                        urllib.request.Request(f"{cfg.base_url}/models", method="GET"),
+                        timeout=3,
+                    )
+                except Exception:
+                    ui.set_status(cfg.name, "no-endpt")
+                    ui.log(f"[{cfg.name}] endpoint unreachable: {cfg.base_url}")
+                    continue
+
+            # Mark running
+            ui.set_status(cfg.name, "running")
+            ui.log(f"[{cfg.name}] starting ({tier})")
             event_tail.append(
                 source="harness",
                 node_name="model_run",
-                status="error",
+                status="started",
                 model=cfg.name,
-                details={"duration_s": duration_s, "reason": "no_fixture"},
+                details={"tier": tier, "tags": list(cfg.tags)},
             )
+            t_model_start = time.monotonic()
 
-        # Unload local model from Ollama VRAM to free memory for next model
-        if "cloud" not in cfg.tags and "encoder" not in cfg.tags:
-            subprocess.run(["ollama", "stop", cfg.model], capture_output=True, timeout=10)
+            # Phase B routing:
+            # - encoder in Phase A panel → _run_model returns pre-saved fixture (no SPO)
+            # - synthetic "ensemble" → _run_model returns ensemble fixture (no SPO)
+            # - LLM-tier → _run_model runs SPO fan-out via extract_with_shared_clusters
+            # - --no-consensus → bypass shared clusters; force legacy full-pipeline path
+            # - fallback (no shared clusters) → legacy full-pipeline path
+            _use_phase_b = bool(_shared_clusters) and not args.no_consensus
+            fixture = _run_model(
+                cfg,
+                args.timeout,
+                store,
+                run.run_id,
+                all_videos=args.all_videos,
+                shared_docs=_shared_docs if _use_phase_b else None,
+                shared_clusters=_shared_clusters if _use_phase_b else None,
+                shared_mentions=_shared_mentions if _use_phase_b else None,
+                phase_a_encoder_names=_phase_a_encoder_names if not args.no_consensus else set(),
+            )
+            duration_s = time.monotonic() - t_model_start
+
+            if fixture:
+                results.append({"model": cfg.name, "fixture": fixture, "tags": cfg.tags})
+                ui.set_status(cfg.name, "ok", fixture=fixture)
+                stats = fixture.get("stats") or {}
+                ui.log(
+                    f"[{cfg.name}] ok  {stats.get('mention_count', 0)} mentions "
+                    f"· {stats.get('assertion_count', 0)} spo  in {duration_s:.1f}s"
+                )
+
+                # Save to run directory
+                run.save_extraction(cfg.model, fixture)
+
+                event_tail.append(
+                    source="harness",
+                    node_name="model_run",
+                    status="completed",
+                    model=cfg.name,
+                    details={"duration_s": duration_s, "stats": fixture.get("stats", {}) or {}},
+                )
+
+                _save_incremental_report(results, store)
+            else:
+                ui.set_status(cfg.name, "FAIL")
+                ui.log(f"[{cfg.name}] FAILED after {duration_s:.1f}s")
+                event_tail.append(
+                    source="harness",
+                    node_name="model_run",
+                    status="error",
+                    model=cfg.name,
+                    details={"duration_s": duration_s, "reason": "no_fixture"},
+                )
+
+            # Unload local model from Ollama VRAM to free memory for next model
+            if "cloud" not in cfg.tags and "encoder" not in cfg.tags:
+                subprocess.run(["ollama", "stop", cfg.model], capture_output=True, timeout=10)
+
+    # Detach the deque handler so it doesn't leak into post-run logging.
+    logging.getLogger().removeHandler(_deque_handler)
 
     total_time = time.monotonic() - t0
 
-    # Generate ensemble ground truth if --full
-    if args.ensemble_gt:
-        ner_override = args.ner_models.split(",") if getattr(args, "ner_models", None) else None
-        spo_override = args.spo_models.split(",") if getattr(args, "spo_models", None) else None
+    # Generate ensemble ground truth if --full (not in ensemble-only / spo-only modes)
+    if args.ensemble_gt and not args.ensemble_only and not args.spo_only:
+        # Use the resolved ensemble / spo lists so --ensemble / --spo-models flow into GT gen
         candidates = _load_candidate_chunk_ids(args.candidates)
-        _run_ensemble_gt(store, ner_models=ner_override, spo_models=spo_override, candidates=candidates)
+        _run_ensemble_gt(
+            store,
+            ner_models=ensemble_model_names if getattr(args, "ensemble", None) else None,
+            spo_models=spo_model_names if getattr(args, "spo_models", None) else None,
+            candidates=candidates,
+        )
 
     # Load ground truth and compute scores
     gt = store.load_ground_truth("active")

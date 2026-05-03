@@ -366,8 +366,11 @@ cd packages/media-ingest && dagster dev -m media_ingest
 # Benchmark: full methodology (run models → GT → score → report)
 task bench
 
-# Benchmark: v3 entity-anchored extraction with one model
-LLM_MODEL=mistral:latest PYTHONPATH=. python tests/benchmark_harness.py --models mistral-7b
+# Benchmark: run specific SPO model
+PYTHONPATH=. python tests/benchmark_harness.py --spo-models mistral-7b
+
+# Benchmark: NER-only pass with custom encoder panel
+PYTHONPATH=. python tests/benchmark_harness.py --ensemble gliner-medium,gliner-large --ensemble-only
 
 # StateInspector + Benchmark Viewer
 cd packages/media-ingest/viewer-ui && npm run dev

@@ -127,8 +127,8 @@ export interface EntityRow {
 
 /**
  * A single line from `events.jsonl` — the unified event stream emitted
- * by harness, exgraph, langgraph, and dagster. Consumers (AuditViewer,
- * StateInspector) read this shape.
+ * by harness, exgraph, langgraph, and dagster. Every consumer (LiveGantt,
+ * AuditViewer, StateInspector) reads this shape.
  */
 export interface RunEvent {
   ts: string;
@@ -296,6 +296,61 @@ export interface GroundTruthChunk {
    * false both mean "not yet reviewed."
    */
   reviewed?: boolean | null;
+}
+
+// ── Consensus events (Phase B, CD-94ow) ──────────────────────────────────────
+
+/**
+ * Details for `consensus_started` events (chunk_id ends with `:_consensus`).
+ */
+export interface ConsensusStartedDetails {
+  n_encoders: number;
+  total_input_mentions: number;
+}
+
+/**
+ * Details for `mention_decision` events — accepted consensus mentions.
+ * Field names mirror consensus.py's event_tail.append call exactly.
+ */
+export interface MentionDecisionDetails {
+  text: string;
+  canonical_type: string;
+  vote_count: number;
+  n_encoders: number;
+  source_models: string[];
+  mean_confidence: number;
+  /** Per-type vote counts, e.g. { "PERSON": 4, "GPE": 1 } */
+  type_votes: Record<string, number>;
+  /** Encoder name that contributed the highest-confidence span. */
+  span_provenance: string;
+  /** Max char-offset difference between chosen span and any other cluster span. */
+  span_disagreement_chars: number;
+}
+
+/**
+ * Details for `mention_rejected` events — mentions that didn't reach quorum.
+ * Note: consensus.py does NOT emit source_models or mean_confidence for
+ * rejected mentions — only the 5 fields below.
+ */
+export interface MentionRejectedDetails {
+  text: string;
+  vote_count: number;
+  n_encoders: number;
+  quorum: number;
+  reason: string; // always "below_quorum" in current impl
+}
+
+/**
+ * Details for `consensus_completed` — one per doc, summary across all clusters.
+ */
+export interface ConsensusCompletedDetails {
+  accepted_count: number;
+  rejected_count: number;
+  mean_vote_count: number;
+  /** Per-type accepted mention counts, e.g. { "PERSON": 12, "ORG": 5 } */
+  type_distribution: Record<string, number>;
+  /** Fraction of accepted mentions where any encoder disagreed on span boundaries. */
+  span_disagreement_rate: number;
 }
 
 export interface GroundTruthFile {

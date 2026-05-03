@@ -143,16 +143,43 @@ def _build_pipelines():
         ner_config = StageConfig(**{**ner_config.__dict__, "prompt_dir": prompt_dir})
         spo_config = StageConfig(**{**spo_config.__dict__, "prompt_dir": prompt_dir})
 
-    # Optional embedder for cluster merge (Qwen3-8B via EmbeddingResource)
+    # Optional embedder for cluster merge. Default is Ollama at localhost:11434
+    # with qwen3-embedding:8b — the canonical local rig (mac-node). Falls back
+    # to proximity-only clustering when the endpoint is unreachable or the
+    # model isn't pulled. Override via EMBED_PROVIDER + EMBED_MODEL +
+    # EMBED_BASE_URL.
     embedder = None
-    try:
-        from dagster_io.llm import EmbeddingResource
+    _embed_provider = os.environ.get("EMBED_PROVIDER", "ollama")
+    if _embed_provider and _embed_provider != "none":
+        try:
+            from dagster_io.llm import EmbeddingResource
 
-        _embed_provider = os.environ.get("EMBED_PROVIDER", "local")
-        embedder = EmbeddingResource(provider=_embed_provider, enable_cache=True)
-        logger.info("_build_pipelines: embedding merge enabled, provider=%s", _embed_provider)
-    except Exception as exc:  # noqa: BLE001
-        logger.info("_build_pipelines: embedder not available (%s) — proximity-only clustering", exc)
+            _embed_model = os.environ.get("EMBED_MODEL", "qwen3-embedding:8b")
+            _embed_base_url = os.environ.get("EMBED_BASE_URL")
+            kwargs = {"provider": _embed_provider, "model": _embed_model, "enable_cache": True}
+            if _embed_base_url:
+                kwargs["base_url"] = _embed_base_url
+            embedder = EmbeddingResource(**kwargs)
+            # EmbeddingResource is a ConfigurableResource whose backend load
+            # happens in setup_for_execution(). When called outside a Dagster
+            # execution context (e.g. bench harness) we must invoke it manually.
+            embedder.setup_for_execution(None)
+            # Sanity check: provider="local" and "huggingface" set _st_model;
+            # all HTTP-backed providers set _embeddings. If neither was assigned,
+            # the silent failure path bites later when embed() is called.
+            if embedder._st_model is None and embedder._embeddings is None:
+                raise RuntimeError(
+                    f"EmbeddingResource setup_for_execution did not assign a backend "
+                    f"(provider={_embed_provider!r}, model={_embed_model!r})"
+                )
+            logger.info(
+                "_build_pipelines: embedding merge enabled, provider=%s model=%s",
+                _embed_provider,
+                _embed_model,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.info("_build_pipelines: embedder not available (%s) — proximity-only clustering", exc)
+            embedder = None
 
     ner_pipeline = build_ner_pipeline(ner_config, client, mcp_client, embedder=embedder)
     spo_pipeline = build_spo_pipeline(spo_config, client, mcp_client)
@@ -249,19 +276,40 @@ async def _process_doc(
     spo_status = "completed"
 
     # ── SPO fan-out per evidence window ───────────────────────────────────
+    # Prefer consensus_mentions (Phase B) when available — they carry full
+    # provenance (vote_count, n_encoders, mean_confidence) that the SPO
+    # prompt uses to weight entity reliability.  Fall back to the NER-stage
+    # accepted list for legacy single-NER pipelines.
+    consensus_mentions: list[dict] = ner_result.get("consensus_mentions") or []
+
     for window in evidence_windows:
         window_id = window.get("window_id", "")
         mention_indices: list[int] = window.get("mention_indices") or []
-        window_mentions = [accepted_mentions[i] for i in mention_indices if i < len(accepted_mentions)]
+        if consensus_mentions:
+            # consensus_mentions are indexed in parallel with accepted_mentions
+            # (both lists are built from the same NER accepted set, with the
+            # same ordering).  Use the same mention_indices to slice.
+            window_mentions = [consensus_mentions[i] for i in mention_indices if i < len(consensus_mentions)]
+        else:
+            window_mentions = [accepted_mentions[i] for i in mention_indices if i < len(accepted_mentions)]
 
+        # Use the evidence-window id as the chunk_id for SPO events so the
+        # StateInspector rail surfaces one card per window (the right
+        # granularity now that NER is doc-scoped). Mirror evidence_window_id
+        # into source_metadata too — LangGraph's state propagation drops
+        # top-level fields it didn't see in the initial schema, but nested
+        # dict values survive.
+        window_chunk_id = f"{doc.doc_id}:{window_id}" if window_id else f"{doc.doc_id}:_unwindowed"
         spo_state_input = {
             "raw_text": window.get("text", ""),
             "doc_id": doc.doc_id,
             "evidence_window_id": window_id,
+            "chunk_id": window_chunk_id,
             "model": bench_model,
             "source_metadata": {
                 "document_id": doc.doc_id,
-                "chunk_id": first_chunk_id,
+                "chunk_id": window_chunk_id,
+                "evidence_window_id": window_id,
                 "chunk_index": 0,
                 "total_chunks": len(doc.chunks),
                 "chunk_metadata": cm,
@@ -284,11 +332,7 @@ async def _process_doc(
             spo_status = "failed"
 
     # Determine overall status
-    status = (
-        "failed"
-        if ner_result.get("status") == "failed" or spo_status == "failed"
-        else "completed"
-    )
+    status = "failed" if ner_result.get("status") == "failed" or spo_status == "failed" else "completed"
 
     return {
         "mentions": accepted_mentions,
@@ -376,6 +420,7 @@ async def _process_doc_spo_only(
     cached_clusters: list,
     bench_model: str,
     max_retries: int = 3,
+    doc_mentions: "list[dict] | None" = None,
 ) -> dict:
     """Run SPO fan-out only for a doc using pre-computed clusters.
 
@@ -385,6 +430,14 @@ async def _process_doc_spo_only(
     ``mentions`` list (the caller accumulates those from the shared NER pass).
 
     Phase 3 (CD-80ic).
+
+    Args:
+        doc_mentions: Optional list of pre-computed mention dicts for this doc
+            (from Phase A's shared NER pass).  When provided, window mentions
+            are sliced from this list using ``mention_indices`` from each
+            evidence window, giving the SPO LLM the per-entity provenance
+            metadata (vote_count, mean_confidence) it needs to weight entity
+            reliability.  Falls back to empty list when ``None``.
     """
     cm = doc.chunk_metadata or {}
     first_chunk = doc.chunks[0] if doc.chunks else None
@@ -412,16 +465,31 @@ async def _process_doc_spo_only(
     spo_retries_total = 0
     spo_status = "completed"
 
+    # Pre-built list of mentions for this doc (may carry ConsensusMention fields).
+    _doc_mentions: list[dict] = doc_mentions or []
+
     for window in evidence_windows:
         window_id = window.get("window_id", "")
+        mention_indices: list[int] = window.get("mention_indices") or []
+        # Per-window chunk_id so the StateInspector rail surfaces one card
+        # per evidence window (the right granularity for v3); evidence_window_id
+        # mirrored into source_metadata to survive LangGraph state filtering.
+        window_chunk_id = f"{doc.doc_id}:{window_id}" if window_id else f"{doc.doc_id}:_unwindowed"
+        # Slice mentions for this window — preserves ConsensusMention provenance
+        # fields (vote_count, mean_confidence) so the SPO LLM can weight
+        # entity reliability.  Falls back to empty list if doc_mentions wasn't
+        # provided (legacy callers).
+        window_mentions = [_doc_mentions[i] for i in mention_indices if i < len(_doc_mentions)]
         spo_state_input = {
             "raw_text": window.get("text", ""),
             "doc_id": doc.doc_id,
             "evidence_window_id": window_id,
+            "chunk_id": window_chunk_id,
             "model": bench_model,
             "source_metadata": {
                 "document_id": doc.doc_id,
-                "chunk_id": first_chunk_id,
+                "chunk_id": window_chunk_id,
+                "evidence_window_id": window_id,
                 "chunk_index": 0,
                 "total_chunks": len(doc.chunks),
                 "chunk_metadata": cm,
@@ -430,7 +498,7 @@ async def _process_doc_spo_only(
                 "temporal_start_ms": (cm.get("start_s") * 1000) if cm.get("start_s") is not None else None,
                 "temporal_end_ms": (cm.get("end_s") * 1000) if cm.get("end_s") is not None else None,
             },
-            "upstream_context": {"accepted_mentions": []},
+            "upstream_context": {"accepted_mentions": window_mentions},
             "stages": {},
             "max_retries": max_retries,
         }
@@ -462,6 +530,7 @@ def extract_with_shared_clusters(
     docs: list["_Doc"],
     cached_clusters: "dict[str, list]",
     *,
+    shared_mentions: "dict[str, list[dict]] | None" = None,
     code_location: str,
     max_concurrency: int = 5,
     max_retries: int = 3,
@@ -478,16 +547,21 @@ def extract_with_shared_clusters(
         cached_clusters: ``{doc_id: list[EntityCluster]}`` from Phase A.
             Docs without an entry in this dict are silently skipped (no SPO
             output for that doc).
+        shared_mentions: ``{doc_id: list[mention_dict]}`` from Phase A's NER
+            pass.  When provided, these mentions are converted to ``Mention``
+            domain models and included in the returned mention list so that
+            all Phase B models report the Phase A NER mentions.  When ``None``
+            (legacy callers), an empty mention list is returned.  (CD-7bco)
         code_location: For metrics labeling.
         max_concurrency: Max parallel doc-level SPO tasks.
         max_retries: Max repair attempts per SPO stage per evidence window.
 
     Returns:
-        ``([], assertion_models)`` — mentions are empty because the caller
-        accumulates them from the shared NER pass (Phase A).  Only assertions
-        are produced here.
+        ``(mention_models, assertion_models)`` — mentions are the Phase A NER
+        output (converted to domain models) when ``shared_mentions`` is
+        provided; otherwise an empty list.
     """
-    from dagster_io.models import Assertion, Provenance
+    from dagster_io.models import Assertion, Mention, MentionType, Provenance
 
     if not docs:
         return [], []
@@ -538,6 +612,7 @@ def extract_with_shared_clusters(
                     clusters,
                     bench_model=bench_model,
                     max_retries=max_retries,
+                    doc_mentions=(shared_mentions.get(doc.doc_id) if shared_mentions else None),
                 )
             )
             duration = time.monotonic() - start
@@ -616,8 +691,63 @@ def extract_with_shared_clusters(
             )
         )
 
+    # ── Build Mention domain models from Phase A NER output ───────────────────
+    # When shared_mentions is provided (Phase B harness path), convert each
+    # raw mention dict to a Mention domain model so callers see >0 mentions.
+    # Mirrors the mention-building block in extract_validated (lines ~795-856).
+    mention_models: list = []
+    if shared_mentions:
+        for doc in docs:
+            raw_mentions = shared_mentions.get(doc.doc_id) or []
+            cm = doc.chunk_metadata or {}
+            first_chunk = doc.chunks[0] if doc.chunks else None
+            first_chunk_id = getattr(first_chunk, "chunk_id", "") if first_chunk else ""
+            start_s = cm.get("start_s")
+            end_s = cm.get("end_s")
+            speaker = cm.get("speaker")
+            for m in raw_mentions:
+                mention_type_str = m.get("mention_type", "OTHER")
+                try:
+                    mention_type = MentionType(mention_type_str)
+                except ValueError:
+                    mention_type = MentionType.OTHER
+
+                ENTITIES_EXTRACTED.labels(
+                    code_location=code_location,
+                    entity_type=mention_type.value,
+                    method="langgraph_validated",
+                ).inc()
+
+                prov = Provenance(
+                    source_document_id=doc.doc_id,
+                    chunk_id=first_chunk_id,
+                    span_start=m.get("span_start"),
+                    span_end=m.get("span_end"),
+                    temporal_start_ms=int(start_s * 1000) if start_s is not None else None,
+                    temporal_end_ms=int(end_s * 1000) if end_s is not None else None,
+                    speaker_label=speaker,
+                    extraction_method="llm",
+                    extraction_model=_llm_model,
+                    code_location=code_location,
+                )
+
+                mention_models.append(
+                    Mention(
+                        document_id=doc.doc_id,
+                        chunk_id=first_chunk_id,
+                        text=m.get("text", ""),
+                        mention_type=mention_type,
+                        span_start=m.get("span_start"),
+                        span_end=m.get("span_end"),
+                        confidence=m.get("confidence", 1.0),
+                        context=m.get("context", ""),
+                        provenance=prov,
+                    )
+                )
+
     logger.info(
-        "extract_with_shared_clusters complete: %d assertions from %d docs (%d failures, %d retries)",
+        "extract_with_shared_clusters complete: %d mentions, %d assertions from %d docs (%d failures, %d retries)",
+        len(mention_models),
         len(assertion_models),
         len(docs),
         errors,
@@ -626,13 +756,14 @@ def extract_with_shared_clusters(
 
     extract_with_shared_clusters.last_stats = {
         "doc_count": len(docs),
+        "mention_count": len(mention_models),
         "assertion_count": len(assertion_models),
         "proposition_retries": total_proposition_retries,
         "errors": errors,
         "audit_events": all_audit_events,
     }
 
-    return [], assertion_models
+    return mention_models, assertion_models
 
 
 def extract_validated(

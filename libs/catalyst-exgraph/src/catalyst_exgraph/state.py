@@ -55,6 +55,53 @@ class EvidenceWindow(TypedDict, total=False):
     """The cluster whose bounding box seeded this window."""
 
 
+class ConsensusMention(TypedDict, total=False):
+    """A consensus mention produced by ConsensusNode (Phase B, CD-94ow).
+
+    Aggregates per-encoder mentions into a single entry with full provenance
+    so downstream nodes (ClusterEntitiesNode, SPO) and the HITL viewer can
+    see exactly how each mention was voted on.
+    """
+
+    mention_id: str
+    """Stable id derived from (canonical_text, canonical_type, span_start).
+    MD5-hex[:12] of ``"{canonical_text}|{canonical_type}|{span_start}"``.
+    """
+
+    text: str
+    """Canonical surface form (lower-stripped from the highest-conf encoder)."""
+
+    canonical_type: str
+    """Post-vote canonical MentionType string (e.g. ``"PERSON"``, ``"ORG"``)."""
+
+    span_start: int
+    """Character offset start — taken from the highest-confidence encoder."""
+
+    span_end: int
+    """Character offset end — taken from the highest-confidence encoder."""
+
+    span_provenance: str
+    """Which encoder's span was used (its encoder_name string)."""
+
+    source_models: list[str]
+    """Encoders that contributed a mention to this cluster."""
+
+    vote_count: int
+    """Number of unique source_models that voted for this mention."""
+
+    n_encoders: int
+    """Total encoders in the ensemble (denominator for vote fractions)."""
+
+    mean_confidence: float
+    """Mean confidence across all raw mentions in the cluster."""
+
+    type_votes: dict[str, int]
+    """canonical_type → number of mentions that voted for it."""
+
+    raw_mentions: list[dict]
+    """Per-encoder source mentions preserved for debugging / HITL."""
+
+
 class ExGraphStatus(StrEnum):
     """Status of the extraction graph execution."""
 
@@ -156,3 +203,36 @@ class ExGraphState(TypedDict, total=False):
 
     evidence_window_id: str
     """Set when running the SPO sub-graph for one specific evidence window."""
+
+    # ── Phase A: NER ensemble (CD-7h9m) ─────────────────────────────────────
+    per_encoder_mentions: dict[str, list[dict[str, Any]]]
+    """Per-encoder mention lists from NerEnsembleNode.
+
+    Keyed by encoder name (cfg.model_override).  Each value is the list of
+    accepted mentions that encoder produced.  Empty list on timeout / error.
+    Populated by NerEnsembleNode; consumed by ConsensusNode (Phase B).
+    """
+
+    ensemble_errors: dict[str, dict[str, Any]]
+    """Per-encoder error info for encoders that failed or timed out.
+
+    Keyed by encoder name.  Absent when all encoders succeeded.
+    Shape: ``{"type": "timeout"|ExceptionClassName, "message"?: str, "duration_s": float}``.
+    """
+
+    # ── Phase B: Consensus (CD-94ow) ─────────────────────────────────────────
+    consensus_mentions: list[ConsensusMention]
+    """Accepted consensus mentions produced by ConsensusNode.
+
+    Each entry is a ConsensusMention with full provenance: vote_count,
+    source_models, mean_confidence, type_votes, span_provenance.
+    Consumed by ClusterEntitiesNode (falls back to stages.ner.accepted
+    for legacy single-NER pipelines when this key is absent).
+    """
+
+    rejected_mentions: list[dict[str, Any]]
+    """Mentions that did not reach quorum in ConsensusNode.
+
+    Each entry carries: text, canonical_type, vote_count, n_encoders,
+    quorum, source_models, raw_mentions.  Persisted for HITL / DPO.
+    """

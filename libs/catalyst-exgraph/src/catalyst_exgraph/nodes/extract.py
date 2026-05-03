@@ -6,7 +6,6 @@ configurable node that works for any extraction type.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import Any
@@ -21,6 +20,45 @@ from catalyst_exgraph.state import ExGraphState, ExGraphStatus
 from dagster_io import event_tail
 
 logger = logging.getLogger(__name__)
+
+
+def _format_entity_provenance(mentions: list[dict]) -> str:
+    """Format a list of mention dicts into a human-readable entity block.
+
+    When mentions carry consensus metadata (``vote_count`` + ``n_encoders``
+    fields), the richer provenance format is used:
+
+        - Reagan           [PERSON,      5/5 votes, mean_conf 0.94]
+        - Crimea           [LOCATION,    3/5 votes, mean_conf 0.62]
+
+    Legacy mentions (bare ``{text, mention_type}`` shape) fall back to:
+
+        - Reagan           [PERSON]
+
+    Both shapes are tolerated in the same list so mixed-pipeline paths don't
+    crash.  Empty or missing ``text`` entries are skipped silently.
+    """
+    if not mentions:
+        return "  (none)"
+
+    lines: list[str] = []
+    for m in mentions:
+        text = m.get("text", "")
+        if not text:
+            continue
+
+        # Detect ConsensusMention shape
+        if "vote_count" in m and "n_encoders" in m:
+            entity_type = m.get("canonical_type") or m.get("mention_type") or "ENTITY"
+            vote_count = m.get("vote_count", 0)
+            n_encoders = m.get("n_encoders", 1)
+            mean_conf = m.get("mean_confidence", 0.0)
+            lines.append(f"  - {text:<30s} [{entity_type}, {vote_count}/{n_encoders} votes, mean_conf {mean_conf:.2f}]")
+        else:
+            entity_type = m.get("mention_type") or m.get("canonical_type") or "ENTITY"
+            lines.append(f"  - {text:<30s} [{entity_type}]")
+
+    return "\n".join(lines) if lines else "  (none)"
 
 
 def _load_prompt(config: StageConfig) -> str:
@@ -88,11 +126,11 @@ class ExtractNode:
             if self.config.stage_name == "spo":
                 upstream = state.get("upstream_context", {})
                 accepted_mentions = upstream.get("accepted_mentions", [])
-                # Pass only entity surface forms as constraints (not full objects).
-                # These constrain which entities the SPO extraction should reference,
-                # NOT additional text to extract from.
-                mention_names = [m.get("text", "") for m in accepted_mentions if m.get("text")]
-                prompt = f"Input mentions: {json.dumps(mention_names)}\n\nInput text: {raw_text}"
+                # Format entity provenance block — includes vote_count / mean_confidence
+                # when consensus metadata is present; falls back to bare "text [type]"
+                # format for legacy single-NER pipelines.
+                entity_block = _format_entity_provenance(accepted_mentions)
+                prompt = f"Entities (with NER agreement):\n{entity_block}\n\nInput text: {raw_text}"
             else:
                 prompt = raw_text
 

@@ -87,7 +87,12 @@ def make_audit_event(
     doc_id = s.get("doc_id") or src_meta.get("document_id")
     chunk_idx = s.get("chunk_idx")
     chunk_id = s.get("chunk_id") or src_meta.get("chunk_id")
-    evidence_window_id: str | None = s.get("evidence_window_id")
+    # LangGraph's state propagation drops top-level TypedDict fields that
+    # weren't part of the original input dict in some configs (1.1.x). Read
+    # from source_metadata as a fallback — that's a nested dict, so it
+    # survives whatever filtering LangGraph applies. Phase 2 originally
+    # wrote evidence_window_id only at the top level, which silently lost it.
+    evidence_window_id: str | None = s.get("evidence_window_id") or src_meta.get("evidence_window_id")
 
     stage_name = ""
     for prefix in ("extract_", "validate_", "repair_"):

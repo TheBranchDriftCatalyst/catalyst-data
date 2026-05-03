@@ -19,6 +19,13 @@ In tests, pass ``store=None`` to use the in-memory fallback which keeps
 everything in a plain dict and never touches S3.  This mirrors the
 ``EmbeddingCache`` pattern from Phase 1 (CD-zt85).
 
+Cache value shape (new, CD-jsha):
+    ``{"clusters": [...], "mentions": [...]}``
+
+Backwards-compat (CD-jsha): old entries that are a bare JSON list are read as
+``CachedNerResult(clusters=<that list>, mentions=[])``.  The next ``put`` for
+that key will silently upgrade to the new shape.
+
 Phase 3 (CD-80ic).
 """
 
@@ -27,18 +34,96 @@ from __future__ import annotations
 import json
 import os
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
 from dagster_io.logging import get_logger
 
 if TYPE_CHECKING:
-    from catalyst_exgraph.state import EntityCluster
+    pass
 
 logger = get_logger(__name__)
 
 _CACHE_PREFIX = "silver"
 _BUCKET = "dagster"
+
+
+@dataclass
+class CachedNerResult:
+    """Value type returned by ClusterCache.
+
+    ``clusters`` — list of EntityCluster TypedDicts (same shape as the old
+    ``list[Cluster]`` the cache used to return).
+
+    ``mentions`` — list of accepted Mention dicts from Phase A NER (added in
+    CD-jsha so warm S3 cache hits no longer produce empty mentions).
+
+    v4 fields (CD-z6xe):
+    ``per_encoder_mentions`` — per-encoder raw mention lists keyed by encoder
+        name; empty dict on legacy entries (backwards-compat read).
+    ``evidence_windows`` — packed evidence windows from PackEvidenceNode; empty
+        list on legacy entries.
+    ``rejected_mentions`` — mentions below consensus quorum; empty list on
+        legacy entries.
+    """
+
+    clusters: list[dict] = field(default_factory=list)
+    mentions: list[dict] = field(default_factory=list)
+    per_encoder_mentions: dict[str, list[dict]] = field(default_factory=dict)  # v4: CD-z6xe
+    evidence_windows: list[dict] = field(default_factory=list)  # v4: CD-z6xe
+    rejected_mentions: list[dict] = field(default_factory=list)  # v4: CD-z6xe
+
+
+# ── Serialisation helpers ────────────────────────────────────────────────────
+
+
+def _to_payload(result: CachedNerResult) -> bytes:
+    """Serialise a CachedNerResult to JSON bytes (v4 shape)."""
+    return json.dumps(
+        {
+            "clusters": result.clusters,
+            "mentions": result.mentions,
+            "per_encoder_mentions": result.per_encoder_mentions,
+            "evidence_windows": result.evidence_windows,
+            "rejected_mentions": result.rejected_mentions,
+        }
+    ).encode("utf-8")
+
+
+def _from_payload(data: bytes, s3_key: str = "<unknown>") -> CachedNerResult | None:
+    """Deserialise JSON bytes → CachedNerResult with backwards-compat.
+
+    Old shape (bare JSON list) → CachedNerResult(clusters=<list>, mentions=[],
+        per_encoder_mentions={}, evidence_windows=[], rejected_mentions=[]).
+    v3 shape (clusters + mentions dict) → per_encoder_mentions/evidence_windows/
+        rejected_mentions default to empty (graceful upgrade on next put).
+    v4 shape → all five fields present.
+    Corrupt data → returns None (cache miss semantics).
+    """
+    try:
+        loaded = json.loads(data.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ClusterCache: corrupt entry %s — ignoring: %s", s3_key, exc)
+        return None
+
+    if isinstance(loaded, list):
+        # Legacy shape: clusters only, all other fields absent.
+        logger.debug("ClusterCache: legacy shape at %s — extra fields empty until next put", s3_key)
+        return CachedNerResult(clusters=loaded, mentions=[])
+
+    if isinstance(loaded, dict):
+        return CachedNerResult(
+            clusters=loaded.get("clusters", []),
+            mentions=loaded.get("mentions", []),
+            per_encoder_mentions=loaded.get("per_encoder_mentions", {}),
+            evidence_windows=loaded.get("evidence_windows", []),
+            rejected_mentions=loaded.get("rejected_mentions", []),
+        )
+
+    logger.warning("ClusterCache: unexpected payload type %s at %s — ignoring", type(loaded).__name__, s3_key)
+    return None
 
 
 def _make_cluster_key(doc_text: str, ner_model: str, params: dict) -> str:
@@ -57,13 +142,22 @@ class _InMemoryStore:
     """Fallback store used in tests / when S3 is unavailable."""
 
     def __init__(self) -> None:
-        self._data: dict[str, list[dict]] = {}
+        self._data: dict[str, bytes] = {}
 
-    def read(self, code_loc: str, key: str) -> list[dict] | None:
-        return self._data.get(f"{code_loc}/{key}")
+    def read(self, code_loc: str, key: str) -> CachedNerResult | None:
+        raw = self._data.get(f"{code_loc}/{key}")
+        if raw is None:
+            return None
+        return _from_payload(raw, s3_key=f"{code_loc}/{key}")
 
-    def write(self, code_loc: str, key: str, clusters: list[dict]) -> None:
-        self._data[f"{code_loc}/{key}"] = clusters
+    def write(self, code_loc: str, key: str, result: CachedNerResult) -> None:
+        self._data[f"{code_loc}/{key}"] = _to_payload(result)
+
+    # ── Low-level helper for legacy-compat tests ─────────────────────────────
+
+    def write_raw(self, code_loc: str, key: str, raw: bytes) -> None:
+        """Write arbitrary bytes — used by tests to plant legacy-shaped entries."""
+        self._data[f"{code_loc}/{key}"] = raw
 
 
 class _S3Store:
@@ -77,23 +171,27 @@ class _S3Store:
         shard = _shard(key)
         return f"{_CACHE_PREFIX}/{self._code_loc}/cluster_cache/{shard}/{key}.json"
 
-    def read(self, _code_loc: str, key: str) -> list[dict] | None:
+    def read(self, _code_loc: str, key: str) -> CachedNerResult | None:
         s3_key = self._s3_key(key)
         try:
             data = self._s3.get_object(s3_key)
         except Exception:  # noqa: BLE001
             return None
-        try:
-            return json.loads(data.decode("utf-8"))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("ClusterCache: corrupt entry %s — ignoring: %s", s3_key, exc)
-            return None
+        return _from_payload(data, s3_key=s3_key)
 
-    def write(self, _code_loc: str, key: str, clusters: list[dict]) -> None:
+    def write(self, _code_loc: str, key: str, result: CachedNerResult) -> None:
         s3_key = self._s3_key(key)
         try:
-            self._s3.put_object(s3_key, json.dumps(clusters).encode("utf-8"))
-            logger.debug("ClusterCache: wrote %s (%d clusters)", s3_key, len(clusters))
+            self._s3.put_object(s3_key, _to_payload(result))
+            logger.debug(
+                "ClusterCache: wrote %s (%d clusters, %d mentions, %d encoders, %d windows, %d rejected)",
+                s3_key,
+                len(result.clusters),
+                len(result.mentions),
+                len(result.per_encoder_mentions),
+                len(result.evidence_windows),
+                len(result.rejected_mentions),
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("ClusterCache: write failed for %s: %s", s3_key, exc)
 
@@ -168,8 +266,8 @@ class ClusterCache:
         doc_text: str,
         ner_model: str,
         params: dict,
-    ) -> list[EntityCluster] | None:
-        """Return cached clusters for the given (doc_text, ner_model, params) triple.
+    ) -> CachedNerResult | None:
+        """Return a CachedNerResult for the given (doc_text, ner_model, params) triple.
 
         Returns ``None`` on a cache miss so callers can distinguish "not
         computed yet" from "computed, returned empty list".
@@ -182,11 +280,12 @@ class ClusterCache:
             logger.debug("ClusterCache: miss  doc_id=%s model=%s key=%s", doc_id, ner_model, key)
         else:
             logger.debug(
-                "ClusterCache: hit   doc_id=%s model=%s key=%s clusters=%d",
+                "ClusterCache: hit   doc_id=%s model=%s key=%s clusters=%d mentions=%d",
                 doc_id,
                 ner_model,
                 key,
-                len(result),
+                len(result.clusters),
+                len(result.mentions),
             )
         return result
 
@@ -196,21 +295,25 @@ class ClusterCache:
         doc_text: str,
         ner_model: str,
         params: dict,
-        clusters: list[EntityCluster],
+        result: CachedNerResult,
     ) -> None:
-        """Write clusters to the cache.
+        """Write a CachedNerResult to the cache.
 
         Idempotent: writing the same key twice with the same value is a no-op
         from the perspective of correctness (content-addressed key).
         """
         key = _make_cluster_key(doc_text, ner_model, params)
-        self._store.write(self._code_loc, key, list(clusters))
+        self._store.write(self._code_loc, key, result)
         logger.debug(
-            "ClusterCache: put   doc_id=%s model=%s key=%s clusters=%d",
+            "ClusterCache: put   doc_id=%s model=%s key=%s clusters=%d mentions=%d encoders=%d windows=%d rejected=%d",
             doc_id,
             ner_model,
             key,
-            len(clusters),
+            len(result.clusters),
+            len(result.mentions),
+            len(result.per_encoder_mentions),
+            len(result.evidence_windows),
+            len(result.rejected_mentions),
         )
 
     def get_or_compute(
@@ -219,8 +322,8 @@ class ClusterCache:
         doc_text: str,
         ner_model: str,
         params: dict,
-        compute_fn,
-    ) -> list[EntityCluster]:
+        compute_fn: Callable[[], CachedNerResult],
+    ) -> CachedNerResult:
         """Lookup → compute on miss → write back → return.
 
         ``compute_fn()`` is called with no arguments only on a cache miss.
@@ -233,8 +336,8 @@ class ClusterCache:
             ner_model: NER model name (used as cache key input).
             params: Dict of clustering params, e.g.
                 ``{"threshold": 0.85, "proximity_radius": 512}``.
-            compute_fn: Zero-argument callable that returns
-                ``list[EntityCluster]``.
+            compute_fn: Zero-argument callable that returns a
+                ``CachedNerResult`` (clusters + mentions).
         """
         key = _make_cluster_key(doc_text, ner_model, params)
         with self._key_lock(key):
@@ -247,6 +350,6 @@ class ClusterCache:
                 doc_id,
                 ner_model,
             )
-            clusters = compute_fn()
-            self._store.write(self._code_loc, key, list(clusters))
-            return clusters
+            result = compute_fn()
+            self._store.write(self._code_loc, key, result)
+            return result

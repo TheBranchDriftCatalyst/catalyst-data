@@ -164,6 +164,96 @@ def build_ner_pipeline(
     return graph.compile()
 
 
+def build_ensemble_pipeline(
+    encoders: list[StageConfig],
+    clients: dict[str, ExtractionClient],
+    mcp_client: Any,
+    embedder: Any = None,
+    cache: Any = None,
+    chunk_config: ChunkConfig | None = None,
+    per_encoder_timeout_s: float = 60.0,
+    quorum: int | None = None,
+    per_type_quorum: dict[str, int] | None = None,
+) -> Any:
+    """Build the v4 NER-ensemble pipeline (Phase B, CD-94ow).
+
+    Graph: [chunk →] ner_ensemble → consensus → cluster_entities → pack_evidence
+
+    Phase A added ``NerEnsembleNode``; Phase B inserts ``ConsensusNode``
+    between the ensemble and cluster stages so ``ClusterEntitiesNode``
+    operates on consensus-filtered mentions with full provenance rather than
+    raw per-encoder output.
+
+    ``build_ner_pipeline`` (single-NER) is kept intact for callers that
+    haven't migrated to the ensemble path yet.
+
+    Args:
+        encoders: List of StageConfig objects — one per encoder model.
+            ``cfg.model_override`` must match a key in ``clients``.
+        clients: Pre-resolved ExtractionClient instances keyed by encoder name
+            (same string as ``cfg.model_override``).
+        mcp_client: MCP contract validation client.
+        embedder: Optional EmbeddingResource for embedding-merge step in
+            ClusterEntitiesNode.  ``None`` → proximity-only clustering.
+        cache: Optional EmbeddingCache.  Defaults to a fresh in-memory cache.
+        chunk_config: Optional ChunkConfig.  When provided a ChunkNode is
+            prepended.
+        per_encoder_timeout_s: Per-encoder asyncio.wait_for timeout.  Default 60 s.
+        quorum: Override default quorum ``ceil(N/2)`` for ConsensusNode.
+        per_type_quorum: Per-type quorum overrides for ConsensusNode.
+            ``None`` → PII_TYPES default to K=1.
+
+    Returns:
+        Compiled LangGraph ready for ``ainvoke()``.
+    """
+    from catalyst_exgraph.nodes.cluster import ClusterEntitiesNode
+    from catalyst_exgraph.nodes.consensus import ConsensusNode
+    from catalyst_exgraph.nodes.ner_ensemble import NerEnsembleNode
+    from catalyst_exgraph.nodes.pack import PackEvidenceNode
+
+    encoder_names = [cfg.model_override or cfg.stage_name for cfg in encoders]
+
+    graph = StateGraph(ExGraphState)
+    node_names: list[str] = []
+
+    if chunk_config is not None:
+        from catalyst_exgraph.nodes.chunk import ChunkNode
+
+        graph.add_node("chunk", ChunkNode(chunk_config))
+        node_names.append("chunk")
+
+    ensemble_node = NerEnsembleNode(
+        encoders=encoders,
+        clients=clients,
+        mcp_client=mcp_client,
+        per_encoder_timeout_s=per_encoder_timeout_s,
+    )
+    graph.add_node("ner_ensemble", ensemble_node)
+    node_names.append("ner_ensemble")
+
+    # Phase B: ConsensusNode sits between ensemble and clustering
+    consensus_node = ConsensusNode(
+        encoders=encoder_names,
+        quorum=quorum,
+        per_type_quorum=per_type_quorum,
+    )
+    graph.add_node("consensus", consensus_node)
+    node_names.append("consensus")
+
+    graph.add_node("cluster_entities", ClusterEntitiesNode(embedder=embedder, cache=cache))
+    node_names.append("cluster_entities")
+
+    graph.add_node("pack_evidence", PackEvidenceNode())
+    node_names.append("pack_evidence")
+
+    graph.set_entry_point(node_names[0])
+    for i in range(len(node_names) - 1):
+        graph.add_edge(node_names[i], node_names[i + 1])
+    graph.add_edge(node_names[-1], END)
+
+    return graph.compile()
+
+
 def build_spo_pipeline(
     spo_config: StageConfig,
     client: ExtractionClient,

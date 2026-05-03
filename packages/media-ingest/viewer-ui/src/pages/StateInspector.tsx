@@ -22,6 +22,7 @@ import { useRunStream } from "@/hooks/useRunStream";
 import { ChunkRail } from "@/components/state/ChunkRail";
 import { ChunkTimeline } from "@/components/state/ChunkTimeline";
 import { ChunkTextPanel } from "@/components/state/ChunkTextPanel";
+import { ConsensusDetail } from "@/components/state/ConsensusDetail";
 
 function readQuery(): { model: string | null; docId: string | null; chunkId: string | null } {
   const p = new URLSearchParams(window.location.search);
@@ -178,12 +179,16 @@ export function StateInspector() {
       </div>
 
       <div className="w-[420px] flex-shrink-0 border-l border-white/10 overflow-y-auto">
-        <ChunkTextPanel
-          chunkText={chunkText}
-          extracted={extracted}
-          events={docEvents}
-          hoveredErrorIndex={null}
-        />
+        {selectedChunk?.endsWith(":_consensus") ? (
+          <ConsensusDetail chunkId={selectedChunk} events={events} />
+        ) : (
+          <ChunkTextPanel
+            chunkText={chunkText}
+            extracted={extracted}
+            events={docEvents}
+            hoveredErrorIndex={null}
+          />
+        )}
       </div>
     </div>
   );

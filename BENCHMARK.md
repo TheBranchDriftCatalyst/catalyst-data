@@ -23,6 +23,16 @@ task bench -- --local-only    # skip cloud models (no API key needed)
 task bench -- --all-videos    # extract across every video in audio_manifest.yaml (multi-video)
 task bench:view               # viewer SPA at http://localhost:5173/viewer/benchmarks
 
+# Override model panels:
+task bench:run -- --ensemble gliner-medium,gliner-large
+task bench:run -- --spo-models gemma3-12b,gpt-4o
+task bench:run -- --ensemble gliner-medium,gliner-large --ensemble-quorum 2
+
+# Phase-skip modes:
+task bench:run -- --ensemble-only                          # NER bench only, skip Phase 4 SPO
+task bench:run -- --spo-only --run-id 2024-01-01-120000   # Phase 4 SPO only, reuse cached NER
+task bench:run -- --no-consensus                           # v3 fairness: each encoder runs standalone
+
 # Fixture prep (run before `task bench` whenever new source videos are added):
 task bench:fixtures:regen     # populate per-doc-id pipeline-cache for every manifest video
 task bench:chunks:regen       # rebuild per-video benchmark_chunks fixtures from cached audio
@@ -49,7 +59,10 @@ flowchart TD
 
         RUN -.- RUN_OPTS
         RUN_OPTS["Optional Args:
-        --models model1,model2
+        --ensemble enc1,enc2
+        --spo-models m1,m2
+        --ensemble-quorum K
+        --ensemble-only / --spo-only / --no-consensus
         --local-only
         --regen
         --timeout N
@@ -298,13 +311,24 @@ URL: `http://localhost:5173/viewer/benchmarks`
 | `--regen` | Clear and regenerate all extraction artifacts |
 | `--timeout N` | Per-model timeout in seconds (default: 300) |
 | `--local-only` | Skip cloud models (no API key needed) |
-| `--all-videos` | Run each model across every video in `audio_manifest.yaml` (multi-video; uses `scripts/bench_extract_per_video.py` instead of single-video pytest path) |
+| `--all-videos` | Run each model across every video in `audio_manifest.yaml` (multi-video; uses `scripts/benchmark/bench_extract_per_video.py` instead of single-video pytest path) |
 | `--label NAME` | Label for this run (used in runs/ dir name) |
-| `--models LIST` | Run only specific models (comma-separated) |
-| `--ner-models LIST` | Override ensemble NER panel (comma-separated) |
-| `--spo-models LIST` | Override ensemble SPO panel (comma-separated) |
+| `--run-id ID` | Existing run ID to load (required by `--spo-only`) |
 | `--gt-model MODEL` | Model for single-model GT generation (default: gpt-4o) |
 | `--chunk-size TOKENS` | Override chunk size in tokens for A/B testing |
+
+### Ensemble / SPO Role Split
+
+| Flag | Description |
+|------|-------------|
+| `--ensemble LIST` | Comma-separated encoder names that vote in Phase 1 NER consensus. Each also produces an individual per-model fixture for F1-vs-GT scoring. Default: all models with `encoder` or `extraction-specialist` tags. |
+| `--spo-models LIST` | Comma-separated model names that run Phase 4 SPO over the consensus output. Default: all models with `tier1`, `tier2`, or `cloud` tags. |
+| `--ensemble-quorum K` | Override ConsensusNode quorum (default `ceil(N/2)`). Must satisfy `1 ≤ K ≤ N`. |
+| `--ensemble-only` | Skip Phase 4 SPO entirely. Produce per-encoder + ensemble NER fixtures and exit. |
+| `--spo-only` | Skip Phase 1+2. Load cached consensus from `--run-id`'s ClusterCache, run Phase 4 only. Requires `--run-id`. |
+| `--no-consensus` | v3 fairness path: run each `--ensemble` model as a standalone NER+SPO pipeline (no consensus vote). |
+
+`--ensemble-only`, `--spo-only`, and `--no-consensus` are mutually exclusive.
 
 ## Task Commands
 
@@ -334,7 +358,7 @@ Each domain owns its own fixtures under `packages/<domain>/tests/fixtures/`:
 packages/media-ingest/tests/fixtures/
     audio_manifest.yaml          # 7 source videos -> stable doc_ids
     demo_video.mp4               # default single-video fixture
-    <other source videos>.mp4    # gitignored when present (compressed via scripts/compress_fixtures.py)
+    <other source videos>.mp4    # gitignored when present (compressed via scripts/fixtures/compress_fixtures.py)
     benchmark_documents.json     # raw documents for adaptive chunking
 packages/congress-data/tests/fixtures/
     bill_manifest.yaml           # bill_ids iterated by task bench:chunks:regen:congress
@@ -477,7 +501,7 @@ source videos are added:
 ```bash
 # 1. Compress: shrink raw videos in-place via the production transcode
 #    dispatcher (videotoolbox-hevc on macOS, svt-av1 elsewhere).
-python scripts/compress_fixtures.py packages/media-ingest/tests/fixtures/
+python scripts/fixtures/compress_fixtures.py packages/media-ingest/tests/fixtures/
 
 # 2. Audio cache: per-doc-id transcription + diarization.
 HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
@@ -629,9 +653,13 @@ All extraction output is JSON-serializable. The `BenchmarkStore` handles save/lo
    ```
    Add it to the appropriate list (`TIER2_MODELS`, `CLOUD_MODELS`, etc.).
 
-2. Run the model:
+2. Run the model as a standalone SPO participant:
    ```bash
-   python tests/benchmark_harness.py --models your-model
+   python tests/benchmark_harness.py --spo-models your-model
+   ```
+   Or add it to the ensemble NER panel if it's an encoder:
+   ```bash
+   python tests/benchmark_harness.py --ensemble gliner-medium,gliner-large,your-model
    ```
 
 3. Score against GT:

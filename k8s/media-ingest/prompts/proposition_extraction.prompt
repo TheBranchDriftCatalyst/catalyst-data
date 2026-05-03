@@ -88,3 +88,19 @@ BAD assertions (do NOT generate these):
 5. Each assertion should be independently meaningful without needing surrounding context.
 6. Focus on factual claims, allegations, and substantive speech acts — not filler.
 7. Preserve speaker attribution in source_attribution qualifier when relevant.
+
+## NER Ensemble Provenance
+
+The "Entities" list above comes from a consensus of N specialized NER models.
+Each entity carries:
+  - canonical type (PERSON, LOCATION, ORGANIZATION, etc.)
+  - vote_count / n_encoders — how many NER models found this entity
+  - mean_conf — average confidence across the agreeing models
+
+Use this signal:
+  - High vote_count + high mean_conf → reliable entity, safe to relate.
+  - Low vote_count (e.g. 1/5) or low mean_conf (< 0.5) → weakly supported.
+    Prefer omitting relations involving these unless the source text
+    strongly justifies them.
+When in doubt, omit a proposition rather than fabricate one. The downstream
+scorer punishes hallucinated relations more than missing ones.

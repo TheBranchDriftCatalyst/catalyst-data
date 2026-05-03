@@ -67,3 +67,19 @@ BAD assertions:
 3. No pronoun subjects or objects.
 4. No metadata noise: skip "has type", "is classified as", "has number" triples.
 5. Focus on who-owns-what, who-controls-whom, money flows, and organizational relationships.
+
+## NER Ensemble Provenance
+
+The "Entities" list above comes from a consensus of N specialized NER models.
+Each entity carries:
+  - canonical type (PERSON, LOCATION, ORGANIZATION, etc.)
+  - vote_count / n_encoders — how many NER models found this entity
+  - mean_conf — average confidence across the agreeing models
+
+Use this signal:
+  - High vote_count + high mean_conf → reliable entity, safe to relate.
+  - Low vote_count (e.g. 1/5) or low mean_conf (< 0.5) → weakly supported.
+    Prefer omitting relations involving these unless the source text
+    strongly justifies them.
+When in doubt, omit a proposition rather than fabricate one. The downstream
+scorer punishes hallucinated relations more than missing ones.

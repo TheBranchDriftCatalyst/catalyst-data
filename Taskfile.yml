@@ -206,13 +206,13 @@ tasks:
   # ── Benchmark ────────────────────────────────────────────────────────────
 
   bench:
-    desc: "Full benchmark methodology: run models → ground truth → F1 report → viewer"
+    desc: "Full benchmark methodology: run models → ground truth → F1 report → viewer. Use --ensemble / --spo-models to override model panels."
     env: *seed-env
     cmds:
       - mise exec -- python tests/benchmark_harness.py --full --regen {{.CLI_ARGS}}
 
   bench:run:
-    desc: "Run extraction benchmarks (skip ground truth regen)"
+    desc: "Run extraction benchmarks (skip ground truth regen). Flags: --ensemble LIST, --spo-models LIST, --ensemble-quorum K, --ensemble-only, --spo-only --run-id ID, --no-consensus."
     env: *seed-env
     cmds:
       - mise exec -- python tests/benchmark_harness.py --regen {{.CLI_ARGS}}
