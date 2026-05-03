@@ -164,6 +164,10 @@ def _phase_a_build_cluster_cache(
         # per_encoder_by_doc[encoder_name][doc_id] = list[mention_dict]
         per_encoder_by_doc: dict[str, dict[str, list]] = {m.name: {} for m in encoder_cfgs}
 
+        # Wall-clock for the entire Phase A loop (encoders run in parallel so
+        # wall time < sum of per-encoder times).
+        phase_a_t0 = time.monotonic()
+
         for doc in docs:
             # Check warm cache first (skips ensemble run entirely on re-runs)
             cache_key_model = "ensemble_v4"
@@ -199,14 +203,31 @@ def _phase_a_build_cluster_cache(
                 result=ner_result,
             )
 
+        # Phase A wall-clock (all encoders ran in parallel, so this is < sum).
+        phase_a_duration_s = time.monotonic() - phase_a_t0
+
         # ── Save per-encoder fixtures so _run_model can return them directly ──
         if store is not None:
+            # Read back ner_encoder_completed events from the JSONL to get
+            # real per-encoder duration_s and mention_count.
+            enc_event_stats = _read_encoder_event_stats()
+
+            total_doc_chars = sum(len(d.full_text) for d in docs)
+            n_docs = len(docs)
+
             for enc_cfg in encoder_cfgs:
                 enc_name = enc_cfg.name
                 enc_docs_mentions = per_encoder_by_doc.get(enc_name, {})
                 all_enc_mentions = []
                 for _doc_id, enc_mentions in enc_docs_mentions.items():
                     all_enc_mentions.extend(enc_mentions)
+
+                # Per-encoder timing from audit events (sum across all docs for
+                # this encoder — each doc emits one ner_encoder_completed event).
+                ev_stat = enc_event_stats.get(enc_name, {})
+                enc_duration_s = ev_stat.get("duration_s", 0.0)
+                enc_tok_per_s = (total_doc_chars / 4.0 / enc_duration_s) if enc_duration_s > 0 else 0.0
+
                 enc_fixture = {
                     "model": enc_cfg.model,
                     "base_url": enc_cfg.base_url or "",
@@ -214,10 +235,15 @@ def _phase_a_build_cluster_cache(
                     "mentions": all_enc_mentions,
                     "assertions": [],
                     "stats": {
-                        "chunk_count": sum(len(d.chunks) for d in docs),
-                        "duration_s": 0.0,
+                        "chunk_count": n_docs,
+                        "duration_s": enc_duration_s,
+                        "tokens_per_sec": enc_tok_per_s,
                         "mention_count": len(all_enc_mentions),
                         "assertion_count": 0,
+                        "llm_call_count": n_docs,
+                        "mention_retries": 0,
+                        "proposition_retries": 0,
+                        "errors": ev_stat.get("error_count", 0),
                         "phase": "a_encoder",
                     },
                 }
@@ -227,6 +253,7 @@ def _phase_a_build_cluster_cache(
             all_consensus_mentions = []
             for doc_mentions in mentions_by_doc.values():
                 all_consensus_mentions.extend(doc_mentions)
+            ensemble_tok_per_s = (total_doc_chars / 4.0 / phase_a_duration_s) if phase_a_duration_s > 0 else 0.0
             ensemble_fixture = {
                 "model": "ensemble",
                 "base_url": "",
@@ -234,10 +261,15 @@ def _phase_a_build_cluster_cache(
                 "mentions": all_consensus_mentions,
                 "assertions": [],
                 "stats": {
-                    "chunk_count": sum(len(d.chunks) for d in docs),
-                    "duration_s": 0.0,
+                    "chunk_count": n_docs,
+                    "duration_s": phase_a_duration_s,
+                    "tokens_per_sec": ensemble_tok_per_s,
                     "mention_count": len(all_consensus_mentions),
                     "assertion_count": 0,
+                    "llm_call_count": n_docs,
+                    "mention_retries": 0,
+                    "proposition_retries": 0,
+                    "errors": 0,
                     "phase": "a_ensemble",
                     "n_encoders": len(encoder_cfgs),
                 },
@@ -249,6 +281,58 @@ def _phase_a_build_cluster_cache(
     except Exception:
         # Propagate — Phase A failure is not silently swallowed
         raise
+
+
+def _read_encoder_event_stats() -> dict[str, dict]:
+    """Read ``ner_encoder_completed`` events from the current run's JSONL.
+
+    Returns a dict keyed by encoder name with aggregated stats:
+        {encoder_name: {"duration_s": float, "mention_count": int, "error_count": int}}
+
+    Falls back to empty dict when event_tail is not configured or the file
+    doesn't exist yet (e.g. warm-cache-only runs).
+    """
+    import json as _json
+
+    from dagster_io import event_tail as _et
+
+    result: dict[str, dict] = {}
+    if not _et.is_configured() or _et._path is None:
+        return result
+    path = _et._path
+    if not path.exists():
+        return result
+
+    try:
+        lines = path.read_text().splitlines()
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+            if ev.get("node_name") != "ner_encoder_completed":
+                continue
+            enc_name = ev.get("model") or (ev.get("details") or {}).get("encoder") or ""
+            if not enc_name:
+                continue
+            details = ev.get("details") or {}
+            duration = float(details.get("duration_s") or 0.0)
+            is_error = ev.get("status") == "error"
+
+            if enc_name not in result:
+                result[enc_name] = {"duration_s": 0.0, "mention_count": 0, "error_count": 0}
+            result[enc_name]["duration_s"] += duration
+            if not is_error:
+                result[enc_name]["mention_count"] += int(details.get("mention_count") or 0)
+            else:
+                result[enc_name]["error_count"] += 1
+    except Exception:
+        pass  # Best-effort — never fail fixture saving over stats reading
+
+    return result
 
 
 def _build_ensemble_pipeline_for_phase_a(encoder_cfgs: list, quorum: int | None = None):

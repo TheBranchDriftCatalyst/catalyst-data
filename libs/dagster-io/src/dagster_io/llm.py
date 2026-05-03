@@ -16,11 +16,24 @@ import time
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+import httpx
 from dagster import ConfigurableResource
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, PrivateAttr
+
+
+def _http_timeout(read: float = 300.0) -> httpx.Timeout:
+    """Per-call httpx timeout — fail fast on dead/wedged endpoints (CD-azmn).
+
+    A scalar ``timeout`` on ChatOpenAI/OpenAIEmbeddings only enforces the
+    overall request deadline. When upstream Ollama wedges (TCP established
+    but no bytes), the connection sits in S+ forever. An ``httpx.Timeout``
+    splits read/connect/write/pool so a stalled read trips after ``read`` s.
+    """
+    return httpx.Timeout(connect=10.0, read=read, write=10.0, pool=10.0)
+
 
 from dagster_io.logging import get_logger
 from dagster_io.metrics import (
@@ -136,7 +149,7 @@ class LLMResource(ConfigurableResource):
             temperature=self.temperature,
             max_tokens=self.max_tokens if self.max_tokens is not None else 16384,
             max_retries=self.max_retries if self.max_retries is not None else 5,
-            timeout=self.request_timeout if self.request_timeout is not None else 300.0,
+            timeout=_http_timeout(read=self.request_timeout if self.request_timeout is not None else 300.0),
             model_kwargs={
                 "extra_body": {
                     "metadata": {
@@ -433,7 +446,12 @@ class EmbeddingResource(ConfigurableResource):
     """
 
     provider: str = "openai"
-    base_url: str = "https://api.openai.com/v1"
+    # base_url default is None so per-provider branches in setup_for_execution
+    # can supply their own (Ollama → localhost:11434/v1, LiteLLM → :4000/v1,
+    # OpenAI → api.openai.com/v1). Setting an OpenAI URL here as the field
+    # default broke the Ollama/LiteLLM branches because `self.base_url or
+    # fallback` always took the OpenAI string as truthy.
+    base_url: str | None = None
     api_key: str = ""
     model: str = "text-embedding-3-small"
     dimensions: int | None = None
@@ -482,19 +500,31 @@ class EmbeddingResource(ConfigurableResource):
                     logger.warning("EmbeddingCache init failed — running without cache: %s", exc)
         elif self.provider == "ollama":
             base_url = self.base_url or os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+            # tiktoken_enabled=False sends raw text instead of pre-tokenized
+            # input — Ollama's embeddings endpoint rejects token-id arrays
+            # with "invalid input type" (400). check_embedding_ctx_length=False
+            # skips the OpenAI-specific 8191 token cap.
             self._embeddings = OpenAIEmbeddings(
                 base_url=base_url,
                 api_key="ollama",
                 model=self.model,
                 chunk_size=effective_batch_size,
+                tiktoken_enabled=False,
+                check_embedding_ctx_length=False,
+                timeout=_http_timeout(),
             )
         elif self.provider == "litellm":
             base_url = self.base_url or os.environ.get("LITELLM_BASE_URL", "http://litellm:4000/v1")
+            # LiteLLM proxies many backends; safe default is to send raw text
+            # rather than tiktoken IDs since the upstream may not be OpenAI.
             self._embeddings = OpenAIEmbeddings(
                 base_url=base_url,
                 api_key=self.api_key or "unused",
                 model=self.model,
                 chunk_size=effective_batch_size,
+                tiktoken_enabled=False,
+                check_embedding_ctx_length=False,
+                timeout=_http_timeout(),
             )
         elif self.provider == "huggingface":
             logger.warning(
@@ -509,10 +539,11 @@ class EmbeddingResource(ConfigurableResource):
         else:
             # openai (default) and any other OpenAI-compatible endpoint
             self._embeddings = OpenAIEmbeddings(
-                base_url=self.base_url,
+                base_url=self.base_url or "https://api.openai.com/v1",
                 api_key=self.api_key or "unused",
                 model=self.model,
                 chunk_size=effective_batch_size,
+                timeout=_http_timeout(),
             )
 
     # ── Internal helpers ────────────────────────────────────────────────────

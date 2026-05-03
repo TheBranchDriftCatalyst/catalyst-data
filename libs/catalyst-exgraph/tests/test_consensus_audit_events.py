@@ -263,3 +263,49 @@ async def test_chunk_id_uses_consensus_pattern(tmp_path):
 
     for e in consensus_events:
         assert e["chunk_id"] == "my-doc-42:_consensus", f"event {e['node_name']} has wrong chunk_id: {e['chunk_id']}"
+
+
+@pytest.mark.asyncio
+async def test_chunk_loaded_emitted_for_consensus_chunk_id(tmp_path):
+    """chunk_loaded fires for '{doc_id}:_consensus' with kind='consensus' metadata."""
+    encoders = ["a", "b"]
+    per_encoder = {
+        "a": [_mention("Alice", "a")],
+        "b": [_mention("Alice", "b")],
+    }
+
+    node = ConsensusNode(encoders=encoders, quorum=2)
+    await node(_state(per_encoder, doc_id="cons-doc"))
+
+    events = _read_events(tmp_path)
+    loaded = [e for e in events if e["node_name"] == "chunk_loaded" and e.get("chunk_id") == "cons-doc:_consensus"]
+    assert len(loaded) == 1, f"Expected 1 chunk_loaded for :_consensus, got {len(loaded)}"
+    d = loaded[0]["details"]
+    assert d.get("chunk_metadata", {}).get("kind") == "consensus"
+
+
+@pytest.mark.asyncio
+async def test_chunk_extracted_emitted_for_consensus_chunk_id(tmp_path):
+    """chunk_extracted fires for '{doc_id}:_consensus' with model='ensemble'."""
+    encoders = ["a", "b"]
+    per_encoder = {
+        "a": [_mention("Alice", "a"), _mention("Bob", "a", span_start=10)],
+        "b": [_mention("Alice", "b"), _mention("Bob", "b", span_start=10)],
+    }
+
+    node = ConsensusNode(encoders=encoders, quorum=2)
+    result = await node(_state(per_encoder, doc_id="cons-doc-2"))
+
+    assert len(result["consensus_mentions"]) == 2
+
+    events = _read_events(tmp_path)
+    extracted = [
+        e for e in events if e["node_name"] == "chunk_extracted" and e.get("chunk_id") == "cons-doc-2:_consensus"
+    ]
+    assert len(extracted) == 1, f"Expected 1 chunk_extracted for :_consensus, got {len(extracted)}"
+
+    e = extracted[0]
+    assert e["model"] == "ensemble"
+    d = e["details"]
+    assert d["mention_count"] == 2
+    assert d["proposition_count"] == 0

@@ -44,6 +44,20 @@ function _docIdFromChunkId(chunkId: string): string {
   return i >= 0 ? chunkId.slice(0, i) : chunkId;
 }
 
+const CHUNK_KIND_CLASSES = {
+  CONSENSUS: "bg-cyan-500/20 text-cyan-200",
+  NER: "bg-violet-500/20 text-violet-200",
+  WIN: "bg-amber-500/20 text-amber-200",
+} as const;
+
+function chunkKindBadge(chunkId: string): { label: string; className: string } | null {
+  if (chunkId.endsWith(":_consensus"))
+    return { label: "CONSENSUS", className: CHUNK_KIND_CLASSES.CONSENSUS };
+  if (chunkId.match(/:_ner_(.+)$/)) return { label: "NER", className: CHUNK_KIND_CLASSES.NER };
+  if (chunkId.match(/:win-/)) return { label: "WIN", className: CHUNK_KIND_CLASSES.WIN };
+  return null;
+}
+
 const NO_DOMAIN = "unknown";
 
 function _inferDomain(docId: string): string {
@@ -267,6 +281,16 @@ export function ChunkRail({ events, selectedModel, selectedDoc, onSelect }: Prop
                           <div className="border-l border-white/5 ml-4">
                             {docs.map((doc) => {
                               const isSel = selectedDoc === doc.docId && selectedModel === model;
+                              // Collect unique chunk kinds present for this doc.
+                              const kindBadges: Array<{ label: string; className: string }> = [];
+                              const seenLabels = new Set<string>();
+                              for (const cid of doc.chunkIds) {
+                                const badge = chunkKindBadge(cid);
+                                if (badge && !seenLabels.has(badge.label)) {
+                                  seenLabels.add(badge.label);
+                                  kindBadges.push(badge);
+                                }
+                              }
                               return (
                                 <button
                                   key={doc.docId}
@@ -283,6 +307,14 @@ export function ChunkRail({ events, selectedModel, selectedDoc, onSelect }: Prop
                                     {isSel ? "●" : "○"}
                                   </span>
                                   <span className="flex-1 truncate">{doc.docId}</span>
+                                  {kindBadges.map((b) => (
+                                    <span
+                                      key={b.label}
+                                      className={`${b.className} px-1 rounded text-[9px]`}
+                                    >
+                                      {b.label}
+                                    </span>
+                                  ))}
                                   <span className="text-zinc-600">
                                     {doc.chunkIds.size}c · {doc.mentionTotal}m·
                                     {doc.propositionTotal}p

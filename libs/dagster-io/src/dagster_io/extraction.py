@@ -36,6 +36,21 @@ from dagster_io.metrics import (
 logger = get_logger(__name__)
 
 
+def _per_call_timeout_s() -> float:
+    """Per-LLM-call wall-clock cap (CD-azmn).
+
+    Read once per call from ``LLM_PER_CALL_TIMEOUT`` (seconds, default 600).
+    The httpx read-timeout in LLMClient already bounds a single HTTP read,
+    but the SPO pipeline can issue *multiple* reads (extract + repair, +
+    validators) for one ainvoke. This wrapper bounds the whole evidence-window
+    invocation so a wedged Ollama can't eat hours of the bench.
+    """
+    try:
+        return float(os.environ.get("LLM_PER_CALL_TIMEOUT", "600"))
+    except (TypeError, ValueError):
+        return 600.0
+
+
 @dataclass
 class _Doc:
     """A reconstructed document from one or more chunks."""
@@ -322,7 +337,9 @@ async def _process_doc(
             "stages": ner_result.get("stages", {}),
             "max_retries": max_retries,
         }
-        spo_result = await spo_pipeline.ainvoke(spo_state_input)
+        # CD-azmn: bound each evidence-window SPO invocation in wall-clock
+        # so a wedged Ollama trips here instead of hanging the whole bench.
+        spo_result = await asyncio.wait_for(spo_pipeline.ainvoke(spo_state_input), timeout=_per_call_timeout_s())
 
         spo_accepted: list[dict] = (spo_result.get("stages") or {}).get("spo", {}).get("accepted") or []
         all_propositions.extend(spo_accepted)
@@ -330,6 +347,19 @@ async def _process_doc(
         spo_retries_total += (spo_result.get("stages") or {}).get("spo", {}).get("retry_count", 0)
         if spo_result.get("status") == "failed":
             spo_status = "failed"
+
+        # Emit chunk_extracted per window so the State Inspector OUTPUT pane
+        # shows per-window SPO propositions for v4 win-N chunk_ids.
+        from dagster_io import event_tail as _et
+
+        if _et.is_configured():
+            _et.emit_chunk_extracted(
+                window_chunk_id,
+                model=bench_model,
+                doc_id=doc.doc_id,
+                mentions=window_mentions,
+                propositions=spo_accepted,
+            )
 
     # Determine overall status
     status = "failed" if ner_result.get("status") == "failed" or spo_status == "failed" else "completed"
@@ -502,7 +532,8 @@ async def _process_doc_spo_only(
             "stages": {},
             "max_retries": max_retries,
         }
-        spo_result = await spo_pipeline.ainvoke(spo_state_input)
+        # CD-azmn: bound each evidence-window SPO invocation in wall-clock.
+        spo_result = await asyncio.wait_for(spo_pipeline.ainvoke(spo_state_input), timeout=_per_call_timeout_s())
 
         spo_accepted: list[dict] = (spo_result.get("stages") or {}).get("spo", {}).get("accepted") or []
         all_propositions.extend(spo_accepted)
@@ -510,6 +541,18 @@ async def _process_doc_spo_only(
         spo_retries_total += (spo_result.get("stages") or {}).get("spo", {}).get("retry_count", 0)
         if spo_result.get("status") == "failed":
             spo_status = "failed"
+
+        # Emit chunk_extracted per window (SPO-only path mirrors _process_doc).
+        from dagster_io import event_tail as _et
+
+        if _et.is_configured():
+            _et.emit_chunk_extracted(
+                window_chunk_id,
+                model=bench_model,
+                doc_id=doc.doc_id,
+                mentions=window_mentions,
+                propositions=spo_accepted,
+            )
 
     return {
         "mentions": [],  # caller provides shared NER mentions

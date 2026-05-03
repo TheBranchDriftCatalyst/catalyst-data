@@ -237,3 +237,39 @@ async def test_chunk_id_uses_doc_id_from_state_not_source_metadata():
     events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
     started = [e for e in events if e["node_name"] == "ner_encoder_started"]
     assert started[0]["chunk_id"] == f"top-level-doc-id:_ner_{encoder_name}"
+
+
+@pytest.mark.asyncio
+async def test_chunk_extracted_emitted_per_encoder():
+    """chunk_extracted fires for each encoder with the correct chunk_id and model."""
+    import dagster_io.bench.event_tail as et
+
+    tail_path = Path(et._path)
+    doc_id = "doc-extracted-check"
+    encoder_names = ["gliner-medium", "gliner-large"]
+
+    encoders = [_make_encoder_config(n) for n in encoder_names]
+    clients = {n: _make_mock_client(n) for n in encoder_names}
+    node = NerEnsembleNode(encoders=encoders, clients=clients, mcp_client=None)
+    for n in encoder_names:
+        node._nodes[n] = _OkStub()
+
+    await node(_base_state(doc_id))
+
+    events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+    extracted = [e for e in events if e["node_name"] == "chunk_extracted"]
+
+    # One chunk_extracted per encoder
+    assert len(extracted) == len(encoder_names), (
+        f"Expected {len(encoder_names)} chunk_extracted events, got {len(extracted)}"
+    )
+
+    for enc_name in encoder_names:
+        expected_chunk_id = f"{doc_id}:_ner_{enc_name}"
+        match = next((e for e in extracted if e["chunk_id"] == expected_chunk_id), None)
+        assert match is not None, f"No chunk_extracted for chunk_id={expected_chunk_id!r}"
+        assert match["model"] == enc_name, f"Expected model={enc_name!r}, got {match['model']!r}"
+        # details must carry mention/proposition counts
+        d = match["details"]
+        assert "mention_count" in d
+        assert "proposition_count" in d

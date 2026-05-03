@@ -8,6 +8,7 @@ import os
 import time
 from typing import Any
 
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
@@ -53,6 +54,9 @@ class LLMClient:
         # without tool support like nuextract), or "json_schema".
         self.structured_method = structured_method or os.environ.get("LLM_STRUCTURED_METHOD", "function_calling")
 
+        # CD-azmn: use httpx.Timeout so a stalled READ on a wedged Ollama
+        # connection trips after self.timeout seconds instead of hanging
+        # forever in S+ on a TCP-established-but-dead socket.
         self._chat_model = ChatOpenAI(
             base_url=self.base_url,
             api_key=self.api_key or "unused",
@@ -60,7 +64,7 @@ class LLMClient:
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             max_retries=self.max_retries,
-            timeout=self.timeout,
+            timeout=httpx.Timeout(connect=10.0, read=float(self.timeout), write=10.0, pool=10.0),
         )
 
     async def complete(self, prompt: str, *, system: str = "") -> str:

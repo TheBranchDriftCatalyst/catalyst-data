@@ -136,6 +136,17 @@ class NerEnsembleNode:
                         "duration_s": duration,
                     },
                 )
+                # Emit chunk_extracted so the State Inspector OUTPUT pane
+                # surfaces per-encoder mention counts for v4 chunk_ids.
+                # This is the v4 equivalent of emit_chunk_extracted_for_state
+                # (which only fires on the legacy build_ner_pipeline path).
+                event_tail.emit_chunk_extracted(
+                    chunk_id_for_encoder,
+                    model=encoder_name,
+                    doc_id=doc_id,
+                    mentions=accepted,
+                    propositions=[],
+                )
                 logger.info(
                     "ner_ensemble: encoder=%s completed, mentions=%d, duration=%.2fs",
                     encoder_name,

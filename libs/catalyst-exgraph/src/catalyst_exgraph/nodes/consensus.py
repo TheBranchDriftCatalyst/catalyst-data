@@ -301,6 +301,33 @@ class ConsensusNode:
             },
         )
 
+        # Emit chunk_loaded (idempotent) + chunk_extracted so the State
+        # Inspector surfaces the consensus card with mention counts.
+        # chunk_loaded carries the raw doc text so the inspector INPUT pane
+        # can display the source text aligned with the consensus result.
+        raw_text = state.get("raw_text") or ""
+        src_domain = (state.get("source_metadata") or {}).get("domain")
+        event_tail.emit_chunk_text(
+            consensus_chunk_id,
+            raw_text,
+            doc_id=doc_id,
+            domain=src_domain,
+            chunk_metadata={
+                "kind": "consensus",
+                "n_encoders": self.n_encoders,
+                "quorum": self.default_quorum,
+                "accepted_count": len(accepted),
+                "rejected_count": len(rejected),
+            },
+        )
+        event_tail.emit_chunk_extracted(
+            consensus_chunk_id,
+            model="ensemble",
+            doc_id=doc_id,
+            mentions=accepted,
+            propositions=[],
+        )
+
         logger.info(
             "consensus: accepted=%d, rejected=%d, span_disagree_rate=%.2f",
             len(accepted),
