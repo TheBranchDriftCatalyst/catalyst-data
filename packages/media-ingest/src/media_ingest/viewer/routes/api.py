@@ -1,17 +1,19 @@
-"""REST API routes for the media viewer.
+"""Media-domain-specific API routes.
 
-GET /viewer/api/documents                          — list all media documents
-GET /viewer/api/documents/{document_id}            — single document metadata
-GET /viewer/api/documents/{document_id}/transcription — transcription data
-GET /viewer/api/documents/{document_id}/diarization   — speaker-attributed segments
-GET /viewer/api/documents/{document_id}/chunks            — text chunks with strategy metadata
-GET /viewer/api/documents/{document_id}/mentions       — NER entity mentions
-GET /viewer/api/documents/{document_id}/assertions     — S-P-O triples
+Generic list+detail endpoints for media documents now live in
+``routes/documents_factory.py`` (mounted at ``/viewer/api/media/documents``).
+This module hosts the media-only extras (transcription, diarization,
+chunks, mentions, assertions) under the same ``/viewer/api/media`` prefix
+so the frontend has a single namespace per domain.
+
+GET /viewer/api/media/documents/{document_id}/transcription
+GET /viewer/api/media/documents/{document_id}/diarization
+GET /viewer/api/media/documents/{document_id}/chunks
+GET /viewer/api/media/documents/{document_id}/mentions
+GET /viewer/api/media/documents/{document_id}/assertions
 """
 
 from __future__ import annotations
-
-import os
 
 from fastapi import APIRouter, HTTPException
 
@@ -20,9 +22,7 @@ from media_ingest.viewer.services.s3_data import S3DataService
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/viewer/api", tags=["viewer-api"])
-
-_VIDEO_EXTS = frozenset({".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v"})
+router = APIRouter(prefix="/viewer/api/media", tags=["media-api"])
 
 # Singleton data service — created once, reused across requests
 _data_service: S3DataService | None = None
@@ -33,57 +33,6 @@ def _svc() -> S3DataService:
     if _data_service is None:
         _data_service = S3DataService()
     return _data_service
-
-
-# ── Document list ────────────────────────────────────────────────────────────
-
-
-@router.get("/documents")
-def list_documents() -> list[dict]:
-    """List all media documents from the silver layer."""
-    svc = _svc()
-    docs = svc.list_documents()
-
-    # Enrich each document with a media URL + thumbnail URL if resolvable
-    for doc in docs:
-        source_path = doc.get("source_path", "")
-        media_url = svc.resolve_media_url(source_path)
-        if media_url:
-            doc["media_url"] = media_url
-            # Add thumbnail URL for video files — check has_video flag first,
-            # then fall back to extension so stale docs without has_video still
-            # get thumbnails (e.g. data seeded before the flag was added).
-            meta = doc.get("metadata", {})
-            ext = (meta.get("extension") or os.path.splitext(source_path)[1]).lower()
-            is_video = bool(meta.get("has_video")) or ext in _VIDEO_EXTS
-            if is_video:
-                doc["thumbnail_url"] = media_url.replace("/viewer/media/", "/viewer/media/thumbnail/")
-
-    return docs
-
-
-# ── Single document ──────────────────────────────────────────────────────────
-
-
-@router.get("/documents/{document_id}")
-def get_document(document_id: str) -> dict:
-    """Get a single media document by ID."""
-    svc = _svc()
-    doc = svc.get_document(document_id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
-
-    source_path = doc.get("source_path", "")
-    media_url = svc.resolve_media_url(source_path)
-    if media_url:
-        doc["media_url"] = media_url
-        meta = doc.get("metadata", {})
-        ext = (meta.get("extension") or os.path.splitext(source_path)[1]).lower()
-        is_video = bool(meta.get("has_video")) or ext in _VIDEO_EXTS
-        if is_video:
-            doc["thumbnail_url"] = media_url.replace("/viewer/media/", "/viewer/media/thumbnail/")
-
-    return doc
 
 
 # ── Transcription ────────────────────────────────────────────────────────────

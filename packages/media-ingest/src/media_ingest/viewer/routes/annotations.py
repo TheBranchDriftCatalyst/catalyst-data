@@ -11,7 +11,7 @@ from dagster_io.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/viewer/api", tags=["annotations"])
+router = APIRouter(prefix="/viewer/api/media", tags=["annotations"])
 
 # Singleton store — initialized in app.py
 _store = None

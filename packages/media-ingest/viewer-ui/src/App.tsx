@@ -5,6 +5,7 @@ import { ThemeProvider, TooltipProvider } from "@thebranchdriftcatalyst/catalyst
 import Sidebar from "@/components/Sidebar";
 import { TopNav } from "@/components/TopNav";
 import Documents from "@/pages/documents/Documents";
+import DomainDocumentDetail from "@/pages/documents/_shared/DomainDocumentDetail";
 import PlayerPage from "@/pages/Player";
 import S3Explorer from "@/pages/S3Explorer";
 import BenchmarkReport from "@/pages/BenchmarkReport";
@@ -58,6 +59,11 @@ function AppShell({
             <Route path="/" element={<Navigate to="/documents/media-ingest" replace />} />
             <Route path="/documents" element={<Navigate to="/documents/media-ingest" replace />} />
             <Route path="/documents/:domain" element={<Documents />} />
+            {/* Generic per-doc detail page for non-media domains. Media-
+             *  ingest still routes to /player/:id (the cards in
+             *  MediaIngestList wire to the player directly, so this
+             *  generic route is only hit by congress-wtf + open-leaks). */}
+            <Route path="/documents/:domain/:id" element={<DomainDocumentDetail />} />
             <Route path="/player/:documentId" element={<PlayerPage />} />
             <Route path="/s3" element={<S3Explorer />} />
             <Route path="/benchmarks" element={<BenchmarkReport />} />

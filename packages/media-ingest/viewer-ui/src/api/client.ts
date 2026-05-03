@@ -7,6 +7,7 @@ import type {
   Assertion,
   Annotation,
 } from "@/types/media";
+import type { Document, Domain } from "@/types/document";
 
 const API_BASE = "/viewer/api";
 
@@ -19,39 +20,62 @@ async function apiFetch<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ── Generic per-domain documents API ──────────────────────────────────────
+
+/** Fetch the registered domain list — populates the Documents sub-tabs and
+ *  drives the generic detail page. Backed by `/viewer/api/domains`. */
+export function fetchDomains(): Promise<Domain[]> {
+  return apiFetch<Domain[]>("/domains");
+}
+
+/** Fetch the documents for an arbitrary registered domain. Used by the
+ *  congress + leaks lists; media-ingest uses `fetchDocuments` (typed as
+ *  MediaDocument[]) so existing call sites keep their richer type. */
+export function fetchDomainDocuments(domainSlug: string): Promise<Document[]> {
+  return apiFetch<Document[]>(`/${encodeURIComponent(domainSlug)}/documents`);
+}
+
+export function fetchDomainDocument(domainSlug: string, id: string): Promise<Document> {
+  return apiFetch<Document>(
+    `/${encodeURIComponent(domainSlug)}/documents/${encodeURIComponent(id)}`,
+  );
+}
+
+// ── Media-ingest documents (now under /media prefix) ──────────────────────
+
 export function fetchDocuments(): Promise<MediaDocument[]> {
-  return apiFetch<MediaDocument[]>("/documents");
+  return apiFetch<MediaDocument[]>("/media/documents");
 }
 
 export function fetchDocument(id: string): Promise<MediaDocument> {
-  return apiFetch<MediaDocument>(`/documents/${encodeURIComponent(id)}`);
+  return apiFetch<MediaDocument>(`/media/documents/${encodeURIComponent(id)}`);
 }
 
 export function fetchTranscription(id: string): Promise<Transcription> {
-  return apiFetch<Transcription>(`/documents/${encodeURIComponent(id)}/transcription`);
+  return apiFetch<Transcription>(`/media/documents/${encodeURIComponent(id)}/transcription`);
 }
 
 export function fetchDiarization(id: string): Promise<Diarization> {
-  return apiFetch<Diarization>(`/documents/${encodeURIComponent(id)}/diarization`);
+  return apiFetch<Diarization>(`/media/documents/${encodeURIComponent(id)}/diarization`);
 }
 
 export function fetchChunks(id: string): Promise<ChunkInfo[]> {
-  return apiFetch<ChunkInfo[]>(`/documents/${encodeURIComponent(id)}/chunks`);
+  return apiFetch<ChunkInfo[]>(`/media/documents/${encodeURIComponent(id)}/chunks`);
 }
 
 export function fetchMentions(id: string): Promise<Mention[]> {
-  return apiFetch<Mention[]>(`/documents/${encodeURIComponent(id)}/mentions`);
+  return apiFetch<Mention[]>(`/media/documents/${encodeURIComponent(id)}/mentions`);
 }
 
 export function fetchAssertions(id: string): Promise<Assertion[]> {
-  return apiFetch<Assertion[]>(`/documents/${encodeURIComponent(id)}/assertions`);
+  return apiFetch<Assertion[]>(`/media/documents/${encodeURIComponent(id)}/assertions`);
 }
 
 /** Speaker name mappings: { "SPEAKER_00": { display_name: "...", color_index: ... }, ... } */
 export type SpeakerMappings = Record<string, { display_name: string; color_index: number | null }>;
 
 export function fetchSpeakerNames(id: string): Promise<SpeakerMappings> {
-  return apiFetch<SpeakerMappings>(`/documents/${encodeURIComponent(id)}/speakers`);
+  return apiFetch<SpeakerMappings>(`/media/documents/${encodeURIComponent(id)}/speakers`);
 }
 
 export async function updateSpeakerName(
@@ -60,7 +84,7 @@ export async function updateSpeakerName(
   displayName: string,
 ): Promise<{ label: string; display_name: string }> {
   const res = await fetch(
-    `${API_BASE}/documents/${encodeURIComponent(documentId)}/speakers/${encodeURIComponent(label)}/name`,
+    `${API_BASE}/media/documents/${encodeURIComponent(documentId)}/speakers/${encodeURIComponent(label)}/name`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -100,7 +124,7 @@ export function getMediaUrl(doc: MediaDocument): string {
 // ── Annotation endpoints ──────────────────────────────────────────────────
 
 export function fetchAnnotations(documentId: string): Promise<Annotation[]> {
-  return apiFetch<Annotation[]>(`/documents/${encodeURIComponent(documentId)}/annotations`);
+  return apiFetch<Annotation[]>(`/media/documents/${encodeURIComponent(documentId)}/annotations`);
 }
 
 export interface AnnotationCreatePayload {
@@ -116,11 +140,14 @@ export async function createAnnotation(
   documentId: string,
   payload: AnnotationCreatePayload,
 ): Promise<Annotation> {
-  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/annotations`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const res = await fetch(
+    `${API_BASE}/media/documents/${encodeURIComponent(documentId)}/annotations`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`API ${res.status}: ${text}`);
@@ -132,7 +159,7 @@ export async function updateAnnotation(
   annotationId: string,
   payload: Partial<Pick<AnnotationCreatePayload, "action" | "edits" | "reviewer" | "notes">>,
 ): Promise<Annotation> {
-  const res = await fetch(`${API_BASE}/annotations/${encodeURIComponent(annotationId)}`, {
+  const res = await fetch(`${API_BASE}/media/annotations/${encodeURIComponent(annotationId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -149,7 +176,7 @@ export async function bulkCreateAnnotations(
   annotations: AnnotationCreatePayload[],
 ): Promise<{ created: number }> {
   const res = await fetch(
-    `${API_BASE}/documents/${encodeURIComponent(documentId)}/annotations/bulk`,
+    `${API_BASE}/media/documents/${encodeURIComponent(documentId)}/annotations/bulk`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

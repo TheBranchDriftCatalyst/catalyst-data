@@ -51,13 +51,23 @@ test.describe("Smoke Tests @smoke", () => {
     await page.goto("/viewer/documents/media-ingest");
     await page.waitForLoadState("networkidle");
 
+    // Each non-media domain now uses the same generic list UI as media-
+    // ingest. Whether the count is 0 or N depends on the local seed; the
+    // assertion just verifies the page rendered the list shell rather than
+    // a "backend not wired up" placeholder.
     await page.getByTestId("documents-subtab-congress-wtf").click();
     await expect(page).toHaveURL(/\/documents\/congress-wtf$/);
-    await expect(page.getByTestId("documents-congress-wtf-placeholder")).toBeVisible();
+    await expect(
+      page.locator('[data-testid="document-list-page"][data-domain="congress-wtf"]'),
+    ).toBeVisible();
+    await expect(page.getByTestId("documents-congress-wtf-placeholder")).toHaveCount(0);
 
     await page.getByTestId("documents-subtab-open-leaks").click();
     await expect(page).toHaveURL(/\/documents\/open-leaks$/);
-    await expect(page.getByTestId("documents-open-leaks-placeholder")).toBeVisible();
+    await expect(
+      page.locator('[data-testid="document-list-page"][data-domain="open-leaks"]'),
+    ).toBeVisible();
+    await expect(page.getByTestId("documents-open-leaks-placeholder")).toHaveCount(0);
 
     await page.getByTestId("documents-subtab-media-ingest").click();
     await expect(page).toHaveURL(/\/documents\/media-ingest$/);
@@ -111,8 +121,8 @@ test.describe("Smoke Tests @smoke", () => {
     await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
   });
 
-  test("API health: /viewer/api/documents returns data", async ({ request, baseURL }) => {
-    const resp = await request.get(`${baseURL}/viewer/api/documents`);
+  test("API health: /viewer/api/media/documents returns data", async ({ request, baseURL }) => {
+    const resp = await request.get(`${baseURL}/viewer/api/media/documents`);
 
     expect(resp.status()).toBe(200);
 
@@ -125,5 +135,40 @@ test.describe("Smoke Tests @smoke", () => {
       expect(doc).toHaveProperty("title");
       expect(doc).toHaveProperty("source");
     }
+  });
+
+  test("API: /viewer/api/domains lists registered domains", async ({ request, baseURL }) => {
+    const resp = await request.get(`${baseURL}/viewer/api/domains`);
+    expect(resp.status()).toBe(200);
+    const domains = await resp.json();
+    expect(Array.isArray(domains)).toBe(true);
+    expect(domains.length).toBe(3);
+    const slugs = new Set(domains.map((d: { slug: string }) => d.slug));
+    expect(slugs.has("media")).toBe(true);
+    expect(slugs.has("congress")).toBe(true);
+    expect(slugs.has("leaks")).toBe(true);
+    for (const d of domains) {
+      expect(d).toHaveProperty("slug");
+      expect(d).toHaveProperty("label");
+      expect(d).toHaveProperty("code_location");
+      expect(d).toHaveProperty("group");
+      expect(d).toHaveProperty("asset");
+    }
+  });
+
+  test("API: /viewer/api/congress/documents endpoint exists", async ({ request, baseURL }) => {
+    const resp = await request.get(`${baseURL}/viewer/api/congress/documents`);
+    expect(resp.status()).toBe(200);
+    const docs = await resp.json();
+    expect(Array.isArray(docs)).toBe(true);
+    // Count may legitimately be 0 in the local seed; just confirm the
+    // endpoint is plumbed through.
+  });
+
+  test("API: /viewer/api/leaks/documents endpoint exists", async ({ request, baseURL }) => {
+    const resp = await request.get(`${baseURL}/viewer/api/leaks/documents`);
+    expect(resp.status()).toBe(200);
+    const docs = await resp.json();
+    expect(Array.isArray(docs)).toBe(true);
   });
 });

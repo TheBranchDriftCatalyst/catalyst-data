@@ -1,10 +1,11 @@
-export interface MediaDocument {
-  id: string;
-  title: string;
-  source: string;
-  source_path: string;
+import type { Document } from "./document";
+
+/** Media-ingest specialization of the generic `Document`. Adds backend-
+ *  resolved streaming URLs plus the rich `metadata` shape produced by
+ *  ffprobe during ingest. Compatible with any code that consumed the old
+ *  standalone interface — `Document` only adds nullable fields. */
+export interface MediaDocument extends Document {
   document_type: string;
-  domain: string;
   /** Backend-resolved streaming URL (preferred over client-side construction). */
   media_url?: string;
   thumbnail_url?: string;

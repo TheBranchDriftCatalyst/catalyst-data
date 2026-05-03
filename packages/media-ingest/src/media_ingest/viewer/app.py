@@ -23,6 +23,7 @@ from media_ingest.viewer.routes.annotations import router as annotations_router
 from media_ingest.viewer.routes.annotations import set_store
 from media_ingest.viewer.routes.api import router as api_router
 from media_ingest.viewer.routes.bench import router as bench_router
+from media_ingest.viewer.routes.documents_factory import all_routers as documents_routers
 from media_ingest.viewer.routes.media import router as media_router
 from media_ingest.viewer.routes.s3_explorer import router as s3_router
 from media_ingest.viewer.services.annotation_store import AnnotationStore
@@ -81,7 +82,13 @@ def create_viewer_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Mount API, annotation, and media routes
+    # Mount API, annotation, and media routes.
+    # The factory's per-domain document routers (`/viewer/api/<domain>/documents`)
+    # go FIRST so list+detail are served by the generic loader; api_router then
+    # contributes the media-only extras (transcription/diarization/etc.) on the
+    # same `/viewer/api/media` prefix.
+    for r in documents_routers():
+        app.include_router(r)
     app.include_router(api_router)
     app.include_router(annotations_router)
     app.include_router(media_router)
