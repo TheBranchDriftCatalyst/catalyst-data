@@ -2,6 +2,8 @@
 
 *April 2026*
 
+> **Architecture context.** For the full EDC pipeline architecture and the v3 entity-anchored chunking redesign, see [edc-pipeline-architecture](../edc-pipeline-architecture/README.md).
+
 A walkthrough of the multi-video pipeline that the media-ingest benchmark harness now exercises. The original benchmark framework ([extraction-benchmark-framework](../extraction-benchmark-framework/README.md)) ran every model against one demo video. This post documents the path from "drop a folder of source videos in the fixtures dir" to "harness extracts across all of them with per-video artifacts."
 
 ## TL;DR
@@ -10,7 +12,7 @@ A walkthrough of the multi-video pipeline that the media-ingest benchmark harnes
 - Audio cache regenerated per-video using `mlx-whisper` (Metal) + `pyannote` (MPS): **14m31s** wall-clock for all 7 videos, 14 cache files (~33 MB total).
 - Manifest-driven layout: `packages/media-ingest/tests/fixtures/audio_manifest.yaml` maps source `.mp4` files to slugified `doc_id`s; everything downstream keys off that.
 - Per-doc-id storage everywhere: `pipeline-cache/<doc_id>/{0_transcription,1_diarization}.json`, `extractions/<doc_id>/extraction_<model>.json`, and the medallion tree at `.test-output/media-ingest/gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl`.
-- Harness gains `--all-videos` flag — swaps the per-model subprocess from single-video pytest to `scripts/bench_extract_per_video.py` which iterates the manifest.
+- Harness gains `--all-videos` flag — swaps the per-model subprocess from single-video pytest to `scripts/benchmark/bench_extract_per_video.py` which iterates the manifest.
 - **Not yet built**: per-(model, video) ensemble GT, per-pair F1 scoring, viewer SPA video selector. Tracked under beads **CD-vfiq**.
 
 ---
@@ -46,12 +48,12 @@ That's it — no other config touchpoint.
 
 ---
 
-## Stage 1: Compression (`scripts/compress_fixtures.py`)
+## Stage 1: Compression (`scripts/fixtures/compress_fixtures.py`)
 
 Source videos straight off YouTube are typically 1080p H.264 or AV1 at 1-2 Mbps. For benchmark fixtures they're decorative — the audio is what matters, and even that gets resampled to mono 16 kHz inside Whisper. So the script aggressively shrinks them:
 
 ```bash
-python scripts/compress_fixtures.py packages/media-ingest/tests/fixtures/ \
+python scripts/fixtures/compress_fixtures.py packages/media-ingest/tests/fixtures/ \
   --scale 480 --vt-bitrate 200k --audio-mono-16k
 ```
 
@@ -85,7 +87,7 @@ The script's `--vt-bitrate 200k` flag uses VideoToolbox's CBR-ish rate control w
 
 ---
 
-## Stage 2: Audio Cache Regen (`scripts/regen_audio_fixtures.py`)
+## Stage 2: Audio Cache Regen (`scripts/fixtures/regen_audio_fixtures.py`)
 
 Once the videos are compressed, run the audio pipeline against each one:
 
@@ -201,7 +203,7 @@ PYTHONPATH=. python tests/benchmark_harness.py --all-videos --models gliner-medi
 In `tests/benchmark_harness.py`, `_run_model(cfg, ..., all_videos=False)` toggles between two subprocess paths:
 
 - `all_videos=False` (default) — runs `pytest tests/test_extraction_e2e.py -k extraction_produces_mentions` against the merged cross-domain chunk set. Single-video, legacy behavior.
-- `all_videos=True` — runs `python scripts/bench_extract_per_video.py`. The script reads the manifest and iterates per-video.
+- `all_videos=True` — runs `python scripts/benchmark/bench_extract_per_video.py`. The script reads the manifest and iterates per-video.
 
 Per-model env vars (`LLM_MODEL`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_STRUCTURED_METHOD`, `LLM_MAX_TOKENS`, `LLM_CONTEXT_WINDOW`) are set the same way for both paths — only the entrypoint differs. The harness also sets `BENCH_SAMPLE_PER_DOMAIN` so the in-process extraction fixtures and the subprocess path agree on the per-domain cap.
 
@@ -264,7 +266,7 @@ What today's `--all-videos` run is good for in the meantime:
 
 ```bash
 # One-time fixture prep (after dropping new videos into the fixture dir)
-python scripts/compress_fixtures.py packages/media-ingest/tests/fixtures/
+python scripts/fixtures/compress_fixtures.py packages/media-ingest/tests/fixtures/
 HF_TOKEN=hf_xxx WHISPER_BACKEND=mlx-whisper task bench:fixtures:regen
 task bench:chunks:regen:media
 
@@ -292,10 +294,10 @@ task bench:pipeline:warm
 ### Relevant file paths
 
 - Manifest: `packages/media-ingest/tests/fixtures/audio_manifest.yaml`
-- Compression: `scripts/compress_fixtures.py`
-- Audio regen: `scripts/regen_audio_fixtures.py`
+- Compression: `scripts/fixtures/compress_fixtures.py`
+- Audio regen: `scripts/fixtures/regen_audio_fixtures.py`
 - Chunk materialization: `packages/media-ingest/tests/integration/test_chunks_cpu.py` (run via `task bench:chunks:regen:media`)
-- Extraction subprocess: `scripts/bench_extract_per_video.py`
+- Extraction subprocess: `scripts/benchmark/bench_extract_per_video.py`
 - Cross-domain chunk loader: `tests/shared/medallion.py` (`load_chunks`)
 - IO manager backends: `libs/dagster-io/src/dagster_io/local_io_manager.py` + `io_backend.py` (`select_io_managers`)
 - Harness flag: `tests/benchmark_harness.py` (`--all-videos`, `--sample-per-domain`)

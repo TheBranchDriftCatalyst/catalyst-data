@@ -2,6 +2,8 @@
 
 *April 2026*
 
+> **Architecture context.** For the full EDC pipeline architecture and the v3 entity-anchored chunking redesign, see [edc-pipeline-architecture](../edc-pipeline-architecture/README.md).
+
 ## TL;DR
 
 <!-- NOTES: general need to add a section on chunking strategies and how thats extremely important.  different strats for different domains/content types -->
@@ -369,7 +371,7 @@ for the strategy details.
 
 **Multi-video benchmarking.** The harness now supports `--all-videos`, which
 swaps the per-model subprocess from the single-video pytest path to
-`scripts/bench_extract_per_video.py`. That script iterates
+`scripts/benchmark/bench_extract_per_video.py`. That script iterates
 `packages/media-ingest/tests/fixtures/audio_manifest.yaml` and produces per-doc-id
 extraction artifacts at `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json`.
 Per-(model, video) F1 scoring isn't built yet — see beads task **CD-vfiq**.
