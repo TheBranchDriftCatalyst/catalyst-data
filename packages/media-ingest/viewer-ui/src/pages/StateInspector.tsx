@@ -95,7 +95,7 @@ function writeQuery(docId: string | null, node: SelectedGraphNode | null, runId:
 
 export function StateInspector() {
   const [pinnedRunId, setPinnedRunId] = useState<string | null>(null);
-  const { events, runId: activeRunId, connected, error } = useRunStream(pinnedRunId);
+  const { events, connected, error } = useRunStream(pinnedRunId);
   const runs = useRuns();
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<SelectedGraphNode | null>(null);
@@ -155,8 +155,9 @@ export function StateInspector() {
         <div className="px-4 py-2 border-b border-white/10 flex items-center gap-2 font-mono text-[11px]">
           <span className="text-zinc-300">state inspector</span>
           <RunPicker
-            runs={runs}
-            selectedRunId={pinnedRunId ?? activeRunId}
+            runs={runs.runs}
+            liveRunId={runs.live}
+            selectedRunId={pinnedRunId}
             onSelect={onRunSelect}
           />
           <span

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useRuns } from "@/hooks/useRuns";
+import { RunPicker } from "@/components/state/RunPicker";
 import type { BenchmarkReport as BenchmarkReportType, EntityRow } from "@/types/benchmark";
 import {
   StatCard,
@@ -261,6 +263,36 @@ export default function BenchmarkReport() {
   const [selectedGT, setSelectedGT] = useState("active");
   const [selectedEntity, setSelectedEntity] = useState<EntityRow | null>(null);
 
+  // Live-run discovery for the shared picker. The picker shows the same
+  // dropdown shape as StateInspector — "Latest report" plus one entry
+  // per archived run that has a report.json. Pinning a run sets its
+  // report.json URL; "Latest report" reads the top-level
+  // /viewer/api/bench/report.json (the newest, copied at run end).
+  const runs = useRuns();
+  const runReportSources = useMemo(
+    () =>
+      availableSources
+        .filter((s) => s.url.startsWith("/viewer/api/bench/runs/"))
+        .map((s) => {
+          // Extract <run_id> from /viewer/api/bench/runs/<run_id>/report.json
+          const m = s.url.match(/\/runs\/([^/]+)\/report\.json/);
+          return m ? decodeURIComponent(m[1]!) : "";
+        })
+        .filter((id) => id.length > 0),
+    [availableSources],
+  );
+  const selectedReportRunId = useMemo(() => {
+    const m = reportSource.match(/\/runs\/([^/]+)\/report\.json/);
+    return m ? decodeURIComponent(m[1]!) : null;
+  }, [reportSource]);
+  const onReportRunSelect = (runId: string | null) => {
+    if (runId === null) {
+      setReportSource("/viewer/api/bench/report.json");
+    } else {
+      setReportSource(`/viewer/api/bench/runs/${encodeURIComponent(runId)}/report.json`);
+    }
+  };
+
   // Hydrate the source dropdown from the bench API: top-level "Latest" plus
   // one entry per archived run. We GET each candidate (HEAD doesn't work —
   // FastAPI's @router.get doesn't auto-allow HEAD, so it returns 405); the
@@ -421,18 +453,13 @@ export default function BenchmarkReport() {
           {availableSources.length > 1 && (
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-zinc-500 font-mono uppercase">Report</span>
-              <select
-                value={reportSource}
-                onChange={(e) => setReportSource(e.target.value)}
-                aria-label="Select report version"
-                className="bg-surface-0 border border-white/10 rounded px-2 py-0.5 text-xs font-mono text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-              >
-                {availableSources.map((src) => (
-                  <option key={src.url} value={src.url}>
-                    {src.label}
-                  </option>
-                ))}
-              </select>
+              <RunPicker
+                runs={runReportSources}
+                liveRunId={runs.live}
+                selectedRunId={selectedReportRunId}
+                onSelect={onReportRunSelect}
+                latestLabel="Latest report"
+              />
             </div>
           )}
           <div className="flex items-center gap-1.5">

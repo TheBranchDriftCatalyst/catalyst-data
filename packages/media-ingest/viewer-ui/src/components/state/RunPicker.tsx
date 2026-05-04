@@ -1,28 +1,45 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ChevronDown, CircleDot, History } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { RunsListing } from "@/hooks/useRuns";
 
 interface RunPickerProps {
-  /** Runs newest-first, plus which one is currently in-flight. */
-  runs: RunsListing;
-  /** The run currently being read (from `useRunStream.runId`). May
-   *  differ from `runs.latest` if the user pinned an older run. */
+  /** Run IDs to show, newest-first. Each consumer filters/transforms its
+   *  view of `/viewer/api/bench/runs` independently (e.g. the benchmark
+   *  report only lists runs with a `report.json`; the state inspector
+   *  shows everything). */
+  runs: string[];
+  /** Run ID of the currently in-flight bench, if any. Pulses next to the
+   *  matching menu item. ``null`` means no live run. */
+  liveRunId: string | null;
+  /** The run currently being rendered. May differ from the latest if
+   *  the user pinned an older run. ``null`` means "follow latest". */
   selectedRunId: string | null;
-  /** ``null`` clears the URL pin so the hook follows `/runs?latest`. */
+  /** Called with ``null`` for the "follow latest" entry, or a specific
+   *  run ID otherwise. Parents persist the choice in URL state. */
   onSelect: (runId: string | null) => void;
+  /** Trigger / menu copy for the auto-follow entry. Defaults to
+   *  "Latest"; the benchmark report uses "Latest report" since its
+   *  Latest endpoint hits the top-level report.json, not the newest
+   *  archived run. */
+  latestLabel?: string;
 }
 
-/** Run-picker dropdown for the StateInspector header. Defaults to
- *  "Latest" (follow `/runs.latest`) and lists every archived run with a
- *  green dot next to the live one. Pinning a specific run sets `?run=<id>`
- *  in the URL via the parent's `onSelect` so reload + share work. */
-export function RunPicker({ runs, selectedRunId, onSelect }: RunPickerProps) {
-  const isFollowingLatest = selectedRunId === null || selectedRunId === runs.latest;
+/** Shared run-picker dropdown — Radix DropdownMenu with one "auto-follow
+ *  Latest" entry plus one entry per supplied run. The in-flight run
+ *  pulses with a green CircleDot. Parents persist selection via URL
+ *  state (typically `?run=<id>`) so reload + share work. */
+export function RunPicker({
+  runs,
+  liveRunId,
+  selectedRunId,
+  onSelect,
+  latestLabel = "Latest",
+}: RunPickerProps) {
+  const isFollowingLatest = selectedRunId === null;
   const label =
     selectedRunId == null
-      ? "Latest"
-      : selectedRunId === runs.live
+      ? latestLabel
+      : selectedRunId === liveRunId
         ? `${selectedRunId} (live)`
         : selectedRunId;
 
@@ -56,18 +73,18 @@ export function RunPicker({ runs, selectedRunId, onSelect }: RunPickerProps) {
                 : "text-zinc-300 hover:bg-white/[0.04] data-[highlighted]:bg-white/[0.04]",
             )}
           >
-            <span className="text-[10px] uppercase tracking-wider opacity-60">Latest</span>
-            <span className="text-zinc-500 truncate">{runs.latest ?? "no runs yet"}</span>
+            <span className="text-[10px] uppercase tracking-wider opacity-60">{latestLabel}</span>
+            <span className="text-zinc-500 truncate">{runs[0] ?? "no runs yet"}</span>
           </DropdownMenu.Item>
 
-          {runs.runs.length > 0 && (
+          {runs.length > 0 && (
             <>
               <DropdownMenu.Separator className="h-px bg-white/5 my-1" />
               <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-zinc-500">
-                All runs ({runs.runs.length})
+                All runs ({runs.length})
               </div>
-              {runs.runs.map((id) => {
-                const isLive = id === runs.live;
+              {runs.map((id) => {
+                const isLive = id === liveRunId;
                 const isSelected = id === selectedRunId;
                 return (
                   <DropdownMenu.Item
