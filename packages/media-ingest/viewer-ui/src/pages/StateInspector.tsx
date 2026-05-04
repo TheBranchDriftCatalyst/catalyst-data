@@ -109,6 +109,13 @@ export function StateInspector() {
     if (firstDoc) setSelectedDoc(firstDoc);
   }, [events, selectedDoc]);
 
+  // Initial load: we haven't fetched anything yet AND we don't know the
+  // run state. `connected` flips true on the first successful fetch
+  // (even if events array is empty). Show the spinner only during that
+  // "haven't talked to backend yet" window — once connected, switch to
+  // the real empty-state copy ("No events yet — start a benchmark run").
+  const isInitialLoad = !connected && error === null;
+
   return (
     <div className="flex h-full">
       <div className="w-60 flex-shrink-0 border-r border-white/10 overflow-y-auto">
@@ -153,6 +160,8 @@ export function StateInspector() {
                 selected={selectedNode}
                 onSelectNode={setSelectedNode}
               />
+            ) : isInitialLoad ? (
+              <LoadingSpinner label="Loading audit log…" />
             ) : (
               <div className="p-6 font-mono text-xs text-zinc-500">
                 {events.length === 0
@@ -187,6 +196,18 @@ export function StateInspector() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function LoadingSpinner({ label }: { label: string }) {
+  return (
+    <div
+      data-testid="state-inspector-loading"
+      className="h-full flex flex-col items-center justify-center gap-3 font-mono text-xs text-zinc-500"
+    >
+      <div className="w-6 h-6 border-2 border-zinc-700 border-t-zinc-300 rounded-full animate-spin" />
+      <span>{label}</span>
     </div>
   );
 }
