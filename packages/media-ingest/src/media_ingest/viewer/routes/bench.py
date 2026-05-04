@@ -219,15 +219,61 @@ def _bench_store() -> S3BenchmarkStore:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _live_local_run_id(cache_root: Path) -> str | None:
+    """Return the ``run_id`` of the currently-in-flight local run, if any.
+
+    Probes the local Phase 4 partition tree (``events/doc_id=*/shard-*.parquet``).
+    Reads ``run_id`` from one row of any shard — they're all stamped with
+    the same id at write time. Returns ``None`` if no shards are present
+    (meaning no live run, or the run already consolidated + archived).
+
+    Why probe disk instead of relying on ``event_store.current_run_id()``:
+    the viewer-api is a separate process from the harness, so the
+    in-process module globals aren't visible. Disk is the SSOT.
+    """
+    partitioned_root = cache_root / "events"
+    if not partitioned_root.is_dir():
+        return None
+    shards = list(partitioned_root.glob("doc_id=*/shard-*.parquet"))
+    if not shards:
+        return None
+    try:
+        import duckdb
+
+        conn = duckdb.connect(":memory:")
+        f_lit = "'" + str(shards[0]).replace("'", "''") + "'"
+        row = conn.execute(f"SELECT run_id FROM read_parquet({f_lit}) LIMIT 1").fetchone()
+        return row[0] if row else None
+    except Exception:
+        logger.exception("failed to probe live run_id from %s", shards[0])
+        return None
+
+
 @router.get("/runs")
 def list_runs() -> dict[str, Any]:
-    """List all benchmark runs in S3, newest first."""
+    """List all benchmark runs, newest first.
+
+    Includes both:
+      - Archived runs in S3 (``store.list_runs()``).
+      - The currently-in-flight LOCAL run, if any. Surfaces the live
+        run for the StateInspector even before the harness uploads at
+        run-end — without this, the UI shows nothing for an active bench
+        until consolidation finishes (could be 10+ minutes on a real run).
+    """
     store = _bench_store()
     runs = store.list_runs()
-    # Reverse so newest is first — matches viewer expectations.
+    archived_newest_first = list(reversed(runs))
+
+    live = _live_local_run_id(store.local_cache_root)
+    # Prepend the live run if it isn't already in the archived list (a
+    # run that just finished consolidate+upload may appear in both — dedupe).
+    if live and live not in archived_newest_first:
+        archived_newest_first.insert(0, live)
+
     return {
-        "runs": list(reversed(runs)),
-        "latest": runs[-1] if runs else None,
+        "runs": archived_newest_first,
+        "latest": archived_newest_first[0] if archived_newest_first else None,
+        "live": live,  # convenience flag so the UI can label the active run
         "uri": store.runs_uri,
     }
 
