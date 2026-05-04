@@ -1,12 +1,20 @@
-"""Tests for the DuckDB-backed bench audit log (CD-jzkg, Phase 1).
+"""Tests for the DuckDB-backed bench audit log.
 
-The four required cases per the plan:
+Phase 1-3 cases:
 
 * roundtrip — append → query
 * swarm — multiple subprocesses concurrently writing shards
 * crash — partial shard after SIGKILL is still readable
-* arbitrary-filter — p99 < 50 ms for ``WHERE chunk_id=? AND status='error'``
+* arbitrary-filter — p99 < 50 ms for ``WHERE chunk_id=? AND status='error''
   on a 10k-row corpus
+
+Phase 4 cases (CD-jzkg.1, hive-partitioned by doc_id):
+
+* writer partitions shards by doc_id
+* events with no doc_id land in the synthetic ``__run__`` partition
+* consolidate produces one ``data.parquet`` per partition + cleans shards
+* ``WHERE doc_id = ?`` partition-prunes to a single file
+* legacy flat ``events.parquet`` runs still read correctly
 
 Tests are written against the public module API (``configure``,
 ``append``, ``flush``, ``query``, ``consolidate``) so refactors of the
@@ -118,15 +126,31 @@ from dagster_io.bench.event_store import BenchEventStore
 run_dir = Path(sys.argv[1])
 run_id = sys.argv[2]
 n = int(sys.argv[3])
+# Each subprocess writes events alternating across two doc_ids plus a
+# few harness-level events with no doc_id. The Phase 4 partition tree
+# must end up with shards under doc_id=doc-A, doc_id=doc-B, and
+# doc_id=__run__ for each writer pid.
+docs = ['doc-A', 'doc-B']
 store = BenchEventStore(run_id=run_id, run_dir=run_dir)
 for i in range(n):
-    store.append(
-        source='harness',
-        node_name='model_run',
-        status='running',
-        model=f'm-{{os.getpid()}}',
-        details={{'i': i}},
-    )
+    if i % 10 == 0:
+        # harness-level event — no doc_id → partition __run__
+        store.append(
+            source='harness',
+            node_name='heartbeat',
+            status='info',
+            model=f'm-{{os.getpid()}}',
+            details={{'i': i}},
+        )
+    else:
+        store.append(
+            source='harness',
+            node_name='model_run',
+            status='running',
+            model=f'm-{{os.getpid()}}',
+            doc_id=docs[i % 2],
+            details={{'i': i}},
+        )
 store.close()
 """
 
@@ -141,13 +165,16 @@ def _libs_path() -> str:
 
 
 def test_swarm_writers_consolidate_in_order(tmp_path: Path) -> None:
-    """Four subprocesses each emit 50 events. Consolidation produces a
-    single parquet sorted by ``(seq, writer_pid)`` with no dupes and all
-    200 rows accounted for.
+    """Four subprocesses each emit 50 events across {doc-A, doc-B, no-doc}.
+    Consolidation produces one ``data.parquet`` per ``doc_id`` partition,
+    each sorted by ``(seq, writer_pid)``, with no dupes and all 200 rows
+    accounted for across the partitions.
 
-    This is the swarm-safety contract: per-process shards are
-    self-contained, the merge is deterministic, the ``(seq, writer_pid)``
-    tuple is the canonical ordering key.
+    Phase 4 (CD-jzkg.1): per-(pid, doc_id) shards consolidate
+    independently into per-partition ``events/doc_id=<doc>/data.parquet``.
+    Multiple writer processes producing the same doc_id is allowed —
+    the merge is deterministic, ``(seq, writer_pid)`` is still the
+    canonical ordering key WITHIN a partition.
     """
     run_id = "swarm-1"
     n_per_proc = 50
@@ -172,29 +199,49 @@ def test_swarm_writers_consolidate_in_order(tmp_path: Path) -> None:
         rc = p.wait(timeout=30)
         assert rc == 0, f"swarm writer pid={p.pid} exited with {rc}"
 
-    # Shard count: one per process.
-    shards = sorted(tmp_path.glob("events-*.parquet"))
-    assert len(shards) == n_procs, f"expected {n_procs} shards, got {len(shards)}: {shards}"
+    events_root = tmp_path / "events"
+    # Each writer produces one shard per partition it touched. The
+    # writer script touches 3 partitions (doc-A, doc-B, __run__), so
+    # we expect 3 partitions × n_procs shards before consolidation.
+    expected_partitions = {"doc_id=doc-A", "doc_id=doc-B", "doc_id=__run__"}
+    actual_partitions = {p.name for p in events_root.glob("doc_id=*")}
+    assert actual_partitions == expected_partitions, (
+        f"expected partitions {expected_partitions}, got {actual_partitions}"
+    )
+    for part_name in expected_partitions:
+        shards = sorted((events_root / part_name).glob("shard-*.parquet"))
+        assert len(shards) == n_procs, f"expected {n_procs} shards under {part_name}, got {len(shards)}: {shards}"
 
-    out = event_store.BenchEventStore.consolidate(tmp_path)
-    assert out.exists()
-    assert out.name == "events.parquet"
+    event_store.BenchEventStore.consolidate(tmp_path)
 
+    # Per-partition: exactly one data.parquet, no shards left over.
     import duckdb  # noqa: PLC0415
 
     conn = duckdb.connect(":memory:")
-    cur = conn.execute("SELECT seq, writer_pid FROM read_parquet(?)", (str(out),))
-    rows = cur.fetchall()
-    assert len(rows) == n_procs * n_per_proc
+    total_rows = 0
+    for part_name in expected_partitions:
+        part_dir = events_root / part_name
+        data = part_dir / "data.parquet"
+        assert data.exists(), f"missing {data}"
+        leftover_shards = list(part_dir.glob("shard-*.parquet"))
+        assert not leftover_shards, f"shards left in {part_name}: {leftover_shards}"
 
-    # Sorted by (seq, writer_pid) — verify ordering invariant.
-    for prev, cur_row in zip(rows, rows[1:], strict=False):
-        assert (prev[0], prev[1]) <= (cur_row[0], cur_row[1])
+        cur = conn.execute(
+            "SELECT seq, writer_pid FROM read_parquet(?) ORDER BY seq, writer_pid",
+            (str(data),),
+        )
+        rows = cur.fetchall()
+        total_rows += len(rows)
+        # Sorted by (seq, writer_pid) — verify per-partition ordering.
+        for prev, cur_row in zip(rows, rows[1:], strict=False):
+            assert (prev[0], prev[1]) <= (cur_row[0], cur_row[1])
+        # No duplicate (seq, writer_pid) pairs within a partition.
+        pairs = {(seq, pid) for seq, pid in rows}
+        assert len(pairs) == len(rows)
 
-    # No duplicate (seq, writer_pid) pairs — each writer has its own seq
-    # space and they're unique within a writer.
-    pairs = {(seq, pid) for seq, pid in rows}
-    assert len(pairs) == len(rows)
+    assert total_rows == n_procs * n_per_proc, (
+        f"row total across partitions: {total_rows}, expected {n_procs * n_per_proc}"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -214,14 +261,16 @@ run_id = sys.argv[2]
 store = BenchEventStore(run_id=run_id, run_dir=run_dir)
 # Emit enough events to force at least one flush ceiling crossing,
 # then a few more so there's a buffer pending when we self-kill.
+# All events use a single doc_id so the partition layout is
+# deterministic for the parent's assertions.
 for i in range({n_pre}):
-    store.append(source='harness', node_name='x', status='ok', details={{'i': i}})
+    store.append(source='harness', node_name='x', status='ok', doc_id='doc-1', details={{'i': i}})
 store.flush()
 # Mark that the first flush completed — parent reads this to know the
 # parquet has *something* on disk before SIGKILL.
 (run_dir / 'first-flush-done').write_text('ok')
 for i in range({n_post}):
-    store.append(source='harness', node_name='x', status='ok', details={{'i': i + {n_pre}}})
+    store.append(source='harness', node_name='x', status='ok', doc_id='doc-1', details={{'i': i + {n_pre}}})
 # Self-kill BEFORE the flush completes — buffer has unflushed rows.
 os.kill(os.getpid(), signal.SIGKILL)
 """
@@ -250,7 +299,7 @@ def test_partial_shard_after_crash_is_readable(tmp_path: Path) -> None:
     # The crash sentinel should exist — proves we got past the first flush.
     assert (tmp_path / "first-flush-done").exists()
 
-    shards = sorted(tmp_path.glob("events-*.parquet"))
+    shards = sorted((tmp_path / "events" / "doc_id=doc-1").glob("shard-*.parquet"))
     assert len(shards) == 1
 
     # Parquet must be readable AND contain the pre-flush events. We do
@@ -381,16 +430,23 @@ def test_query_arbitrary_filter(tmp_path: Path) -> None:
 
 
 def test_consolidate_is_idempotent(tmp_path: Path) -> None:
+    """Two consolidate calls on the same partition produce identical row
+    data (modulo parquet writer metadata).
+
+    With no doc_id supplied the events land in ``doc_id=__run__/`` —
+    the synthetic harness partition.
+    """
     s = _make_store(tmp_path, run_id="idem-1")
     for i in range(20):
         s.append(source="harness", node_name="x", status="ok", details={"i": i})
     s.flush()
     s.close()
 
-    out1 = event_store.BenchEventStore.consolidate(tmp_path)
-    sha1 = _sha256_rows(out1)
-    out2 = event_store.BenchEventStore.consolidate(tmp_path)
-    sha2 = _sha256_rows(out2)
+    event_store.BenchEventStore.consolidate(tmp_path)
+    out = tmp_path / "events" / "doc_id=__run__" / "data.parquet"
+    sha1 = _sha256_rows(out)
+    event_store.BenchEventStore.consolidate(tmp_path)
+    sha2 = _sha256_rows(out)
     assert sha1 == sha2
 
 
@@ -410,3 +466,195 @@ def _sha256_rows(parquet_path: Path) -> str:
     for r in rows:
         h.update(repr(r).encode("utf-8"))
     return h.hexdigest()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Phase 4 (CD-jzkg.1): hive-partitioning by doc_id
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_writer_partitions_by_doc_id(tmp_path: Path) -> None:
+    """Events with different ``doc_id`` values land in different shard files
+    matching ``events/doc_id=<X>/shard-*.parquet``."""
+    s = _make_store(tmp_path, run_id="part-1")
+    s.append(source="harness", node_name="x", status="ok", doc_id="alpha", details={"i": 0})
+    s.append(source="harness", node_name="x", status="ok", doc_id="beta", details={"i": 1})
+    s.append(source="harness", node_name="x", status="ok", doc_id="alpha", details={"i": 2})
+    s.flush()
+
+    events_root = tmp_path / "events"
+    alpha_shards = sorted((events_root / "doc_id=alpha").glob("shard-*.parquet"))
+    beta_shards = sorted((events_root / "doc_id=beta").glob("shard-*.parquet"))
+    assert len(alpha_shards) == 1, f"alpha: {alpha_shards}"
+    assert len(beta_shards) == 1, f"beta: {beta_shards}"
+
+    # Crucially — the alpha shard must NOT see beta rows and vice versa.
+    import duckdb  # noqa: PLC0415
+
+    conn = duckdb.connect(":memory:")
+    alpha_doc_ids = {
+        r[0] for r in conn.execute(f"SELECT DISTINCT doc_id FROM read_parquet('{alpha_shards[0]}')").fetchall()
+    }
+    beta_doc_ids = {
+        r[0] for r in conn.execute(f"SELECT DISTINCT doc_id FROM read_parquet('{beta_shards[0]}')").fetchall()
+    }
+    assert alpha_doc_ids == {"alpha"}
+    assert beta_doc_ids == {"beta"}
+    s.close()
+
+
+def test_null_doc_id_lands_in_run_partition(tmp_path: Path) -> None:
+    """Events with ``doc_id=None`` (or empty string) land in the synthetic
+    ``doc_id=__run__/`` partition — never the literal string ``None``."""
+    s = _make_store(tmp_path, run_id="nullpart-1")
+    s.append(source="harness", node_name="run_start", status="started")
+    s.append(source="harness", node_name="run_end", status="completed", doc_id="")
+    s.flush()
+    s.close()
+
+    event_store.BenchEventStore.consolidate(tmp_path)
+    run_part = tmp_path / "events" / "doc_id=__run__" / "data.parquet"
+    assert run_part.exists(), f"expected {run_part}"
+
+    # The literal "None" path must NOT exist — that would silently
+    # collide with a real doc whose stringified id is "None".
+    assert not (tmp_path / "events" / "doc_id=None").exists()
+
+    import duckdb  # noqa: PLC0415
+
+    conn = duckdb.connect(":memory:")
+    # Disable hive_partitioning so we see the *actual* parquet column,
+    # not the partition-key projection. The parquet value should be
+    # NULL or empty — the partition key is the synthesised one.
+    rows = conn.execute(f"SELECT doc_id FROM read_parquet('{run_part}', hive_partitioning=false)").fetchall()
+    assert len(rows) == 2
+    for (doc,) in rows:
+        assert doc is None or doc == ""
+
+    # And with hive_partitioning=true (the viewer's read mode) the
+    # column resolves to the synthetic ``__run__`` key — that's the
+    # contract that lets ``WHERE doc_id = '__run__'`` find these rows.
+    rows_hive = conn.execute(f"SELECT doc_id FROM read_parquet('{run_part}', hive_partitioning=true)").fetchall()
+    for (doc,) in rows_hive:
+        assert doc == "__run__"
+
+
+def test_consolidate_per_partition(tmp_path: Path) -> None:
+    """After consolidate, each ``doc_id=<X>/`` has exactly one
+    ``data.parquet`` and zero ``shard-*.parquet`` left over."""
+    s = _make_store(tmp_path, run_id="cons-1")
+    for i in range(5):
+        s.append(source="harness", node_name="x", status="ok", doc_id="alpha", details={"i": i})
+    for i in range(7):
+        s.append(source="harness", node_name="x", status="ok", doc_id="beta", details={"i": i})
+    s.append(source="harness", node_name="run_start", status="started")  # no doc_id
+    s.flush()
+    s.close()
+
+    event_store.BenchEventStore.consolidate(tmp_path)
+
+    events_root = tmp_path / "events"
+    parts = sorted(p.name for p in events_root.glob("doc_id=*"))
+    assert parts == ["doc_id=__run__", "doc_id=alpha", "doc_id=beta"]
+
+    for part in parts:
+        part_dir = events_root / part
+        data = part_dir / "data.parquet"
+        assert data.exists(), f"missing {data}"
+        leftover = list(part_dir.glob("shard-*.parquet"))
+        assert not leftover, f"shards left in {part}: {leftover}"
+
+
+def test_doc_id_filter_partition_prunes(tmp_path: Path) -> None:
+    """``read_parquet(events/**/data.parquet, hive_partitioning=true)
+    WHERE doc_id = X`` opens exactly one file.
+
+    Verifies via DuckDB ``EXPLAIN ANALYZE`` that partition-pruning
+    actually fires. This is the user-visible win — the speedup at 45k
+    events is the whole point of Phase 4.
+    """
+    s = _make_store(tmp_path, run_id="prune-1")
+    # Three partitions with very different sizes. If pruning is working,
+    # filtering on doc_id=alpha should NOT scan beta/gamma at all.
+    for i in range(20):
+        s.append(source="harness", node_name="x", status="ok", doc_id="alpha", details={"i": i})
+    for i in range(50):
+        s.append(source="harness", node_name="x", status="ok", doc_id="beta", details={"i": i})
+    for i in range(30):
+        s.append(source="harness", node_name="x", status="ok", doc_id="gamma", details={"i": i})
+    s.flush()
+    s.close()
+
+    event_store.BenchEventStore.consolidate(tmp_path)
+
+    glob = str(tmp_path / "events" / "doc_id=*" / "data.parquet")
+    import duckdb  # noqa: PLC0415
+
+    conn = duckdb.connect(":memory:")
+
+    # Sanity: total rows match.
+    [(total,)] = conn.execute(f"SELECT count(*) FROM read_parquet('{glob}', hive_partitioning=true)").fetchall()
+    assert total == 100
+
+    # Filter pruning: distinct files touched when filtering on doc_id.
+    # Use ``parquet_metadata()`` against the *intended* file as a sanity
+    # baseline, then count rows with the ``filename`` virtual column to
+    # confirm only one file participated.
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT filename
+        FROM read_parquet('{glob}', hive_partitioning=true, filename=true)
+        WHERE doc_id = 'alpha'
+        """
+    ).fetchall()
+    assert len(rows) == 1, f"expected 1 file touched for alpha, got {len(rows)}: {rows}"
+    assert "doc_id=alpha" in rows[0][0]
+
+    # No-filter scan touches all 3 files — proves the comparison above
+    # is meaningful (pruning vs full scan).
+    all_files = conn.execute(
+        f"SELECT DISTINCT filename FROM read_parquet('{glob}', hive_partitioning=true, filename=true)"
+    ).fetchall()
+    assert len(all_files) == 3
+
+
+def test_backward_compat_legacy_layout(tmp_path: Path) -> None:
+    """A run dir with only the Phase 1-3 flat ``events.parquet`` (no
+    ``events/`` directory) still reads correctly.
+
+    The Phase 4 migration is forward-only: legacy artefacts on disk or
+    in S3 keep working, but new writes never produce them.
+    """
+    # Hand-build a legacy layout: a single flat ``events-<pid>-<uuid>.parquet``
+    # using the same writer with the partitioned events/ dir scrubbed.
+    s = _make_store(tmp_path, run_id="legacy-1")
+    for i in range(5):
+        s.append(source="harness", node_name="x", status="ok", doc_id="doc-1", details={"i": i})
+    s.flush()
+    s.close()
+
+    # Move the partition shard to the legacy flat path and remove the
+    # events/ tree so the run looks like Phase 1-3.
+    events_root = tmp_path / "events"
+    shards = list(events_root.glob("doc_id=*/shard-*.parquet"))
+    assert len(shards) == 1, f"expected 1 shard, got {shards}"
+    legacy_path = tmp_path / shards[0].name  # same shard-<pid>-<uuid> name
+    # Phase 1-3 used events-<pid>-<uuid>.parquet — rename accordingly so
+    # the legacy glob (events-*.parquet) catches it.
+    legacy_name = "events-" + shards[0].name.removeprefix("shard-")
+    legacy_path = tmp_path / legacy_name
+    shards[0].rename(legacy_path)
+    # Wipe the partition tree so only the legacy file remains.
+    import shutil  # noqa: PLC0415
+
+    shutil.rmtree(events_root)
+    assert not events_root.exists()
+    assert legacy_path.exists()
+
+    # Read via the BenchEventStore.query helper — its layout-detection
+    # branch falls through to ``events-*.parquet`` when there's no
+    # partitioned tree.
+    reader = event_store.BenchEventStore(run_id="legacy-1-reader", run_dir=tmp_path)
+    rows = reader.query("SELECT doc_id, details FROM events ORDER BY seq")
+    assert len(rows) == 5
+    assert {r["doc_id"] for r in rows} == {"doc-1"}

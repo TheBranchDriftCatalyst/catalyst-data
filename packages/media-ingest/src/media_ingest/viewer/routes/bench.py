@@ -40,6 +40,7 @@ import copy
 import json
 import os
 import threading
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -280,6 +281,24 @@ _MAX_LIMIT = 50_000
 _DEFAULT_LIMIT = 5_000
 
 
+def _local_event_files(store: S3BenchmarkStore) -> list[Path]:
+    """Return every local parquet that *might* contain run events.
+
+    Walks both the Phase 4 partitioned tree
+    (``events/doc_id=*/{shard,data}-*.parquet``) and the Phase 1-3
+    flat layout (``events-*.parquet``) so a stale leftover from
+    either era still gets probed for ``_is_live_run``. The
+    semantics from commit 21f89bf — *scan ALL shards, not just the
+    first* — are preserved: every file contributes its run_id.
+    """
+    cache_root = store.local_cache_root
+    out: list[Path] = []
+    out.extend(cache_root.glob("events/doc_id=*/shard-*.parquet"))
+    out.extend(cache_root.glob("events/doc_id=*/data.parquet"))
+    out.extend(cache_root.glob("events-*.parquet"))
+    return out
+
+
 def _local_run_ids(store: S3BenchmarkStore) -> set[str]:
     """Return the set of distinct ``run_id`` values present in the local
     shard set.
@@ -289,9 +308,13 @@ def _local_run_ids(store: S3BenchmarkStore) -> set[str]:
     active one until manual cleanup. Every shard is single-run by
     construction (one writer-process per run, per ``event_store.py``), so
     a single-row probe per file is enough.
+
+    Walks both the Phase 4 partitioned tree and the Phase 1-3 flat
+    layout — backward-compat reads have to recognise either as
+    "this run is local".
     """
-    shards = list(store.local_cache_root.glob("events-*.parquet"))
-    if not shards:
+    files = _local_event_files(store)
+    if not files:
         return set()
     try:
         import duckdb  # noqa: PLC0415
@@ -299,9 +322,9 @@ def _local_run_ids(store: S3BenchmarkStore) -> set[str]:
         conn = duckdb.connect(":memory:")
         try:
             run_ids: set[str] = set()
-            for shard in shards:
-                shard_lit = "'" + str(shard).replace("'", "''") + "'"
-                row = conn.execute(f"SELECT run_id FROM read_parquet({shard_lit}) LIMIT 1").fetchone()
+            for f in files:
+                f_lit = "'" + str(f).replace("'", "''") + "'"
+                row = conn.execute(f"SELECT run_id FROM read_parquet({f_lit}) LIMIT 1").fetchone()
                 if row and row[0]:
                     run_ids.add(row[0])
             return run_ids
@@ -316,7 +339,7 @@ def _is_live_run(store: S3BenchmarkStore, run_id: str) -> bool:
 
     "Live" really means "served from the local cache rather than the S3
     archive" — once a run consolidates and uploads, the canonical artefact
-    is the S3 ``events.parquet``. During a run, and for the brief window
+    is the S3 events tree. During a run, and for the brief window
     between consolidation and archive PUT, the local shards are
     authoritative.
 
@@ -336,6 +359,73 @@ def _is_live_run(store: S3BenchmarkStore, run_id: str) -> bool:
     except Exception:
         pass
     return run_id in _local_run_ids(store)
+
+
+def _resolve_local_glob(cache_root: Path) -> tuple[str | None, str]:
+    """Pick the local parquet glob to read for a live run.
+
+    Returns ``(quoted_glob_literal, hive_flag)`` — quoted so the caller
+    can drop it straight into a ``read_parquet(<glob_lit>, ...)``
+    expression. Phase 4 layout (``events/doc_id=*/{shard,data}-*.parquet``)
+    wins when present; Phases 1-3 fall through to ``events-*.parquet``.
+
+    Returns ``(None, "false")`` when neither layout has any files —
+    the caller surfaces that as 404.
+    """
+    partitioned_root = cache_root / "events"
+    if partitioned_root.is_dir():
+        # Match BOTH the in-flight shards AND consolidated data files
+        # so a freshly-completed run that hasn't yet been treated as
+        # archived still reads via the live path. ``shard-*.parquet``
+        # disappears after consolidate so this naturally degrades to
+        # ``data.parquet`` only.
+        partitioned = list(partitioned_root.glob("doc_id=*/*.parquet"))
+        if partitioned:
+            glob = str(partitioned_root / "doc_id=*/*.parquet")
+            glob_lit = "'" + glob.replace("'", "''") + "'"
+            return glob_lit, "true"
+    legacy = list(cache_root.glob("events-*.parquet"))
+    if legacy:
+        glob = str(cache_root / "events-*.parquet")
+        glob_lit = "'" + glob.replace("'", "''") + "'"
+        return glob_lit, "false"
+    return None, "false"
+
+
+def _resolve_archived_uri(store: S3BenchmarkStore, run) -> tuple[str | None, str]:
+    """Pick the S3 URI to read for an archived run.
+
+    Probe order:
+      1. Phase 4 partitioned tree under ``run.events_parquet_prefix``.
+      2. Phase 1-3 legacy single file at ``run.legacy_events_parquet_key``.
+
+    Returns ``(quoted_uri_literal, hive_flag)``. The hive flag is
+    ``true`` for the partitioned glob (so DuckDB partition-prunes on
+    ``doc_id`` filters) and ``false`` for the legacy single-file path.
+    Returns ``(None, "false")`` if neither artefact exists in S3 —
+    the caller surfaces that as 404.
+    """
+    # ``list_objects`` is a cheap listing call (paginated under the
+    # hood); only first-page truthiness is needed to know if anything
+    # is there at all.
+    try:
+        partitioned_keys = store.client.list_objects(run.events_parquet_prefix)
+    except Exception:
+        partitioned_keys = []
+    if partitioned_keys:
+        uri = f"s3://{store.bucket}/{run.events_parquet_prefix}**/data.parquet"
+        return "'" + uri.replace("'", "''") + "'", "true"
+    # Fall back to legacy single file. We probe via list_objects rather
+    # than HEAD so a missing file doesn't raise on the listing — let
+    # the actual read fail with NoSuchKey if the key is gone.
+    try:
+        legacy_keys = store.client.list_objects(run.legacy_events_parquet_key)
+    except Exception:
+        legacy_keys = []
+    if legacy_keys:
+        uri = f"s3://{store.bucket}/{run.legacy_events_parquet_key}"
+        return "'" + uri.replace("'", "''") + "'", "false"
+    return None, "false"
 
 
 def _duckdb_connect_with_s3(client) -> Any:
@@ -452,8 +542,17 @@ def run_events_duckdb(
     The single viewer-facing audit-log endpoint as of CD-jzkg Phase 3
     (the legacy ``events.jsonl`` route is gone). Returns 404 with
     ``{"detail": "no parquet for run"}`` when neither the local shard
-    glob nor the S3 ``events.parquet`` resolves — the SPA shows
-    "no events for run" without retry.
+    glob nor the S3 events tree resolves — the SPA shows "no events
+    for run" without retry.
+
+    Phase 4 (CD-jzkg.1): the on-disk + S3 layout switched from a single
+    ``events.parquet`` to a hive-partitioned tree
+    ``events/doc_id=<doc>/data.parquet`` (plus in-flight
+    ``shard-*.parquet`` files). With ``hive_partitioning=true`` set on
+    the read, ``WHERE doc_id = ?`` partition-prunes to a single file —
+    that's the fix for the user's "feels slow at 45k events" report.
+    Old runs with the flat layout still read via the fall-through
+    branch; new writes never produce that layout.
     """
     store = _bench_store()
     run = store.load_run(run_id)
@@ -479,18 +578,13 @@ def run_events_duckdb(
     cols: list[str] = []
     try:
         if is_live:
-            shard_glob = str(store.local_cache_root / "events-*.parquet")
-            shards = list(store.local_cache_root.glob("events-*.parquet"))
-            if not shards:
+            glob_lit, hive = _resolve_local_glob(store.local_cache_root)
+            if glob_lit is None:
                 raise HTTPException(status_code=404, detail="no parquet for run")
             import duckdb  # noqa: PLC0415
 
             conn = duckdb.connect(":memory:")
             try:
-                # read_parquet doesn't accept ``?`` parameters for the
-                # path argument; embed the glob (a Path-derived string,
-                # never user input) as a literal with quote escaping.
-                glob_lit = "'" + shard_glob.replace("'", "''") + "'"
                 # Always WHERE-filter by run_id even on the live path —
                 # the local cache is not cleaned between runs, so shards
                 # from a prior run can sit alongside the active set
@@ -504,8 +598,13 @@ def run_events_duckdb(
                     live_clauses.append(where_sql.removeprefix(" WHERE "))
                     live_params.extend(params)
                 live_where = " WHERE " + " AND ".join(live_clauses)
+                # hive_partitioning=true on the partitioned glob makes
+                # DuckDB treat ``doc_id`` from the path as a virtual
+                # column AND prune partitions when the WHERE clause
+                # filters on it. Legacy globs run with hive=false.
                 sql = (
-                    f"SELECT * FROM read_parquet({glob_lit}, union_by_name=true)"
+                    f"SELECT * FROM read_parquet({glob_lit}, "
+                    f"union_by_name=true, hive_partitioning={hive})"
                     f"{live_where} {order_sql} LIMIT {int(limit)}"
                 )
                 cur = conn.execute(sql, tuple(live_params))
@@ -514,23 +613,27 @@ def run_events_duckdb(
             finally:
                 conn.close()
         else:
-            # Archived run — read events.parquet from S3 via httpfs.
-            s3_uri = f"s3://{store.bucket}/{run.events_parquet_key}"
+            # Archived run — try the partitioned tree first, fall back
+            # to the legacy single events.parquet for old runs that
+            # pre-date Phase 4.
+            uri_lit, hive = _resolve_archived_uri(store, run)
+            if uri_lit is None:
+                raise HTTPException(status_code=404, detail="no parquet for run")
             conn = _duckdb_connect_with_s3(store.client)
             try:
-                uri_lit = "'" + s3_uri.replace("'", "''") + "'"
-                # union_by_name=true keeps us schema-evolution-safe across
-                # mixed-shard runs (see CD-jzkg §9.3).
+                # union_by_name=true keeps us schema-evolution-safe
+                # across mixed-shard runs (see CD-jzkg §9.3).
                 sql = (
-                    f"SELECT * FROM read_parquet({uri_lit}, union_by_name=true)"
+                    f"SELECT * FROM read_parquet({uri_lit}, "
+                    f"union_by_name=true, hive_partitioning={hive})"
                     f"{where_sql} {order_sql} LIMIT {int(limit)}"
                 )
                 try:
                     cur = conn.execute(sql, tuple(params))
                 except Exception as e:  # noqa: BLE001
-                    # Most common: HTTP 404 from S3 because no parquet was
-                    # archived for this run (consolidate failed). Surface
-                    # as 404 so the SPA shows "no events for run".
+                    # Most common: HTTP 404 from S3 because no parquet
+                    # was archived for this run (consolidate failed).
+                    # Surface as 404 so the SPA shows "no events for run".
                     msg = str(e)
                     if "404" in msg or "NoSuchKey" in msg or "not found" in msg.lower():
                         raise HTTPException(status_code=404, detail="no parquet for run") from e

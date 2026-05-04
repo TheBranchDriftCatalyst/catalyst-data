@@ -6,12 +6,14 @@ top-level reports. Everything lives under ``s3://<bucket>/bench/...`` so the
 training-dataset Dagster assets can read benchmark output from the same bucket
 that holds the live medallion corpus.
 
-The bench audit log writes per-process Parquet shards to local disk under
-``local_cache_root`` during a run (CD-jzkg ``BenchEventStore``); at run end
-the harness consolidates them to ``events.parquet`` and uploads to
-``s3://<bucket>/bench/runs/<run_id>/events.parquet`` via
-:meth:`S3RunStore.archive_events_parquet`. The viewer reads the same parquet
-back via DuckDB ``httpfs``.
+The bench audit log writes per-(pid, doc_id) Parquet shards to local disk
+under ``local_cache_root`` during a run (CD-jzkg ``BenchEventStore``); at
+run end the harness consolidates each ``doc_id`` partition into its own
+``data.parquet`` and uploads the partitioned tree to
+``s3://<bucket>/bench/runs/<run_id>/events/doc_id=<doc>/data.parquet`` via
+:meth:`S3RunStore.archive_events_parquet`. DuckDB partition-prunes via
+``read_parquet(..., hive_partitioning=true)`` when the viewer filters by
+``doc_id`` (Phase 4 of CD-jzkg).
 
 Path layout:
 
@@ -22,13 +24,18 @@ Path layout:
       runs/<run_id>/
         extractions/extraction_<model>.json
         extractions/<doc_id>/extraction_<model>.json
-        events.parquet
+        events/doc_id=<doc_id>/data.parquet     -- Phase 4 partitioned
+        events/doc_id=__run__/data.parquet      -- harness-level events
         benchmark-report.json
         run-config.json
       benchmark-report.json     -- top-level, latest-run snapshot
       overrides/snapshot.json   -- viewer_entity_overrides export
       training/sft/<domain>/data.jsonl
       training/dpo/<domain>/data.jsonl
+
+Legacy runs from Phases 1-3 may still have a flat
+``runs/<run_id>/events.parquet``; the read path falls back to that when the
+partitioned ``events/`` prefix doesn't resolve.
 """
 
 from __future__ import annotations
@@ -119,12 +126,39 @@ class S3RunStore:
         return f"s3://{self._store.bucket}/{self.report_key}"
 
     @property
-    def events_parquet_key(self) -> str:
-        return f"{self.s3_prefix}/events.parquet"
+    def events_parquet_prefix(self) -> str:
+        """Prefix under which the partitioned events tree lives.
+
+        Includes the trailing slash so callers can do
+        ``f"{prefix}{partition}/data.parquet"`` cleanly. Phase 4 (CD-jzkg)
+        replaced the single ``events.parquet`` file with this hive-style
+        partitioned tree.
+        """
+        return f"{self.s3_prefix}/events/"
 
     @property
     def events_parquet_uri(self) -> str:
-        return f"s3://{self._store.bucket}/{self.events_parquet_key}"
+        """S3 URI for the partitioned events tree (with trailing slash).
+
+        Suitable as a directory-style reference for tooling that lists
+        the partitioned layout. For a DuckDB ``read_parquet`` glob use
+        ``f"{events_parquet_uri}**/data.parquet"``.
+        """
+        return f"s3://{self._store.bucket}/{self.events_parquet_prefix}"
+
+    @property
+    def legacy_events_parquet_key(self) -> str:
+        """Legacy single-file key from Phases 1-3.
+
+        Read-only fallback: a run that pre-dates Phase 4 still has its
+        consolidated ``events.parquet`` at this key. New writes never
+        produce this file.
+        """
+        return f"{self.s3_prefix}/events.parquet"
+
+    @property
+    def legacy_events_parquet_uri(self) -> str:
+        return f"s3://{self._store.bucket}/{self.legacy_events_parquet_key}"
 
     # ── Extractions (run-scoped) ────────────────────────────────────────────
 
@@ -199,19 +233,34 @@ class S3RunStore:
 
     # ── Events archive (parquet, CD-jzkg) ──────────────────────────────────
 
-    def archive_events_parquet(self, local_parquet_path: Path | None = None) -> str | None:
-        """Upload the consolidated DuckDB-emitted ``events.parquet`` to S3.
+    def archive_events_parquet(self, local_run_dir: Path | None = None) -> str | None:
+        """Upload every ``events/doc_id=<doc>/data.parquet`` partition under
+        ``local_run_dir`` to S3 with the matching partition layout.
 
-        Path defaults to ``<local_cache_root>/events.parquet`` — the
-        location :class:`BenchEventStore.consolidate` writes to. Returns
-        the S3 key (or ``None`` if the local file is missing — typical
-        for a run that never emitted any events).
+        Phase 4 (CD-jzkg.1) replaces the single-file upload with a
+        per-partition fan-out. ``local_run_dir`` defaults to
+        ``<local_cache_root>`` — the directory
+        :class:`BenchEventStore.consolidate` writes the
+        ``events/doc_id=*/data.parquet`` tree under.
+
+        Returns the S3 events prefix when at least one partition was
+        uploaded, ``None`` when no partitioned data was found locally.
         """
-        path = Path(local_parquet_path) if local_parquet_path else self._store.local_cache_root / "events.parquet"
-        if not path.exists():
+        run_dir = Path(local_run_dir) if local_run_dir else self._store.local_cache_root
+        events_root = run_dir / "events"
+        if not events_root.is_dir():
             return None
-        self._store.client.put_object(self.events_parquet_key, path.read_bytes())
-        return self.events_parquet_key
+        uploaded = 0
+        for part_dir in sorted(events_root.glob("doc_id=*")):
+            data = part_dir / "data.parquet"
+            if not data.exists():
+                continue
+            key = f"{self.events_parquet_prefix}{part_dir.name}/data.parquet"
+            self._store.client.put_object_file(key, str(data))
+            uploaded += 1
+        if uploaded == 0:
+            return None
+        return self.events_parquet_prefix
 
 
 # ─────────────────────────────────────────────────────────────────────────────

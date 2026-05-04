@@ -153,14 +153,23 @@ local_resource(
 # the interactive shell button).
 _DUCKDB_PREAMBLE = '''
 ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"
-if [ ! -f "$ROOT/events.parquet" ] && [ -z "$(ls "$ROOT"/events-*.parquet 2>/dev/null)" ]; then
+# Phase 4 (CD-jzkg.1) writes events under events/doc_id=*/data.parquet
+# (or shard-*.parquet while a run is in flight). Phase 1-3 wrote a flat
+# events.parquet (consolidated) and events-*.parquet (per-process
+# shards). The downstream queries use read_parquet($TARGET,
+# union_by_name=true, hive_partitioning=true) — the hive flag is a
+# no-op on the legacy globs so a single flag covers both eras.
+if compgen -G "$ROOT/events/doc_id=*/data.parquet" > /dev/null; then
+  TARGET="/data/events/**/data.parquet"
+elif compgen -G "$ROOT/events/doc_id=*/shard-*.parquet" > /dev/null; then
+  TARGET="/data/events/**/shard-*.parquet"
+elif [ -f "$ROOT/events.parquet" ]; then
+  TARGET="/data/events.parquet"
+elif compgen -G "$ROOT/events-*.parquet" > /dev/null; then
+  TARGET="/data/events-*.parquet"
+else
   echo "No events parquet found under $ROOT. Run a bench first (bench:run)."
   exit 1
-fi
-if [ -f "$ROOT/events.parquet" ]; then
-  TARGET="/data/events.parquet"
-else
-  TARGET="/data/events-*.parquet"
 fi
 duck() {
   docker run --rm $DOCKER_FLAGS \\
@@ -178,7 +187,7 @@ cmd_button(
 DOCKER_FLAGS="-it"
 echo "Opening DuckDB on: $TARGET (via davidgasquez/duckdb)"
 echo "Try:  SELECT node_name, status, count(*) FROM events GROUP BY 1,2 ORDER BY 3 DESC;"
-duck -cmd "CREATE VIEW events AS SELECT * FROM read_parquet('$TARGET', union_by_name=true);"
+duck -cmd "CREATE VIEW events AS SELECT * FROM read_parquet('$TARGET', union_by_name=true, hive_partitioning=true);"
 '''],
     text='Open DuckDB shell',
     icon_name='terminal',
@@ -189,13 +198,13 @@ cmd_button(
     resource='duckdb-inspect',
     argv=['sh', '-c', _DUCKDB_PREAMBLE + '''
 echo "── node_name × status histogram ──"
-duck -box -cmd "SELECT node_name, status, count(*) AS n FROM read_parquet('$TARGET', union_by_name=true) GROUP BY 1,2 ORDER BY n DESC LIMIT 50;"
+duck -box -cmd "SELECT node_name, status, count(*) AS n FROM read_parquet('$TARGET', union_by_name=true, hive_partitioning=true) GROUP BY 1,2 ORDER BY n DESC LIMIT 50;"
 echo
 echo "── total events / per-source ──"
-duck -box -cmd "SELECT source, count(*) AS n FROM read_parquet('$TARGET', union_by_name=true) GROUP BY 1 ORDER BY n DESC;"
+duck -box -cmd "SELECT source, count(*) AS n FROM read_parquet('$TARGET', union_by_name=true, hive_partitioning=true) GROUP BY 1 ORDER BY n DESC;"
 echo
 echo "── per-model event counts ──"
-duck -box -cmd "SELECT model, count(*) AS n FROM read_parquet('$TARGET', union_by_name=true) WHERE model IS NOT NULL GROUP BY 1 ORDER BY n DESC LIMIT 20;"
+duck -box -cmd "SELECT model, count(*) AS n FROM read_parquet('$TARGET', union_by_name=true, hive_partitioning=true) WHERE model IS NOT NULL GROUP BY 1 ORDER BY n DESC LIMIT 20;"
 '''],
     text='Stats (histograms)',
     icon_name='analytics',
@@ -214,7 +223,7 @@ duck -box -cmd "
     coalesce(doc_id, '-')  AS doc_id,
     coalesce(chunk_id, '-') AS chunk_id,
     json_extract_string(details, '$.error') AS error_msg
-  FROM read_parquet('$TARGET', union_by_name=true)
+  FROM read_parquet('$TARGET', union_by_name=true, hive_partitioning=true)
   WHERE status IN ('error', 'failed', 'failure', 'timeout')
   ORDER BY ts DESC
   LIMIT 30;
@@ -229,13 +238,17 @@ cmd_button(
     resource='duckdb-inspect',
     argv=['sh', '-c', _DUCKDB_PREAMBLE + '''
 echo "── parquet schema (DESCRIBE) ──"
-duck -box -cmd "DESCRIBE SELECT * FROM read_parquet('$TARGET', union_by_name=true);"
+duck -box -cmd "DESCRIBE SELECT * FROM read_parquet('$TARGET', union_by_name=true, hive_partitioning=true);"
 echo
 echo "── shard files on disk ──"
-ls -lh "${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"/events*.parquet 2>&1
+DISK_ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"
+if [ -d "$DISK_ROOT/events" ]; then
+  find "$DISK_ROOT/events" -type f -name '*.parquet' -exec ls -lh {} +
+fi
+ls -lh "$DISK_ROOT"/events*.parquet 2>/dev/null || true
 echo
 echo "── row counts per shard ──"
-duck -box -cmd "SELECT filename, count(*) AS rows FROM read_parquet('$TARGET', union_by_name=true, filename=true) GROUP BY filename ORDER BY filename;"
+duck -box -cmd "SELECT filename, count(*) AS rows FROM read_parquet('$TARGET', union_by_name=true, hive_partitioning=true, filename=true) GROUP BY filename ORDER BY filename;"
 '''],
     text='Schema + shard layout',
     icon_name='schema',
@@ -252,7 +265,7 @@ duck -box -cmd "
     source, node_name, status,
     coalesce(model, '-') AS model,
     coalesce(chunk_id, '-') AS chunk_id
-  FROM read_parquet('$TARGET', union_by_name=true)
+  FROM read_parquet('$TARGET', union_by_name=true, hive_partitioning=true)
   ORDER BY ts DESC
   LIMIT 20;
 "
@@ -273,7 +286,7 @@ HOST="${ENDPOINT#http://}"; HOST="${HOST#https://}"
 ACCESS="${DAGSTER_S3_ACCESS_KEY:-minio}"
 SECRET="${DAGSTER_S3_SECRET_KEY:-minio123}"
 BUCKET="${DAGSTER_S3_BUCKET:-dagster}"
-echo "── archived bench runs in s3://$BUCKET/bench/runs/ (events.parquet only) ──"
+echo "── archived bench runs in s3://$BUCKET/bench/runs/ (Phase 4 partitioned + legacy) ──"
 docker run --rm --platform linux/amd64 \\
   -e S3_HOST="$HOST" -e S3_ACCESS="$ACCESS" -e S3_SECRET="$SECRET" -e S3_BUCKET="$BUCKET" \\
   --entrypoint duckdb davidgasquez/duckdb:latest -box -cmd "
@@ -284,8 +297,10 @@ docker run --rm --platform linux/amd64 \\
     SET s3_access_key_id = getenv('S3_ACCESS');
     SET s3_secret_access_key = getenv('S3_SECRET');
     SELECT regexp_extract(file, 'runs/([^/]+)/', 1) AS run_id, count(*) AS rows
-    FROM read_parquet('s3://' || getenv('S3_BUCKET') || '/bench/runs/*/events.parquet',
-                      filename='file', union_by_name=true)
+    FROM read_parquet([
+      's3://' || getenv('S3_BUCKET') || '/bench/runs/*/events/doc_id=*/data.parquet',
+      's3://' || getenv('S3_BUCKET') || '/bench/runs/*/events.parquet'
+    ], filename='file', union_by_name=true, hive_partitioning=true)
     GROUP BY 1 ORDER BY 1 DESC;
   "
 '''],
@@ -355,13 +370,20 @@ cmd_button(
     argv=['sh', '-c', '''
 ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"
 echo "── files before flush in $ROOT ──"
-ls -lh "$ROOT"/events*.parquet "$ROOT"/events.jsonl 2>/dev/null || echo "(nothing)"
+ls -lh "$ROOT"/events*.parquet "$ROOT"/events.jsonl 2>/dev/null || echo "(no flat artefacts)"
+if [ -d "$ROOT/events" ]; then
+  find "$ROOT/events" -type f -name '*.parquet' -exec ls -lh {} + 2>/dev/null || echo "(empty events/ dir)"
+else
+  echo "(no events/ dir)"
+fi
 echo
-echo "── deleting events.parquet, events-*.parquet, events.jsonl ──"
+echo "── deleting events/ tree, events.parquet, events-*.parquet, events.jsonl ──"
+rm -rfv "$ROOT"/events 2>/dev/null
 rm -fv "$ROOT"/events.parquet "$ROOT"/events-*.parquet "$ROOT"/events.jsonl 2>/dev/null
 echo
 echo "── files after ──"
 ls -lh "$ROOT"/events*.parquet "$ROOT"/events.jsonl 2>/dev/null || echo "(empty — clean slate)"
+[ -d "$ROOT/events" ] && echo "(events/ dir still present — should be gone)" || echo "(events/ dir gone)"
 echo
 echo "Diagnostics counter was NOT touched. Click \\"Flush diagnostics counter\\" to also reset that."
 '''],

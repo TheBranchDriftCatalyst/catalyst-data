@@ -1374,13 +1374,16 @@ examples:
 
     # Bind the bench audit-log writer to this run. Every harness /
     # exgraph / langgraph / dagster event for the lifetime of this process
-    # lands in a per-process Parquet shard under
-    # ``<local_cache_root>/events-<pid>-<uuid>.parquet`` (CD-jzkg
-    # ``BenchEventStore``). At run end the shards consolidate to
-    # ``events.parquet`` and upload to
-    # ``s3://<bucket>/bench/runs/<run_id>/events.parquet`` for the
-    # viewer's DuckDB ``httpfs`` reads. The live viewer reads the local
-    # shard glob directly so it sees in-flight events on the 3 s poll.
+    # lands in a per-(pid, doc_id) Parquet shard under
+    # ``<local_cache_root>/events/doc_id=<doc>/shard-<pid>-<uuid>.parquet``
+    # (CD-jzkg.1 Phase 4 ``BenchEventStore``). Events without a doc_id
+    # (run_start/run_end and friends) land in ``doc_id=__run__/``. At run
+    # end the shards consolidate to per-partition ``data.parquet`` files
+    # and upload to
+    # ``s3://<bucket>/bench/runs/<run_id>/events/doc_id=<doc>/data.parquet``
+    # for the viewer's DuckDB ``httpfs`` reads. The live viewer reads
+    # the local shard glob directly so it sees in-flight events on the
+    # 3 s poll.
     #
     # Forward-only: each run owns its shard set. Stale shards from a
     # previous run can sit alongside the active set (the harness doesn't
@@ -1746,15 +1749,17 @@ examples:
         details={"results": len(results), "models": len(models)},
     )
 
-    # CD-jzkg: flush remaining buffered events, consolidate per-process
-    # Parquet shards into a single events.parquet, and PUT to S3. The
-    # consolidated file is the canonical replay source; the viewer reads
-    # it via DuckDB ``httpfs``. Failures here are logged-and-swallowed so
-    # a duckdb hiccup doesn't crash the run footer.
+    # CD-jzkg.1 (Phase 4): flush remaining buffered events, consolidate
+    # per-(pid, doc_id) Parquet shards into per-partition ``data.parquet``
+    # files, and PUT every partition to S3. The hive-partitioned tree is
+    # the canonical replay source; the viewer reads it via DuckDB
+    # ``httpfs`` with ``hive_partitioning=true`` so ``?doc_id=X`` queries
+    # partition-prune to a single file. Failures here are logged-and-
+    # swallowed so a duckdb hiccup doesn't crash the run footer.
     try:
-        parquet_path, parquet_key = event_store.consolidate_and_archive(run, run_dir=store.local_cache_root)
+        _run_dir, parquet_key = event_store.consolidate_and_archive(run, run_dir=store.local_cache_root)
         if parquet_key:
-            print(f"  events parquet archived to {run.events_parquet_uri}")
+            print(f"  events parquet archived to {run.events_parquet_uri}**/data.parquet")
     except Exception as e:  # noqa: BLE001
         print(f"  event_store consolidate/archive failed: {e}", file=sys.stderr)
 
@@ -1795,7 +1800,7 @@ examples:
         print("  groundtruth not available (run with --generate-ground-truth)")
     print(f"  artifacts   {run.s3_uri}")
     print(f"  report      {store.top_report_uri}")
-    print(f"  events      {run.events_uri}")
+    print(f"  events      {run.events_parquet_uri}**/data.parquet")
     print(f"{'═' * 78}")
 
     # Print the full report
