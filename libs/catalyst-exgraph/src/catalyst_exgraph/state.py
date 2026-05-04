@@ -199,7 +199,14 @@ class ExGraphState(TypedDict, total=False):
     """Entity clusters produced by ClusterEntitiesNode."""
 
     evidence_windows: list[EvidenceWindow]
-    """Evidence windows produced by PackEvidenceNode."""
+    """Evidence windows produced by PackEvidenceNode (post-pruning)."""
+
+    pruned_evidence_windows: list[dict[str, Any]]
+    """Evidence windows dropped by PackEvidenceNode's density heuristic.
+    Each entry carries ``window_id``, ``cluster_id``, ``mention_count``,
+    ``char_count``, ``chars_per_mention``, and ``reason`` so the State
+    Inspector can show *why* a window was skipped instead of just hiding
+    it from the SPO fan-out."""
 
     evidence_window_id: str
     """Set when running the SPO sub-graph for one specific evidence window."""

@@ -193,29 +193,13 @@ TYPE_CANONICAL: dict[str, dict[str, str]] = {
         "CREDIT_CARD": "CREDIT_CARD",
         "ADDRESS": "ADDRESS",
         "DOB": "DOB",
-        # General-NER labels that gliner-pii emits when the bench prompts it
-        # with the full ensemble label set (it shares the GLiNER engine with
-        # gliner-medium/large, so any label in the prompt vocabulary is fair
-        # game). Mirror gliner-medium's canonical-passthrough block.
-        "ORG": "ORG",
-        "ORGANIZATION": "ORG",
-        "LOC": "LOC",
-        "LOCATION": "LOC",
-        "GPE": "GPE",
-        "DATE": "DATE",
-        "LAW": "LAW",
-        "EVENT": "EVENT",
-        "MONEY": "MONEY",
-        "NORP": "NORP",
-        "FACILITY": "FACILITY",
-        "DOCUMENT": "DOCUMENT",
-        "BOOK": "BOOK",
-        "ROLE": "ROLE",
-        "STRATEGIC_ASSET": "STRATEGIC_ASSET",
-        "FINANCIAL_INSTRUMENT": "FINANCIAL_INSTRUMENT",
+        # gliner-pii is now prompted with PII_GLINER_LABELS only (see
+        # catalyst_langgraph.clients.gliner.PII_GLINER_LABELS) so the
+        # general-NER passthroughs the previous expand carried (DATE/LAW/
+        # MONEY/etc.) are dead code. Keeping a defensive minimal "OTHER"
+        # so any stray label the model emits flows to OTHER instead of
+        # warning. Reverts CD-lxcf-adjacent expand from 73ea4df.
         "OTHER": "OTHER",
-        "organization": "ORG",
-        "location": "LOC",
     },
     # ── nuextract-2.0-8b ───────────────────────────────────────────────────
     # NuExtract returns structured JSON with title-case category labels.

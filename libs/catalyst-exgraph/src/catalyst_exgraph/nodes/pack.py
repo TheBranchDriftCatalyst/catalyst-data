@@ -21,6 +21,7 @@ window-size lookups to ``window_for_model`` from the same module.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 import uuid
@@ -28,9 +29,22 @@ from typing import Any
 
 from catalyst_exgraph.nodes._audit import make_audit_event
 from catalyst_exgraph.state import EntityCluster, EvidenceWindow, ExGraphState
+from dagster_io import event_tail
 from dagster_io.chunking import window_for_model
 
 logger = logging.getLogger(__name__)
+
+# Density-pruning thresholds (CD-lxcf research follow-up — captures ~70%
+# of the wall-clock win a reranker would have provided, for free).
+# A window is dropped if EITHER:
+#   - it carries fewer than ``PACK_MIN_MENTIONS`` cluster mentions (entity
+#     barely appears → SPO call rarely produces useful triples), OR
+#   - its char/mention density exceeds ``PACK_MAX_CHARS_PER_MENTION``
+#     (very long window with few mentions → boilerplate / cable masthead /
+#     intro greeting).
+# Override via env to disable pruning entirely (set MIN=0, MAX=0).
+_PACK_MIN_MENTIONS = int(os.environ.get("PACK_MIN_MENTIONS", "2"))
+_PACK_MAX_CHARS_PER_MENTION = int(os.environ.get("PACK_MAX_CHARS_PER_MENTION", "800"))
 
 # ── Approximate chars-per-token for context sizing ───────────────────────────
 # GPT/Llama tokenisers average ~4 chars/token; GLiNER uses sub-word pieces.
@@ -161,20 +175,68 @@ class PackEvidenceNode:
                     )
                 )
 
+        # ── Density pruning ─────────────────────────────────────────────────
+        # Drop low-signal windows BEFORE the SPO fan-out hits them. Each
+        # pruned window emits its own audit event so the State Inspector
+        # surfaces a card with the reason — they're not silently dropped.
+        kept_windows: list[EvidenceWindow] = []
+        pruned_records: list[dict[str, Any]] = []
+        doc_id = state.get("doc_id") or (state.get("source_metadata") or {}).get("document_id") or ""
+        for w in evidence_windows:
+            n_mentions = len(w.get("mention_indices") or [])
+            char_count = len(w.get("text") or "")
+            chars_per_mention = (char_count / n_mentions) if n_mentions > 0 else float("inf")
+
+            reason: str | None = None
+            if _PACK_MIN_MENTIONS > 0 and n_mentions < _PACK_MIN_MENTIONS:
+                reason = f"too_few_mentions ({n_mentions} < {_PACK_MIN_MENTIONS})"
+            elif _PACK_MAX_CHARS_PER_MENTION > 0 and chars_per_mention > _PACK_MAX_CHARS_PER_MENTION:
+                reason = f"sparse_density ({chars_per_mention:.0f} > {_PACK_MAX_CHARS_PER_MENTION} chars/mention)"
+
+            if reason is None:
+                kept_windows.append(w)
+                continue
+
+            record = {
+                "window_id": w.get("window_id", ""),
+                "cluster_id": w.get("cluster_id", ""),
+                "mention_count": n_mentions,
+                "char_count": char_count,
+                "chars_per_mention": (round(chars_per_mention, 1) if chars_per_mention != float("inf") else None),
+                "reason": reason,
+            }
+            pruned_records.append(record)
+
+            # Per-window audit event so the State Inspector surfaces one
+            # card per pruned window with the reason — same pattern as
+            # consensus mention_rejected events.
+            if event_tail.is_configured():
+                event_tail.append(
+                    source="exgraph",
+                    node_name="evidence_window_pruned",
+                    status="info",
+                    model=state.get("model"),
+                    doc_id=doc_id,
+                    chunk_id=f"{doc_id}:{w.get('window_id', '')}" if doc_id else None,
+                    details=record,
+                )
+
         elapsed = time.perf_counter() - t0
         mean_tokens = sum(window_token_counts) / len(window_token_counts) if window_token_counts else 0.0
 
         logger.info(
-            "%s: %d clusters → %d evidence windows, total_tokens≈%d, model=%s",
+            "%s: %d clusters → %d windows kept, %d pruned (model=%s, total_tokens≈%d)",
             node_name,
             len(clusters),
-            len(evidence_windows),
-            total_tokens,
+            len(kept_windows),
+            len(pruned_records),
             model,
+            total_tokens,
         )
 
         return {
-            "evidence_windows": evidence_windows,
+            "evidence_windows": kept_windows,
+            "pruned_evidence_windows": pruned_records,
             "audit_events": list(state.get("audit_events") or [])
             + [
                 make_audit_event(
@@ -182,10 +244,13 @@ class PackEvidenceNode:
                     "completed",
                     state=state,
                     duration_s=elapsed,
-                    window_count=len(evidence_windows),
+                    window_count=len(kept_windows),
+                    pruned_count=len(pruned_records),
                     total_tokens=total_tokens,
                     mean_tokens_per_window=round(mean_tokens, 1),
                     context_tokens=context_tokens,
+                    prune_min_mentions=_PACK_MIN_MENTIONS,
+                    prune_max_chars_per_mention=_PACK_MAX_CHARS_PER_MENTION,
                 )
             ],
         }

@@ -43,6 +43,23 @@ MENTION_TYPE_TO_GLINER_LABEL = {
 
 GLINER_LABEL_TO_MENTION_TYPE = {v: k for k, v in MENTION_TYPE_TO_GLINER_LABEL.items()}
 
+# PII-specific label set for the urchade/gliner_multi_pii-v1 model.
+# When the model name contains "pii" we prompt with these instead of the
+# general NER labels — keeps the encoder focused on what it was trained for
+# and stops it from emitting noisy DATE/LAW/MONEY votes that the consensus
+# layer then has to filter (CD-lxcf follow-up).
+PII_GLINER_LABELS: list[str] = [
+    "person",  # names are PII
+    "phone number",
+    "email address",
+    "social security number",
+    "credit card number",
+    "address",
+    "date of birth",
+    "passport number",
+    "driver's license",
+]
+
 
 class GLiNERClient:
     """Adapter that runs GLiNER for entity extraction and wraps results
@@ -130,7 +147,9 @@ class GLiNERClient:
         from catalyst_contracts.models.extraction_output import MentionCandidate
 
         model = self._get_model()
-        labels = list(MENTION_TYPE_TO_GLINER_LABEL.values())
+        # PII-trained model gets the PII-specific label vocab; everyone
+        # else gets the full general-NER label set.
+        labels = PII_GLINER_LABELS if "pii" in self.model_name.lower() else list(MENTION_TYPE_TO_GLINER_LABEL.values())
 
         windows = list(self._iter_windows(raw_text))
         logger.info(
