@@ -23,6 +23,7 @@ from media_ingest.viewer.routes.annotations import router as annotations_router
 from media_ingest.viewer.routes.annotations import set_store
 from media_ingest.viewer.routes.api import router as api_router
 from media_ingest.viewer.routes.bench import router as bench_router
+from media_ingest.viewer.routes.docs import router as docs_router
 from media_ingest.viewer.routes.documents_factory import all_routers as documents_routers
 from media_ingest.viewer.routes.media import router as media_router
 from media_ingest.viewer.routes.s3_explorer import router as s3_router
@@ -94,6 +95,7 @@ def create_viewer_app() -> FastAPI:
     app.include_router(media_router)
     app.include_router(s3_router)
     app.include_router(bench_router)
+    app.include_router(docs_router)
 
     # Initialize annotation store
     store = AnnotationStore()
