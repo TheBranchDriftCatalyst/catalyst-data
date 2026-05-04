@@ -45,13 +45,14 @@ const MAX_WINDOW_NODES = 6;
 // Logical roles a graph node can play. Each role maps to a right-pane
 // detail component; `selectedNode` carries this back up.
 export type NodeRole =
-  | "chunks"
+  | "document"
   | "ner_encoder"
   | "consensus"
   | "pack"
   | "spo_window"
   | "spo_windows_collapsed"
   | "spo_model"
+  | "pruned_window"
   | "persist";
 
 export type NodeStatus = "queued" | "running" | "ok" | "error";
@@ -145,6 +146,12 @@ function buildGraph(
   let consensusStats: { accepted: number; rejected: number; status: NodeStatus } | null = null;
   let persistStatus: NodeStatus = "queued";
 
+  // Pruned evidence windows (CD-lxcf research follow-up — pack.py emits
+  // evidence_window_pruned events for each window dropped by the density
+  // heuristic). Render as faded amber nodes downstream of pack so the
+  // operator can click to see the prune reason.
+  const prunedWindows: Array<{ windowId: string; reason: string }> = [];
+
   for (const e of docEvents) {
     const cid = e.chunk_id ?? "";
     // chunk count from chunk_loaded events whose chunk_id is the doc-level
@@ -157,6 +164,14 @@ function buildGraph(
       !cid.endsWith(":_doc_ensemble")
     ) {
       chunkCount += 1;
+    }
+
+    // Pruned evidence windows
+    if (e.node_name === "evidence_window_pruned") {
+      const d = (e.details ?? {}) as { window_id?: string; reason?: string };
+      if (d.window_id) {
+        prunedWindows.push({ windowId: d.window_id, reason: d.reason ?? "?" });
+      }
     }
 
     // NER encoders
@@ -233,18 +248,19 @@ function buildGraph(
   const isSel = (role: NodeRole, ref: string | null) =>
     !!selected && selected.role === role && selected.ref === ref;
 
-  // chunks
+  // document — semantic root of the pipeline. Chunks are the chunker's
+  // output and travel as metadata through this node, not their own stage.
   nodes.push({
-    id: "chunks",
+    id: "document",
     type: "pipeline",
     position: { x: 0, y: 0 },
     data: {
-      role: "chunks",
+      role: "document",
       ref: null,
-      title: "chunks",
+      title: "document",
       badge: chunkCount > 0 ? `${chunkCount} chunks` : "—",
       status: chunkCount > 0 ? "ok" : "queued",
-      selected: isSel("chunks", null),
+      selected: isSel("document", null),
     },
   });
 
@@ -273,8 +289,8 @@ function buildGraph(
       },
     });
     edges.push({
-      id: `e:chunks:${enc}`,
-      source: "chunks",
+      id: `e:document:${enc}`,
+      source: "document",
       target: `ner:${enc}`,
       type: "smoothstep",
       style: { stroke: "rgb(139 92 246 / 0.6)" },
@@ -407,6 +423,61 @@ function buildGraph(
             type: "smoothstep",
             style: { stroke: "rgb(245 158 11 / 0.6)" },
             markerEnd: { type: MarkerType.ArrowClosed, color: "rgb(245 158 11)" },
+          });
+        }
+      }
+    }
+
+    // Pruned windows — sibling of kept windows under pack, but they
+    // don't fan out to spo_models since the SPO call was skipped.
+    // Collapse to one "pruned ×N" node when count > 4 to keep the graph
+    // legible (full-corpus runs can produce dozens).
+    if (prunedWindows.length > 0) {
+      if (prunedWindows.length > 4) {
+        nodes.push({
+          id: "pruned_collapsed",
+          type: "pipeline",
+          position: { x: 0, y: 0 },
+          data: {
+            role: "pruned_window",
+            ref: prunedWindows[0]?.windowId ?? null,
+            title: `pruned ×${prunedWindows.length}`,
+            badge: "click pack to see",
+            status: "queued",
+            selected: false,
+          },
+        });
+        edges.push({
+          id: "e:pack:pruned_collapsed",
+          source: "pack",
+          target: "pruned_collapsed",
+          type: "smoothstep",
+          style: { stroke: "rgb(245 158 11 / 0.3)", strokeDasharray: "4 4" },
+          markerEnd: { type: MarkerType.ArrowClosed, color: "rgb(245 158 11 / 0.5)" },
+        });
+      } else {
+        for (const p of prunedWindows) {
+          const id = `pruned:${p.windowId}`;
+          nodes.push({
+            id,
+            type: "pipeline",
+            position: { x: 0, y: 0 },
+            data: {
+              role: "pruned_window",
+              ref: p.windowId,
+              title: `pruned · ${p.windowId.slice(0, 8)}`,
+              badge: p.reason.split("(")[0]!.trim(),
+              status: "queued",
+              selected: isSel("pruned_window", p.windowId),
+            },
+          });
+          edges.push({
+            id: `e:pack:${id}`,
+            source: "pack",
+            target: id,
+            type: "smoothstep",
+            style: { stroke: "rgb(245 158 11 / 0.3)", strokeDasharray: "4 4" },
+            markerEnd: { type: MarkerType.ArrowClosed, color: "rgb(245 158 11 / 0.5)" },
           });
         }
       }

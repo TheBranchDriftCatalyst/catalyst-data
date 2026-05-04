@@ -158,6 +158,28 @@ def _phase_a_build_cluster_cache(
         eval_chunks = [TextChunk(**c) for c in medallion_chunks]
         docs = _group_chunks_into_docs(eval_chunks)
 
+        # Emit one chunk_loaded event per medallion input chunk so the
+        # State Inspector V2 'chunks' node has data to render. v4's NER
+        # ensemble runs on doc-level text (per-encoder chunk_loaded events
+        # already fire for that), so without this loop the input-chunk
+        # detail panel is empty even though the chunks exist in the silver
+        # layer. emit_chunk_text is idempotent — repeated calls for the
+        # same chunk_id are no-ops.
+        for c in eval_chunks:
+            cm = c.metadata or {}
+            event_tail.emit_chunk_text(
+                c.chunk_id,
+                c.text,
+                doc_id=c.document_id,
+                domain=cm.get("domain"),
+                speaker_label=cm.get("speaker") or cm.get("speaker_label"),
+                temporal_start_ms=(cm.get("start_s") * 1000 if cm.get("start_s") is not None else None),
+                temporal_end_ms=(cm.get("end_s") * 1000 if cm.get("end_s") is not None else None),
+                chunk_index=c.index,
+                total_chunks=c.total_chunks,
+                chunk_metadata=cm,
+            )
+
         # Build ensemble pipeline
         ensemble_pipeline = _build_ensemble_pipeline_for_phase_a(encoder_cfgs, quorum=quorum)
 

@@ -1,18 +1,32 @@
 /**
  * StateInspectorV2 — graph-native view of the v4 LangGraph execution.
  *
- *   ┌────────────┬──────────────────────────────┬───────────────┐
- *   │ DocRailV2  │ PipelineGraph (reactflow LR) │ DetailPanel   │
- *   │ (domain →  │   chunks → 5 enc → consen →  │  (consensus / │
- *   │  doc only) │    pack → win-* → spo →      │   ner enc /   │
- *   │            │    persist)                  │   chunk text) │
- *   └────────────┴──────────────────────────────┴───────────────┘
+ * Layout (4-pane, T-shaped):
+ *
+ *   ┌──────┬──────────────────┬─────────────────────┐
+ *   │ Doc  │ Pipeline Graph   │ Document Source     │
+ *   │ Rail │  (reactflow TB)  │  (full text + chunk │
+ *   │      │                  │   boundary overlay) │
+ *   │      ├──────────────────┴─────────────────────┤
+ *   │      │ Selected Node Detail                   │
+ *   │      │  (consensus / ner_encoder / spo_window │
+ *   │      │   / pack / spo_model / persist / …)    │
+ *   └──────┴────────────────────────────────────────┘
  *
  * The graph IS the topology: each LangGraph node = one graph node, edges
  * follow the literal data flow. Live updates are driven by `useRunStream`
  * — when events arrive, node statuses (queued / running / ok / error) and
  * payload badges (mention count, duration, retries) recompute and the
  * graph re-renders in place without losing pan/zoom.
+ *
+ * The right pane shows the *whole* doc text with chunk-boundary overlays
+ * so the chunking strategy is visible in context: pre-NER input chunks
+ * are subtly bordered, SPO windows are amber, and whichever chunk maps to
+ * the currently-selected graph node is highlighted cyan. When a NER
+ * encoder is selected, its mention spans are inline-underlined too.
+ *
+ * The bottom pane is the per-node detail (consensus accept/reject table,
+ * encoder mention list, window text + extraction output, etc.).
  *
  * Deep-link query: ?doc=<docId>&node=<role>:<ref>
  */
@@ -29,15 +43,19 @@ import {
 import { ConsensusDetail } from "@/components/state/ConsensusDetail";
 import { ChunkTextPanel } from "@/components/state/ChunkTextPanel";
 import { NerEncoderDetail } from "@/components/state/NerEncoderDetail";
+import { DocumentSourcePanel } from "@/components/state/DocumentSourcePanel";
+import { ChunksDetail } from "@/components/state/ChunksDetail";
+import { PackDetail } from "@/components/state/PackDetail";
 
 const VALID_ROLES: ReadonlySet<NodeRole> = new Set<NodeRole>([
-  "chunks",
+  "document",
   "ner_encoder",
   "consensus",
   "pack",
   "spo_window",
   "spo_windows_collapsed",
   "spo_model",
+  "pruned_window",
   "persist",
 ]);
 
@@ -105,6 +123,8 @@ export function StateInspectorV2() {
         />
       </div>
 
+      {/* Right of the rail: vertical split — top row is graph + doc-source
+          side-by-side; bottom row is the selected-node detail. */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="px-4 py-2 border-b border-white/10 flex items-center gap-2 font-mono text-[11px]">
           <span className="text-zinc-300">state inspector</span>
@@ -125,32 +145,50 @@ export function StateInspectorV2() {
           <span className="text-zinc-500">{events.length} events</span>
           {selectedDoc && <span className="text-zinc-400 truncate ml-2">{selectedDoc}</span>}
         </div>
-        <div className="flex-1 min-h-0">
-          {selectedDoc ? (
-            <PipelineGraph
-              events={events}
-              docId={selectedDoc}
-              selected={selectedNode}
-              onSelectNode={setSelectedNode}
-            />
+
+        {/* Top row: graph (left) + document source (right) */}
+        <div className="flex flex-1 min-h-0">
+          <div className="flex-1 min-w-0 border-r border-white/10">
+            {selectedDoc ? (
+              <PipelineGraph
+                events={events}
+                docId={selectedDoc}
+                selected={selectedNode}
+                onSelectNode={setSelectedNode}
+              />
+            ) : (
+              <div className="p-6 font-mono text-xs text-zinc-500">
+                {events.length === 0
+                  ? "No events yet — start a benchmark run."
+                  : "Pick a doc on the left to see its LangGraph execution."}
+              </div>
+            )}
+          </div>
+          <div className="w-[420px] flex-shrink-0 overflow-hidden">
+            {selectedDoc ? (
+              <DocumentSourcePanel
+                events={events}
+                docId={selectedDoc}
+                selectedNode={selectedNode}
+              />
+            ) : (
+              <div className="p-4 font-mono text-[10px] text-zinc-600">
+                Pick a doc to see its source text.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Bottom row: detail of the currently-selected graph node */}
+        <div className="h-[280px] flex-shrink-0 border-t border-white/10 overflow-y-auto bg-surface-1/50">
+          {selectedDoc && selectedNode ? (
+            <DetailRouter events={events} docId={selectedDoc} node={selectedNode} />
           ) : (
-            <div className="p-6 font-mono text-xs text-zinc-500">
-              {events.length === 0
-                ? "No events yet — start a benchmark run."
-                : "Pick a doc on the left to see its LangGraph execution."}
+            <div className="p-4 font-mono text-[10px] text-zinc-600">
+              Click a node in the graph to see its I/O.
             </div>
           )}
         </div>
-      </div>
-
-      <div className="w-[420px] flex-shrink-0 border-l border-white/10 overflow-y-auto">
-        {selectedDoc && selectedNode ? (
-          <DetailRouter events={events} docId={selectedDoc} node={selectedNode} />
-        ) : (
-          <div className="p-6 font-mono text-xs text-zinc-500">
-            Click a node in the graph to see its I/O.
-          </div>
-        )}
       </div>
     </div>
   );
@@ -171,6 +209,12 @@ function DetailRouter({
   if (node.role === "ner_encoder" && node.ref) {
     return <NerEncoderDetail events={events} docId={docId} encoder={node.ref} />;
   }
+  if (node.role === "document") {
+    return <ChunksDetail events={events} docId={docId} />;
+  }
+  if (node.role === "pack") {
+    return <PackDetail events={events} docId={docId} />;
+  }
   if (node.role === "spo_window" && node.ref) {
     const chunkId = node.ref;
     const loaded = events.find((e) => e.node_name === "chunk_loaded" && e.chunk_id === chunkId);
@@ -187,7 +231,29 @@ function DetailRouter({
       />
     );
   }
-  // chunks / pack / persist / spo_model / collapsed: terse stats.
+  if (node.role === "pruned_window" && node.ref) {
+    const ev = events.find(
+      (e) =>
+        e.node_name === "evidence_window_pruned" &&
+        ((e.details ?? {}) as { window_id?: string }).window_id === node.ref,
+    );
+    const d = (ev?.details ?? {}) as Record<string, unknown>;
+    return (
+      <div className="p-3 font-mono text-[11px] space-y-2">
+        <div className="text-zinc-300">pruned window · {String(d.window_id ?? node.ref)}</div>
+        <div className="text-amber-300 text-[10px]">{String(d.reason ?? "?")}</div>
+        <div className="flex flex-wrap gap-3 text-zinc-500 text-[10px]">
+          <span>cluster: {String(d.cluster_id ?? "—")}</span>
+          <span>{String(d.mention_count ?? 0)}m</span>
+          <span>{String(d.char_count ?? 0)}ch</span>
+          {d.chars_per_mention != null && (
+            <span>{Number(d.chars_per_mention).toFixed(0)} ch/mention</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+  // persist / spo_model / collapsed: terse stats.
   return <NodeStats events={events} docId={docId} node={node} />;
 }
 
@@ -206,27 +272,7 @@ function NodeStats({
     return eDoc === docId;
   });
   let body: React.ReactNode = null;
-  if (node.role === "chunks") {
-    const chunks = new Set<string>();
-    for (const e of docEvents) {
-      const cid = e.chunk_id ?? "";
-      if (
-        e.node_name === "chunk_loaded" &&
-        !cid.includes(":_ner_") &&
-        !cid.endsWith(":_consensus") &&
-        !cid.includes(":win-") &&
-        !cid.endsWith(":_doc_ensemble")
-      ) {
-        chunks.add(cid);
-      }
-    }
-    body = <div>{chunks.size} input chunks</div>;
-  } else if (node.role === "pack") {
-    const wins = new Set(
-      docEvents.filter((e) => e.chunk_id?.includes(":win-")).map((e) => e.chunk_id!),
-    );
-    body = <div>{wins.size} packed windows</div>;
-  } else if (node.role === "spo_model" && node.ref) {
+  if (node.role === "spo_model" && node.ref) {
     const m = node.ref;
     let mentions = 0;
     let props = 0;
