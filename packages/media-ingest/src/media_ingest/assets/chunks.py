@@ -3,8 +3,11 @@
 Thin Dagster asset wrapping ``ChunkingResource.chunk_with_semantic_refinement``
 in ``dagster_io.chunking``. The chunker:
 
-1. Groups consecutive speaker turns into ~chunk_size windows with inline
-   ``[SPEAKER_X]`` tags so the LLM sees who said what.
+1. Groups consecutive speaker turns into ~chunk_size windows. Speaker
+   info travels in chunk metadata (``speaker_label``); inline
+   ``[SPEAKER_X]`` text-prefixes are off by default (CD-lxcf follow-up)
+   because the NER encoders pick them up as ORG mentions and pollute
+   the consensus.
 2. Embeds each window via ``EmbeddingResource``.
 3. Merges adjacent windows whose cosine similarity is above the 75th-percentile
    threshold (collapses topically-continuous neighbors into longer windows).

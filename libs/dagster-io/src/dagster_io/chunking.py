@@ -466,14 +466,17 @@ class ChunkingResource(ConfigurableResource):
         target_chars: int | None = None,
         pause_threshold_s: float = 1.0,
         fallback_chunk_size: int | None = None,
-        inline_speaker_tags: bool = True,
+        inline_speaker_tags: bool = False,
     ) -> list[TextChunk]:
         """Group consecutive speaker turns into multi-speaker windows of ~target_chars.
 
         Unlike ``chunk_speaker_segments`` (one chunk per speaker turn), this
         method packs N consecutive turns into one chunk until the target size
-        is hit, then starts a new chunk. Inline speaker tags (``[SPEAKER_X] ``)
-        preserve who-said-what for the LLM.
+        is hit, then starts a new chunk. Speaker info travels in chunk
+        metadata (``speaker_label``); inline ``[SPEAKER_X]`` prefixes are
+        opt-in via ``inline_speaker_tags=True`` because they otherwise
+        pollute downstream NER (the encoders pick up SPEAKER_0 as an ORG
+        mention) and SPO extraction.
 
         Why: single-turn chunks (80–200 chars) starve the LLM of conversational
         context; coreference and SPO extraction both fail when each chunk is
@@ -495,8 +498,10 @@ class ChunkingResource(ConfigurableResource):
             fallback_chunk_size: tier-3 splitter size; defaults to
                 ``target_chars // 2``.
             inline_speaker_tags: when True, prefix each turn's text with
-                ``[SPEAKER_X] `` so the LLM sees who said what. Set False if
-                you want bare concatenated text (e.g. for embedding-only flows).
+                ``[SPEAKER_X] `` so the LLM sees who said what. Default
+                False — the inline tags pollute NER (encoders attribute
+                SPEAKER_0 as a mention) and downstream extraction. Set
+                True for prompts that need attribution and don't run NER.
 
         Output ``TextChunk`` metadata adds: ``speakers`` (list of all speakers
         in this chunk), ``primary_speaker`` (most-spoken-by-char-count),
@@ -759,7 +764,7 @@ class ChunkingResource(ConfigurableResource):
         target_chars: int | None = None,
         pause_threshold_s: float = 1.0,
         fallback_chunk_size: int | None = None,
-        inline_speaker_tags: bool = True,
+        inline_speaker_tags: bool = False,
         merge_threshold: float | None = None,
     ) -> list[TextChunk]:
         """One-shot hybrid: multi-speaker windowing + semantic refinement.
