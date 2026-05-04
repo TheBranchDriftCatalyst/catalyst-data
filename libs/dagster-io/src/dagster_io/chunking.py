@@ -393,7 +393,7 @@ class ChunkingResource(ConfigurableResource):
 
         chunks: list[TextChunk] = []
         for seg in segments:
-            text = (seg.get("text") or "").strip()
+            text = normalize_text(seg.get("text") or "").strip()
             if not text:
                 continue
 
@@ -511,7 +511,7 @@ class ChunkingResource(ConfigurableResource):
         # Pre-format each turn's text (with inline speaker tag) so the buffer
         # accounting matches what the chunk will actually contain.
         def _format_turn(seg: dict) -> str:
-            text = (seg.get("text") or "").strip()
+            text = normalize_text(seg.get("text") or "").strip()
             if not text:
                 return ""
             if inline_speaker_tags:
@@ -562,7 +562,7 @@ class ChunkingResource(ConfigurableResource):
         buffer_chars = 0
 
         for seg in segments:
-            text = (seg.get("text") or "").strip()
+            text = normalize_text(seg.get("text") or "").strip()
             if not text:
                 continue
 
@@ -838,9 +838,15 @@ def chunk_text(
     When *config* is provided, ``chunk_size`` and ``chunk_overlap`` are derived
     from the config (target_chars / overlap_tokens * 4) unless explicitly
     overridden by the caller.
+
+    Input is normalized via ``normalize_text`` (CD-lxcf) so downstream
+    SentencePiece-based tokenizers don't emit ``<unk>`` for smart quotes,
+    em-dashes, NBSPs, etc. Idempotent — no-op when text is already clean.
     """
     if not text or not text.strip():
         return []
+
+    text = normalize_text(text)
 
     if config is not None:
         chunk_size = config.target_chars
@@ -863,7 +869,15 @@ def chunk_document(
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
 ) -> list[TextChunk]:
-    """Chunk a document into TextChunk objects (standalone, for notebooks)."""
+    """Chunk a document into TextChunk objects (standalone, for notebooks).
+
+    Input title + content are normalized via ``normalize_text`` (CD-lxcf)
+    so downstream tokenizers don't emit ``<unk>`` for smart quotes / dashes
+    / NBSPs. ``chunk_text`` does the same normalization on content; the
+    title is normalized here since it's prepended directly.
+    """
+    if title:
+        title = normalize_text(title)
     raw_chunks = chunk_text(content, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     if not raw_chunks:
         return []
