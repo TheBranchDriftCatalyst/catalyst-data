@@ -97,8 +97,12 @@ def append(
     if _path is None:
         raise RuntimeError("event_tail.configure() must be called before append()")
 
+    # Stamp once and share with the event_store dual-write so the two
+    # paths agree byte-identically on the timestamp (parity assertion §7.3
+    # of docs/plans/duckdb-audit-log.md).
+    _ts = datetime.now(UTC)
     record = {
-        "ts": datetime.now(UTC).isoformat(),
+        "ts": _ts.isoformat(),
         "run_id": _run_id,
         "source": source,
         "node_name": node_name,
@@ -117,6 +121,32 @@ def append(
 
     with _lock, _path.open("a") as f:
         f.write(line + "\n")
+
+    # CD-jzkg Phase 1 dual-write — every jsonl row also lands in the
+    # DuckDB-backed parquet shard. No-op when event_store is unconfigured
+    # (e.g. unit tests that only configure event_tail). Failures here
+    # MUST NOT poison the canonical jsonl path, so we swallow exceptions
+    # to stderr.
+    try:
+        from dagster_io.bench import event_store as _event_store  # noqa: PLC0415
+
+        _event_store.append(
+            source=source,
+            node_name=node_name,
+            status=status,
+            model=model,
+            doc_id=doc_id,
+            chunk_idx=chunk_idx,
+            chunk_id=chunk_id,
+            retry_count=retry_count,
+            code_location=code_location,
+            evidence_window_id=evidence_window_id,
+            state=state or {},
+            details=details or {},
+            ts=_ts,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"event_store dual-write: {e}", file=sys.stderr)
 
 
 def emit_chunk_text(

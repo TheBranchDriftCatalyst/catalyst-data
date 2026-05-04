@@ -37,7 +37,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from dagster_io import event_tail
+from dagster_io import event_store, event_tail
 from tests._bench_tui import BenchLiveUI
 from tests.benchmark_config import ALL_MODELS, LOCAL_MODELS, BenchmarkConfig, ModelConfig
 
@@ -1371,6 +1371,11 @@ examples:
     events_path.parent.mkdir(parents=True, exist_ok=True)
     events_path.write_text("")  # forward-only: each run owns the live tail
     event_tail.configure(events_path, run_id=run.run_id)
+    # CD-jzkg Phase 1: dual-write to a DuckDB-backed parquet shard
+    # alongside the jsonl. No feature flag — when un-configured the
+    # event_store.append calls are no-ops, so existing tests that don't
+    # exercise the harness see no change.
+    event_store.configure(run_id=run.run_id, run_dir=store.local_cache_root)
 
     # Periodically upload the local tail to S3 so the StateInspector can
     # observe the run live (frontend polls /viewer/api/bench/runs/<id>/events.jsonl
@@ -1393,6 +1398,8 @@ examples:
     bus.start()
     (store.local_cache_root / ".bus-port").write_text(str(bus.port))
 
+    # event_tail.append fans out to event_store internally (CD-jzkg
+    # Phase 1 dual-write).
     event_tail.append(
         source="harness",
         node_name="run_start",
@@ -1769,6 +1776,18 @@ examples:
     archived_key = run.archive_events()
     if archived_key:
         print(f"  events archived to {run.events_uri}")
+
+    # CD-jzkg Phase 1: flush remaining buffered events, consolidate
+    # per-process Parquet shards into a single events.parquet, and PUT
+    # to S3 alongside events.jsonl. Sibling of run.archive_events()
+    # above. Failures here are logged-and-swallowed so a duckdb hiccup
+    # never poisons the canonical jsonl archive.
+    try:
+        parquet_path, parquet_key = event_store.consolidate_and_archive(run, run_dir=store.local_cache_root)
+        if parquet_key:
+            print(f"  events parquet archived to {run.events_parquet_uri}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  event_store consolidate/archive failed: {e}", file=sys.stderr)
 
     # ── Run footer — totals across the live table above ─────────────────
     n_ok = len(results)

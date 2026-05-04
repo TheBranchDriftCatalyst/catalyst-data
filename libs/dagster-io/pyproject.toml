@@ -23,6 +23,9 @@ dependencies = [
     "opentelemetry-api>=1.30",
     "opentelemetry-sdk>=1.30",
     "opentelemetry-exporter-otlp-proto-grpc>=1.30",
+    # DuckDB backs the bench audit log (CD-jzkg, Phase 1 dual-write).
+    # In-process, no daemon. ~30 MB wheel — fine in dev; bench is dev-only.
+    "duckdb>=1.5",
 ]
 
 [project.optional-dependencies]

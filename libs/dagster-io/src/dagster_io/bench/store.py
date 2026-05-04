@@ -123,6 +123,14 @@ class S3RunStore:
     def events_uri(self) -> str:
         return f"s3://{self._store.bucket}/{self.events_key}"
 
+    @property
+    def events_parquet_key(self) -> str:
+        return f"{self.s3_prefix}/events.parquet"
+
+    @property
+    def events_parquet_uri(self) -> str:
+        return f"s3://{self._store.bucket}/{self.events_parquet_key}"
+
     # ── Extractions (run-scoped) ────────────────────────────────────────────
 
     def _extraction_key(self, model: str, doc_id: str | None) -> str:
@@ -208,6 +216,22 @@ class S3RunStore:
         data = self.local_events_path.read_bytes()
         self._store.client.put_object(self.events_key, data)
         return self.events_key
+
+    def archive_events_parquet(self, local_parquet_path: Path | None = None) -> str | None:
+        """Upload the consolidated DuckDB-emitted ``events.parquet`` to S3.
+
+        Sibling of :meth:`archive_events` for the parquet path
+        (CD-jzkg, Phase 1). Path defaults to
+        ``<local_cache_root>/events.parquet`` — the location
+        :class:`BenchEventStore.consolidate` writes to. Returns the S3
+        key (or ``None`` if the local file is missing — typical for a
+        run that never emitted via the duckdb path).
+        """
+        path = Path(local_parquet_path) if local_parquet_path else self._store.local_cache_root / "events.parquet"
+        if not path.exists():
+            return None
+        self._store.client.put_object(self.events_parquet_key, path.read_bytes())
+        return self.events_parquet_key
 
     def load_events_text(self) -> str | None:
         try:

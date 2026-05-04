@@ -129,6 +129,46 @@ local_resource(
     labels=[LABEL_BENCH],
 )
 
+# DuckDB is in-process — no daemon. This resource is just an inspect
+# button for the latest bench run's parquet shards (CD-jzkg Phase 1).
+local_resource(
+    'duckdb-inspect',
+    cmd='echo "Click the button to open DuckDB on the latest bench run."',
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    labels=[LABEL_BENCH],
+)
+
+cmd_button(
+    name='btn-duckdb-latest-run',
+    resource='duckdb-inspect',
+    argv=[
+        'sh',
+        '-c',
+        '''
+        ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"
+        if [ ! -f "$ROOT/events.parquet" ] && [ -z "$(ls "$ROOT"/events-*.parquet 2>/dev/null)" ]; then
+          echo "No events parquet found under $ROOT. Run a bench first (bench:run)."
+          exit 1
+        fi
+        if ! command -v duckdb >/dev/null 2>&1; then
+          echo "duckdb CLI not installed. Install with:  brew install duckdb"
+          exit 1
+        fi
+        if [ -f "$ROOT/events.parquet" ]; then
+          TARGET="$ROOT/events.parquet"
+        else
+          TARGET="$ROOT/events-*.parquet"
+        fi
+        echo "Opening DuckDB on: $TARGET"
+        echo "Try:  SELECT node_name, status, count(*) FROM events GROUP BY 1,2 ORDER BY 3 DESC;"
+        duckdb -cmd "CREATE VIEW events AS SELECT * FROM read_parquet('$TARGET', union_by_name=true);"
+        ''',
+    ],
+    text='Open DuckDB on latest run',
+    icon_name='terminal',
+)
+
 # ============================================
 # OPS — Local diagnostics
 # ============================================

@@ -10,11 +10,12 @@ in subsequent passes (assets/, io/, resources/, etc.). Top-level
 ``dagster_io`` re-exports are stable.
 """
 
-from dagster_io.bench import event_tail
+from dagster_io.bench import event_store, event_tail
 from dagster_io.bench.store import S3BenchmarkStore, S3RunStore
 
 __all__ = [
     "event_tail",
+    "event_store",
     "S3BenchmarkStore",
     "S3RunStore",
 ]
