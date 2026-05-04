@@ -407,13 +407,33 @@ export default function BenchmarkReport() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-[1400px] mx-auto p-6 space-y-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-xl font-mono text-zinc-100">Extraction Benchmark Report</h1>
-          <p className="text-xs text-zinc-500 font-mono mt-1">
-            Generated {new Date(report.generated_at).toLocaleString()} — {report.model_count}{" "}
-            models, {report.entity_count} unique entities, {report.proposition_count} propositions
-          </p>
+        {/* Header — title + the run + GT pickers cluster up top so the
+         *  context (which run? which ground truth?) is visible without
+         *  scrolling past the stat cards. */}
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-xl font-mono text-zinc-100">Extraction Benchmark Report</h1>
+            <p className="text-xs text-zinc-500 font-mono mt-1">
+              Generated {new Date(report.generated_at).toLocaleString()} — {report.model_count}{" "}
+              models, {report.entity_count} unique entities, {report.proposition_count} propositions
+            </p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-zinc-500 font-mono uppercase">Run</span>
+              <RunPicker
+                runs={runReportSources}
+                liveRunId={runs.live}
+                selectedRunId={selectedReportRunId}
+                onSelect={onReportRunSelect}
+                latestLabel="Latest report"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-zinc-500 font-mono uppercase">Ground Truth</span>
+              <GTSelector selected={selectedGT} onChange={setSelectedGT} />
+            </div>
+          </div>
         </div>
 
         {/* Stat Cards */}
@@ -448,24 +468,10 @@ export default function BenchmarkReport() {
           />
         </div>
 
-        {/* Global Controls */}
+        {/* Global Controls — Run + GT pickers moved to the title row.
+         *  This row keeps the table-shape controls (group-by, model
+         *  visibility) since those are scoped to the table view. */}
         <div className="flex items-center gap-4 flex-wrap bg-surface-1 border border-white/5 rounded-lg px-4 py-2">
-          {availableSources.length > 1 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-zinc-500 font-mono uppercase">Report</span>
-              <RunPicker
-                runs={runReportSources}
-                liveRunId={runs.live}
-                selectedRunId={selectedReportRunId}
-                onSelect={onReportRunSelect}
-                latestLabel="Latest report"
-              />
-            </div>
-          )}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-zinc-500 font-mono uppercase">Ground Truth</span>
-            <GTSelector selected={selectedGT} onChange={setSelectedGT} />
-          </div>
           <TableControls
             models={report.models}
             groupBy={groupBy}
