@@ -129,44 +129,198 @@ local_resource(
     labels=[LABEL_BENCH],
 )
 
-# DuckDB is in-process — no daemon. This resource is just an inspect
-# button for the latest bench run's parquet shards (CD-jzkg Phase 1).
+# DuckDB is in-process — no daemon. This resource is just a hub of
+# inspect buttons for the latest bench run's parquet shards (CD-jzkg).
+# Every button below shares the same path-resolution preamble: pick
+# events.parquet if consolidated, else glob the per-process shards.
 local_resource(
     'duckdb-inspect',
-    cmd='echo "Click the button to open DuckDB on the latest bench run."',
+    cmd='echo "Click any button to interrogate the latest bench run\'s DuckDB audit log."',
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
     labels=[LABEL_BENCH],
 )
 
+# Shared preamble: define $TARGET (the parquet path or shard glob) +
+# ensure the duckdb CLI is installed. Keeps each button focused on its
+# query. NOTE: this is the *Starlark* string; it gets injected verbatim
+# into each button's shell command via Python f-string-style format.
+_DUCKDB_PREAMBLE = '''
+ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"
+if [ ! -f "$ROOT/events.parquet" ] && [ -z "$(ls "$ROOT"/events-*.parquet 2>/dev/null)" ]; then
+  echo "No events parquet found under $ROOT. Run a bench first (bench:run)."
+  exit 1
+fi
+if ! command -v duckdb >/dev/null 2>&1; then
+  echo "duckdb CLI not installed. Install with:  brew install duckdb"
+  exit 1
+fi
+if [ -f "$ROOT/events.parquet" ]; then
+  TARGET="$ROOT/events.parquet"
+else
+  TARGET="$ROOT/events-*.parquet"
+fi
+'''
+
 cmd_button(
-    name='btn-duckdb-latest-run',
+    name='btn-duckdb-open',
     resource='duckdb-inspect',
-    argv=[
-        'sh',
-        '-c',
-        '''
-        ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"
-        if [ ! -f "$ROOT/events.parquet" ] && [ -z "$(ls "$ROOT"/events-*.parquet 2>/dev/null)" ]; then
-          echo "No events parquet found under $ROOT. Run a bench first (bench:run)."
-          exit 1
-        fi
-        if ! command -v duckdb >/dev/null 2>&1; then
-          echo "duckdb CLI not installed. Install with:  brew install duckdb"
-          exit 1
-        fi
-        if [ -f "$ROOT/events.parquet" ]; then
-          TARGET="$ROOT/events.parquet"
-        else
-          TARGET="$ROOT/events-*.parquet"
-        fi
-        echo "Opening DuckDB on: $TARGET"
-        echo "Try:  SELECT node_name, status, count(*) FROM events GROUP BY 1,2 ORDER BY 3 DESC;"
-        duckdb -cmd "CREATE VIEW events AS SELECT * FROM read_parquet('$TARGET', union_by_name=true);"
-        ''',
-    ],
-    text='Open DuckDB on latest run',
+    argv=['sh', '-c', _DUCKDB_PREAMBLE + '''
+echo "Opening DuckDB on: $TARGET"
+echo "Try:  SELECT node_name, status, count(*) FROM events GROUP BY 1,2 ORDER BY 3 DESC;"
+duckdb -cmd "CREATE VIEW events AS SELECT * FROM read_parquet('$TARGET', union_by_name=true);"
+'''],
+    text='Open DuckDB shell',
     icon_name='terminal',
+)
+
+cmd_button(
+    name='btn-duckdb-stats',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', _DUCKDB_PREAMBLE + '''
+echo "── node_name × status histogram ──"
+duckdb -box -cmd "SELECT node_name, status, count(*) AS n FROM read_parquet('$TARGET', union_by_name=true) GROUP BY 1,2 ORDER BY n DESC LIMIT 50;"
+echo
+echo "── total events / per-source ──"
+duckdb -box -cmd "SELECT source, count(*) AS n FROM read_parquet('$TARGET', union_by_name=true) GROUP BY 1 ORDER BY n DESC;"
+echo
+echo "── per-model event counts ──"
+duckdb -box -cmd "SELECT model, count(*) AS n FROM read_parquet('$TARGET', union_by_name=true) WHERE model IS NOT NULL GROUP BY 1 ORDER BY n DESC LIMIT 20;"
+'''],
+    text='Stats (histograms)',
+    icon_name='analytics',
+)
+
+cmd_button(
+    name='btn-duckdb-errors',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', _DUCKDB_PREAMBLE + '''
+echo "── recent failed/error events (last 30) ──"
+duckdb -box -cmd "
+  SELECT
+    strftime(ts, '%H:%M:%S.%f') AS time,
+    source, node_name, status,
+    coalesce(model, '-')   AS model,
+    coalesce(doc_id, '-')  AS doc_id,
+    coalesce(chunk_id, '-') AS chunk_id,
+    json_extract_string(details, '$.error') AS error_msg
+  FROM read_parquet('$TARGET', union_by_name=true)
+  WHERE status IN ('error', 'failed', 'failure', 'timeout')
+  ORDER BY ts DESC
+  LIMIT 30;
+"
+'''],
+    text='Errors (recent failures)',
+    icon_name='error_outline',
+)
+
+cmd_button(
+    name='btn-duckdb-schema',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', _DUCKDB_PREAMBLE + '''
+echo "── parquet schema (DESCRIBE) ──"
+duckdb -box -cmd "DESCRIBE SELECT * FROM read_parquet('$TARGET', union_by_name=true);"
+echo
+echo "── shard files on disk ──"
+ls -lh "${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"/events*.parquet 2>&1
+echo
+echo "── row counts per shard ──"
+duckdb -box -cmd "SELECT filename, count(*) AS rows FROM read_parquet('$TARGET', union_by_name=true, filename=true) GROUP BY filename ORDER BY filename;"
+'''],
+    text='Schema + shard layout',
+    icon_name='schema',
+)
+
+cmd_button(
+    name='btn-duckdb-tail',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', _DUCKDB_PREAMBLE + '''
+echo "── last 20 events ──"
+duckdb -box -cmd "
+  SELECT
+    strftime(ts, '%H:%M:%S.%f') AS time,
+    source, node_name, status,
+    coalesce(model, '-') AS model,
+    coalesce(chunk_id, '-') AS chunk_id
+  FROM read_parquet('$TARGET', union_by_name=true)
+  ORDER BY ts DESC
+  LIMIT 20;
+"
+'''],
+    text='Tail (last 20)',
+    icon_name='vertical_align_bottom',
+)
+
+cmd_button(
+    name='btn-duckdb-runs-s3',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', '''
+if ! command -v duckdb >/dev/null 2>&1; then
+  echo "duckdb CLI not installed. Install with:  brew install duckdb"
+  exit 1
+fi
+ENDPOINT="${DAGSTER_S3_ENDPOINT_URL:-http://localhost:9000}"
+ACCESS="${DAGSTER_S3_ACCESS_KEY:-minio}"
+SECRET="${DAGSTER_S3_SECRET_KEY:-minio123}"
+BUCKET="${DAGSTER_S3_BUCKET:-dagster}"
+echo "── archived bench runs in s3://$BUCKET/bench/runs/ (events.parquet only) ──"
+duckdb -box -cmd "
+  INSTALL httpfs;
+  LOAD httpfs;
+  SET s3_endpoint = '${ENDPOINT#http://}';
+  SET s3_url_style = 'path';
+  SET s3_use_ssl = false;
+  SET s3_access_key_id = '$ACCESS';
+  SET s3_secret_access_key = '$SECRET';
+  SELECT regexp_extract(file, 'runs/([^/]+)/', 1) AS run_id, count(*) AS rows
+  FROM read_parquet('s3://$BUCKET/bench/runs/*/events.parquet', filename='file', union_by_name=true)
+  GROUP BY 1 ORDER BY 1 DESC;
+"
+'''],
+    text='List archived runs (S3)',
+    icon_name='cloud',
+)
+
+# ── UI shortcuts: open key viewer surfaces in a browser ────────────────
+
+cmd_button(
+    name='btn-open-audit-viewer',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', 'open http://localhost:5173/viewer/benchmarks'],
+    text='Open Benchmark Report (UI)',
+    icon_name='dashboard',
+)
+
+cmd_button(
+    name='btn-open-state-inspector',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', 'open http://localhost:5173/viewer/benchmarks/state'],
+    text='Open State Inspector (UI)',
+    icon_name='timeline',
+)
+
+cmd_button(
+    name='btn-open-events-api',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', '''
+LATEST=$(curl -sm 3 http://localhost:8080/viewer/api/bench/runs 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('latest') or '')" 2>/dev/null)
+if [ -z "$LATEST" ]; then
+  echo "No bench runs found."
+  exit 1
+fi
+echo "Opening /viewer/api/bench/runs/$LATEST/events?limit=50 in browser…"
+open "http://localhost:8080/viewer/api/bench/runs/$LATEST/events?limit=50"
+'''],
+    text='Open /events API (latest run)',
+    icon_name='api',
+)
+
+cmd_button(
+    name='btn-open-diagnostics',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', 'open http://localhost:8080/viewer/api/bench/diagnostics'],
+    text='Open Diagnostics counter',
+    icon_name='monitoring',
 )
 
 # ============================================
