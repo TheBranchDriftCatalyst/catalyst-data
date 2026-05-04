@@ -15,7 +15,6 @@
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
-  Activity,
   BarChart3,
   Boxes,
   ChevronDown,
@@ -42,8 +41,7 @@ const ITEMS: NavItem[] = [
   { to: "/documents", label: "Documents", icon: FileText, prefix: true },
   { to: "/s3", label: "S3 Explorer", icon: Database },
   { to: "/benchmarks", label: "Benchmarks", icon: BarChart3, prefix: true },
-  { to: "/benchmarks/state", label: "State Inspector", icon: Activity },
-  { to: "/benchmarks/state-v2", label: "Pipeline Graph", icon: Workflow },
+  { to: "/benchmarks/state", label: "State Inspector", icon: Workflow },
 ];
 
 interface ServiceLink {
