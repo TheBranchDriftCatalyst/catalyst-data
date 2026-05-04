@@ -28,6 +28,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel
 
+from catalyst_langgraph.clients._retry import retry_llm_call
+
 logger = logging.getLogger(__name__)
 
 # Map our MentionType to natural-language entity type descriptions
@@ -91,8 +93,14 @@ class UniversalNERClient:
         self.structured_method = "universalner"
         self.temperature = 0.0
 
+    @retry_llm_call(name="universalner")
     async def _call_ollama(self, messages: list[dict]) -> str:
-        """Send a multi-turn chat to Ollama and return the assistant response."""
+        """Send a multi-turn chat to Ollama and return the assistant response.
+
+        Wrapped in retry_llm_call (CD-58ry): transient Ollama 5xx /
+        connection-reset errors retry up to 3 times with exponential
+        backoff + full jitter.
+        """
         url = f"{self.base_url}/api/chat"
         payload = {
             "model": self.model,

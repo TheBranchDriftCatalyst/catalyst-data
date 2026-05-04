@@ -23,6 +23,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel
 
+from catalyst_langgraph.clients._retry import retry_llm_call
+
 logger = logging.getLogger(__name__)
 
 # NuExtract template categories → MentionType mapping.
@@ -142,6 +144,7 @@ class NuExtractClient:
         self.structured_method = "nuextract"
         self.temperature = 0.0
 
+    @retry_llm_call(name="nuextract")
     async def _call_llm(self, prompt: str) -> str:
         """Send a request to the LLM and return the response text.
 
@@ -150,6 +153,11 @@ class NuExtractClient:
 
         NuExtract 2.0 (Qwen2.5): uses /api/chat which correctly applies the
         Qwen im_start/im_end template.
+
+        Wrapped in retry_llm_call (CD-58ry): transient Ollama 5xx /
+        connection-reset errors retry up to 3 times with exponential
+        backoff + full jitter; non-transient errors (4xx besides 408/429,
+        JSON parse failures) propagate immediately.
         """
         is_ollama = ":11434" in self.base_url
 
