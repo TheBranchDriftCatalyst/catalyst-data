@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any
+
+import httpx
 
 from catalyst_exgraph.config import StageConfig
 from catalyst_exgraph.protocol import ExtractionClient
@@ -24,6 +27,29 @@ from catalyst_exgraph.state import ExGraphState
 from dagster_io import event_tail
 
 logger = logging.getLogger(__name__)
+
+# Transient transport-layer / 5xx exceptions get a brief WARNING line
+# instead of a full traceback dump (matches the retry classification in
+# catalyst_langgraph.clients._retry). Logic bugs still get logger.exception
+# so we see the stack.
+_TRANSIENT_HTTPX_EXC: tuple[type[BaseException], ...] = (
+    httpx.ReadTimeout,
+    httpx.ConnectTimeout,
+    httpx.WriteTimeout,
+    httpx.PoolTimeout,
+    httpx.ConnectError,
+    httpx.RemoteProtocolError,
+    httpx.ReadError,
+    httpx.WriteError,
+)
+_TRANSIENT_HTTP_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """True iff exc is a known-transient I/O failure (logged tersely)."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _TRANSIENT_HTTP_STATUS
+    return isinstance(exc, _TRANSIENT_HTTPX_EXC)
 
 
 class NerEnsembleNode:
@@ -55,11 +81,24 @@ class NerEnsembleNode:
         clients: dict[str, ExtractionClient],
         mcp_client: Any,
         per_encoder_timeout_s: float = 60.0,
+        max_concurrency: int | None = None,
     ) -> None:
         self.encoders = encoders
         self.clients = clients
         self.mcp_client = mcp_client
         self.per_encoder_timeout_s = per_encoder_timeout_s
+        # Cap concurrent encoder calls to avoid OOM-ing the local Ollama
+        # daemon when 5+ encoders + 3 SPO LLMs all hit it at once. ``None``
+        # (the default) means unbounded — preserves legacy behavior. Env
+        # var ``NER_ENSEMBLE_MAX_CONCURRENCY`` overrides the constructor
+        # arg so ops can throttle a stuck run without touching code.
+        env_cap = os.environ.get("NER_ENSEMBLE_MAX_CONCURRENCY")
+        if env_cap and env_cap.strip():
+            try:
+                max_concurrency = int(env_cap)
+            except ValueError:
+                logger.warning("NER_ENSEMBLE_MAX_CONCURRENCY=%r is not an int; ignoring", env_cap)
+        self.max_concurrency = max_concurrency
 
         # Build one ExtractNode per encoder — lazy import to avoid circular deps
         from catalyst_exgraph.nodes.extract import ExtractNode
@@ -180,7 +219,33 @@ class NerEnsembleNode:
 
             except Exception as exc:
                 duration = time.perf_counter() - t0
-                logger.exception("ner_ensemble: encoder=%s raised", encoder_name)
+                # Known-transient I/O failures: terse WARNING. Genuine bugs
+                # (anything else): full traceback so we see the stack.
+                if _is_transient(exc):
+                    status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+                    logger.warning(
+                        "ner_ensemble: encoder=%s transient %s%s after %.1fs (vote skipped, consensus continues)",
+                        encoder_name,
+                        type(exc).__name__,
+                        f" {status_code}" if status_code else "",
+                        duration,
+                    )
+                else:
+                    logger.exception("ner_ensemble: encoder=%s raised", encoder_name)
+
+                # Capture HTTP status in the audit event so ConsensusDetail
+                # / NerEncoderDetail can show "503 Service Unavailable"
+                # instead of just an exception type. Useful for debugging
+                # without re-running with more verbose logs.
+                err_details: dict[str, Any] = {
+                    "encoder": encoder_name,
+                    "error": type(exc).__name__,
+                    "message": str(exc)[:500],
+                    "transient": _is_transient(exc),
+                    "duration_s": duration,
+                }
+                if isinstance(exc, httpx.HTTPStatusError):
+                    err_details["http_status"] = exc.response.status_code
                 event_tail.append(
                     source="harness",
                     node_name="ner_encoder_completed",
@@ -188,19 +253,28 @@ class NerEnsembleNode:
                     model=encoder_name,
                     doc_id=doc_id,
                     chunk_id=chunk_id_for_encoder,
-                    details={
-                        "encoder": encoder_name,
-                        "error": type(exc).__name__,
-                        "message": str(exc)[:500],
-                        "duration_s": duration,
-                    },
+                    details=err_details,
                 )
                 return encoder_name, [], {"type": type(exc).__name__, "message": str(exc)[:500]}
 
-        # Launch all encoders in parallel — exceptions are caught inside _run_one
-        # so return_exceptions=False is safe: we never let exceptions propagate.
+        # Optionally throttle the fan-out so the local Ollama daemon
+        # doesn't OOM under 5+ concurrent inference calls. ``None`` means
+        # unbounded (legacy behavior); env-overridable via
+        # ``NER_ENSEMBLE_MAX_CONCURRENCY``.
+        sem: asyncio.Semaphore | None = asyncio.Semaphore(self.max_concurrency) if self.max_concurrency else None
+
+        async def _gated(name: str, node: Any) -> tuple[str, list[dict], dict | None]:
+            if sem is None:
+                return await _run_one(name, node)
+            async with sem:
+                return await _run_one(name, node)
+
+        # Launch all encoders in parallel (or up to max_concurrency at a
+        # time when sem is set) — exceptions are caught inside _run_one
+        # so return_exceptions=False is safe: we never let exceptions
+        # propagate.
         results = await asyncio.gather(
-            *[_run_one(name, node) for name, node in self._nodes.items()],
+            *[_gated(name, node) for name, node in self._nodes.items()],
             return_exceptions=False,
         )
 
