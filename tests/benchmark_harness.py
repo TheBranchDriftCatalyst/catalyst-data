@@ -24,6 +24,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+
+logger = logging.getLogger("bench.harness")
 import os
 import subprocess
 import sys
@@ -167,8 +169,17 @@ def _phase_a_build_cluster_cache(
         # Wall-clock for the entire Phase A loop (encoders run in parallel so
         # wall time < sum of per-encoder times).
         phase_a_t0 = time.monotonic()
+        n_docs_total = len(docs)
+        n_warm = 0
+        n_cold = 0
 
-        for doc in docs:
+        # Heartbeat header so the user knows we're alive and how much work is
+        # ahead before the per-doc lines start. With long full-corpus runs the
+        # ensemble call per doc can take 30s+; without per-doc progress all
+        # you'd see is "Phase A: building cluster cache..." for minutes.
+        logger.info("phase_a: %d doc(s); checking cluster cache", n_docs_total)
+
+        for i, doc in enumerate(docs, start=1):
             # Check warm cache first (skips ensemble run entirely on re-runs)
             cache_key_model = "ensemble_v4"
             cached = cluster_cache.get(
@@ -183,10 +194,30 @@ def _phase_a_build_cluster_cache(
                 mentions_by_doc[doc.doc_id] = cached.mentions
                 for enc_name, enc_mentions in cached.per_encoder_mentions.items():
                     per_encoder_by_doc.setdefault(enc_name, {})[doc.doc_id] = enc_mentions
+                n_warm += 1
+                logger.info(
+                    "phase_a [%d/%d] %s  warm  (%d mentions, %d per-encoder)",
+                    i,
+                    n_docs_total,
+                    doc.doc_id,
+                    len(cached.mentions),
+                    sum(len(v) for v in cached.per_encoder_mentions.values()),
+                )
                 continue
 
             # Cold miss — run the ensemble pipeline
+            n_cold += 1
+            doc_t0 = time.monotonic()
+            logger.info(
+                "phase_a [%d/%d] %s  cold  (%d chars, %d encoders)…",
+                i,
+                n_docs_total,
+                doc.doc_id,
+                len(doc.full_text),
+                len(encoder_cfgs),
+            )
             ner_result = _run_ensemble_for_doc(ensemble_pipeline, doc, encoder_cfgs)
+            doc_duration_s = time.monotonic() - doc_t0
 
             cluster_by_doc[doc.doc_id] = ner_result.clusters
             mentions_by_doc[doc.doc_id] = ner_result.mentions
@@ -202,9 +233,24 @@ def _phase_a_build_cluster_cache(
                 params=params,
                 result=ner_result,
             )
+            logger.info(
+                "phase_a [%d/%d] %s  done  (%d mentions, %.1fs)",
+                i,
+                n_docs_total,
+                doc.doc_id,
+                len(ner_result.mentions),
+                doc_duration_s,
+            )
 
         # Phase A wall-clock (all encoders ran in parallel, so this is < sum).
         phase_a_duration_s = time.monotonic() - phase_a_t0
+        logger.info(
+            "phase_a done in %.1fs  (%d warm hits, %d cold %s)",
+            phase_a_duration_s,
+            n_warm,
+            n_cold,
+            "miss" if n_cold == 1 else "misses",
+        )
 
         # ── Save per-encoder fixtures so _run_model can return them directly ──
         if store is not None:

@@ -297,7 +297,20 @@ async def _process_doc(
     # accepted list for legacy single-NER pipelines.
     consensus_mentions: list[dict] = ner_result.get("consensus_mentions") or []
 
-    for window in evidence_windows:
+    n_windows = len(evidence_windows)
+    if n_windows == 0:
+        logger.info("[%s] %s: 0 evidence windows — skipping SPO", bench_model, doc.doc_id)
+    else:
+        logger.info(
+            "[%s] %s: %d evidence window%s, %d consensus mentions",
+            bench_model,
+            doc.doc_id,
+            n_windows,
+            "" if n_windows == 1 else "s",
+            len(consensus_mentions) if consensus_mentions else len(accepted_mentions),
+        )
+
+    for w_i, window in enumerate(evidence_windows, start=1):
         window_id = window.get("window_id", "")
         mention_indices: list[int] = window.get("mention_indices") or []
         if consensus_mentions:
@@ -339,14 +352,28 @@ async def _process_doc(
         }
         # CD-azmn: bound each evidence-window SPO invocation in wall-clock
         # so a wedged Ollama trips here instead of hanging the whole bench.
+        win_t0 = time.perf_counter()
         spo_result = await asyncio.wait_for(spo_pipeline.ainvoke(spo_state_input), timeout=_per_call_timeout_s())
+        win_dt = time.perf_counter() - win_t0
 
         spo_accepted: list[dict] = (spo_result.get("stages") or {}).get("spo", {}).get("accepted") or []
         all_propositions.extend(spo_accepted)
         spo_audit.extend(spo_result.get("audit_events") or [])
-        spo_retries_total += (spo_result.get("stages") or {}).get("spo", {}).get("retry_count", 0)
+        win_retries = (spo_result.get("stages") or {}).get("spo", {}).get("retry_count", 0)
+        spo_retries_total += win_retries
         if spo_result.get("status") == "failed":
             spo_status = "failed"
+
+        logger.info(
+            "[%s] %s win %d/%d  %d props · %.1fs%s",
+            bench_model,
+            doc.doc_id,
+            w_i,
+            n_windows,
+            len(spo_accepted),
+            win_dt,
+            f" · {win_retries} retries" if win_retries else "",
+        )
 
         # Emit chunk_extracted per window so the State Inspector OUTPUT pane
         # shows per-window SPO propositions for v4 win-N chunk_ids.
