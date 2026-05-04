@@ -231,10 +231,30 @@ class ClusterCache:
 
     @staticmethod
     def _build_default_store(code_loc: str) -> Any:
-        endpoint = os.environ.get("MINIO_ENDPOINT") or os.environ.get("AWS_ENDPOINT_URL")
-        access_key = os.environ.get("MINIO_ACCESS_KEY") or os.environ.get("AWS_ACCESS_KEY_ID")
-        secret_key = os.environ.get("MINIO_SECRET_KEY") or os.environ.get("AWS_SECRET_ACCESS_KEY")
-        if endpoint and access_key and secret_key:
+        # Endpoint env-var precedence — the bench harness + .envrc set
+        # DAGSTER_S3_ENDPOINT_URL, NOT MINIO_ENDPOINT, so without this the
+        # cache silently fell back to in-memory and EVERY run started cold
+        # (the warm-hit branch in _phase_a_build_cluster_cache only fired
+        # within the same process). Recognize all three names.
+        endpoint = (
+            os.environ.get("DAGSTER_S3_ENDPOINT_URL")
+            or os.environ.get("MINIO_ENDPOINT")
+            or os.environ.get("AWS_ENDPOINT_URL")
+        )
+        access_key = (
+            os.environ.get("DAGSTER_S3_ACCESS_KEY")
+            or os.environ.get("AWS_ACCESS_KEY_ID")
+            or os.environ.get("MINIO_ACCESS_KEY")
+            # Tiltfile default (Tiltfile:286) — matches the local MinIO root user.
+            or "minio"
+        )
+        secret_key = (
+            os.environ.get("DAGSTER_S3_SECRET_KEY")
+            or os.environ.get("AWS_SECRET_ACCESS_KEY")
+            or os.environ.get("MINIO_SECRET_KEY")
+            or "minio123"
+        )
+        if endpoint:
             from dagster_io.s3_client import S3Client
 
             s3 = S3Client(
@@ -243,10 +263,17 @@ class ClusterCache:
                 secret_key=secret_key,
                 bucket=_BUCKET,
             )
+            logger.info(
+                "ClusterCache: backed by S3 at %s (bucket=%s, code_loc=%s)",
+                endpoint,
+                _BUCKET,
+                code_loc,
+            )
             return _S3Store(s3, code_loc)
-        logger.info(
-            "ClusterCache: S3 env vars not found (MINIO_ENDPOINT / MINIO_ACCESS_KEY / MINIO_SECRET_KEY), "
-            "using in-memory fallback"
+        logger.warning(
+            "ClusterCache: no S3 endpoint env var found "
+            "(DAGSTER_S3_ENDPOINT_URL / MINIO_ENDPOINT / AWS_ENDPOINT_URL); "
+            "falling back to in-memory store — every run will start cold."
         )
         return _InMemoryStore()
 
