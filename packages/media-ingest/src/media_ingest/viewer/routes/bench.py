@@ -309,63 +309,64 @@ _MAX_LIMIT = 50_000
 _DEFAULT_LIMIT = 5_000
 
 
-def _local_shard_run_id(store: S3BenchmarkStore) -> str | None:
-    """Return the ``run_id`` of whatever the local shard set belongs to,
-    or ``None`` if there are no local shards.
+def _local_run_ids(store: S3BenchmarkStore) -> set[str]:
+    """Return the set of distinct ``run_id`` values present in the local
+    shard set.
 
-    The local cache is one-run-at-a-time (the harness truncates
-    ``events.jsonl`` at run start — see ``benchmark_harness.py:1372`` —
-    so the parquet shards alongside it always belong to that same run).
-    We probe the first shard's ``run_id`` column rather than parsing the
-    filename so a future ``events-<pid>-<uuid>.parquet`` name change
-    doesn't silently break this.
+    The harness truncates ``events.jsonl`` at run start
+    (``benchmark_harness.py:1372``) but does NOT clean prior parquet
+    shards, so the local cache can carry shards from the previous run
+    alongside the active one until manual cleanup. Every shard is
+    single-run by construction (one writer-process per run, per
+    ``event_store.py``), so a single-row probe per file is enough.
     """
-    shards = sorted(store.local_cache_root.glob("events-*.parquet"))
+    shards = list(store.local_cache_root.glob("events-*.parquet"))
     if not shards:
-        return None
+        return set()
     try:
         import duckdb  # noqa: PLC0415
 
         conn = duckdb.connect(":memory:")
         try:
-            shard_lit = "'" + str(shards[0]).replace("'", "''") + "'"
-            row = conn.execute(f"SELECT run_id FROM read_parquet({shard_lit}) LIMIT 1").fetchone()
-            return row[0] if row else None
+            run_ids: set[str] = set()
+            for shard in shards:
+                shard_lit = "'" + str(shard).replace("'", "''") + "'"
+                row = conn.execute(f"SELECT run_id FROM read_parquet({shard_lit}) LIMIT 1").fetchone()
+                if row and row[0]:
+                    run_ids.add(row[0])
+            return run_ids
         finally:
             conn.close()
     except Exception:
-        return None
+        return set()
 
 
 def _is_live_run(store: S3BenchmarkStore, run_id: str) -> bool:
-    """Return True iff ``run_id`` is the run currently in flight on this host.
+    """Return True iff ``run_id`` has at least one local parquet shard.
 
-    The harness writes ``<local_cache_root>/.bus-port`` at run start
-    (``benchmark_harness.py:1399``) and ``RunBus.stop()`` removes it at run end.
-    "Live" means BOTH:
-      1. The bus-port marker exists (a run is in flight at all), and
-      2. The local shard set's ``run_id`` matches the requested ``run_id``.
+    "Live" really means "served from the local cache rather than the S3
+    archive" — once a run consolidates and uploads, the canonical artefact
+    is the S3 ``events.parquet``. During a run, and for the brief window
+    between consolidation and archive PUT, the local shards are
+    authoritative.
 
-    Without (2) we'd serve archived-run queries from whatever happens to
-    sit in ``local_cache_root`` — which is always exactly one prior run's
-    data — and the wire response would carry the wrong events.
+    We don't gate on ``.bus-port`` because the local shard set may
+    legitimately contain the previous run's leftovers (the harness
+    truncates ``events.jsonl`` at run start but not the parquet shards).
+    Stale-shard rows are filtered out by the ``WHERE run_id = ?`` clause
+    in the live read path (see ``run_events_duckdb``).
     """
-    bus_port_path = store.local_cache_root / ".bus-port"
-    if not bus_port_path.exists():
-        return False
-    # Prefer the in-process state when the viewer-api shares a process
-    # with the harness (which it doesn't in production, but does under
-    # certain dev orchestrations). Cheap and avoids a parquet read.
+    # In-process fast path: viewer-api shares the harness process under
+    # certain dev orchestrations. Saves a parquet probe per request.
     try:
         from dagster_io.bench import event_store as _event_store
 
         active = _event_store.current_run_id()
-        if active is not None:
-            return active == run_id
+        if active is not None and active == run_id:
+            return True
     except Exception:
         pass
-    # Cross-process: probe the local shards for the run_id they belong to.
-    return _local_shard_run_id(store) == run_id
+    return run_id in _local_run_ids(store)
 
 
 def _duckdb_connect_with_s3(client) -> Any:
@@ -523,11 +524,24 @@ def run_events_duckdb(
                 # path argument; embed the glob (a Path-derived string,
                 # never user input) as a literal with quote escaping.
                 glob_lit = "'" + shard_glob.replace("'", "''") + "'"
+                # Always WHERE-filter by run_id even on the live path —
+                # the local cache is not cleaned between runs, so shards
+                # from a prior run can sit alongside the active set
+                # (see ``_local_run_ids``). Without this clause, the
+                # response would mix events across runs.
+                live_clauses = ["run_id = ?"]
+                live_params: list[Any] = [run_id]
+                if where_sql:
+                    # ``where_sql`` always starts with " WHERE " — strip
+                    # that prefix and AND it onto the run_id guard.
+                    live_clauses.append(where_sql.removeprefix(" WHERE "))
+                    live_params.extend(params)
+                live_where = " WHERE " + " AND ".join(live_clauses)
                 sql = (
                     f"SELECT * FROM read_parquet({glob_lit}, union_by_name=true)"
-                    f"{where_sql} {order_sql} LIMIT {int(limit)}"
+                    f"{live_where} {order_sql} LIMIT {int(limit)}"
                 )
-                cur = conn.execute(sql, tuple(params))
+                cur = conn.execute(sql, tuple(live_params))
                 cols = [d[0] for d in (cur.description or [])]
                 rows = cur.fetchall()
             finally:
