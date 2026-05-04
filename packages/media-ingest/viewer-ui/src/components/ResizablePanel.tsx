@@ -11,6 +11,10 @@ interface ResizablePanelProps {
   className?: string;
   /** Height of the collapsed tab bar strip */
   collapsedHeight?: number;
+  /** Persistence key for localStorage. When set, the panel restores its
+   *  height (and collapsed state if uncontrolled) on mount and writes
+   *  back on every drag-end / collapse toggle. */
+  storageKey?: string;
 }
 
 export default function ResizablePanel({
@@ -22,12 +26,25 @@ export default function ResizablePanel({
   onCollapsedChange,
   className = "",
   collapsedHeight = 40,
+  storageKey,
 }: ResizablePanelProps) {
-  const [internalCollapsed, setInternalCollapsed] = useState(false);
+  const [internalCollapsed, setInternalCollapsed] = useState<boolean>(() => {
+    if (storageKey && typeof window !== "undefined") {
+      return window.localStorage.getItem(`${storageKey}:collapsed`) === "1";
+    }
+    return false;
+  });
   const collapsed = controlledCollapsed ?? internalCollapsed;
   const setCollapsed = onCollapsedChange ?? setInternalCollapsed;
 
-  const [height, setHeight] = useState(defaultHeight);
+  const [height, setHeight] = useState<number>(() => {
+    if (storageKey && typeof window !== "undefined") {
+      const stored = window.localStorage.getItem(`${storageKey}:height`);
+      const n = stored ? parseInt(stored, 10) : NaN;
+      if (Number.isFinite(n) && n >= minHeight && n <= maxHeight) return n;
+    }
+    return defaultHeight;
+  });
   const panelRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const startY = useRef(0);
@@ -60,6 +77,13 @@ export default function ResizablePanel({
       isDragging.current = false;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      if (storageKey && typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(`${storageKey}:height`, String(height));
+        } catch {
+          /* quota / private mode — ignore */
+        }
+      }
     };
 
     document.addEventListener("mousemove", handleMouseMove);
@@ -68,11 +92,19 @@ export default function ResizablePanel({
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [maxHeight, minHeight]);
+  }, [maxHeight, minHeight, storageKey, height]);
 
   const toggleCollapsed = useCallback(() => {
-    setCollapsed(!collapsed);
-  }, [collapsed, setCollapsed]);
+    const next = !collapsed;
+    setCollapsed(next);
+    if (storageKey && typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(`${storageKey}:collapsed`, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [collapsed, setCollapsed, storageKey]);
 
   return (
     <div
@@ -116,7 +148,7 @@ export default function ResizablePanel({
 
       {/* Panel content */}
       <div
-        className={`flex-1 min-h-0 overflow-hidden transition-opacity ${
+        className={`flex-1 min-h-0 overflow-y-auto transition-opacity ${
           collapsed ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
       >

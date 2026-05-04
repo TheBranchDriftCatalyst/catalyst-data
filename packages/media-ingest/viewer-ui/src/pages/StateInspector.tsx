@@ -37,6 +37,8 @@ import { useRunStream } from "@/hooks/useRunStream";
 import { useRuns } from "@/hooks/useRuns";
 import { DocRailV2 } from "@/components/state/DocRailV2";
 import { RunPicker } from "@/components/state/RunPicker";
+import ResizablePanel from "@/components/ResizablePanel";
+import ResizableSidebar from "@/components/ResizableSidebar";
 import {
   PipelineGraph,
   type SelectedGraphNode,
@@ -137,7 +139,13 @@ export function StateInspector() {
 
   return (
     <div className="flex h-full">
-      <div className="w-60 flex-shrink-0 border-r border-white/10 overflow-y-auto">
+      <ResizableSidebar
+        storageKey="state-inspector-rail"
+        defaultWidth={240}
+        minWidth={180}
+        maxWidth={500}
+        className="border-r border-white/10 overflow-y-auto"
+      >
         <DocRailV2
           events={events}
           selectedDoc={selectedDoc}
@@ -147,7 +155,7 @@ export function StateInspector() {
             setSelectedNode(null);
           }}
         />
-      </div>
+      </ResizableSidebar>
 
       {/* Right of the rail: vertical split — top row is graph + doc-source
           side-by-side; bottom row is the selected-node detail. */}
@@ -175,27 +183,45 @@ export function StateInspector() {
           {selectedDoc && <span className="text-zinc-400 truncate ml-2">{selectedDoc}</span>}
         </div>
 
-        {/* Top row: graph (left) + document source (right) */}
+        {/* L-shaped layout: doc source spans full height on the right,
+         *  graph + detail stack vertically on the left. */}
         <div className="flex flex-1 min-h-0">
-          <div className="flex-1 min-w-0 border-r border-white/10">
-            {selectedDoc ? (
-              <PipelineGraph
-                events={events}
-                docId={selectedDoc}
-                selected={selectedNode}
-                onSelectNode={setSelectedNode}
-              />
-            ) : isInitialLoad ? (
-              <LoadingSpinner label="Loading audit log…" />
-            ) : (
-              <div className="p-6 font-mono text-xs text-zinc-500">
-                {events.length === 0
-                  ? "No events yet — start a benchmark run."
-                  : "Pick a doc on the left to see its LangGraph execution."}
-              </div>
-            )}
+          <div className="flex-1 min-w-0 flex flex-col border-r border-white/10">
+            <div className="flex-1 min-h-0">
+              {selectedDoc ? (
+                <PipelineGraph
+                  events={events}
+                  docId={selectedDoc}
+                  selected={selectedNode}
+                  onSelectNode={setSelectedNode}
+                />
+              ) : isInitialLoad ? (
+                <LoadingSpinner label="Loading audit log…" />
+              ) : (
+                <div className="p-6 font-mono text-xs text-zinc-500">
+                  {events.length === 0
+                    ? "No events yet — start a benchmark run."
+                    : "Pick a doc on the left to see its LangGraph execution."}
+                </div>
+              )}
+            </div>
+            <ResizablePanel
+              storageKey="state-inspector-detail"
+              defaultHeight={220}
+              minHeight={120}
+              maxHeight={600}
+              className="bg-surface-1/50 overflow-y-auto border-t border-white/10"
+            >
+              {selectedDoc && selectedNode ? (
+                <DetailRouter events={events} docId={selectedDoc} node={selectedNode} />
+              ) : (
+                <div className="p-4 font-mono text-[10px] text-zinc-600">
+                  Click a node in the graph to see its I/O.
+                </div>
+              )}
+            </ResizablePanel>
           </div>
-          <div className="w-[420px] flex-shrink-0 overflow-hidden">
+          <div className="w-[480px] flex-shrink-0 overflow-hidden">
             {selectedDoc ? (
               <DocumentSourcePanel
                 events={events}
@@ -208,17 +234,6 @@ export function StateInspector() {
               </div>
             )}
           </div>
-        </div>
-
-        {/* Bottom row: detail of the currently-selected graph node */}
-        <div className="h-[280px] flex-shrink-0 border-t border-white/10 overflow-y-auto bg-surface-1/50">
-          {selectedDoc && selectedNode ? (
-            <DetailRouter events={events} docId={selectedDoc} node={selectedNode} />
-          ) : (
-            <div className="p-4 font-mono text-[10px] text-zinc-600">
-              Click a node in the graph to see its I/O.
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -317,19 +332,92 @@ function NodeStats({
   let body: React.ReactNode = null;
   if (node.role === "spo_model" && node.ref) {
     const m = node.ref;
+    type Row = {
+      chunkId: string;
+      window: string;
+      mentions: number;
+      props: number;
+      durationS: number | null;
+      status: string;
+    };
+    const rows: Row[] = [];
     let mentions = 0;
     let props = 0;
+    let durationTotal = 0;
+    let durationCount = 0;
     for (const e of docEvents) {
       if (e.node_name !== "chunk_extracted") continue;
       if (!e.chunk_id?.includes(":win-")) continue;
       if (e.model !== m) continue;
       const d = (e.details ?? {}) as Record<string, unknown>;
-      mentions += (d.mention_count as number) ?? 0;
-      props += (d.proposition_count as number) ?? 0;
+      const ment = (d.mention_count as number) ?? 0;
+      const pr = (d.proposition_count as number) ?? 0;
+      const dur = typeof d.duration_s === "number" ? (d.duration_s as number) : null;
+      mentions += ment;
+      props += pr;
+      if (dur != null) {
+        durationTotal += dur;
+        durationCount += 1;
+      }
+      const win = e.chunk_id.split(":win-")[1] ?? e.chunk_id;
+      rows.push({
+        chunkId: e.chunk_id,
+        window: `win-${win.slice(0, 12)}`,
+        mentions: ment,
+        props: pr,
+        durationS: dur,
+        status: e.status ?? "?",
+      });
     }
+    rows.sort((a, b) => b.mentions + b.props - (a.mentions + a.props));
     body = (
-      <div>
-        {mentions} mentions · {props} propositions
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-3 text-zinc-400 text-[10px]">
+          <span className="text-zinc-300">{rows.length} windows</span>
+          <span className="text-zinc-600">·</span>
+          <span>{mentions} mentions</span>
+          <span>{props} propositions</span>
+          {durationCount > 0 && (
+            <>
+              <span className="text-zinc-600">·</span>
+              <span>{durationTotal.toFixed(1)}s total</span>
+              <span>{(durationTotal / durationCount).toFixed(2)}s/win</span>
+            </>
+          )}
+        </div>
+        <div className="rounded border border-white/5 max-h-44 overflow-y-auto">
+          <table className="w-full text-[10px]">
+            <thead className="sticky top-0 bg-surface-1/80 backdrop-blur">
+              <tr className="text-zinc-500 text-left">
+                <th className="px-2 py-1 font-normal">window</th>
+                <th className="px-2 py-1 font-normal text-right">mentions</th>
+                <th className="px-2 py-1 font-normal text-right">props</th>
+                <th className="px-2 py-1 font-normal text-right">dur</th>
+                <th className="px-2 py-1 font-normal">status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.chunkId} className="border-t border-white/5">
+                  <td className="px-2 py-0.5 text-zinc-400 truncate">{r.window}</td>
+                  <td className="px-2 py-0.5 text-right text-cyan-300">{r.mentions}</td>
+                  <td className="px-2 py-0.5 text-right text-violet-300">{r.props}</td>
+                  <td className="px-2 py-0.5 text-right text-zinc-500">
+                    {r.durationS != null ? `${r.durationS.toFixed(1)}s` : "—"}
+                  </td>
+                  <td className="px-2 py-0.5 text-zinc-500">{r.status}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-2 py-2 text-zinc-600">
+                    no windows extracted yet
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   } else if (node.role === "spo_windows_collapsed") {
