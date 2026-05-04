@@ -152,7 +152,7 @@ local_resource(
 # inspection. Pass any extra docker flags via $DOCKER_FLAGS (e.g. -it for
 # the interactive shell button).
 _DUCKDB_PREAMBLE = '''
-ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"
+ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/bench-cache"
 # Phase 4 (CD-jzkg.1) writes events under events/doc_id=*/data.parquet
 # (or shard-*.parquet while a run is in flight). Phase 1-3 wrote a flat
 # events.parquet (consolidated) and events-*.parquet (per-process
@@ -241,7 +241,7 @@ echo "── parquet schema (DESCRIBE) ──"
 duck -box -cmd "DESCRIBE SELECT * FROM read_parquet('$TARGET', union_by_name=true, hive_partitioning=true);"
 echo
 echo "── shard files on disk ──"
-DISK_ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"
+DISK_ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/bench-cache"
 if [ -d "$DISK_ROOT/events" ]; then
   find "$DISK_ROOT/events" -type f -name '*.parquet' -exec ls -lh {} +
 fi
@@ -368,7 +368,7 @@ cmd_button(
     name='btn-flush-duckdb',
     resource='duckdb-inspect',
     argv=['sh', '-c', '''
-ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"
+ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/bench-cache"
 echo "── files before flush in $ROOT ──"
 ls -lh "$ROOT"/events*.parquet "$ROOT"/events.jsonl 2>/dev/null || echo "(no flat artefacts)"
 if [ -d "$ROOT/events" ]; then

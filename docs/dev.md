@@ -32,7 +32,7 @@ Brings up:
 - `bench:run` — manual trigger for the benchmark harness; writes
   artifacts to `s3://dagster/bench/runs/<timestamp>/...` in the local
   MinIO bucket. The bench audit log lands in per-process Parquet shards
-  under `.test-output/media-ingest/bench-cache/` (`events-<pid>-<uuid>.parquet`)
+  under `.test-output/bench-cache/` (`events-<pid>-<uuid>.parquet`)
   during the run, then consolidates to `events.parquet` and uploads to
   `s3://dagster/bench/runs/<run_id>/events.parquet` at run end. The
   StateInspector reads it via DuckDB at

@@ -70,13 +70,18 @@ def _default_local_cache_root() -> Path:
     parquet shards from ``BenchEventStore``). Persists between runs only
     as a side effect — the canonical archive lives in S3.
 
+    Used to live at ``.test-output/media-ingest/bench-cache/`` from when
+    bench was media-ingest-only; now that Phase 4 writes partitions for
+    media + congress + leaks docs in the same run, the ``media-ingest/``
+    segment is misleading. Top-level ``.test-output/bench-cache/``.
+
     store.py lives at ``libs/dagster-io/src/dagster_io/bench/store.py``
     so the repo root is ``parents[5]``. Tracked by CD-vse9 (replace these
     parents[N] hops with a single dagster_io.paths.repo_root() helper).
     """
     repo_root = Path(__file__).resolve().parents[5]
     base = Path(os.environ.get("TEST_OUTPUT_ROOT", str(repo_root / ".test-output")))
-    return base / "media-ingest" / "bench-cache"
+    return base / "bench-cache"
 
 
 def _default_s3_client() -> S3Client:
