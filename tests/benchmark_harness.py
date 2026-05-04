@@ -38,7 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from dagster_io import event_tail
-from tests._bench_tui import BenchLiveUI, DequeHandler
+from tests._bench_tui import BenchLiveUI
 from tests.benchmark_config import ALL_MODELS, LOCAL_MODELS, BenchmarkConfig, ModelConfig
 
 # ── Default encoder/SPO lists — resolved from benchmark_config tags ──────────
@@ -1514,14 +1514,10 @@ examples:
         sample_cap=sample_cap_display,
     )
 
-    # Capture library log records (transformers warnings, sentence-transformers
-    # progress, httpx errors, etc.) into the UI's log panel without losing
-    # them from the underlying stderr — DequeHandler appends to the deque
-    # alongside whatever the root logger is already doing.
-    _deque_handler = DequeHandler(ui._log_buffer)
-    _deque_handler.setFormatter(logging.Formatter("%(name)s  %(message)s"))
-    logging.getLogger().addHandler(_deque_handler)
-
+    # Library log records (transformers warnings, httpx errors, our own
+    # logger.info calls) are captured into the UI's log buffer by the
+    # DequeHandler that BenchLiveUI installs in __enter__ and removes in
+    # __exit__. Anywhere in the codebase: just `logger.info(msg)`.
     results = []
     t0 = time.monotonic()
 
@@ -1702,8 +1698,7 @@ examples:
             if "cloud" not in cfg.tags and "encoder" not in cfg.tags:
                 subprocess.run(["ollama", "stop", cfg.model], capture_output=True, timeout=10)
 
-    # Detach the deque handler so it doesn't leak into post-run logging.
-    logging.getLogger().removeHandler(_deque_handler)
+    # DequeHandler detached automatically by BenchLiveUI.__exit__.
 
     total_time = time.monotonic() - t0
 
