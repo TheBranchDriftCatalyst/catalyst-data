@@ -472,3 +472,94 @@ def bucket_stats() -> dict[str, Any]:
         )
 
     return {"bucket": client.bucket, "top_level_prefixes": prefixes}
+
+
+# ── delete endpoints ────────────────────────────────────────────────────────
+#
+# The S3 explorer is otherwise read-only. Deletes were added intentionally
+# for the dev-tool case (clearing fixture clutter, dropping a bad bench run,
+# scrubbing a test silver row before re-seeding). MinIO behind the scenes,
+# so destruction is bounded to the local bucket; in prod the same routes
+# touch the cluster bucket — that's a deliberate dev-ops affordance, NOT a
+# safety hole. The frontend gates each click behind a `window.confirm`.
+
+
+def _bust_caches(prefixes: list[str]) -> None:
+    """Clear any cached index/stats entries that overlap the deleted keys.
+
+    Both caches key on prefix; a delete invalidates every cached prefix
+    that is an ancestor (since the deleted object would have been in their
+    recursive listing). Cheap to walk — typical cache size is < 50 entries.
+    """
+    affected: set[str] = set()
+    for p in prefixes:
+        for cached_prefix in list(_index_cache.keys()):
+            if p.startswith(cached_prefix) or cached_prefix.startswith(p):
+                affected.add(cached_prefix)
+        with _stats_lock:
+            for cached_prefix in list(_stats_cache.keys()):
+                if p.startswith(cached_prefix) or cached_prefix.startswith(p):
+                    affected.add(cached_prefix)
+    for p in affected:
+        _index_cache.pop(p, None)
+        with _stats_lock:
+            _stats_cache.pop(p, None)
+
+
+@router.delete("/object")
+def delete_object(
+    key: str = Query(..., min_length=1, description="S3 object key to delete"),
+) -> dict[str, Any]:
+    """Delete a single object. Idempotent — missing keys return ``deleted: 0``."""
+    client = _s3()
+    if key.endswith("/"):
+        raise HTTPException(
+            status_code=400,
+            detail="Use DELETE /prefix for prefix-style (recursive) deletes.",
+        )
+    # Confirm existence so the caller gets a useful response (delete_object
+    # itself is silently idempotent on S3).
+    head = client.head_object(key)
+    if head is None:
+        return {"deleted": 0, "key": key, "missing": True}
+    client.delete_object(key)
+    _bust_caches([key])
+    logger.info("S3 explorer: deleted object key=%s", key)
+    return {"deleted": 1, "key": key}
+
+
+@router.delete("/prefix")
+def delete_prefix(
+    prefix: str = Query(..., min_length=1, description="S3 prefix to delete recursively"),
+    confirm: bool = Query(False, description="Required guard — must be true to proceed (defense in depth)"),
+) -> dict[str, Any]:
+    """Recursively delete every object under ``prefix``.
+
+    ``confirm=true`` is required to actually delete — without it the route
+    returns the would-be victim count so the caller can decide. The frontend
+    sends two requests: a dry-run (``confirm=false``) to populate the
+    confirmation dialog, then the live one.
+    """
+    if not prefix.endswith("/"):
+        # Guard against accidentally deleting a single object via this route.
+        raise HTTPException(
+            status_code=400,
+            detail="Prefix must end with '/'. Use DELETE /object for single keys.",
+        )
+    if prefix == "/":
+        # Refuse to nuke the entire bucket.
+        raise HTTPException(status_code=400, detail="Refusing to delete bucket root.")
+    client = _s3()
+    keys = client.list_all_objects(prefix)
+    if not confirm:
+        return {"deleted": 0, "prefix": prefix, "would_delete": len(keys), "dry_run": True}
+    if not keys:
+        return {"deleted": 0, "prefix": prefix, "missing": True}
+    deleted, errors = client.delete_objects(keys)
+    _bust_caches([prefix])
+    logger.info("S3 explorer: deleted prefix=%s deleted=%d errors=%d", prefix, deleted, len(errors))
+    return {
+        "deleted": deleted,
+        "prefix": prefix,
+        "errors": errors,
+    }

@@ -296,6 +296,40 @@ export function s3RawUrl(key: string, download = false): string {
   return download ? `${base}&download=true` : base;
 }
 
+export interface S3DeleteResult {
+  deleted: number;
+  /** Single-object deletes echo the key; prefix deletes echo the prefix. */
+  key?: string;
+  prefix?: string;
+  /** Set when the target didn't exist — the operation is idempotent. */
+  missing?: boolean;
+  /** Set on a dry-run prefix delete (confirm=false). */
+  would_delete?: number;
+  dry_run?: boolean;
+  errors?: unknown[];
+}
+
+export async function deleteS3Object(key: string): Promise<S3DeleteResult> {
+  const res = await fetch(`/viewer/api/s3/object?key=${encodeURIComponent(key)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`DELETE /s3/object ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+export async function deleteS3Prefix(prefix: string, confirm = false): Promise<S3DeleteResult> {
+  const url = `/viewer/api/s3/prefix?prefix=${encodeURIComponent(prefix)}&confirm=${confirm}`;
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`DELETE /s3/prefix ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
 /** File extensions that should render as video */
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv"]);
 

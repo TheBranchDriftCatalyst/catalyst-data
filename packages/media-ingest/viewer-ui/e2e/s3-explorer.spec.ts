@@ -725,4 +725,109 @@ test.describe("S3 Explorer", () => {
       expect(body.error).toMatch(/Object not found/i);
     });
   });
+
+  // ── 9. Delete (object + recursive prefix) ────────────────────────────
+
+  test.describe("Delete", () => {
+    /** Seed a fresh fixture under dev/fixtures/test-delete/<random>/... so
+     *  parallel runs don't collide and so we can verify the recursive
+     *  prefix-delete blast radius. */
+    async function seed(request: import("@playwright/test").APIRequestContext, baseURL: string) {
+      const id = Math.random().toString(36).slice(2, 10);
+      const prefix = `dev/fixtures/test-delete/${id}/`;
+      const objKey = `${prefix}sentinel.txt`;
+      const childKey = `${prefix}nested/inner.txt`;
+      // Plant via the seed-script's REST equivalent: PUT through the
+      // upload helper if it exists, else use boto via the test harness.
+      // The simplest path that exists today is to use the bench seed
+      // script's pattern indirectly — but for a delete-test we can just
+      // call /raw GET against MinIO directly. Instead, bail out cleanly
+      // if the bucket has no scratch space we can write to.
+      const res = await request.put(
+        `http://localhost:9000/dagster/${objKey}`,
+        { data: "delete-me", headers: { "Content-Type": "text/plain" } },
+      );
+      if (!res.ok()) test.skip(true, "MinIO direct PUT not available — skip delete test.");
+      const res2 = await request.put(
+        `http://localhost:9000/dagster/${childKey}`,
+        { data: "also-delete-me", headers: { "Content-Type": "text/plain" } },
+      );
+      if (!res2.ok()) test.skip(true, "MinIO direct PUT not available — skip delete test.");
+      return { prefix, objKey, childKey };
+    }
+
+    test("DELETE /object removes a single key + busts the cache", async ({
+      request,
+      baseURL,
+    }) => {
+      const { objKey, prefix } = await seed(request, baseURL!);
+
+      // Warm the index cache so we can verify the bust below.
+      await request.get(`${baseURL}${API}/index?prefix=${encodeURIComponent(prefix)}`);
+
+      const del = await request.delete(`${baseURL}${API}/object?key=${encodeURIComponent(objKey)}`);
+      expect(del.status()).toBe(200);
+      const body = await del.json();
+      expect(body.deleted).toBe(1);
+      expect(body.key).toBe(objKey);
+
+      // Index should now lack the key — re-listing returns missing.
+      const after = await (
+        await request.get(`${baseURL}${API}/list?prefix=${encodeURIComponent(prefix)}`)
+      ).json();
+      const stillThere = (after.files ?? []).some((f: { key: string }) => f.key === objKey);
+      expect(stillThere).toBe(false);
+    });
+
+    test("DELETE /prefix dry-run reports victim count without deleting", async ({
+      request,
+      baseURL,
+    }) => {
+      const { prefix } = await seed(request, baseURL!);
+
+      const dry = await request.delete(
+        `${baseURL}${API}/prefix?prefix=${encodeURIComponent(prefix)}&confirm=false`,
+      );
+      expect(dry.status()).toBe(200);
+      const body = await dry.json();
+      expect(body.dry_run).toBe(true);
+      expect(body.would_delete).toBeGreaterThanOrEqual(2);
+      expect(body.deleted).toBe(0);
+
+      // Confirm: keys are still present.
+      const after = await (
+        await request.get(`${baseURL}${API}/list?prefix=${encodeURIComponent(prefix)}`)
+      ).json();
+      expect((after.files?.length ?? 0) + (after.folders?.length ?? 0)).toBeGreaterThan(0);
+    });
+
+    test("DELETE /prefix?confirm=true recursively wipes everything", async ({
+      request,
+      baseURL,
+    }) => {
+      const { prefix } = await seed(request, baseURL!);
+
+      const del = await request.delete(
+        `${baseURL}${API}/prefix?prefix=${encodeURIComponent(prefix)}&confirm=true`,
+      );
+      expect(del.status()).toBe(200);
+      const body = await del.json();
+      expect(body.deleted).toBeGreaterThanOrEqual(2);
+
+      const after = await (
+        await request.get(`${baseURL}${API}/list?prefix=${encodeURIComponent(prefix)}`)
+      ).json();
+      expect((after.files ?? []).length + (after.folders ?? []).length).toBe(0);
+    });
+
+    test("DELETE /prefix refuses bucket-root", async ({ request, baseURL }) => {
+      const resp = await request.delete(`${baseURL}${API}/prefix?prefix=%2F&confirm=true`);
+      expect(resp.status()).toBe(400);
+    });
+
+    test("DELETE /object refuses keys ending in /", async ({ request, baseURL }) => {
+      const resp = await request.delete(`${baseURL}${API}/object?key=foo%2F`);
+      expect(resp.status()).toBe(400);
+    });
+  });
 });

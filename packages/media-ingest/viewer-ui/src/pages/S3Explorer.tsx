@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Input } from "@thebranchdriftcatalyst/catalyst-ui";
 import {
   ArrowLeft,
@@ -12,6 +12,8 @@ import {
   X,
 } from "lucide-react";
 import {
+  deleteS3Object,
+  deleteS3Prefix,
   fetchS3FolderStats,
   fetchS3List,
   fetchS3Search,
@@ -39,12 +41,55 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 export default function S3Explorer() {
   const state = useExplorerState();
   const { recent } = useRecentPrefixes(state.prefix);
+  const queryClient = useQueryClient();
 
   const [pathInput, setPathInput] = useState("");
   const [hotkeysOpen, setHotkeysOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pathInputRef = useRef<HTMLInputElement>(null);
+
+  /** Delete handler for the per-row trash icon. Confirms with the user
+   *  (browser-native `window.confirm` — fine for a dev tool), dispatches
+   *  the right backend call (object vs recursive prefix), then invalidates
+   *  the listing + folder-stats queries so the UI refreshes. Folder
+   *  delete does a dry-run first to surface the victim count in the
+   *  confirm message. */
+  const handleDelete = useCallback(
+    async (row: { kind: "folder"; folder: S3Folder } | { kind: "file"; file: S3File }) => {
+      try {
+        if (row.kind === "file") {
+          if (!window.confirm(`Delete file?\n\n${row.file.key}`)) return;
+          await deleteS3Object(row.file.key);
+          if (state.selectedKey === row.file.key) state.setSelectedKey(null);
+        } else {
+          const dry = await deleteS3Prefix(row.folder.prefix, false);
+          const n = dry.would_delete ?? 0;
+          if (n === 0) {
+            window.alert(`Folder is already empty:\n\n${row.folder.prefix}`);
+            return;
+          }
+          if (
+            !window.confirm(
+              `Recursively delete ${n} object${n === 1 ? "" : "s"} under:\n\n${row.folder.prefix}\n\nThis cannot be undone.`,
+            )
+          ) {
+            return;
+          }
+          await deleteS3Prefix(row.folder.prefix, true);
+        }
+      } catch (e) {
+        window.alert(`Delete failed: ${(e as Error).message}`);
+        return;
+      }
+      // Invalidate every cached query rooted at the current prefix so the
+      // listing, folder-stats badge, and recursive index all re-fetch.
+      queryClient.invalidateQueries({ queryKey: ["s3-list"] });
+      queryClient.invalidateQueries({ queryKey: ["s3-folder-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["s3-search"] });
+    },
+    [queryClient, state],
+  );
 
   const debouncedQuery = useDebouncedValue(state.query.trim(), 80);
   const isSearching = debouncedQuery.length > 0;
@@ -443,6 +488,7 @@ export default function S3Explorer() {
                 onNavigate={navigate}
                 onSelectFile={(f) => state.setSelectedKey(f.key)}
                 onHover={setCursor}
+                onDelete={handleDelete}
               />
             )}
           </div>
@@ -475,6 +521,7 @@ function ListingPanel({
   onNavigate,
   onSelectFile,
   onHover,
+  onDelete,
 }: {
   loading: boolean;
   error: boolean;
@@ -485,6 +532,7 @@ function ListingPanel({
   onNavigate: (p: string) => void;
   onSelectFile: (f: S3File) => void;
   onHover: (i: number) => void;
+  onDelete?: (row: { kind: "folder"; folder: S3Folder } | { kind: "file"; file: S3File }) => void;
 }) {
   if (loading) return <PanelSpinner />;
   if (error) return <div className="p-4 text-sm text-red-400">Failed to list objects</div>;
@@ -497,6 +545,7 @@ function ListingPanel({
       onNavigate={onNavigate}
       onSelectFile={onSelectFile}
       onHover={onHover}
+      onDelete={onDelete}
     />
   );
 }
