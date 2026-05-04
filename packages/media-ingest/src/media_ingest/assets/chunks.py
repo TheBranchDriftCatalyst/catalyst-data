@@ -68,7 +68,13 @@ def media_chunks(
             if not text:
                 context.log.info(f"No segments or text for partition={partition_key}")
                 return Output([], metadata={"document_id": doc_id, "chunk_count": 0, "skipped": True})
-            chunks = chunking.chunk_document(doc_id, title, text, chunk_overlap=0)
+            chunks = chunking.chunk_document(
+                doc_id,
+                title,
+                text,
+                chunk_overlap=0,
+                metadata={"source": "media_ingest", "domain": "media_ingest"},
+            )
         else:
             # Hybrid: multi-speaker windowing + semantic refinement. Same code
             # path the benchmark fixtures regenerate against, so prod and
@@ -80,6 +86,7 @@ def media_chunks(
                 embedder=embedding,  # has .embed(texts) -> list[list[float]]
                 metadata={
                     "source": "media_ingest",
+                    "domain": "media_ingest",
                     "language": t.get("language", "unknown"),
                     "speaker_count": t.get("speaker_count", 0),
                 },
