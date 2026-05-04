@@ -415,6 +415,26 @@ curl -sm 3 -X POST http://localhost:8080/viewer/api/bench/diagnostics/flush | py
     icon_name='restart_alt',
 )
 
+cmd_button(
+    name='btn-flush-duckdb',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', '''
+ROOT="${TEST_OUTPUT_ROOT:-./.test-output}/media-ingest/bench-cache"
+echo "── files before flush in $ROOT ──"
+ls -lh "$ROOT"/events*.parquet "$ROOT"/events.jsonl 2>/dev/null || echo "(nothing)"
+echo
+echo "── deleting events.parquet, events-*.parquet, events.jsonl ──"
+rm -fv "$ROOT"/events.parquet "$ROOT"/events-*.parquet "$ROOT"/events.jsonl 2>/dev/null
+echo
+echo "── files after ──"
+ls -lh "$ROOT"/events*.parquet "$ROOT"/events.jsonl 2>/dev/null || echo "(empty — clean slate)"
+echo
+echo "Diagnostics counter was NOT touched. Click \\"Flush diagnostics counter\\" to also reset that."
+'''],
+    text='Flush DuckDB (delete local parquet)',
+    icon_name='delete_sweep',
+)
+
 # ============================================
 # CONFIGURATION
 # ============================================
