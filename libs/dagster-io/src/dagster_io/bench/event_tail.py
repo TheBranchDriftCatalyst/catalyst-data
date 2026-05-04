@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
@@ -23,6 +26,14 @@ _path: Path | None = None
 _run_id: str | None = None
 _lock = Lock()
 _seen_chunks: set[str] = set()
+
+# Background uploader state — populated by ``configure_periodic_upload``.
+# Daemon thread is auto-killed on process exit; we still expose
+# ``stop_periodic_upload`` for clean shutdown before final archive.
+_uploader_thread: threading.Thread | None = None
+_uploader_stop = threading.Event()
+_uploader_fn: Callable[[Path], None] | None = None
+_last_uploaded_size: int = 0
 
 
 def configure(path: str | Path, *, run_id: str) -> None:
@@ -189,6 +200,71 @@ def emit_chunk_extracted(
             "proposition_count": len(propositions) if propositions else 0,
         },
     )
+
+
+def configure_periodic_upload(
+    uploader: Callable[[Path], None],
+    *,
+    interval_s: float = 5.0,
+) -> None:
+    """Start a background thread that uploads the JSONL every ``interval_s``.
+
+    The uploader callable receives the local Path and should put it to
+    whatever backing store it likes (typically S3). Only fires when the
+    file's size has grown since the last upload — avoids redundant PUTs
+    during idle stretches.
+
+    No-op if already running, if event_tail isn't configured, or if the
+    process is in a state that can't spawn threads. Uploader exceptions
+    are logged to stderr but don't bring the run down — a transient S3
+    hiccup shouldn't fail a 30-min benchmark.
+    """
+    global _uploader_thread, _uploader_fn
+    if _uploader_thread is not None or _path is None:
+        return
+    _uploader_fn = uploader
+    _uploader_stop.clear()
+
+    def _loop() -> None:
+        global _last_uploaded_size
+        while not _uploader_stop.wait(interval_s):
+            try:
+                if _path is None or not _path.exists():
+                    continue
+                size = _path.stat().st_size
+                if size <= _last_uploaded_size or size == 0:
+                    continue
+                if _uploader_fn is not None:
+                    _uploader_fn(_path)
+                    _last_uploaded_size = size
+            except Exception as e:  # noqa: BLE001
+                print(f"event_tail uploader: {e}", file=sys.stderr)
+
+    t = threading.Thread(target=_loop, daemon=True, name="event-tail-uploader")
+    t.start()
+    _uploader_thread = t
+
+
+def stop_periodic_upload(*, final_flush: bool = True) -> None:
+    """Stop the background uploader. Optionally do one final upload first
+    so the post-run archive doesn't lag the last few events.
+
+    Safe to call when no uploader was ever started — no-op in that case.
+    """
+    global _uploader_thread, _uploader_fn, _last_uploaded_size
+    if _uploader_thread is None:
+        return
+    _uploader_stop.set()
+    _uploader_thread.join(timeout=5.0)
+    _uploader_thread = None
+    if final_flush and _path is not None and _path.exists() and _uploader_fn is not None:
+        try:
+            if _path.stat().st_size > _last_uploaded_size:
+                _uploader_fn(_path)
+                _last_uploaded_size = _path.stat().st_size
+        except Exception as e:  # noqa: BLE001
+            print(f"event_tail final flush: {e}", file=sys.stderr)
+    _uploader_fn = None
 
 
 def configure_from_env() -> None:

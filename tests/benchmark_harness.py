@@ -1328,6 +1328,18 @@ examples:
     events_path.write_text("")  # forward-only: each run owns the live tail
     event_tail.configure(events_path, run_id=run.run_id)
 
+    # Periodically upload the local tail to S3 so the StateInspector can
+    # observe the run live (frontend polls /viewer/api/bench/runs/<id>/events.jsonl
+    # every 3s; the viewer-api reads from S3). Without this the audit log
+    # is blank until run end, which is brutal for full-corpus runs.
+    # Default 5s; override via BENCH_EVENT_UPLOAD_INTERVAL_S.
+    upload_interval_s = float(os.environ.get("BENCH_EVENT_UPLOAD_INTERVAL_S", "5"))
+
+    def _upload_tail_to_s3(local_path: Path) -> None:
+        store.client.put_object(run.events_key, local_path.read_bytes())
+
+    event_tail.configure_periodic_upload(_upload_tail_to_s3, interval_s=upload_interval_s)
+
     # Spin up the run-bus so the viewer's LiveGantt can subscribe to live
     # events. Discovery: <local_cache_root>/.bus-port — the viewer's bench
     # API reads this to forward the WebSocket port.
@@ -1704,6 +1716,11 @@ examples:
     # down. The events.jsonl on disk remains the canonical replay source.
     time.sleep(0.5)
     bus.stop()
+
+    # Stop the periodic S3 uploader (one final flush included) before the
+    # canonical archive call below — avoids a benign double-PUT race on
+    # the same key.
+    event_tail.stop_periodic_upload(final_flush=True)
 
     # Archive the local events.jsonl to S3 so future replays of this
     # specific run survive a later harness invocation truncating the
