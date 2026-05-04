@@ -1,9 +1,10 @@
 /**
  * Shared chunking + color helpers for the audit timeline.
  *
- * `AuditViewer` and `StateInspector` consume the same `events.jsonl`
- * shape and group events into chunks the same way, so the same renderer
- * works for replay and live streaming.
+ * `AuditViewer` and `StateInspector` consume the same `RunEvent`
+ * shape (from the DuckDB-backed bench audit log) and group events into
+ * chunks the same way, so the same renderer works for replay and live
+ * streaming.
  */
 
 import type { AuditEvent } from "@/types/benchmark";

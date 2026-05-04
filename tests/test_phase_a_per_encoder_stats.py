@@ -9,34 +9,49 @@ Phase A / CD-l2uu.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
+
+from dagster_io.bench import event_store
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 
-def _write_encoder_completed_events(path: Path, encoders: list[str], duration_per_enc: float = 0.42) -> None:
-    """Write synthetic ner_encoder_completed events for each encoder into path."""
+def _emit_encoder_completed_events(encoders: list[str], duration_per_enc: float = 0.42) -> None:
+    """Emit synthetic ner_encoder_completed events for each encoder.
+
+    Goes through the module-global ``event_store.append`` funnel — the
+    same path the real harness uses — so the rows land in the configured
+    parquet shard and ``_read_encoder_event_stats`` can read them back.
+    """
     for enc_name in encoders:
-        record = {
-            "ts": "2026-01-01T00:00:00+00:00",
-            "run_id": "test-run",
-            "source": "harness",
-            "node_name": "ner_encoder_completed",
-            "status": "completed",
-            "model": enc_name,
-            "doc_id": "doc-1",
-            "chunk_id": f"doc-1:_ner_{enc_name}",
-            "details": {
+        event_store.append(
+            source="harness",
+            node_name="ner_encoder_completed",
+            status="completed",
+            model=enc_name,
+            doc_id="doc-1",
+            chunk_id=f"doc-1:_ner_{enc_name}",
+            details={
                 "encoder": enc_name,
                 "mention_count": 3,
                 "duration_s": duration_per_enc,
             },
-        }
-        with path.open("a") as f:
-            f.write(json.dumps(record) + "\n")
+        )
+
+
+@pytest.fixture(autouse=True)
+def _configure_event_store(tmp_path):
+    """Bind the module-global event_store to a temp shard dir per test.
+
+    Resets between tests so a leaked configure() doesn't trip the
+    "already configured" guard. Mirrors the
+    libs/catalyst-exgraph/tests/conftest.py fixture but scoped here for
+    the harness-tests package which doesn't share that conftest.
+    """
+    event_store.close()
+    event_store.configure(run_id="test-run", run_dir=tmp_path)
+    yield
+    event_store.close()
 
 
 class _FakeStore:
@@ -59,17 +74,8 @@ class _FakeStore:
 
 
 def test_read_encoder_event_stats_parses_completed_events(tmp_path):
-    """_read_encoder_event_stats returns duration_s and mention_count from JSONL."""
-    import dagster_io.bench.event_tail as et
-
-    # Configure event_tail to the temp file
-    et._path = None
-    et._run_id = None
-    et._seen_chunks = set()
-    events_path = tmp_path / "events.jsonl"
-    et.configure(str(events_path), run_id="test-run")
-
-    _write_encoder_completed_events(events_path, ["gliner-medium", "gliner-large"], duration_per_enc=0.5)
+    """_read_encoder_event_stats returns duration_s and mention_count from the shard."""
+    _emit_encoder_completed_events(["gliner-medium", "gliner-large"], duration_per_enc=0.5)
 
     from tests.benchmark_harness import _read_encoder_event_stats
 
@@ -83,37 +89,20 @@ def test_read_encoder_event_stats_parses_completed_events(tmp_path):
         assert stats[enc_name]["mention_count"] == 3, f"{enc_name} mention_count should be 3"
         assert stats[enc_name]["error_count"] == 0
 
-    # Cleanup
-    et._path = None
-    et._run_id = None
-    et._seen_chunks = set()
-
 
 def test_read_encoder_event_stats_accumulates_multiple_docs(tmp_path):
     """_read_encoder_event_stats sums duration_s across multiple docs."""
-    import dagster_io.bench.event_tail as et
-
-    et._path = None
-    et._run_id = None
-    et._seen_chunks = set()
-    events_path = tmp_path / "events.jsonl"
-    et.configure(str(events_path), run_id="test-run")
-
-    # Write two events for the same encoder (two docs)
+    # Two events for the same encoder (two docs)
     for doc_id in ("doc-1", "doc-2"):
-        record = {
-            "ts": "2026-01-01T00:00:00+00:00",
-            "run_id": "test-run",
-            "source": "harness",
-            "node_name": "ner_encoder_completed",
-            "status": "completed",
-            "model": "gliner-medium",
-            "doc_id": doc_id,
-            "chunk_id": f"{doc_id}:_ner_gliner-medium",
-            "details": {"encoder": "gliner-medium", "mention_count": 2, "duration_s": 1.0},
-        }
-        with events_path.open("a") as f:
-            f.write(json.dumps(record) + "\n")
+        event_store.append(
+            source="harness",
+            node_name="ner_encoder_completed",
+            status="completed",
+            model="gliner-medium",
+            doc_id=doc_id,
+            chunk_id=f"{doc_id}:_ner_gliner-medium",
+            details={"encoder": "gliner-medium", "mention_count": 2, "duration_s": 1.0},
+        )
 
     from tests.benchmark_harness import _read_encoder_event_stats
 
@@ -122,36 +111,20 @@ def test_read_encoder_event_stats_accumulates_multiple_docs(tmp_path):
     assert stats["gliner-medium"]["duration_s"] == pytest.approx(2.0), "should sum across both docs"
     assert stats["gliner-medium"]["mention_count"] == 4
 
-    et._path = None
-    et._run_id = None
-    et._seen_chunks = set()
-
 
 def test_read_encoder_event_stats_counts_errors(tmp_path):
     """_read_encoder_event_stats tracks error events separately."""
-    import dagster_io.bench.event_tail as et
-
-    et._path = None
-    et._run_id = None
-    et._seen_chunks = set()
-    events_path = tmp_path / "events.jsonl"
-    et.configure(str(events_path), run_id="test-run")
-
     # One completed + one error for the same encoder
     for status, doc_id in (("completed", "doc-ok"), ("error", "doc-fail")):
-        record = {
-            "ts": "2026-01-01T00:00:00+00:00",
-            "run_id": "test-run",
-            "source": "harness",
-            "node_name": "ner_encoder_completed",
-            "status": status,
-            "model": "nuextract",
-            "doc_id": doc_id,
-            "chunk_id": f"{doc_id}:_ner_nuextract",
-            "details": {"encoder": "nuextract", "mention_count": 1 if status == "completed" else 0, "duration_s": 0.3},
-        }
-        with events_path.open("a") as f:
-            f.write(json.dumps(record) + "\n")
+        event_store.append(
+            source="harness",
+            node_name="ner_encoder_completed",
+            status=status,
+            model="nuextract",
+            doc_id=doc_id,
+            chunk_id=f"{doc_id}:_ner_nuextract",
+            details={"encoder": "nuextract", "mention_count": 1 if status == "completed" else 0, "duration_s": 0.3},
+        )
 
     from tests.benchmark_harness import _read_encoder_event_stats
 
@@ -161,31 +134,19 @@ def test_read_encoder_event_stats_counts_errors(tmp_path):
     # Only completed events contribute to mention_count
     assert stats["nuextract"]["mention_count"] == 1
 
-    et._path = None
-    et._run_id = None
-    et._seen_chunks = set()
-
 
 def test_phase_a_fixture_has_nonzero_stats_after_backfill(tmp_path):
     """Per-encoder fixture saved by _phase_a_build_cluster_cache has non-zero duration_s.
 
     This test exercises the backfill logic end-to-end by:
-    1. Configuring event_tail to a temp file
-    2. Pre-seeding the JSONL with synthetic ner_encoder_completed events
+    1. Configuring event_store to a temp run dir (autouse fixture above)
+    2. Pre-seeding the parquet shard with synthetic ner_encoder_completed events
     3. Calling the harness fixture-saving block via the internal helper
     4. Asserting the saved fixture has non-zero duration_s, tokens_per_sec,
        llm_call_count
     """
-    import dagster_io.bench.event_tail as et
-
-    et._path = None
-    et._run_id = None
-    et._seen_chunks = set()
-    events_path = tmp_path / "events.jsonl"
-    et.configure(str(events_path), run_id="test-run")
-
     encoder_names = ["gliner-medium", "gliner-large"]
-    _write_encoder_completed_events(events_path, encoder_names, duration_per_enc=1.5)
+    _emit_encoder_completed_events(encoder_names, duration_per_enc=1.5)
 
     from tests.benchmark_harness import _read_encoder_event_stats
 
@@ -228,7 +189,3 @@ def test_phase_a_fixture_has_nonzero_stats_after_backfill(tmp_path):
         assert s["tokens_per_sec"] > 0.0, f"{enc_name}: tokens_per_sec should be non-zero"
         assert s["llm_call_count"] == n_docs, f"{enc_name}: llm_call_count should equal n_docs"
         assert s["errors"] == 0, f"{enc_name}: error count should be 0"
-
-    et._path = None
-    et._run_id = None
-    et._seen_chunks = set()

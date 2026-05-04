@@ -247,13 +247,11 @@ test.describe("Smoke Tests @smoke", () => {
     });
   });
 
-  // ── Bench audit log dual-read (CD-jzkg, Phase 2) ────────────────────────
+  // ── Bench audit log (CD-jzkg) ───────────────────────────────────────────
   //
-  // Smoke checks that the new DuckDB-backed events endpoint is wired up and
-  // the diagnostics counter ticks on each duckdb read. The frontend
-  // `useRunStream` rewrite + console-log assertion is covered by the
-  // mocked-route test below (deterministic; doesn't require a live bench
-  // run to be in flight).
+  // DuckDB-backed events endpoint is the only audit-log reader. Phase 3
+  // removed the events.jsonl fallback — these tests confirm the parquet
+  // path is wired up and the diagnostics counter ticks on each duckdb read.
   test.describe("Bench audit log @smoke", () => {
     test("audit log endpoint returns parquet rows for the latest run", async ({
       request,
@@ -307,154 +305,6 @@ test.describe("Smoke Tests @smoke", () => {
       ).json();
       const afterCount = after.reads.duckdb as number;
       expect(afterCount).toBeGreaterThan(beforeCount);
-    });
-
-    test("useRunStream falls back to jsonl when duckdb endpoint 404s", async ({ page }) => {
-      // Mock the duckdb endpoint to 404 so we can deterministically prove the
-      // fallback path fires regardless of the live bench state. Captures the
-      // console output to verify both the warn line and the fallback POST
-      // hitting /diagnostics/fallback.
-      //
-      // The hook's polling cycle runs whenever a component using
-      // ``useRunStream`` mounts; rather than booting the whole
-      // StateInspector page (which has heavy data dependencies), we inject
-      // a minimal harness page via ``page.setContent`` and import the hook
-      // by triggering its fetch sequence inline. The hook is small and
-      // pure-fetch, so simulating its first poll cycle is sufficient to
-      // exercise the fallback path.
-      const fallbackPosts: string[] = [];
-      const consoleLines: string[] = [];
-
-      page.on("console", (msg) => {
-        const text = msg.text();
-        if (text.includes("[audit-log]")) consoleLines.push(text);
-      });
-      // Mock /viewer/api/bench/runs to return a deterministic run_id.
-      await page.route(/\/viewer\/api\/bench\/runs(\?|$)/, (route) => {
-        return route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            runs: ["fake-run-id"],
-            latest: "fake-run-id",
-            uri: "s3://test/",
-          }),
-        });
-      });
-      // Mock the duckdb endpoint to 404 so the hook falls back.
-      await page.route(/\/viewer\/api\/bench\/runs\/[^/]+\/events(\?|$)/, (route) => {
-        // Don't catch /events.jsonl — it's a separate path.
-        const url = route.request().url();
-        if (url.includes("/events.jsonl")) return route.continue();
-        return route.fulfill({
-          status: 404,
-          contentType: "application/json",
-          body: JSON.stringify({ detail: "no parquet for run" }),
-        });
-      });
-      // Mock the jsonl fallback path with one event so the test confirms
-      // the hook produced data via the legacy path.
-      await page.route(/\/viewer\/api\/bench\/runs\/[^/]+\/events\.jsonl(\?|$)/, (route) => {
-        return route.fulfill({
-          status: 200,
-          contentType: "application/x-ndjson",
-          body:
-            JSON.stringify({
-              ts: "2026-01-01T00:00:00Z",
-              run_id: "fake-run-id",
-              source: "harness",
-              node_name: "run_start",
-              status: "started",
-              model: null,
-              doc_id: null,
-              chunk_idx: null,
-              chunk_id: null,
-              retry_count: null,
-              code_location: null,
-              state: {},
-              details: {},
-            }) + "\n",
-        });
-      });
-      // Capture POSTs to the diagnostics counter — the assertion-load-bearing
-      // signal that the fallback path fired (plus the console.warn).
-      await page.route(/\/viewer\/api\/bench\/diagnostics\/fallback/, async (route) => {
-        const body = route.request().postData();
-        if (body) fallbackPosts.push(body);
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ reads: { duckdb: 0, jsonl_fallback: 1 } }),
-        });
-      });
-
-      // Inline harness — recreate the hook's first polling cycle in the
-      // browser so the test doesn't depend on a heavy page mounting.
-      // The console.log / console.warn calls and the fallback POST are
-      // exactly what the real hook does on each tick.
-      //
-      // page.goto with the baseURL gives us a real origin so relative
-      // ``/viewer/api/...`` URLs resolve cleanly under page.route mocks.
-      // Any 200 page works — the SPA index, the API health check, even
-      // a plain text page — because page.route catches all subsequent
-      // fetches before they reach the network.
-      await page.goto("/viewer/health");
-      const result = await page.evaluate(async () => {
-        // Mirrors the production hook in src/hooks/useRunStream.ts —
-        // duplicated here in plain JS so the test exercises the same
-        // network sequence without needing to bundle TS + React.
-        const runsResp = await fetch("/viewer/api/bench/runs");
-        const runs = (await runsResp.json()) as { latest: string };
-        const runId = runs.latest;
-
-        // Try DuckDB first (mocked → 404).
-        const duckResp = await fetch(
-          `/viewer/api/bench/runs/${encodeURIComponent(runId)}/events?limit=50000`,
-        );
-        let usedFallback = false;
-        let count = 0;
-        if (!duckResp.ok) {
-          // Fall back to jsonl
-          const jsonlResp = await fetch(
-            `/viewer/api/bench/runs/${encodeURIComponent(runId)}/events.jsonl`,
-          );
-          const text = await jsonlResp.text();
-          count = text.split("\n").filter(Boolean).length;
-          // eslint-disable-next-line no-console
-          console.warn(
-            `[audit-log] reader=jsonl-fallback run=${runId} count=${count} reason="duckdb returned 404 or empty"`,
-          );
-          await fetch("/viewer/api/bench/diagnostics/fallback", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              run_id: runId,
-              reason: "duckdb returned 404 or empty",
-            }),
-          });
-          usedFallback = true;
-        } else {
-          const text = await duckResp.text();
-          count = text.split("\n").filter(Boolean).length;
-          // eslint-disable-next-line no-console
-          console.log(`[audit-log] reader=duckdb run=${runId} count=${count}`);
-        }
-        return { usedFallback, count, runId };
-      });
-
-      expect(result.usedFallback).toBe(true);
-      expect(result.count).toBeGreaterThan(0);
-      // Wait briefly for the route handler to record the POST body.
-      await page.waitForTimeout(200);
-
-      const fallbackLogs = consoleLines.filter((l) => l.includes("reader=jsonl-fallback"));
-      expect(fallbackLogs.length).toBeGreaterThan(0);
-      expect(fallbackPosts.length).toBeGreaterThan(0);
-      // The POST body carries run_id + reason — confirm both are populated
-      // so the server-side counter has something to display.
-      const parsed = JSON.parse(fallbackPosts[0]);
-      expect(typeof parsed.run_id).toBe("string");
-      expect(typeof parsed.reason).toBe("string");
     });
   });
 });

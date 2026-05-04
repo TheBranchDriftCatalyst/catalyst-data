@@ -31,9 +31,12 @@ Brings up:
   `/viewer/api/bench/*`.
 - `bench:run` — manual trigger for the benchmark harness; writes
   artifacts to `s3://dagster/bench/runs/<timestamp>/...` in the local
-  MinIO bucket. The live `events.jsonl` stays on disk under
-  `.test-output/media-ingest/bench-cache/` (S3 doesn't append) and is
-  archived to S3 at run end.
+  MinIO bucket. The bench audit log lands in per-process Parquet shards
+  under `.test-output/media-ingest/bench-cache/` (`events-<pid>-<uuid>.parquet`)
+  during the run, then consolidates to `events.parquet` and uploads to
+  `s3://dagster/bench/runs/<run_id>/events.parquet` at run end. The
+  StateInspector reads it via DuckDB at
+  `/viewer/api/bench/runs/<run_id>/events`.
 
 Run the bench, click around the viewer, materialize a Dagster asset
 end-to-end without ever leaving your laptop.
@@ -95,13 +98,13 @@ Local v1 consumer is Unsloth + TRL (CD-sduv). Workflow:
 
 ```bash
 # 1. Pull the latest dataset down to a GPU box
-python scripts/pull_training_dataset.py --kind sft --output ./sft.jsonl
+python scripts/training/pull_training_dataset.py --kind sft --output ./sft.jsonl
 
 # 2. (One-time) install the opt-in fine-tuning deps
 uv pip install -e '.[unsloth]'
 
 # 3. Fine-tune
-python scripts/unsloth_finetune.py --kind sft \
+python scripts/training/unsloth_finetune.py --kind sft \
     --dataset ./sft.jsonl \
     --base-model unsloth/llama-3.2-1b-Instruct-bnb-4bit \
     --output ./adapters/sft-media

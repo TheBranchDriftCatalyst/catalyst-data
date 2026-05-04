@@ -377,7 +377,7 @@ async def _process_doc(
 
         # Emit chunk_extracted per window so the State Inspector OUTPUT pane
         # shows per-window SPO propositions for v4 win-N chunk_ids.
-        from dagster_io import event_tail as _et
+        from dagster_io import event_store as _et
 
         if _et.is_configured():
             _et.emit_chunk_extracted(
@@ -570,7 +570,7 @@ async def _process_doc_spo_only(
             spo_status = "failed"
 
         # Emit chunk_extracted per window (SPO-only path mirrors _process_doc).
-        from dagster_io import event_tail as _et
+        from dagster_io import event_store as _et
 
         if _et.is_configured():
             _et.emit_chunk_extracted(

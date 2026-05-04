@@ -29,7 +29,7 @@ from typing import Any
 
 from catalyst_exgraph.nodes._audit import make_audit_event
 from catalyst_exgraph.state import EntityCluster, EvidenceWindow, ExGraphState
-from dagster_io import event_tail
+from dagster_io import event_store
 from dagster_io.chunking import window_for_model
 
 logger = logging.getLogger(__name__)
@@ -210,8 +210,8 @@ class PackEvidenceNode:
             # Per-window audit event so the State Inspector surfaces one
             # card per pruned window with the reason — same pattern as
             # consensus mention_rejected events.
-            if event_tail.is_configured():
-                event_tail.append(
+            if event_store.is_configured():
+                event_store.append(
                     source="exgraph",
                     node_name="evidence_window_pruned",
                     status="info",

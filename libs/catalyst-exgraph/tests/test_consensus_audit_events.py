@@ -12,12 +12,11 @@ mention_decision or mention_rejected event.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 from catalyst_exgraph.nodes.consensus import ConsensusNode
 from catalyst_exgraph.state import ExGraphState
+
+from dagster_io.bench import event_store
 
 
 def _mention(text: str, encoder: str, mention_type: str = "PERSON", span_start: int = 0) -> dict:
@@ -44,12 +43,13 @@ def _state(per_encoder: dict, doc_id: str = "doc-audit") -> ExGraphState:
     }
 
 
-def _read_events(tmp_path: Path) -> list[dict]:
-    """Read all events from the configured event_tail JSONL."""
-    tail_path = tmp_path / "events.jsonl"
-    if not tail_path.exists():
-        return []
-    return [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+def _read_events(tmp_path) -> list[dict]:  # noqa: ARG001 — kept for fixture-symmetric signature
+    """Read all events the conftest-configured event_store has captured.
+
+    The ``tmp_path`` arg is unused (the conftest fixture already wired
+    event_store to it); kept positional so test bodies remain unchanged.
+    """
+    return event_store.read_events_for_test()
 
 
 # ---------------------------------------------------------------------------

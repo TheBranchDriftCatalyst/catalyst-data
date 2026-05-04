@@ -48,7 +48,7 @@ from dagster import (
     run_status_sensor,
 )
 
-from dagster_io import event_tail
+from dagster_io import event_store
 from dagster_io.metrics import (
     ASSET_LAST_MATERIALIZED_TIMESTAMP_SECONDS,
     DAGSTER_RUN_DURATION_SECONDS,
@@ -127,18 +127,18 @@ def _emit_run_metrics(code_location: str, context: RunStatusSensorContext) -> No
                 asset_key=label,
             ).set(now)
 
-    # Emit to the unified event tail so Dagster runs land on the same
+    # Emit to the bench audit log so Dagster runs land on the same
     # timeline as harness/exgraph/langgraph events. Skipped silently when
-    # event_tail isn't configured (e.g. dagster-webserver outside a
+    # event_store isn't configured (e.g. dagster-webserver outside a
     # benchmark context).
-    if event_tail.is_configured():
+    if event_store.is_configured():
         details: dict[str, Any] = {
             "job_name": job_name,
             "run_id": dagster_run.run_id,
         }
         if start_time is not None and end_time is not None and end_time >= start_time:
             details["duration_s"] = end_time - start_time
-        event_tail.append(
+        event_store.append(
             source="dagster",
             node_name=job_name,
             status=status_label,

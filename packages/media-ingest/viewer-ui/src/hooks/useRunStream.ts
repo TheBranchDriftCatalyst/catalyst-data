@@ -1,19 +1,13 @@
 /**
- * Read the latest run's audit log, with optional polling.
+ * Read the latest run's audit log via the DuckDB-backed
+ * ``GET /viewer/api/bench/runs/<id>/events`` endpoint and re-poll on a
+ * fixed interval.
  *
- * Phase 2 of CD-jzkg: prefer the DuckDB-backed
- * ``GET /viewer/api/bench/runs/<id>/events`` endpoint (parameterised facets,
- * served from ``events.parquet``) and fall back to the legacy
- * ``events.jsonl`` endpoint on 404 / non-2xx. Same RunEvent[] shape — no
- * other consumer changes.
- *
- * The fallback path is the explicit safety net during the dual-read
- * validation window; Phase 3 strangles it once three consecutive runs
- * show zero fallback hits in the server-side diagnostics counter.
- *
- * Console logs fire on EVERY poll cycle (informational, not error-only)
- * so the validation window can be watched in DevTools without scraping
- * the network tab.
+ * CD-jzkg Phase 3: the legacy ``events.jsonl`` fallback was removed —
+ * DuckDB / parquet is the only path. On 404 the hook surfaces the error
+ * to the caller (the SPA renders an empty state); on success it logs
+ * one informational line per poll so the operator can spot read churn
+ * in DevTools without scraping the network tab.
  */
 import { useEffect, useState } from "react";
 
@@ -30,11 +24,6 @@ interface UseRunStreamResult {
 
 const POLL_INTERVAL_MS = 3_000;
 
-/** Result of a single fetch attempt — separates "no events yet" (empty list)
- *  from "endpoint did not resolve" (null) so the caller can decide whether
- *  to fall back. */
-type FetchResult = { events: RunEvent[]; reason?: string } | null;
-
 async function latestRunId(): Promise<string | null> {
   try {
     const res = await fetch("/viewer/api/bench/runs");
@@ -46,70 +35,27 @@ async function latestRunId(): Promise<string | null> {
   }
 }
 
-/** Try the DuckDB-backed endpoint. Returns ``null`` on 404 / non-2xx so the
- *  caller falls back to jsonl; returns ``{ events: [...] }`` on success
- *  (possibly empty for a freshly-started run). */
-async function fetchDuckDB(runId: string): Promise<FetchResult> {
-  try {
-    const res = await fetch(
-      `/viewer/api/bench/runs/${encodeURIComponent(runId)}/events?limit=50000`,
-    );
-    if (!res.ok) {
-      // 404 is the expected "no parquet for this run yet" signal; anything
-      // else is unexpected but we still fall back to jsonl rather than
-      // surface a hard error to the operator mid-run.
-      return null;
-    }
-    const text = await res.text();
-    const events = text
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line) as RunEvent;
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is RunEvent => e !== null);
-    return { events };
-  } catch (e) {
-    return { events: [], reason: `duckdb fetch threw: ${(e as Error).message}` };
+/** Fetch the audit log for ``runId`` from the DuckDB endpoint.
+ *  Returns ``null`` on non-2xx (typically 404 = "no parquet for this run yet")
+ *  so callers can render an empty state. Returns an empty array on a
+ *  successful but empty response (freshly-started run). */
+async function fetchEvents(runId: string): Promise<RunEvent[] | null> {
+  const res = await fetch(`/viewer/api/bench/runs/${encodeURIComponent(runId)}/events?limit=50000`);
+  if (!res.ok) {
+    return null;
   }
-}
-
-async function fetchJsonl(runId: string): Promise<RunEvent[]> {
-  try {
-    const res = await fetch(`/viewer/api/bench/runs/${encodeURIComponent(runId)}/events.jsonl`);
-    if (!res.ok) return [];
-    const text = await res.text();
-    return text
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line) as RunEvent;
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is RunEvent => e !== null);
-  } catch {
-    return [];
-  }
-}
-
-/** Fire-and-forget: tell the server-side diagnostics counter that we just
- *  fell back. Server-side because the frontend's polling state resets on
- *  every page load — Phase 3 needs a durable signal. */
-function reportFallback(runId: string, reason: string): void {
-  void fetch("/viewer/api/bench/diagnostics/fallback", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ run_id: runId, reason }),
-  }).catch(() => {
-    /* swallow — diagnostics is best-effort */
-  });
+  const text = await res.text();
+  return text
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as RunEvent;
+      } catch {
+        return null;
+      }
+    })
+    .filter((e): e is RunEvent => e !== null);
 }
 
 export function useRunStream(): UseRunStreamResult {
@@ -131,27 +77,22 @@ export function useRunStream(): UseRunStreamResult {
         return;
       }
 
-      // Phase 2 dual-read: try DuckDB first, fall back to jsonl on 404.
-      const duck = await fetchDuckDB(runId);
+      const next = await fetchEvents(runId);
       if (cancelled) return;
 
-      if (duck && !duck.reason) {
-        console.log(`[audit-log] reader=duckdb run=${runId} count=${duck.events.length}`);
-        setEvents(duck.events);
-        setConnected(true);
-        setError(null);
+      if (next === null) {
+        // 404 / non-2xx. Either the run hasn't emitted yet (typical right
+        // after harness start) or the parquet archive is missing. Either
+        // way the SPA renders the empty list — no retry beyond the next
+        // poll cycle.
+        setError("no events for run");
+        setConnected(false);
         timeout = window.setTimeout(tick, POLL_INTERVAL_MS);
         return;
       }
 
-      const reason = duck?.reason ?? "duckdb returned 404 or empty";
-      const fallback = await fetchJsonl(runId);
-      if (cancelled) return;
-      console.warn(
-        `[audit-log] reader=jsonl-fallback run=${runId} count=${fallback.length} reason="${reason}"`,
-      );
-      reportFallback(runId, reason);
-      setEvents(fallback);
+      console.log(`[audit-log] reader=duckdb run=${runId} count=${next.length}`);
+      setEvents(next);
       setConnected(true);
       setError(null);
       timeout = window.setTimeout(tick, POLL_INTERVAL_MS);

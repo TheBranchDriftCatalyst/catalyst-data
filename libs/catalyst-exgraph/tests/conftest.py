@@ -244,30 +244,24 @@ def sample_source_text() -> str:
     return "Alice met Bob at the park. Later Alice called Bob."
 
 
-# ── event_tail fixture — configure the writer to a temp file ─────────────────
+# ── event_store fixture — configure the writer to a temp dir ─────────────────
 
 
 @pytest.fixture(autouse=True)
-def configure_event_tail(tmp_path):
-    """Configure event_tail to a temp file for every test.
+def configure_event_store(tmp_path):
+    """Configure event_store to a temp run directory for every test.
 
-    Resets module-level state before and after the test so test isolation
-    is maintained.  ``autouse=True`` so every test in the package gets this
-    without opting in.
+    Closes any leaked module-global writer before and after the test so
+    test isolation is maintained. ``autouse=True`` so every test in the
+    package gets this without opting in. Tests that need to inspect what
+    was emitted call ``event_store.read_events_for_test()`` to drain the
+    parquet shard back to a list of dicts.
     """
-    import dagster_io.bench.event_tail as _et
+    from dagster_io.bench import event_store
 
-    # Reset to unconfigured state
-    _et._path = None
-    _et._run_id = None
-    _et._seen_chunks = set()
-
-    tail_path = tmp_path / "events.jsonl"
-    _et.configure(str(tail_path), run_id="test-run")
+    event_store.close()
+    event_store.configure(run_id="test-run", run_dir=tmp_path)
 
     yield
 
-    # Reset after test
-    _et._path = None
-    _et._run_id = None
-    _et._seen_chunks = set()
+    event_store.close()

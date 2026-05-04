@@ -1,6 +1,12 @@
 # DuckDB-backed Bench Audit Log — Implementation Plan
 
-Tracking issue: **CD-jzkg**. Strangler-fig replacement for the current
+**Status: Phase 3 complete.** The legacy `events.jsonl` writer, the
+periodic S3 uploader, the `S3RunStore.archive_events()` helper, the
+`/events.jsonl` route, the `useRunStream` jsonl fallback, and
+`tests/shared/run_bus.py` were all deleted. DuckDB / parquet is the
+only audit-log path; no shim, no env-var flag, no fallback.
+
+Tracking issue: **CD-jzkg**. Strangler-fig replacement for the previous
 `events.jsonl` pipeline used by the bench harness, exgraph nodes, and the
 viewer's `AuditViewer` / `StateInspector`.
 

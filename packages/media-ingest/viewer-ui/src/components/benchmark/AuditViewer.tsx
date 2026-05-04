@@ -6,13 +6,15 @@ import { STAGE_COLORS, groupByChunk } from "./auditChunking";
 // ── Helpers ──────────────────────────────────────────────────────────
 
 /**
- * Filter the unified events.jsonl down to one model's exgraph/langgraph
+ * Filter the unified bench audit log down to one model's exgraph/langgraph
  * trail and reshape into the AuditLog the existing GanttChart consumes.
- * Reads the archived events.jsonl for the latest run from S3 via the
- * bench API.
+ * Reads the DuckDB-backed parquet for the latest run via the bench API
+ * (CD-jzkg). The endpoint emits NDJSON regardless of in-flight vs archived
+ * status, so the parser shape is unchanged from the prior jsonl reader.
  */
 async function fetchAuditLog(modelName: string): Promise<AuditLog | null> {
-  // Look up the latest run, then fetch its events.jsonl from S3.
+  // Look up the latest run, then fetch its parquet rows from the
+  // DuckDB-backed events endpoint.
   let latest: string | null = null;
   try {
     const r = await fetch("/viewer/api/bench/runs");
@@ -25,9 +27,14 @@ async function fetchAuditLog(modelName: string): Promise<AuditLog | null> {
   }
   if (!latest) return null;
 
+  // Parameterised fetch: only events for this model. The endpoint
+  // streams NDJSON when ``format=jsonl`` (the default), so the parse loop
+  // matches the prior jsonl reader byte-for-byte.
   let raw: RunEvent[] = [];
   try {
-    const res = await fetch(`/viewer/api/bench/runs/${encodeURIComponent(latest)}/events.jsonl`);
+    const res = await fetch(
+      `/viewer/api/bench/runs/${encodeURIComponent(latest)}/events?model=${encodeURIComponent(modelName)}&limit=50000`,
+    );
     if (!res.ok) return null;
     const text = await res.text();
     raw = text
@@ -365,7 +372,7 @@ export function AuditViewer({ modelNames }: { modelNames: string[] }) {
     setErrorA(null);
     fetchAuditLog(modelA).then((log) => {
       if (log) setLogA(log);
-      else setErrorA("No events for this model in events.jsonl");
+      else setErrorA("No events for this model in the audit log");
       setLoadingA(false);
     });
   }, [modelA]);
@@ -379,7 +386,7 @@ export function AuditViewer({ modelNames }: { modelNames: string[] }) {
     setErrorB(null);
     fetchAuditLog(modelB).then((log) => {
       if (log) setLogB(log);
-      else setErrorB("No events for this model in events.jsonl");
+      else setErrorB("No events for this model in the audit log");
       setLoadingB(false);
     });
   }, [modelB]);

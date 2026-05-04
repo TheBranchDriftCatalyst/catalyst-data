@@ -1,8 +1,8 @@
 """Shared audit-event helper for exgraph nodes.
 
 Dual-writes: the returned dict goes into ``state["audit_events"]``
-(post-hoc trail) and the same fields are emitted to the unified
-event-tail JSONL with a per-node state summary the StateInspector
+(post-hoc trail) and the same fields are emitted to the DuckDB-backed
+bench audit log with a per-node state summary the StateInspector
 consumes.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from dagster_io import event_tail
+from dagster_io import event_store
 
 
 def _compact(item: dict[str, Any], stage: str) -> dict[str, Any]:
@@ -118,7 +118,7 @@ def make_audit_event(
         "details": details,
     }
 
-    event_tail.append(
+    event_store.append(
         source="exgraph",
         node_name=node_name,
         status=status,

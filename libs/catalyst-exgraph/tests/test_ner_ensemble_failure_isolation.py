@@ -7,8 +7,6 @@ with lightweight callable stubs before each invocation.
 from __future__ import annotations
 
 import asyncio
-import json
-from pathlib import Path
 
 import pytest
 from catalyst_exgraph.config import ner_stage_config
@@ -188,9 +186,7 @@ async def test_all_encoders_fail_produces_empty_lists():
 @pytest.mark.asyncio
 async def test_error_event_emitted_on_encoder_failure():
     """ner_encoder_completed with status='error' is written to the event tail."""
-    import dagster_io.bench.event_tail as et
-
-    tail_path = Path(et._path)
+    from dagster_io.bench import event_store
 
     encoders = [_make_encoder_config("crash-enc")]
     clients = {"crash-enc": _make_mock_client("crash-enc")}
@@ -199,7 +195,7 @@ async def test_error_event_emitted_on_encoder_failure():
 
     await node(_base_state("doc-err"))
 
-    events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+    events = event_store.read_events_for_test()
     error_events = [e for e in events if e["node_name"] == "ner_encoder_completed" and e["status"] == "error"]
     assert len(error_events) == 1
     ev = error_events[0]
@@ -210,9 +206,7 @@ async def test_error_event_emitted_on_encoder_failure():
 @pytest.mark.asyncio
 async def test_error_event_emitted_on_timeout():
     """ner_encoder_completed with status='error' and error='timeout' on timeout."""
-    import dagster_io.bench.event_tail as et
-
-    tail_path = Path(et._path)
+    from dagster_io.bench import event_store
 
     encoders = [_make_encoder_config("slow-enc")]
     clients = {"slow-enc": _make_mock_client("slow-enc")}
@@ -226,7 +220,7 @@ async def test_error_event_emitted_on_timeout():
 
     await node(_base_state("doc-to"))
 
-    events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+    events = event_store.read_events_for_test()
     error_events = [e for e in events if e["node_name"] == "ner_encoder_completed" and e["status"] == "error"]
     assert len(error_events) == 1
     ev = error_events[0]

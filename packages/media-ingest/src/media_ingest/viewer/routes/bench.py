@@ -5,12 +5,12 @@ Replaces the prior shape where the bench harness wrote into Vite's
 ``/viewer/...`` directly off disk. Now the harness writes to
 ``s3://<bucket>/bench/...`` and these routes proxy reads from S3 to the SPA.
 
-Live tail (during a running bench): the harness writes
-``events.jsonl`` to local disk under ``S3BenchmarkStore.local_cache_root``
-as it runs, and the StateInspector polls the archived path on a 3s
-interval. No WebSocket / SSE plumbing — the same archived endpoint
-(``GET /viewer/api/bench/runs/<run_id>/events.jsonl``) serves both
-in-flight progress and post-hoc replay.
+Audit log (CD-jzkg): the harness writes per-process Parquet shards to
+local disk via ``BenchEventStore`` during a run, then consolidates to
+``events.parquet`` and uploads to S3 at run end. The viewer reads via
+``GET /viewer/api/bench/runs/<run_id>/events`` (DuckDB ``read_parquet``
+against the local shards while live, ``httpfs`` against the S3 archive
+post-hoc). The legacy jsonl endpoint was removed in Phase 3.
 
 Phase 0 (CD-9wno) — GT span translation
 ----------------------------------------
@@ -51,17 +51,14 @@ from dagster_io.logging import get_logger
 logger = get_logger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Diagnostics counter (CD-jzkg, Phase 2)
+# Diagnostics counter (CD-jzkg)
 #
 # Module-global counters that observe how often the viewer reads the parquet
-# audit log via DuckDB vs. falls back to the legacy events.jsonl path. Phase 3
-# (strangle the jsonl) is gated on three consecutive runs showing zero
-# fallback hits — that gate is checkable by polling
-# ``GET /viewer/api/bench/diagnostics``.
-#
-# Server-side counter, not just frontend-side, because the frontend's polling
-# state resets on every page load. The frontend POSTs ``/diagnostics/fallback``
-# whenever it falls back, so the counter is durable across reloads.
+# audit log via DuckDB. Post-Phase-3 the ``jsonl_fallback`` slot is retained
+# as an always-zero observation channel — useful for confirming "no errors
+# on duckdb reads" at a glance. The frontend no longer falls back, but the
+# ``/diagnostics/fallback`` POST endpoint is kept so any future client-side
+# error path can surface here without backend changes.
 # ─────────────────────────────────────────────────────────────────────────────
 
 _diag_lock = threading.Lock()
@@ -247,34 +244,8 @@ def run_report(run_id: str) -> dict[str, Any]:
     return report
 
 
-@router.get("/runs/{run_id}/events.jsonl")
-def run_events(run_id: str) -> StreamingResponse:
-    """Stream the archived events.jsonl for a completed run.
-
-    Live runs serve their tail via the run-bus WebSocket — see
-    :func:`bus_port`. Once the run completes the harness uploads the
-    file to S3 and replays come from here.
-    """
-    store = _bench_store()
-    run = store.load_run(run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
-    text = run.load_events_text()
-    if text is None:
-        raise HTTPException(status_code=404, detail=f"no events for run: {run_id}")
-
-    def _gen():
-        # FastAPI streams in chunks so very large event logs don't materialize
-        # in one buffer. JSONL is line-delimited so chunk boundaries are safe.
-        chunk = 64 * 1024
-        for i in range(0, len(text), chunk):
-            yield text[i : i + chunk]
-
-    return StreamingResponse(_gen(), media_type="application/x-ndjson")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# DuckDB-backed events endpoint (CD-jzkg, Phase 2)
+# DuckDB-backed events endpoint (CD-jzkg)
 #
 # Parameterised facets — NOT raw SQL across HTTP. Cross-run JOINs and arbitrary
 # scans are footguns the viewer never needs; the StateInspector / AuditViewer
@@ -287,10 +258,10 @@ def run_events(run_id: str) -> StreamingResponse:
 #   - Archived runs: read via DuckDB ``httpfs`` against
 #     ``s3://<bucket>/bench/runs/<run_id>/events.parquet``.
 #
-# ``Live vs archived'' is decided by checking the on-disk
-# ``<local_cache_root>/.bus-port`` marker — the harness writes this file at
-# run start and the run-bus deletes it at run end. The marker is the single
-# source of truth for "is there an active run right now?".
+# ``Live vs archived'' is decided by probing the local shard set: if the
+# harness has written ``events-*.parquet`` shards under ``local_cache_root``
+# for this run_id, we read the local glob; otherwise we fetch the
+# consolidated S3 archive.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -313,12 +284,11 @@ def _local_run_ids(store: S3BenchmarkStore) -> set[str]:
     """Return the set of distinct ``run_id`` values present in the local
     shard set.
 
-    The harness truncates ``events.jsonl`` at run start
-    (``benchmark_harness.py:1372``) but does NOT clean prior parquet
-    shards, so the local cache can carry shards from the previous run
-    alongside the active one until manual cleanup. Every shard is
-    single-run by construction (one writer-process per run, per
-    ``event_store.py``), so a single-row probe per file is enough.
+    The harness does NOT clean prior parquet shards at run start, so the
+    local cache can carry shards from the previous run alongside the
+    active one until manual cleanup. Every shard is single-run by
+    construction (one writer-process per run, per ``event_store.py``), so
+    a single-row probe per file is enough.
     """
     shards = list(store.local_cache_root.glob("events-*.parquet"))
     if not shards:
@@ -350,11 +320,10 @@ def _is_live_run(store: S3BenchmarkStore, run_id: str) -> bool:
     between consolidation and archive PUT, the local shards are
     authoritative.
 
-    We don't gate on ``.bus-port`` because the local shard set may
-    legitimately contain the previous run's leftovers (the harness
-    truncates ``events.jsonl`` at run start but not the parquet shards).
-    Stale-shard rows are filtered out by the ``WHERE run_id = ?`` clause
-    in the live read path (see ``run_events_duckdb``).
+    The local shard set may legitimately contain the previous run's
+    leftovers (the harness doesn't clean shards at run start). Stale-shard
+    rows are filtered out by the ``WHERE run_id = ?`` clause in the live
+    read path (see ``run_events_duckdb``).
     """
     # In-process fast path: viewer-api shares the harness process under
     # certain dev orchestrations. Saves a parquet probe per request.
@@ -480,13 +449,11 @@ def run_events_duckdb(
 ):
     """DuckDB-backed audit log read.
 
-    Replaces ``GET /runs/{run_id}/events.jsonl`` for the viewer; the
-    legacy endpoint stays for fallback (Phase 2 dual-read) and is
-    deleted in Phase 3.
-
-    Returns 404 with ``{"detail": "no parquet for run"}`` when neither
-    the local shard glob nor the S3 ``events.parquet`` resolves —
-    ``useRunStream`` uses this status to fall back to jsonl.
+    The single viewer-facing audit-log endpoint as of CD-jzkg Phase 3
+    (the legacy ``events.jsonl`` route is gone). Returns 404 with
+    ``{"detail": "no parquet for run"}`` when neither the local shard
+    glob nor the S3 ``events.parquet`` resolves — the SPA shows
+    "no events for run" without retry.
     """
     store = _bench_store()
     run = store.load_run(run_id)
@@ -562,9 +529,8 @@ def run_events_duckdb(
                     cur = conn.execute(sql, tuple(params))
                 except Exception as e:  # noqa: BLE001
                     # Most common: HTTP 404 from S3 because no parquet was
-                    # archived for this run (run pre-dates Phase 1, or
-                    # consolidate failed). Surface as 404 so the frontend
-                    # falls back cleanly to jsonl.
+                    # archived for this run (consolidate failed). Surface
+                    # as 404 so the SPA shows "no events for run".
                     msg = str(e)
                     if "404" in msg or "NoSuchKey" in msg or "not found" in msg.lower():
                         raise HTTPException(status_code=404, detail="no parquet for run") from e
@@ -597,10 +563,12 @@ def run_events_duckdb(
 
 @router.get("/diagnostics")
 def diagnostics() -> dict[str, Any]:
-    """Snapshot the dual-read counters.
+    """Snapshot the audit-log read counters.
 
-    Phase 3 strangle gate: three consecutive runs with
-    ``reads.jsonl_fallback == 0`` clear the way to delete the jsonl writer.
+    Post-Phase-3, ``reads.duckdb`` ticks on every viewer fetch and
+    ``reads.jsonl_fallback`` is permanently zero (the fallback path was
+    removed). The slot is retained as a free check that no client-side
+    error path is masquerading as a fallback.
     """
     with _diag_lock:
         # Shallow copy the nested dict so the response isn't mutated by a
@@ -615,11 +583,13 @@ def diagnostics() -> dict[str, Any]:
 
 @router.post("/diagnostics/fallback")
 async def diagnostics_fallback(request: Request) -> dict[str, Any]:
-    """Bump the jsonl-fallback counter from the frontend.
+    """Bump the jsonl-fallback counter.
 
-    The viewer's ``useRunStream`` POSTs here whenever it falls back from
-    DuckDB to jsonl, so the counter is server-side observable across page
-    reloads. Body: ``{"run_id": "...", "reason": "..."}`` (both optional).
+    Retained post-Phase-3 as a server-side observation channel for any
+    future client-side error path. The current ``useRunStream`` does not
+    POST here (no fallback exists); a non-zero counter means something
+    novel is calling this route. Body: ``{"run_id": "...", "reason": "..."}``
+    (both optional).
     """
     try:
         body = await request.json()
@@ -634,11 +604,11 @@ async def diagnostics_fallback(request: Request) -> dict[str, Any]:
 
 @router.post("/diagnostics/flush")
 def diagnostics_flush() -> dict[str, Any]:
-    """Reset the dual-read counters to zero.
+    """Reset the audit-log counters to zero.
 
-    Used between bench runs to start the Phase 3 gate clock fresh, or
-    after fixing a bug that caused stray fallbacks. Returns the previous
-    snapshot so callers can confirm what was cleared.
+    Used between bench runs when the operator wants a clean ``reads.duckdb``
+    count. Returns the previous snapshot so callers can confirm what was
+    cleared.
     """
     with _diag_lock:
         previous = {

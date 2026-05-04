@@ -1,9 +1,9 @@
-"""DuckDB-backed bench audit log writer (CD-jzkg, Phase 1).
+"""DuckDB-backed bench audit log writer (CD-jzkg).
 
-Strangler-fig replacement for ``event_tail``'s JSONL writer. Buffered
-in-process DuckDB appends to a per-process Parquet shard
-(``<run_dir>/events-<pid>-<uuid>.parquet``); shards consolidate at
-run-end into ``events.parquet`` and archive to
+Single source of truth for the harness/exgraph/langgraph/dagster event
+stream. Buffered in-process DuckDB appends to a per-process Parquet
+shard (``<run_dir>/events-<pid>-<uuid>.parquet``); shards consolidate
+at run-end into ``events.parquet`` and archive to
 ``s3://<bucket>/bench/runs/<run_id>/events.parquet``.
 
 Concurrency model (per the plan §2): per-process Parquet shards,
@@ -15,12 +15,11 @@ Buffering ceiling: ≤512 events or ≤1.0 s wall-clock — whichever
 fires first. A daemon timer thread enforces the time bound so
 low-rate runs don't go silent for minutes.
 
-Module-global accessor mirrors ``event_tail.configure(...)`` /
-``is_configured()`` so emit-site changes are one import line + one
-call.
-
-Phase 1 scope: dual-write only. Reader integration (Phase 2) and
-``event_tail`` removal (Phase 3) follow.
+Module-global accessor (configure / append / is_configured /
+emit_chunk_text / emit_chunk_extracted / configure_from_env) is the
+single funnel every emit site hits. Phase 3 of CD-jzkg removed the
+former ``event_tail`` jsonl path; this module is now the canonical
+writer.
 """
 
 from __future__ import annotations
@@ -73,8 +72,7 @@ class BenchEventStore:
 
     One instance per process. Module-global wiring lives at the bottom
     of this file (``configure``/``append``/``flush``) so emit sites
-    don't need to thread an instance through every call site — same
-    pattern as ``event_tail``.
+    don't need to thread an instance through every call site.
 
     Thread-safety: ``append`` and ``flush`` hold a single buffer lock
     so multiple threads inside one process can safely emit. Across
@@ -174,10 +172,12 @@ class BenchEventStore:
     ) -> None:
         """Append a single event to the buffer; flush on size ceiling.
 
-        Same kwargs as ``event_tail.append`` so dual-write at emit sites
-        is mechanical. ``ts`` is optional — passed in by the parity test
-        when reconciling jsonl rows; production callers leave it None
-        and we stamp ``datetime.now(UTC)``.
+        Required fields (``source``, ``node_name``, ``status``) plus the
+        optional context fields define the unified event shape that the
+        viewer's LiveGantt, AuditViewer, and StateInspector all consume.
+        ``ts`` is optional — production callers leave it None and we
+        stamp ``datetime.now(UTC)``; tests pass an explicit timestamp
+        when verifying ordering.
         """
         # Ensure backing structures exist before any state mutation so a
         # duckdb-import failure surfaces here, not after we've split the
@@ -246,9 +246,9 @@ class BenchEventStore:
         col_list = ", ".join(_COLUMNS)
         placeholders = ", ".join("?" for _ in _COLUMNS)
         # ``ts`` is TIMESTAMPTZ so the round-trip through parquet
-        # preserves the UTC offset event_tail.append stamps. Plain
-        # TIMESTAMP is wall-local on read which would diverge from the
-        # jsonl iso-8601 string under the parity test (CD-jzkg §7.3).
+        # preserves the UTC offset (plain TIMESTAMP is wall-local on
+        # read, which would silently shift timestamps for downstream
+        # consumers).
         conn.execute(
             "CREATE OR REPLACE TEMP TABLE _events_buf ("
             "ts TIMESTAMPTZ, run_id VARCHAR, seq BIGINT, writer_pid INTEGER, "
@@ -409,18 +409,23 @@ class BenchEventStore:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Module-global accessor — mirrors event_tail's shape so emit-site
-# refactors are one extra import + one extra call.
+# Module-global accessor — emit sites use the configure/append funnel
+# rather than threading an instance through every call site.
 # ─────────────────────────────────────────────────────────────────────────
 
 _store: BenchEventStore | None = None
 _module_lock = Lock()
 
+# Per-process idempotency set for ``emit_chunk_text`` — the same
+# ``chunk_id`` should only emit one ``chunk_loaded`` event per run, even
+# if multiple stages encounter it.
+_seen_chunks: set[str] = set()
+
 
 def configure(*, run_id: str, run_dir: Path | str) -> BenchEventStore:
     """Bind the module-global writer to a run. Idempotent for the same
     ``(run_id, run_dir)``; raises if reconfigured to a different target
-    mid-run (mirrors ``event_tail.configure``).
+    mid-run.
 
     Returns the store instance so callers that want a typed handle can
     grab one without re-importing the class.
@@ -451,15 +456,96 @@ def current_run_id() -> str | None:
 def append(**kwargs: Any) -> None:
     """Forward to the module-global store, no-op if unconfigured.
 
-    Phase 1 dual-write is unconditional at every emit site — when the
-    harness hasn't run ``configure(...)`` (e.g. a unit test that imports
-    a node), we silently drop the event rather than fail loud. This
-    matches the strangler-fig contract: the jsonl path is still
-    authoritative until Phase 3.
+    Emit sites call this unconditionally; if the harness hasn't run
+    ``configure(...)`` (e.g. a unit test that imports a node without a
+    bench fixture), we silently drop the event rather than fail loud.
     """
     if _store is None:
         return
     _store.append(**kwargs)
+
+
+def emit_chunk_text(
+    chunk_id: str,
+    text: str,
+    *,
+    doc_id: str | None = None,
+    model: str | None = None,
+    domain: str | None = None,
+    speaker_label: str | None = None,
+    temporal_start_ms: float | None = None,
+    temporal_end_ms: float | None = None,
+    chunk_index: int | None = None,
+    total_chunks: int | None = None,
+    chunk_metadata: dict[str, Any] | None = None,
+    max_chars: int = 4096,
+) -> None:
+    """Emit a one-shot ``chunk_loaded`` event the first time a chunk_id
+    is seen in this process. Idempotent — subsequent calls for the same
+    chunk_id are no-ops, so repair retries don't re-emit. The text is
+    capped at ``max_chars`` (default 4 KiB) and a ``truncated`` flag is
+    set when the source was longer; the StateInspector uses the inline
+    text directly without a side fetch.
+
+    ``chunk_metadata`` carries the chunker's strategy + size/overlap /
+    char-offset / content-hash so the StateInspector right-pane can
+    surface "why is this chunk shaped this way" without re-reading the
+    silver layer. Index + total flow through separately because they're
+    promoted onto the TextChunk model itself, not the metadata bag.
+    """
+    if not chunk_id or chunk_id in _seen_chunks:
+        return
+    _seen_chunks.add(chunk_id)
+    truncated = len(text) > max_chars
+    append(
+        source="harness",
+        node_name="chunk_loaded",
+        status="info",
+        model=model,
+        doc_id=doc_id,
+        chunk_id=chunk_id,
+        details={
+            "text": text[:max_chars],
+            "char_count": len(text),
+            "truncated": truncated,
+            "domain": domain,
+            "speaker_label": speaker_label,
+            "temporal_start_ms": temporal_start_ms,
+            "temporal_end_ms": temporal_end_ms,
+            "chunk_index": chunk_index,
+            "total_chunks": total_chunks,
+            "chunk_metadata": chunk_metadata or {},
+        },
+    )
+
+
+def emit_chunk_extracted(
+    chunk_id: str,
+    *,
+    model: str | None = None,
+    doc_id: str | None = None,
+    mentions: list[dict[str, Any]] | None = None,
+    propositions: list[dict[str, Any]] | None = None,
+) -> None:
+    """Emit a terminal ``chunk_extracted`` event with the final NER +
+    SPO output for a (model, chunk) pair. Lets the StateInspector tie
+    the chunk text directly to what each model produced without
+    reconstructing it from intermediate validate/repair events.
+    """
+    append(
+        source="harness",
+        node_name="chunk_extracted",
+        status="completed",
+        model=model,
+        doc_id=doc_id,
+        chunk_id=chunk_id,
+        details={
+            "mentions": mentions or [],
+            "propositions": propositions or [],
+            "mention_count": len(mentions) if mentions else 0,
+            "proposition_count": len(propositions) if propositions else 0,
+        },
+    )
 
 
 def flush() -> None:
@@ -474,10 +560,53 @@ def close() -> None:
     after consolidation; tests use it to release file handles between
     cases."""
     global _store
+    _seen_chunks.clear()
     if _store is None:
         return
     _store.close()
     _store = None
+
+
+def read_events_for_test() -> list[dict[str, Any]]:
+    """Drain the module-global store's buffered + flushed events.
+
+    Test-only helper — reads back every row the current process has
+    emitted to the active shard, deserialising ``state``/``details``
+    JSON columns to dicts so assertions can compare against the input
+    dict shape callers passed into ``append``. Mirrors the shape the
+    viewer's ``/events`` endpoint produces (see ``_row_to_event_dict``
+    in ``viewer/routes/bench.py``).
+
+    Raises ``RuntimeError`` if no module-global store is configured —
+    use ``configure(...)`` in a test fixture before calling.
+    """
+    if _store is None:
+        raise RuntimeError("event_store.read_events_for_test() requires configure() first")
+    # Force a flush so the shard reflects every appended row, then
+    # query the current shard back through the same ``read_parquet``
+    # path the viewer uses. ``ORDER BY seq, writer_pid`` matches the
+    # consolidate(...) sort.
+    _store.flush()
+    rows = _store.query("SELECT * FROM events ORDER BY seq, writer_pid")
+    import json as _json  # noqa: PLC0415
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        rec = dict(row)
+        ts = rec.get("ts")
+        if ts is not None and not isinstance(ts, str):
+            rec["ts"] = ts.isoformat()
+        for k in ("state", "details"):
+            v = rec.get(k)
+            if isinstance(v, str):
+                try:
+                    rec[k] = _json.loads(v) if v else {}
+                except _json.JSONDecodeError:
+                    rec[k] = {}
+            elif v is None:
+                rec[k] = {}
+        out.append(rec)
+    return out
 
 
 def consolidate_and_archive(run: S3RunStore, *, run_dir: Path | str) -> tuple[Path, str | None]:
@@ -489,7 +618,7 @@ def consolidate_and_archive(run: S3RunStore, *, run_dir: Path | str) -> tuple[Pa
 
 
 def configure_from_env() -> None:
-    """Subprocess entrypoint — mirrors ``event_tail.configure_from_env``.
+    """Subprocess entrypoint for harness fan-out.
 
     Reads ``CATALYST_RUN_DIR`` and ``CATALYST_RUN_ID``. No-op if either
     is unset, so direct script invocations outside a configured run
@@ -507,6 +636,7 @@ def configure_from_env() -> None:
 def _reset_after_fork() -> None:
     global _store
     _store = None
+    _seen_chunks.clear()
 
 
 with contextlib.suppress(AttributeError, RuntimeError):  # pragma: no cover — non-POSIX or restricted env
@@ -536,6 +666,9 @@ __all__ = [
     "configure_from_env",
     "consolidate_and_archive",
     "current_run_id",
+    "emit_chunk_extracted",
+    "emit_chunk_text",
     "flush",
     "is_configured",
+    "read_events_for_test",
 ]

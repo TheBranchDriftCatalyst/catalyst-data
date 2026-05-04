@@ -24,7 +24,7 @@ import httpx
 from catalyst_exgraph.config import StageConfig
 from catalyst_exgraph.protocol import ExtractionClient
 from catalyst_exgraph.state import ExGraphState
-from dagster_io import event_tail
+from dagster_io import event_store
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ class NerEnsembleNode:
             }
 
             t0 = time.perf_counter()
-            event_tail.append(
+            event_store.append(
                 source="harness",
                 node_name="ner_encoder_started",
                 status="started",
@@ -162,7 +162,7 @@ class NerEnsembleNode:
                     m["_source_encoder"] = encoder_name
 
                 duration = time.perf_counter() - t0
-                event_tail.append(
+                event_store.append(
                     source="harness",
                     node_name="ner_encoder_completed",
                     status="completed",
@@ -179,7 +179,7 @@ class NerEnsembleNode:
                 # surfaces per-encoder mention counts for v4 chunk_ids.
                 # This is the v4 equivalent of emit_chunk_extracted_for_state
                 # (which only fires on the legacy build_ner_pipeline path).
-                event_tail.emit_chunk_extracted(
+                event_store.emit_chunk_extracted(
                     chunk_id_for_encoder,
                     model=encoder_name,
                     doc_id=doc_id,
@@ -201,7 +201,7 @@ class NerEnsembleNode:
                     encoder_name,
                     duration,
                 )
-                event_tail.append(
+                event_store.append(
                     source="harness",
                     node_name="ner_encoder_completed",
                     status="error",
@@ -246,7 +246,7 @@ class NerEnsembleNode:
                 }
                 if isinstance(exc, httpx.HTTPStatusError):
                     err_details["http_status"] = exc.response.status_code
-                event_tail.append(
+                event_store.append(
                     source="harness",
                     node_name="ner_encoder_completed",
                     status="error",

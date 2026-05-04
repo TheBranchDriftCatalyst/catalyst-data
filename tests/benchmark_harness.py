@@ -4,8 +4,10 @@ Wraps the existing test infrastructure into a clean CLI that:
 1. Runs extraction across all configured models
 2. Computes F1/precision/recall against ground truth (if available)
 3. Generates the benchmark report JSON for the viewer SPA
-4. Streams every harness/exgraph/langgraph/dagster event into one
-   ``events.jsonl`` per run (consumed live by the viewer's LiveGantt)
+4. Streams every harness/exgraph/langgraph/dagster event into the
+   DuckDB-backed bench audit log (per-process Parquet shards consolidated
+   to ``events.parquet`` at run end), consumed by the viewer's
+   StateInspector via ``GET /viewer/api/bench/runs/<id>/events``
 5. Reports latency, throughput, hallucination rate, quality/speed ratio
 
 Usage:
@@ -37,7 +39,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from dagster_io import event_store, event_tail
+from dagster_io import event_store
 from tests._bench_tui import BenchLiveUI
 from tests.benchmark_config import ALL_MODELS, LOCAL_MODELS, BenchmarkConfig, ModelConfig
 
@@ -167,7 +169,7 @@ def _phase_a_build_cluster_cache(
         # same chunk_id are no-ops.
         for c in eval_chunks:
             cm = c.metadata or {}
-            event_tail.emit_chunk_text(
+            event_store.emit_chunk_text(
                 c.chunk_id,
                 c.text,
                 doc_id=c.document_id,
@@ -350,53 +352,41 @@ def _phase_a_build_cluster_cache(
 
 
 def _read_encoder_event_stats() -> dict[str, dict]:
-    """Read ``ner_encoder_completed`` events from the current run's JSONL.
+    """Read ``ner_encoder_completed`` events from the current run's parquet shards.
 
     Returns a dict keyed by encoder name with aggregated stats:
         {encoder_name: {"duration_s": float, "mention_count": int, "error_count": int}}
 
-    Falls back to empty dict when event_tail is not configured or the file
-    doesn't exist yet (e.g. warm-cache-only runs).
+    Falls back to empty dict when event_store is not configured or no
+    shards exist yet (e.g. warm-cache-only runs).
     """
-    import json as _json
-
-    from dagster_io import event_tail as _et
-
     result: dict[str, dict] = {}
-    if not _et.is_configured() or _et._path is None:
-        return result
-    path = _et._path
-    if not path.exists():
+    if not event_store.is_configured():
         return result
 
     try:
-        lines = path.read_text().splitlines()
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                ev = _json.loads(line)
-            except _json.JSONDecodeError:
-                continue
-            if ev.get("node_name") != "ner_encoder_completed":
-                continue
-            enc_name = ev.get("model") or (ev.get("details") or {}).get("encoder") or ""
-            if not enc_name:
-                continue
-            details = ev.get("details") or {}
-            duration = float(details.get("duration_s") or 0.0)
-            is_error = ev.get("status") == "error"
-
-            if enc_name not in result:
-                result[enc_name] = {"duration_s": 0.0, "mention_count": 0, "error_count": 0}
-            result[enc_name]["duration_s"] += duration
-            if not is_error:
-                result[enc_name]["mention_count"] += int(details.get("mention_count") or 0)
-            else:
-                result[enc_name]["error_count"] += 1
+        events = event_store.read_events_for_test()
     except Exception:
-        pass  # Best-effort — never fail fixture saving over stats reading
+        # Best-effort — never fail fixture saving over stats reading
+        return result
+
+    for ev in events:
+        if ev.get("node_name") != "ner_encoder_completed":
+            continue
+        enc_name = ev.get("model") or (ev.get("details") or {}).get("encoder") or ""
+        if not enc_name:
+            continue
+        details = ev.get("details") or {}
+        duration = float(details.get("duration_s") or 0.0)
+        is_error = ev.get("status") == "error"
+
+        if enc_name not in result:
+            result[enc_name] = {"duration_s": 0.0, "mention_count": 0, "error_count": 0}
+        result[enc_name]["duration_s"] += duration
+        if not is_error:
+            result[enc_name]["mention_count"] += int(details.get("mention_count") or 0)
+        else:
+            result[enc_name]["error_count"] += 1
 
     return result
 
@@ -594,7 +584,7 @@ def _run_model(
                 run.save_extraction("ensemble", fixture)
             store.save_extraction("ensemble", fixture)
             return fixture
-        event_tail.append(
+        event_store.append(
             source="harness",
             node_name="model_run",
             status="error",
@@ -645,7 +635,7 @@ def _run_model(
             from dagster_io.extraction import extract_with_shared_clusters
 
             if not shared_docs:
-                event_tail.append(
+                event_store.append(
                     source="harness",
                     node_name="model_run",
                     status="error",
@@ -666,7 +656,7 @@ def _run_model(
                     max_concurrency=1,
                 )
             except Exception as exc:
-                event_tail.append(
+                event_store.append(
                     source="harness",
                     node_name="model_run",
                     status="error",
@@ -681,7 +671,7 @@ def _run_model(
             # Used for: encoder-tier models NOT in Phase A panel, and any fallback.
             medallion_chunks = load_chunks(sample_per_domain=sample_n)
             if not medallion_chunks:
-                event_tail.append(
+                event_store.append(
                     source="harness",
                     node_name="model_run",
                     status="error",
@@ -701,7 +691,7 @@ def _run_model(
                     max_concurrency=1,
                 )
             except Exception as exc:
-                event_tail.append(
+                event_store.append(
                     source="harness",
                     node_name="model_run",
                     status="error",
@@ -1382,54 +1372,29 @@ examples:
     # Create the run BEFORE rendering the header so the run_id can be included.
     run = store.create_run(label=pipeline_label)
 
-    # Bind the unified event-stream writer to this run. Every harness /
+    # Bind the bench audit-log writer to this run. Every harness /
     # exgraph / langgraph / dagster event for the lifetime of this process
-    # appends to <local_cache_root>/events.jsonl — S3 doesn't support
-    # append, so the live tail stays on local disk and is uploaded once
-    # at run end via run.archive_events(). The viewer's bench routes
-    # serve the live tail directly off the FastAPI; replays read the
-    # archived copy from S3.
-    events_path = store.local_cache_root / "events.jsonl"
-    events_path.parent.mkdir(parents=True, exist_ok=True)
-    events_path.write_text("")  # forward-only: each run owns the live tail
-    event_tail.configure(events_path, run_id=run.run_id)
-    # CD-jzkg Phase 1: dual-write to a DuckDB-backed parquet shard
-    # alongside the jsonl. No feature flag — when un-configured the
-    # event_store.append calls are no-ops, so existing tests that don't
-    # exercise the harness see no change.
+    # lands in a per-process Parquet shard under
+    # ``<local_cache_root>/events-<pid>-<uuid>.parquet`` (CD-jzkg
+    # ``BenchEventStore``). At run end the shards consolidate to
+    # ``events.parquet`` and upload to
+    # ``s3://<bucket>/bench/runs/<run_id>/events.parquet`` for the
+    # viewer's DuckDB ``httpfs`` reads. The live viewer reads the local
+    # shard glob directly so it sees in-flight events on the 3 s poll.
+    #
+    # Forward-only: each run owns its shard set. Stale shards from a
+    # previous run can sit alongside the active set (the harness doesn't
+    # clean them at start), but the viewer's WHERE-clause filter on
+    # ``run_id`` keeps responses scoped — see
+    # ``viewer/routes/bench.py::_local_run_ids``.
     event_store.configure(run_id=run.run_id, run_dir=store.local_cache_root)
-
-    # Periodically upload the local tail to S3 so the StateInspector can
-    # observe the run live (frontend polls /viewer/api/bench/runs/<id>/events.jsonl
-    # every 3s; the viewer-api reads from S3). Without this the audit log
-    # is blank until run end, which is brutal for full-corpus runs.
-    # Default 5s; override via BENCH_EVENT_UPLOAD_INTERVAL_S.
-    upload_interval_s = float(os.environ.get("BENCH_EVENT_UPLOAD_INTERVAL_S", "5"))
-
-    def _upload_tail_to_s3(local_path: Path) -> None:
-        store.client.put_object(run.events_key, local_path.read_bytes())
-
-    event_tail.configure_periodic_upload(_upload_tail_to_s3, interval_s=upload_interval_s)
-
-    # Spin up the run-bus so the viewer's LiveGantt can subscribe to live
-    # events. Discovery: <local_cache_root>/.bus-port — the viewer's bench
-    # API reads this to forward the WebSocket port.
-    from tests.shared.run_bus import RunBus
-
-    bus = RunBus(events_path=events_path)
-    bus.start()
-    (store.local_cache_root / ".bus-port").write_text(str(bus.port))
-
-    # event_tail.append fans out to event_store internally (CD-jzkg
-    # Phase 1 dual-write).
-    event_tail.append(
+    event_store.append(
         source="harness",
         node_name="run_start",
         status="started",
         details={
             "pipeline": pipeline_label or "default",
             "model_count": len(models),
-            "bus_port": bus.port,
         },
     )
 
@@ -1662,7 +1627,7 @@ examples:
             # Mark running
             ui.set_status(cfg.name, "running")
             ui.log(f"[{cfg.name}] starting ({tier})")
-            event_tail.append(
+            event_store.append(
                 source="harness",
                 node_name="model_run",
                 status="started",
@@ -1703,7 +1668,7 @@ examples:
                 # Save to run directory
                 run.save_extraction(cfg.model, fixture)
 
-                event_tail.append(
+                event_store.append(
                     source="harness",
                     node_name="model_run",
                     status="completed",
@@ -1715,7 +1680,7 @@ examples:
             else:
                 ui.set_status(cfg.name, "FAIL")
                 ui.log(f"[{cfg.name}] FAILED after {duration_s:.1f}s")
-                event_tail.append(
+                event_store.append(
                     source="harness",
                     node_name="model_run",
                     status="error",
@@ -1774,36 +1739,18 @@ examples:
         }
     )
 
-    event_tail.append(
+    event_store.append(
         source="harness",
         node_name="run_end",
         status="completed",
         details={"results": len(results), "models": len(models)},
     )
 
-    # Give the bus a beat to flush the final event over WS, then shut it
-    # down. The events.jsonl on disk remains the canonical replay source.
-    time.sleep(0.5)
-    bus.stop()
-
-    # Stop the periodic S3 uploader (one final flush included) before the
-    # canonical archive call below — avoids a benign double-PUT race on
-    # the same key.
-    event_tail.stop_periodic_upload(final_flush=True)
-
-    # Archive the local events.jsonl to S3 so future replays of this
-    # specific run survive a later harness invocation truncating the
-    # local cache file at its own run start. The local file is left
-    # in place — the run-bus may still be flushing for a beat.
-    archived_key = run.archive_events()
-    if archived_key:
-        print(f"  events archived to {run.events_uri}")
-
-    # CD-jzkg Phase 1: flush remaining buffered events, consolidate
-    # per-process Parquet shards into a single events.parquet, and PUT
-    # to S3 alongside events.jsonl. Sibling of run.archive_events()
-    # above. Failures here are logged-and-swallowed so a duckdb hiccup
-    # never poisons the canonical jsonl archive.
+    # CD-jzkg: flush remaining buffered events, consolidate per-process
+    # Parquet shards into a single events.parquet, and PUT to S3. The
+    # consolidated file is the canonical replay source; the viewer reads
+    # it via DuckDB ``httpfs``. Failures here are logged-and-swallowed so
+    # a duckdb hiccup doesn't crash the run footer.
     try:
         parquet_path, parquet_key = event_store.consolidate_and_archive(run, run_dir=store.local_cache_root)
         if parquet_key:

@@ -3,7 +3,7 @@
 from dagster_io.append_io_manager import AppendIOManager
 from dagster_io.asset_factories import LLM_ASSET_K8S_CONFIG
 from dagster_io.asset_factory import EMBEDDING_ASSET_K8S_CONFIG, PipelineConfig, extraction_assets
-from dagster_io.bench import S3BenchmarkStore, S3RunStore, event_store, event_tail
+from dagster_io.bench import S3BenchmarkStore, S3RunStore, event_store
 from dagster_io.chunking import (
     PRESET_CONFIGS,
     ChunkConfig,
@@ -203,9 +203,7 @@ __all__ = [
     # Prompts
     "load_prompt",
     "parse_prompt_file",
-    # Unified event stream
-    "event_tail",
-    # DuckDB-backed event store (CD-jzkg, Phase 1 dual-write)
+    # DuckDB-backed event store (CD-jzkg)
     "event_store",
     # S3-backed benchmark store (Phase 2 — single backend across dev/prod)
     "S3BenchmarkStore",

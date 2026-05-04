@@ -11,19 +11,14 @@ from catalyst_exgraph.state import EntityCluster
 
 
 @pytest.fixture(autouse=True)
-def configure_event_tail(tmp_path):
-    """Configure event_tail so PackEvidenceNode's audit emit doesn't raise."""
-    from dagster_io import event_tail
+def configure_event_store(tmp_path):
+    """Configure event_store so PackEvidenceNode's audit emit lands somewhere."""
+    from dagster_io.bench import event_store
 
-    events_file = tmp_path / "events.jsonl"
-    events_file.write_text("")
-    event_tail.configure(str(events_file), run_id="test-pack-per-model")
+    event_store.close()
+    event_store.configure(run_id="test-pack-per-model", run_dir=tmp_path)
     yield
-    # Reset internal state after test
-    import dagster_io.bench.event_tail as _et
-
-    _et._path = None
-    _et._run_id = None
+    event_store.close()
 
 
 def _make_cluster(start: int, end: int) -> EntityCluster:

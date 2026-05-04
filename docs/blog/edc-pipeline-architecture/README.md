@@ -453,7 +453,7 @@ The `Provenance` fields threaded through from silver to gold:
 | `speaker_label` | Speaker from diarization (media only) |
 | `temporal_start_ms`, `temporal_end_ms` | Time range from audio segmentation (media only) |
 
-Every `chunk_loaded` event in the unified `events.jsonl` stream carries a `chunk_metadata` block with chunking strategy, size, overlap, char offset, and content hash. This means the StateInspector can display not just what was extracted from a chunk but why the chunk has the shape it has — which chunker produced it, with what parameters.
+Every `chunk_loaded` event in the unified DuckDB-backed audit log carries a `chunk_metadata` block with chunking strategy, size, overlap, char offset, and content hash. This means the StateInspector can display not just what was extracted from a chunk but why the chunk has the shape it has — which chunker produced it, with what parameters.
 
 The audit event stream from ExGraph emits per-stage events tagged with `(model, doc_id, chunk_id, evidence_window_id)`. In the v3 topology this extends to the evidence window level: each SPO invocation emits events tagged with the evidence window ID, so the StateInspector's timeline can group events by window and show the full sequence — NER, cluster, pack, SPO — as a coherent trail for one entity cluster in one document.
 

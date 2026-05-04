@@ -126,9 +126,11 @@ export interface EntityRow {
 }
 
 /**
- * A single line from `events.jsonl` — the unified event stream emitted
- * by harness, exgraph, langgraph, and dagster. Every consumer (LiveGantt,
- * AuditViewer, StateInspector) reads this shape.
+ * A single row from the bench audit log — the unified event stream
+ * emitted by harness, exgraph, langgraph, and dagster. Persisted as
+ * Parquet under ``events.parquet`` (CD-jzkg) and exposed via the
+ * ``GET /viewer/api/bench/runs/<id>/events`` endpoint as NDJSON. Every
+ * consumer (LiveGantt, AuditViewer, StateInspector) reads this shape.
  */
 export interface RunEvent {
   ts: string;

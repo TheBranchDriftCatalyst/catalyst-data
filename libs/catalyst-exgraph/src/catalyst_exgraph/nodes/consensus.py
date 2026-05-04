@@ -9,7 +9,7 @@ Consumes ``state["per_encoder_mentions"]`` (produced by Phase A's
 - ``state["rejected_mentions"]`` — raw cluster dicts that didn't reach quorum
 
 Every decision (accept, reject, span pick, type vote) emits an audit event
-via ``event_tail.append`` with ``chunk_id = "{doc_id}:_consensus"`` so the
+via ``event_store.append`` with ``chunk_id = "{doc_id}:_consensus"`` so the
 State Inspector can render the consensus card with full provenance.
 
 **No silent drops.**  Every mention that enters consensus must result in
@@ -51,7 +51,7 @@ from typing import Any
 
 from catalyst_exgraph.consensus_taxonomy import PII_TYPES, canonicalize_type
 from catalyst_exgraph.state import ExGraphState
-from dagster_io import event_tail
+from dagster_io import event_store
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ class ConsensusNode:
 
         total_input = len(all_mentions)
 
-        event_tail.append(
+        event_store.append(
             source="consensus",
             node_name="consensus_started",
             status="started",
@@ -175,7 +175,7 @@ class ConsensusNode:
         )
 
         if not all_mentions:
-            event_tail.append(
+            event_store.append(
                 source="consensus",
                 node_name="consensus_completed",
                 status="completed",
@@ -233,7 +233,7 @@ class ConsensusNode:
                 }
                 accepted.append(consensus_mention)
 
-                event_tail.append(
+                event_store.append(
                     source="consensus",
                     node_name="mention_decision",
                     status="accepted",
@@ -264,7 +264,7 @@ class ConsensusNode:
                 }
                 rejected.append(rejected_rec)
 
-                event_tail.append(
+                event_store.append(
                     source="consensus",
                     node_name="mention_rejected",
                     status="rejected",
@@ -286,7 +286,7 @@ class ConsensusNode:
             sum(1 for d in span_disagreements if d > 0) / len(span_disagreements) if span_disagreements else 0.0
         )
 
-        event_tail.append(
+        event_store.append(
             source="consensus",
             node_name="consensus_completed",
             status="completed",
@@ -307,7 +307,7 @@ class ConsensusNode:
         # can display the source text aligned with the consensus result.
         raw_text = state.get("raw_text") or ""
         src_domain = (state.get("source_metadata") or {}).get("domain")
-        event_tail.emit_chunk_text(
+        event_store.emit_chunk_text(
             consensus_chunk_id,
             raw_text,
             doc_id=doc_id,
@@ -320,7 +320,7 @@ class ConsensusNode:
                 "rejected_count": len(rejected),
             },
         )
-        event_tail.emit_chunk_extracted(
+        event_store.emit_chunk_extracted(
             consensus_chunk_id,
             model="ensemble",
             doc_id=doc_id,

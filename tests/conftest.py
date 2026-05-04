@@ -12,13 +12,13 @@ os.environ.setdefault("OTEL_TRACES_EXPORTER", "none")
 import pytest
 from dagster import build_asset_context
 
-# Bind the unified event-stream writer if the harness propagated
+# Bind the bench audit-log writer if the harness propagated
 # CATALYST_RUN_DIR / CATALYST_RUN_ID into our env. No-op when invoked
 # outside a benchmark run (plain pytest), so library tests don't need
-# to know about event_tail.
-from dagster_io import event_tail
+# to know about event_store.
+from dagster_io import event_store
 
-event_tail.configure_from_env()
+event_store.configure_from_env()
 
 
 def _safe_addoption(parser, *args, **kwargs):

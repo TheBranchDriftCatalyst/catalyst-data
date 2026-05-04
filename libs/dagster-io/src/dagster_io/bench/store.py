@@ -6,10 +6,12 @@ top-level reports. Everything lives under ``s3://<bucket>/bench/...`` so the
 training-dataset Dagster assets can read benchmark output from the same bucket
 that holds the live medallion corpus.
 
-S3 doesn't support append, so the live ``events.jsonl`` (consumed by the run-bus
-WS) plus the ``.bus-port`` discovery file are kept on local disk under
-``local_cache_root`` for the lifetime of a run. At run end, the harness archives
-the final events.jsonl to ``s3://<bucket>/bench/runs/<run_id>/events.jsonl``.
+The bench audit log writes per-process Parquet shards to local disk under
+``local_cache_root`` during a run (CD-jzkg ``BenchEventStore``); at run end
+the harness consolidates them to ``events.parquet`` and uploads to
+``s3://<bucket>/bench/runs/<run_id>/events.parquet`` via
+:meth:`S3RunStore.archive_events_parquet`. The viewer reads the same parquet
+back via DuckDB ``httpfs``.
 
 Path layout:
 
@@ -20,7 +22,7 @@ Path layout:
       runs/<run_id>/
         extractions/extraction_<model>.json
         extractions/<doc_id>/extraction_<model>.json
-        events.jsonl
+        events.parquet
         benchmark-report.json
         run-config.json
       benchmark-report.json     -- top-level, latest-run snapshot
@@ -57,9 +59,9 @@ def _stage_filename(name: str) -> str:
 
 
 def _default_local_cache_root() -> Path:
-    """Local working directory for ephemeral run artifacts (live events.jsonl,
-    bus-port file). Persists between runs only as a side effect — the canonical
-    archive lives in S3.
+    """Local working directory for ephemeral run artifacts (in-flight
+    parquet shards from ``BenchEventStore``). Persists between runs only
+    as a side effect — the canonical archive lives in S3.
 
     store.py lives at ``libs/dagster-io/src/dagster_io/bench/store.py``
     so the repo root is ``parents[5]``. Tracked by CD-vse9 (replace these
@@ -97,19 +99,16 @@ class S3RunStore:
     """I/O for a single benchmark run, keyed by ``run_id``.
 
     The harness uses ``run_id`` (a timestamped folder name) as the canonical
-    identifier; ``s3_prefix`` is the corresponding S3 key prefix. The
-    ``local_events_path`` is the on-disk file the live ``event_tail`` writes
-    to during the run — uploaded to S3 once the run completes via
-    :meth:`archive_events`.
+    identifier; ``s3_prefix`` is the corresponding S3 key prefix. The bench
+    audit log shards live at ``<local_cache_root>/events-*.parquet`` during
+    the run and consolidate to ``events.parquet`` for upload via
+    :meth:`archive_events_parquet`.
     """
 
     def __init__(self, *, run_id: str, store: S3BenchmarkStore):
         self.run_id = run_id
         self._store = store
         self.s3_prefix = f"{store.runs_prefix}/{run_id}"
-        # Local working files for this run. Same name on disk as in S3 so the
-        # final upload is just a literal copy.
-        self.local_events_path = store.local_cache_root / "events.jsonl"
 
     @property
     def s3_uri(self) -> str:
@@ -118,10 +117,6 @@ class S3RunStore:
     @property
     def report_uri(self) -> str:
         return f"s3://{self._store.bucket}/{self.report_key}"
-
-    @property
-    def events_uri(self) -> str:
-        return f"s3://{self._store.bucket}/{self.events_key}"
 
     @property
     def events_parquet_key(self) -> str:
@@ -188,10 +183,6 @@ class S3RunStore:
     def config_key(self) -> str:
         return f"{self.s3_prefix}/run-config.json"
 
-    @property
-    def events_key(self) -> str:
-        return f"{self.s3_prefix}/events.jsonl"
-
     def save_report(self, data: dict) -> str:
         self._store.client.put_object(self.report_key, _to_bytes(data))
         return self.report_key
@@ -206,38 +197,21 @@ class S3RunStore:
         self._store.client.put_object(self.config_key, _to_bytes(config))
         return self.config_key
 
-    # ── Events archive ──────────────────────────────────────────────────────
-
-    def archive_events(self) -> str | None:
-        """Upload the local ``events.jsonl`` to S3 as the run's permanent
-        archive. Returns the S3 key (or None if the local file is missing)."""
-        if not self.local_events_path.exists():
-            return None
-        data = self.local_events_path.read_bytes()
-        self._store.client.put_object(self.events_key, data)
-        return self.events_key
+    # ── Events archive (parquet, CD-jzkg) ──────────────────────────────────
 
     def archive_events_parquet(self, local_parquet_path: Path | None = None) -> str | None:
         """Upload the consolidated DuckDB-emitted ``events.parquet`` to S3.
 
-        Sibling of :meth:`archive_events` for the parquet path
-        (CD-jzkg, Phase 1). Path defaults to
-        ``<local_cache_root>/events.parquet`` — the location
-        :class:`BenchEventStore.consolidate` writes to. Returns the S3
-        key (or ``None`` if the local file is missing — typical for a
-        run that never emitted via the duckdb path).
+        Path defaults to ``<local_cache_root>/events.parquet`` — the
+        location :class:`BenchEventStore.consolidate` writes to. Returns
+        the S3 key (or ``None`` if the local file is missing — typical
+        for a run that never emitted any events).
         """
         path = Path(local_parquet_path) if local_parquet_path else self._store.local_cache_root / "events.parquet"
         if not path.exists():
             return None
         self._store.client.put_object(self.events_parquet_key, path.read_bytes())
         return self.events_parquet_key
-
-    def load_events_text(self) -> str | None:
-        try:
-            return self._store.client.get_object(self.events_key).decode("utf-8")
-        except Exception:
-            return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

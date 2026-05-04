@@ -370,7 +370,7 @@ def emit_chunk_extracted_for_state(state: ExGraphState) -> None:
     """Emit the terminal ``chunk_extracted`` event from a finished
     ExGraphState. Called once per pipeline invocation to tie a chunk's
     text to the accepted NER + SPO output for the StateInspector."""
-    from dagster_io import event_tail
+    from dagster_io import event_store
 
     src = state.get("source_metadata") or {}
     chunk_id = state.get("chunk_id") or src.get("chunk_id")
@@ -379,7 +379,7 @@ def emit_chunk_extracted_for_state(state: ExGraphState) -> None:
     stages = state.get("stages") or {}
     mentions = (stages.get("ner") or {}).get("accepted") or []
     propositions = (stages.get("spo") or {}).get("accepted") or []
-    event_tail.emit_chunk_extracted(
+    event_store.emit_chunk_extracted(
         chunk_id,
         model=state.get("model"),
         doc_id=state.get("doc_id") or src.get("document_id"),

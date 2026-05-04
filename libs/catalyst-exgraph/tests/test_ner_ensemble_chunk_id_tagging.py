@@ -6,9 +6,6 @@ chunk_id to identify one card per (doc, encoder).  No GPU or Ollama required.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 from catalyst_exgraph.config import ner_stage_config
 from catalyst_exgraph.nodes.ner_ensemble import NerEnsembleNode
@@ -87,9 +84,8 @@ class _FailingStub:
 @pytest.mark.asyncio
 async def test_started_event_chunk_id_pattern():
     """ner_encoder_started event has chunk_id = '{doc_id}:_ner_{encoder_name}'."""
-    import dagster_io.bench.event_tail as et
+    from dagster_io.bench import event_store
 
-    tail_path = Path(et._path)
     doc_id = "doc-abc"
     encoder_name = "gliner-medium"
 
@@ -100,7 +96,7 @@ async def test_started_event_chunk_id_pattern():
 
     await node(_base_state(doc_id))
 
-    events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+    events = event_store.read_events_for_test()
     started = [e for e in events if e["node_name"] == "ner_encoder_started"]
     assert len(started) == 1
 
@@ -111,9 +107,8 @@ async def test_started_event_chunk_id_pattern():
 @pytest.mark.asyncio
 async def test_completed_event_chunk_id_pattern():
     """ner_encoder_completed event has chunk_id = '{doc_id}:_ner_{encoder_name}'."""
-    import dagster_io.bench.event_tail as et
+    from dagster_io.bench import event_store
 
-    tail_path = Path(et._path)
     doc_id = "doc-xyz"
     encoder_name = "gliner-large"
 
@@ -124,7 +119,7 @@ async def test_completed_event_chunk_id_pattern():
 
     await node(_base_state(doc_id))
 
-    events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+    events = event_store.read_events_for_test()
     completed = [e for e in events if e["node_name"] == "ner_encoder_completed"]
     assert len(completed) == 1
 
@@ -135,9 +130,8 @@ async def test_completed_event_chunk_id_pattern():
 @pytest.mark.asyncio
 async def test_each_encoder_gets_distinct_chunk_id():
     """With 3 encoders, 3 distinct chunk_ids appear in the event stream."""
-    import dagster_io.bench.event_tail as et
+    from dagster_io.bench import event_store
 
-    tail_path = Path(et._path)
     doc_id = "doc-multi"
     encoder_names = ["gliner-medium", "gliner-large", "gliner-pii"]
 
@@ -149,7 +143,7 @@ async def test_each_encoder_gets_distinct_chunk_id():
 
     await node(_base_state(doc_id))
 
-    events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+    events = event_store.read_events_for_test()
     ner_events = [e for e in events if e["node_name"] in ("ner_encoder_started", "ner_encoder_completed")]
 
     observed_chunk_ids = {e["chunk_id"] for e in ner_events}
@@ -163,9 +157,8 @@ async def test_each_encoder_gets_distinct_chunk_id():
 @pytest.mark.asyncio
 async def test_model_field_matches_encoder_name_on_events():
     """Every ner_encoder_* event has model == encoder_name."""
-    import dagster_io.bench.event_tail as et
+    from dagster_io.bench import event_store
 
-    tail_path = Path(et._path)
     doc_id = "doc-model-check"
     encoder_name = "nuextract-2.0-8b"
 
@@ -176,7 +169,7 @@ async def test_model_field_matches_encoder_name_on_events():
 
     await node(_base_state(doc_id))
 
-    events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+    events = event_store.read_events_for_test()
     ner_events = [e for e in events if "ner_encoder" in e.get("node_name", "")]
 
     assert len(ner_events) >= 1
@@ -187,9 +180,8 @@ async def test_model_field_matches_encoder_name_on_events():
 @pytest.mark.asyncio
 async def test_error_event_also_carries_correct_chunk_id():
     """Even on failure the ner_encoder_completed error event uses the right chunk_id."""
-    import dagster_io.bench.event_tail as et
+    from dagster_io.bench import event_store
 
-    tail_path = Path(et._path)
     doc_id = "doc-err-chunk"
     encoder_name = "bad-encoder"
 
@@ -200,7 +192,7 @@ async def test_error_event_also_carries_correct_chunk_id():
 
     await node(_base_state(doc_id))
 
-    events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+    events = event_store.read_events_for_test()
     error_ev = next(
         (e for e in events if e["node_name"] == "ner_encoder_completed" and e["status"] == "error"),
         None,
@@ -212,9 +204,8 @@ async def test_error_event_also_carries_correct_chunk_id():
 @pytest.mark.asyncio
 async def test_chunk_id_uses_doc_id_from_state_not_source_metadata():
     """chunk_id is built from state['doc_id'] (top-level), not source_metadata."""
-    import dagster_io.bench.event_tail as et
+    from dagster_io.bench import event_store
 
-    tail_path = Path(et._path)
     # Put a different doc_id in source_metadata to verify precedence
     encoder_name = "gliner-medium"
     state: ExGraphState = {
@@ -234,7 +225,7 @@ async def test_chunk_id_uses_doc_id_from_state_not_source_metadata():
 
     await node(state)
 
-    events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+    events = event_store.read_events_for_test()
     started = [e for e in events if e["node_name"] == "ner_encoder_started"]
     assert started[0]["chunk_id"] == f"top-level-doc-id:_ner_{encoder_name}"
 
@@ -242,9 +233,8 @@ async def test_chunk_id_uses_doc_id_from_state_not_source_metadata():
 @pytest.mark.asyncio
 async def test_chunk_extracted_emitted_per_encoder():
     """chunk_extracted fires for each encoder with the correct chunk_id and model."""
-    import dagster_io.bench.event_tail as et
+    from dagster_io.bench import event_store
 
-    tail_path = Path(et._path)
     doc_id = "doc-extracted-check"
     encoder_names = ["gliner-medium", "gliner-large"]
 
@@ -256,7 +246,7 @@ async def test_chunk_extracted_emitted_per_encoder():
 
     await node(_base_state(doc_id))
 
-    events = [json.loads(line) for line in tail_path.read_text().splitlines() if line.strip()]
+    events = event_store.read_events_for_test()
     extracted = [e for e in events if e["node_name"] == "chunk_extracted"]
 
     # One chunk_extracted per encoder

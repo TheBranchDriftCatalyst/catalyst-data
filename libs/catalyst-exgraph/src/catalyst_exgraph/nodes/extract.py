@@ -17,7 +17,7 @@ from catalyst_exgraph.nodes._audit import make_audit_event
 from catalyst_exgraph.nodes.spans import correct_candidate_spans
 from catalyst_exgraph.protocol import ExtractionClient
 from catalyst_exgraph.state import ExGraphState, ExGraphStatus
-from dagster_io import event_tail
+from dagster_io import event_store
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ class ExtractNode:
         src = state.get("source_metadata") or {}
         chunk_id = state.get("chunk_id") or src.get("chunk_id")
         if chunk_id:
-            event_tail.emit_chunk_text(
+            event_store.emit_chunk_text(
                 chunk_id,
                 raw_text,
                 doc_id=state.get("doc_id") or src.get("document_id"),
