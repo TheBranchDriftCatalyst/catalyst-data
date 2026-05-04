@@ -34,7 +34,9 @@
 import { useEffect, useState } from "react";
 
 import { useRunStream } from "@/hooks/useRunStream";
+import { useRuns } from "@/hooks/useRuns";
 import { DocRailV2 } from "@/components/state/DocRailV2";
+import { RunPicker } from "@/components/state/RunPicker";
 import {
   PipelineGraph,
   type SelectedGraphNode,
@@ -59,9 +61,14 @@ const VALID_ROLES: ReadonlySet<NodeRole> = new Set<NodeRole>([
   "persist",
 ]);
 
-function readQuery(): { docId: string | null; node: SelectedGraphNode | null } {
+function readQuery(): {
+  docId: string | null;
+  node: SelectedGraphNode | null;
+  runId: string | null;
+} {
   const p = new URLSearchParams(window.location.search);
   const docId = p.get("doc");
+  const runId = p.get("run");
   const raw = p.get("node");
   let node: SelectedGraphNode | null = null;
   if (raw) {
@@ -73,11 +80,12 @@ function readQuery(): { docId: string | null; node: SelectedGraphNode | null } {
       };
     }
   }
-  return { docId, node };
+  return { docId, node, runId };
 }
 
-function writeQuery(docId: string | null, node: SelectedGraphNode | null) {
+function writeQuery(docId: string | null, node: SelectedGraphNode | null, runId: string | null) {
   const p = new URLSearchParams();
+  if (runId) p.set("run", runId);
   if (docId) p.set("doc", docId);
   if (node) p.set("node", node.ref ? `${node.role}:${node.ref}` : node.role);
   const qs = p.toString();
@@ -86,7 +94,9 @@ function writeQuery(docId: string | null, node: SelectedGraphNode | null) {
 }
 
 export function StateInspector() {
-  const { events, connected, error } = useRunStream();
+  const [pinnedRunId, setPinnedRunId] = useState<string | null>(null);
+  const { events, runId: activeRunId, connected, error } = useRunStream(pinnedRunId);
+  const runs = useRuns();
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<SelectedGraphNode | null>(null);
 
@@ -95,12 +105,21 @@ export function StateInspector() {
     const q = readQuery();
     if (q.docId) setSelectedDoc(q.docId);
     if (q.node) setSelectedNode(q.node);
+    if (q.runId) setPinnedRunId(q.runId);
   }, []);
 
   // Persist selection to URL.
   useEffect(() => {
-    writeQuery(selectedDoc, selectedNode);
-  }, [selectedDoc, selectedNode]);
+    writeQuery(selectedDoc, selectedNode, pinnedRunId);
+  }, [selectedDoc, selectedNode, pinnedRunId]);
+
+  // Switching run wipes the per-run selections — a doc/node from run X
+  // probably doesn't exist (or means something different) in run Y.
+  const onRunSelect = (runId: string | null) => {
+    setPinnedRunId(runId);
+    setSelectedDoc(null);
+    setSelectedNode(null);
+  };
 
   // Default to the first observed doc once events arrive.
   useEffect(() => {
@@ -135,6 +154,11 @@ export function StateInspector() {
       <div className="flex-1 flex flex-col min-w-0">
         <div className="px-4 py-2 border-b border-white/10 flex items-center gap-2 font-mono text-[11px]">
           <span className="text-zinc-300">state inspector</span>
+          <RunPicker
+            runs={runs}
+            selectedRunId={pinnedRunId ?? activeRunId}
+            onSelect={onRunSelect}
+          />
           <span
             className={`px-1.5 py-0.5 rounded text-[10px] ${
               connected

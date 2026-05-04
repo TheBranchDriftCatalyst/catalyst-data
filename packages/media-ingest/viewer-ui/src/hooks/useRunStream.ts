@@ -1,5 +1,5 @@
 /**
- * Read the latest run's audit log via the DuckDB-backed
+ * Read a bench run's audit log via the DuckDB-backed
  * ``GET /viewer/api/bench/runs/<id>/events`` endpoint and re-poll on a
  * fixed interval.
  *
@@ -8,6 +8,12 @@
  * to the caller (the SPA renders an empty state); on success it logs
  * one informational line per poll so the operator can spot read churn
  * in DevTools without scraping the network tab.
+ *
+ * Run selection: caller can pin a specific ``runId`` via the optional
+ * argument (e.g. from a ``?run=<id>`` URL param). When omitted, the
+ * hook follows whatever ``/runs`` reports as ``latest`` — which the
+ * backend defines as the currently-in-flight local run if any, else
+ * the newest archived run in S3.
  */
 import { useEffect, useState } from "react";
 
@@ -15,9 +21,10 @@ import type { RunEvent } from "@/types/benchmark";
 
 interface UseRunStreamResult {
   events: RunEvent[];
-  /** True once we've successfully fetched at least one batch. Mirrors the
-   *  previous hook's semantics so existing callers (StateInspector) render
-   *  the right "connected" indicator. */
+  /** The run_id whose events are currently in `events`. Drives header
+   *  badges + e2e selectors that need to assert "we're looking at run X". */
+  runId: string | null;
+  /** True once we've successfully fetched at least one batch. */
   connected: boolean;
   error: string | null;
 }
@@ -58,8 +65,14 @@ async function fetchEvents(runId: string): Promise<RunEvent[] | null> {
     .filter((e): e is RunEvent => e !== null);
 }
 
-export function useRunStream(): UseRunStreamResult {
+/**
+ * @param pinnedRunId  Optional explicit run_id to read (e.g. from a
+ *   `?run=...` URL param). Pass `null` / `undefined` to follow `/runs`'
+ *   `latest`.
+ */
+export function useRunStream(pinnedRunId?: string | null): UseRunStreamResult {
   const [events, setEvents] = useState<RunEvent[]>([]);
+  const [runId, setRunId] = useState<string | null>(pinnedRunId ?? null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,30 +81,34 @@ export function useRunStream(): UseRunStreamResult {
     let timeout: number | null = null;
 
     const tick = async () => {
-      const runId = await latestRunId();
+      // Resolve the run we're going to read this tick. If the caller
+      // pinned one, honor it forever; otherwise refresh against /runs
+      // every poll so the UI follows the live run when it appears.
+      const targetRunId = pinnedRunId ?? (await latestRunId());
       if (cancelled) return;
-      if (!runId) {
+      if (!targetRunId) {
         setError("no run found");
         setConnected(false);
+        setRunId(null);
         timeout = window.setTimeout(tick, POLL_INTERVAL_MS);
         return;
       }
 
-      const next = await fetchEvents(runId);
+      const next = await fetchEvents(targetRunId);
       if (cancelled) return;
 
+      // Always reflect the run we *attempted* — useful for the run-picker
+      // dropdown to show the current selection even before any events land.
+      setRunId(targetRunId);
+
       if (next === null) {
-        // 404 / non-2xx. Either the run hasn't emitted yet (typical right
-        // after harness start) or the parquet archive is missing. Either
-        // way the SPA renders the empty list — no retry beyond the next
-        // poll cycle.
         setError("no events for run");
         setConnected(false);
         timeout = window.setTimeout(tick, POLL_INTERVAL_MS);
         return;
       }
 
-      console.log(`[audit-log] reader=duckdb run=${runId} count=${next.length}`);
+      console.log(`[audit-log] reader=duckdb run=${targetRunId} count=${next.length}`);
       setEvents(next);
       setConnected(true);
       setError(null);
@@ -104,7 +121,7 @@ export function useRunStream(): UseRunStreamResult {
       cancelled = true;
       if (timeout !== null) window.clearTimeout(timeout);
     };
-  }, []);
+  }, [pinnedRunId]);
 
-  return { events, connected, error };
+  return { events, runId, connected, error };
 }
