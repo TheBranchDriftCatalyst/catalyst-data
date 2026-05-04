@@ -632,6 +632,29 @@ async def diagnostics_fallback(request: Request) -> dict[str, Any]:
         return {"reads": dict(_diag_counters["reads"])}
 
 
+@router.post("/diagnostics/flush")
+def diagnostics_flush() -> dict[str, Any]:
+    """Reset the dual-read counters to zero.
+
+    Used between bench runs to start the Phase 3 gate clock fresh, or
+    after fixing a bug that caused stray fallbacks. Returns the previous
+    snapshot so callers can confirm what was cleared.
+    """
+    with _diag_lock:
+        previous = {
+            "reads": dict(_diag_counters["reads"]),
+            "last_fallback_reason": _diag_counters["last_fallback_reason"],
+            "last_fallback_run_id": _diag_counters["last_fallback_run_id"],
+            "last_duckdb_run_id": _diag_counters["last_duckdb_run_id"],
+        }
+        _diag_counters["reads"]["duckdb"] = 0
+        _diag_counters["reads"]["jsonl_fallback"] = 0
+        _diag_counters["last_fallback_reason"] = None
+        _diag_counters["last_fallback_run_id"] = None
+        _diag_counters["last_duckdb_run_id"] = None
+    return {"flushed": True, "previous": previous}
+
+
 @router.get("/runs/{run_id}/config.json")
 def run_config(run_id: str) -> dict[str, Any]:
     """Return the run-config.json for a specific run, if present."""

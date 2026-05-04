@@ -401,6 +401,20 @@ cmd_button(
     icon_name='monitoring',
 )
 
+cmd_button(
+    name='btn-flush-diagnostics',
+    resource='duckdb-inspect',
+    argv=['sh', '-c', '''
+echo "── before flush ──"
+curl -sm 3 http://localhost:8080/viewer/api/bench/diagnostics | python3 -m json.tool
+echo
+echo "── flushing ──"
+curl -sm 3 -X POST http://localhost:8080/viewer/api/bench/diagnostics/flush | python3 -m json.tool
+'''],
+    text='Flush diagnostics counter',
+    icon_name='restart_alt',
+)
+
 # ============================================
 # CONFIGURATION
 # ============================================
