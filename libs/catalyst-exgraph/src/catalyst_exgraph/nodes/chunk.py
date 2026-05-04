@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import UTC, datetime
 from typing import Any
 
+from catalyst_exgraph.nodes._audit import make_audit_event
 from dagster_io.chunking import ChunkConfig, chunk_text
 
 logger = logging.getLogger(__name__)
@@ -62,17 +62,18 @@ class ChunkNode:
             self.config.target_tokens,
         )
 
-        audit_event = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "node_name": "chunk",
-            "status": "completed",
-            "duration_s": elapsed,
-            "details": {
-                "chunk_count": len(chunks),
-                "target_tokens": self.config.target_tokens,
-                "strategy": self.config.strategy,
-            },
-        }
+        # Route through make_audit_event so the State Inspector picks the
+        # event up via event_store — previously this node only appended
+        # to state["audit_events"] (post-hoc trail) and the UI saw nothing.
+        audit_event = make_audit_event(
+            "chunk",
+            "completed",
+            state=state,
+            duration_s=elapsed,
+            chunk_count=len(chunks),
+            target_tokens=self.config.target_tokens,
+            strategy=self.config.strategy,
+        )
 
         return {
             "chunks": chunks,

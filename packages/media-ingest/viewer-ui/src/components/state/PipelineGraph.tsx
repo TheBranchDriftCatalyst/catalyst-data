@@ -585,7 +585,20 @@ function PipelineGraphInner({ events, docId, selected, onSelectNode }: Props) {
       defaultEdgeOptions={{ animated: false }}
     >
       <Background color="#27272a" gap={16} />
-      <Controls showInteractive={false} />
+      {/* Dark-theme override for reactflow's default light-on-light Controls.
+          Arbitrary-variant Tailwind selectors target the internal button
+          spans + their fill-via-currentColor SVG icons. */}
+      <Controls
+        showInteractive={false}
+        className={[
+          "[&]:bg-zinc-900/90 [&]:border [&]:border-zinc-700 [&]:rounded [&]:overflow-hidden",
+          "[&_.react-flow__controls-button]:bg-zinc-900/90",
+          "[&_.react-flow__controls-button]:border-zinc-700",
+          "[&_.react-flow__controls-button]:text-zinc-300",
+          "[&_.react-flow__controls-button:hover]:bg-zinc-800",
+          "[&_.react-flow__controls-button>svg]:fill-zinc-300",
+        ].join(" ")}
+      />
     </ReactFlow>
   );
 }
