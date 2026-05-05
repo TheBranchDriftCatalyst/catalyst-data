@@ -124,6 +124,15 @@ function readRunFile(
   return existsSync(multi) ? readFileSync(multi, "utf-8") : null;
 }
 
+/** Read the corpus's ground-truth.json. The GT is corpus-level (not
+ *  run-level) because the same active GT is consulted across every run
+ *  in a corpus. Returns ``null`` when the corpus has no GT file —
+ *  caller should serve 404 so ``useActiveGroundTruth`` resolves to []. */
+function readGroundTruth(info: CorpusInfo): string | null {
+  const gt = join(info.rootDir, "ground-truth.json");
+  return existsSync(gt) ? readFileSync(gt, "utf-8") : null;
+}
+
 /**
  * Install a route handler that intercepts `/viewer/api/bench/runs*`
  * calls and serves bytes from the named corpus. No-op when
@@ -195,6 +204,20 @@ export async function useFixtureCorpus(
     // API. Safer than a blanket 404; the SPA may legitimately probe
     // endpoints we haven't mocked yet (e.g. /summary).
     await route.continue();
+  });
+
+  // Separate handler for the GT endpoint — it lives outside /bench/runs,
+  // and useActiveGroundTruth fetches it on every State Inspector mount.
+  // Without this, the SPA falls through to the live API and Gap #1's GT
+  // chips never render against the synthetic corpus (the dev GT doesn't
+  // know about ``happy-path-doc-001``).
+  await page.route("**/viewer/api/bench/ground-truth/**", async (route: Route) => {
+    const body = readGroundTruth(info);
+    if (body == null) {
+      await route.fulfill({ status: 404, body: "ground-truth.json not in corpus" });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body });
   });
 
   return info;

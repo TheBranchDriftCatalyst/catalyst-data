@@ -1,0 +1,42 @@
+{
+  "chunks": [
+    {
+      "chunk_id": "happy-path-doc-001:_consensus",
+      "doc_id": "happy-path-doc-001",
+      "mentions": [
+        {
+          "mention_type": "PERSON",
+          "span_end": null,
+          "span_start": null,
+          "text": "Entity0_0"
+        },
+        {
+          "mention_type": "ORG",
+          "span_end": null,
+          "span_start": null,
+          "text": "Entity0_1"
+        },
+        {
+          "mention_type": "GPE",
+          "span_end": null,
+          "span_start": null,
+          "text": "Entity1_0"
+        },
+        {
+          "mention_type": "PERSON",
+          "span_end": null,
+          "span_start": null,
+          "text": "Entity1_1"
+        },
+        {
+          "mention_type": "ORG",
+          "span_end": null,
+          "span_start": null,
+          "text": "Entity2_0"
+        }
+      ]
+    }
+  ],
+  "name": "fixture-active",
+  "total_mentions": 5
+}

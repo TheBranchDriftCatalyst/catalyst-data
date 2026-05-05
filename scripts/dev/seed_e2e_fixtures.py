@@ -182,9 +182,15 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
             details={
                 "decision": "accepted",
                 "text": ent_text,
+                # ConsensusDetail.acceptedToMention reads ``canonical_type`` —
+                # match the live bench schema. ``label`` kept for fixtures
+                # that haven't been migrated yet.
+                "canonical_type": label,
                 "label": label,
+                "n_encoders": len(encoders),
                 "source_models": list(sources),
                 "vote_count": len(sources),
+                "mean_confidence": round(rng.uniform(0.7, 0.95), 3),
                 "confidence": round(rng.uniform(0.7, 0.95), 3),
             },
         )
@@ -203,11 +209,15 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
             details={
                 "decision": "rejected",
                 "text": ent_text,
+                "canonical_type": label,
                 "label": label,
+                "n_encoders": len(encoders),
+                "quorum": 2,
                 "source_models": list(sources),
                 "vote_count": len(sources),
                 "confidence": round(rng.uniform(0.3, 0.55), 3),
                 "reject_reason": "single_source",
+                "reason": "single_source",
             },
         )
 
@@ -303,6 +313,46 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
         "docs": [doc_id],
     }
     return events, report
+
+
+def _build_happy_path_gt() -> dict:
+    """Ground-truth file for happy-path corpus (CD-1qqy GT-chip fix).
+
+    Mirrors the 5 ``accepted_specs`` in ``_build_happy_path``: same
+    text + canonical_type. ``gt-match.ts`` joins on text+type+doc_id and
+    skips spans when the predicted side has none (consensus accepted
+    mentions don't carry spans), so omitting span_start/span_end here
+    is intentional.
+
+    Shape mirrors the bench's GT file at
+    ``/viewer/api/bench/ground-truth/<name>.json`` — chunks→mentions
+    with doc_id at the chunk level. The chunk_id we use
+    (``<doc>:_consensus``) doesn't matter for matching because
+    ConsensusDetail's predicate carries doc_id, not chunk_id, so the
+    chunk-level guard short-circuits before chunk_id is compared.
+    """
+    doc_id = "happy-path-doc-001"
+    accepted = [
+        ("Entity0_0", "PERSON"),
+        ("Entity0_1", "ORG"),
+        ("Entity1_0", "GPE"),
+        ("Entity1_1", "PERSON"),
+        ("Entity2_0", "ORG"),
+    ]
+    return {
+        "name": "fixture-active",
+        "total_mentions": len(accepted),
+        "chunks": [
+            {
+                "doc_id": doc_id,
+                "chunk_id": f"{doc_id}:_consensus",
+                "mentions": [
+                    {"text": text, "mention_type": label, "span_start": None, "span_end": None}
+                    for text, label in accepted
+                ],
+            }
+        ],
+    }
 
 
 # ── trend-window corpus ─────────────────────────────────────────────────
@@ -473,6 +523,7 @@ def build_happy_path() -> None:
     out = CORPORA_DIR / "happy-path"
     _write_ndjson(out / "events.ndjson", events)
     _write_json(out / "report.json", report)
+    _write_json(out / "ground-truth.json", _build_happy_path_gt())
     _write_manifest(
         out / "manifest.yaml",
         {
