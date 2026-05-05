@@ -23,7 +23,8 @@ const FIXTURE_MODE = process.env.PLAYWRIGHT_FIXTURE_MODE === "1";
 
 // ESM-safe `__dirname` — the project compiles tests as ES modules.
 const _DIR = dirname(fileURLToPath(import.meta.url));
-const CORPORA_DIR = join(_DIR, "fixtures", "corpora");
+// Lives one level up from e2e/ now; corpora are still under e2e/fixtures/corpora.
+const CORPORA_DIR = join(_DIR, "e2e", "fixtures", "corpora");
 
 // Corpora the seeder produces. Keep in lockstep with
 // `scripts/dev/seed_e2e_fixtures.py`. A subset of these may legitimately

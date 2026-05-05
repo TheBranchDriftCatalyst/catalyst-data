@@ -6,7 +6,7 @@ export default defineConfig({
   testDir: "./e2e",
   // CD-1qqy: globalSetup gates `PLAYWRIGHT_FIXTURE_MODE=1` on the corpus
   // dir being present + populated. No-op when env is unset.
-  globalSetup: "./e2e/global-setup.ts",
+  globalSetup: "./playwright-global-setup.ts",
   fullyParallel: false,
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
