@@ -30,6 +30,7 @@ import { F1Strip, type F1Comparison, type F1Scores } from "./F1Strip";
 import { EncoderCovoteMatrix, type EncoderCovoteFilter } from "./EncoderCovoteMatrix";
 import { typeBadgeClass } from "./_mentionStyles";
 import { TrendSparkline } from "../TrendSparkline";
+import { DeepLinkButton } from "./DeepLinkButton";
 
 interface Props {
   chunkId: string;
@@ -292,13 +293,16 @@ export function ConsensusDetail({ chunkId, events, runId, onJumpRun }: Props) {
           <div className="font-mono text-[11px] text-zinc-300 font-semibold">
             Consensus — {docId}
           </div>
-          <TrendSparkline
-            points={trendPoints}
-            metric="consensus_accepted_count"
-            currentRunId={runId}
-            onSelectRun={(id) => onJumpRun?.(id)}
-            trend="up-good"
-          />
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <DeepLinkButton testidPrefix="consensus" panelName="consensus" />
+            <TrendSparkline
+              points={trendPoints}
+              metric="consensus_accepted_count"
+              currentRunId={runId}
+              onSelectRun={(id) => onJumpRun?.(id)}
+              trend="up-good"
+            />
+          </div>
         </div>
 
         {/* Encoder list */}

@@ -28,10 +28,12 @@
 import { useMemo } from "react";
 
 import type { RunEvent } from "@/types/benchmark";
+import { useRunReport } from "@/hooks/useRunReport";
 
 interface Props {
   events: RunEvent[];
   docId: string;
+  compareRunId?: string | null;
 }
 
 interface DownstreamCard {
@@ -213,8 +215,21 @@ function buildSummary(events: RunEvent[], docId: string): DownstreamSummary {
   };
 }
 
-export function DownstreamPanel({ events, docId }: Props) {
+export function DownstreamPanel({ events, docId, compareRunId }: Props) {
   const summary = useMemo(() => buildSummary(events, docId), [events, docId]);
+  // A/B run-diff: fetch compare run report for potential row count deltas.
+  // For now, the report is fetched but not yet used — row count deltas may
+  // be added to a future iteration. Fetching early enables future UI enhancements.
+  useRunReport(compareRunId ?? null);
+
+  // A/B run-diff: extract row counts from compare run for Δ display.
+  // Note: the compare report's stats may be in the models array under an entry
+  // with row count data. For now, return empty map and rely on defensive null checks.
+  const compareRowCounts = useMemo<Record<string, number>>(() => {
+    // TODO: if the compare report is available, extract row count stats.
+    // For now, we defensively return empty and show no delta.
+    return {};
+  }, []);
 
   if (summary.cards.length === 0) {
     return (
@@ -242,6 +257,7 @@ export function DownstreamPanel({ events, docId }: Props) {
             card={card}
             dagsterRunId={summary.dagsterRunId}
             materializedAt={summary.materializedAt}
+            compareRowCount={compareRowCounts[card.assetKey] ?? null}
           />
         ))}
       </div>
@@ -253,10 +269,12 @@ function DownstreamCardView({
   card,
   dagsterRunId,
   materializedAt,
+  compareRowCount,
 }: {
   card: DownstreamCard;
   dagsterRunId: string | null;
   materializedAt: string | null;
+  compareRowCount: number | null;
 }) {
   const isError = card.status === "error";
   const wrapClass = isError
@@ -287,7 +305,25 @@ function DownstreamCardView({
 
       {/* Row 2: row count + size + materialized_at */}
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-zinc-500 text-[10px]">
-        {card.rowCount != null && <span>{formatNumber(card.rowCount)} rows</span>}
+        {card.rowCount != null && (
+          <span>
+            {formatNumber(card.rowCount)} rows
+            {compareRowCount != null && (
+              <span
+                className={`text-[9px] ml-1 ${
+                  card.rowCount - compareRowCount > 0
+                    ? "text-emerald-400"
+                    : card.rowCount - compareRowCount < 0
+                      ? "text-rose-400"
+                      : "text-zinc-600"
+                }`}
+              >
+                ({card.rowCount - compareRowCount > 0 ? "+" : ""}
+                {(card.rowCount - compareRowCount).toLocaleString()})
+              </span>
+            )}
+          </span>
+        )}
         {card.sizeBytes != null && (
           <>
             <span className="text-zinc-700">·</span>

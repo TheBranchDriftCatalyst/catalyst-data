@@ -32,6 +32,8 @@ export interface F1Comparison {
   delta: number;
   /** What the delta is computed against — e.g. "vs best encoder". */
   baselineLabel?: string;
+  /** For A/B diffs: scores from the compare run to compute per-metric deltas. */
+  compareScores?: F1Scores;
 }
 
 interface Props {
@@ -43,6 +45,15 @@ interface Props {
 }
 
 const fmt = (v: number) => v.toFixed(2);
+const fmtDelta = (v: number) => {
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${v.toFixed(3)}`;
+};
+
+function getDeltaColor(delta: number): string {
+  // Positive delta is good for P/R/F1 (higher is better).
+  return delta > 0.005 ? "text-emerald-400" : delta < -0.005 ? "text-rose-400" : "text-zinc-500";
+}
 
 function buildTooltip(scores: F1Scores): string {
   const lines: string[] = [];
@@ -96,6 +107,8 @@ export function F1Strip({ scores, comparison, leadingThresholdMet }: Props): Rea
     );
   }
 
+  const hasCompareScores = comparison?.compareScores !== undefined;
+
   return (
     <div
       data-testid="f1-strip"
@@ -107,6 +120,14 @@ export function F1Strip({ scores, comparison, leadingThresholdMet }: Props): Rea
         <span data-testid="f1-strip-precision" className="text-zinc-200">
           {fmt(scores.precision)}
         </span>
+        {hasCompareScores && (
+          <span
+            data-testid="f1-strip-precision-delta"
+            className={`text-[9px] ml-1 ${getDeltaColor(scores.precision - comparison!.compareScores!.precision)}`}
+          >
+            ({fmtDelta(scores.precision - comparison!.compareScores!.precision)})
+          </span>
+        )}
       </span>
       <span className="text-zinc-700">·</span>
       <span>
@@ -114,6 +135,14 @@ export function F1Strip({ scores, comparison, leadingThresholdMet }: Props): Rea
         <span data-testid="f1-strip-recall" className="text-zinc-200">
           {fmt(scores.recall)}
         </span>
+        {hasCompareScores && (
+          <span
+            data-testid="f1-strip-recall-delta"
+            className={`text-[9px] ml-1 ${getDeltaColor(scores.recall - comparison!.compareScores!.recall)}`}
+          >
+            ({fmtDelta(scores.recall - comparison!.compareScores!.recall)})
+          </span>
+        )}
       </span>
       <span className="text-zinc-700">·</span>
       <span>
@@ -121,6 +150,14 @@ export function F1Strip({ scores, comparison, leadingThresholdMet }: Props): Rea
         <span data-testid="f1-strip-f1" className={f1Color}>
           {fmt(scores.strict_f1)}
         </span>
+        {hasCompareScores && (
+          <span
+            data-testid="f1-strip-f1-delta"
+            className={`text-[9px] ml-1 ${getDeltaColor(scores.strict_f1 - comparison!.compareScores!.strict_f1)}`}
+          >
+            ({fmtDelta(scores.strict_f1 - comparison!.compareScores!.strict_f1)})
+          </span>
+        )}
       </span>
       {deltaPill}
     </div>
