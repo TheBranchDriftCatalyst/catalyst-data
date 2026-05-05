@@ -331,8 +331,12 @@ export interface MentionDecisionDetails {
 
 /**
  * Details for `mention_rejected` events — mentions that didn't reach quorum.
- * Note: consensus.py does NOT emit source_models or mean_confidence for
- * rejected mentions — only the 5 fields below.
+ *
+ * Gap #9 (CD-…): consensus.py now emits `source_models` on rejected events
+ * so the rejected-row UI can show which encoders argued for the mention
+ * (asymmetric-coverage signal — e.g. gliner-pii alone below quorum).
+ * The field is optional because legacy events predating Gap #9 don't carry
+ * it; the UI degrades gracefully when absent.
  */
 export interface MentionRejectedDetails {
   text: string;
@@ -340,6 +344,8 @@ export interface MentionRejectedDetails {
   n_encoders: number;
   quorum: number;
   reason: string; // always "below_quorum" in current impl
+  /** Gap #9 — encoders that voted for this rejected mention (may be absent on legacy events). */
+  source_models?: string[];
 }
 
 /**

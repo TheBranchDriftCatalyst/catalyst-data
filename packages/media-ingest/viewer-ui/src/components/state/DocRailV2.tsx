@@ -144,9 +144,10 @@ export function DocRailV2({ events, selectedDoc, onSelect }: Props) {
   }
 
   return (
-    <div>
+    <div data-testid="doc-rail">
       <div className="sticky top-0 z-10 bg-surface-1/95 backdrop-blur border-b border-white/5 px-2 py-2 space-y-1.5">
         <input
+          data-testid="doc-rail-search"
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -160,6 +161,7 @@ export function DocRailV2({ events, selectedDoc, onSelect }: Props) {
               return (
                 <button
                   key={d}
+                  data-testid={`doc-rail-domain-${d}`}
                   type="button"
                   onClick={() => toggleDomain(d)}
                   className={`px-1.5 py-0.5 rounded font-mono text-[9.5px] border transition-colors ${
@@ -194,6 +196,8 @@ export function DocRailV2({ events, selectedDoc, onSelect }: Props) {
                   return (
                     <button
                       key={doc.docId}
+                      data-testid={`doc-rail-doc-${doc.docId}`}
+                      data-selected={sel ? "true" : "false"}
                       type="button"
                       onClick={() => onSelect(doc.docId)}
                       className={`w-full text-left px-3 py-1 font-mono text-[10px] flex items-center gap-2 ${

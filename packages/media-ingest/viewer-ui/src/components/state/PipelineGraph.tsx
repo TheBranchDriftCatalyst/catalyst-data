@@ -94,15 +94,24 @@ const STATUS_DOT: Record<NodeStatus, string> = {
 
 function PipelineNode({ data }: NodeProps) {
   const d = data as PipelineNodeData;
+  // Per-node wrapper testid — encodes role and (when present) ref so
+  // tests can deep-link into a specific encoder/model node without
+  // relying on text content. e.g. ``pipeline-node-ner_encoder-gliner-pii``.
+  const nodeTestId = d.ref ? `pipeline-node-${d.role}-${d.ref}` : `pipeline-node-${d.role}`;
   return (
     <div
+      data-testid={nodeTestId}
       className={`px-2 py-1.5 rounded border font-mono text-[10px] min-w-[120px] ${STATUS_BG[d.status]} ${
         d.selected ? "ring-2 ring-cyan-400" : ""
       }`}
     >
       <Handle type="target" position={Position.Top} className="!bg-zinc-600 !w-1.5 !h-1.5" />
       <div className="flex items-center gap-1.5">
-        <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[d.status]}`} />
+        <span
+          data-testid="pipeline-node-status"
+          data-status={d.status}
+          className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[d.status]}`}
+        />
         <span className="text-zinc-200 truncate flex-1">{d.title}</span>
       </div>
       {d.badge && <div className="text-zinc-400 text-[9px] mt-0.5 pl-3">{d.badge}</div>}
@@ -566,34 +575,36 @@ function PipelineGraphInner({ events, docId, selected, onSelectNode }: Props) {
   }, [built, setNodes, setEdges, fitView]);
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onNodeClick={(_, node) => {
-        const d = node.data as PipelineNodeData;
-        onSelectNode({ role: d.role, ref: d.ref });
-      }}
-      fitView
-      fitViewOptions={{ padding: 0.1, minZoom: 0.2, maxZoom: 1.5 }}
-      proOptions={{ hideAttribution: true }}
-      nodesDraggable={false}
-      nodesConnectable={false}
-      elementsSelectable
-      defaultEdgeOptions={{ animated: false }}
-      // xyflow's built-in dark theme. Sets `data-color-mode="dark"` on
-      // the wrapper which the bundled CSS uses to recolor the Controls
-      // buttons + handles + minimap + edges. Strictly better than the
-      // arbitrary-variant Tailwind hack we had before since it uses
-      // xyflow's own CSS variables (--xy-controls-button-*) and tracks
-      // upstream theme tweaks automatically.
-      colorMode="dark"
-    >
-      <Background color="#27272a" gap={16} />
-      <Controls showInteractive={false} />
-    </ReactFlow>
+    <div data-testid="pipeline-graph" className="h-full w-full">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodeClick={(_, node) => {
+          const d = node.data as PipelineNodeData;
+          onSelectNode({ role: d.role, ref: d.ref });
+        }}
+        fitView
+        fitViewOptions={{ padding: 0.1, minZoom: 0.2, maxZoom: 1.5 }}
+        proOptions={{ hideAttribution: true }}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable
+        defaultEdgeOptions={{ animated: false }}
+        // xyflow's built-in dark theme. Sets `data-color-mode="dark"` on
+        // the wrapper which the bundled CSS uses to recolor the Controls
+        // buttons + handles + minimap + edges. Strictly better than the
+        // arbitrary-variant Tailwind hack we had before since it uses
+        // xyflow's own CSS variables (--xy-controls-button-*) and tracks
+        // upstream theme tweaks automatically.
+        colorMode="dark"
+      >
+        <Background color="#27272a" gap={16} />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </div>
   );
 }
 

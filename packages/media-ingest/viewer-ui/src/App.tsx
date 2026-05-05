@@ -10,6 +10,7 @@ import PlayerPage from "@/pages/Player";
 import S3Explorer from "@/pages/S3Explorer";
 import BenchmarkReport from "@/pages/BenchmarkReport";
 import { StateInspector } from "@/pages/StateInspector";
+import { BenchmarkRunner } from "@/pages/BenchmarkRunner";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -68,6 +69,7 @@ function AppShell({
             <Route path="/s3" element={<S3Explorer />} />
             <Route path="/benchmarks" element={<BenchmarkReport />} />
             <Route path="/benchmarks/state" element={<StateInspector />} />
+            <Route path="/benchmarks/runner" element={<BenchmarkRunner />} />
             {/* Backwards-compat redirect: /state-v2 was the V2 trial route. */}
             <Route
               path="/benchmarks/state-v2"

@@ -15,6 +15,10 @@ interface ResizablePanelProps {
    *  height (and collapsed state if uncontrolled) on mount and writes
    *  back on every drag-end / collapse toggle. */
   storageKey?: string;
+  /** Optional ``data-testid`` override for the root element. Defaults to
+   *  ``resizable-panel`` so the e2e suite can target a specific consumer
+   *  (e.g. ``state-inspector-detail-panel``). */
+  testId?: string;
 }
 
 export default function ResizablePanel({
@@ -27,6 +31,7 @@ export default function ResizablePanel({
   className = "",
   collapsedHeight = 40,
   storageKey,
+  testId = "resizable-panel",
 }: ResizablePanelProps) {
   const [internalCollapsed, setInternalCollapsed] = useState<boolean>(() => {
     if (storageKey && typeof window !== "undefined") {
@@ -109,7 +114,7 @@ export default function ResizablePanel({
   return (
     <div
       ref={panelRef}
-      data-testid="resizable-panel"
+      data-testid={testId}
       className={`flex flex-col flex-shrink-0 bg-surface-1 border-t border-white/5 transition-[height] ${
         isDragging.current ? "" : "duration-200"
       } ${className}`}
@@ -117,7 +122,7 @@ export default function ResizablePanel({
     >
       {/* Drag handle bar */}
       <div
-        data-testid="resize-handle"
+        data-testid="resizer-handle"
         className={`resizable-panel-handle group flex items-center justify-center flex-shrink-0 ${
           collapsed ? "cursor-pointer" : "cursor-ns-resize"
         }`}

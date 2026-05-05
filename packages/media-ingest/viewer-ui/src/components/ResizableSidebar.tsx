@@ -14,6 +14,10 @@ interface ResizableSidebarProps {
    *  yet — file an issue if you need it. */
   side?: "left";
   className?: string;
+  /** Optional ``data-testid`` override for the root element. Defaults to
+   *  ``resizable-sidebar`` so the e2e suite can target a specific
+   *  consumer (e.g. ``state-inspector-rail``). */
+  testId?: string;
 }
 
 /** Horizontal resizable sidebar. Mirrors the vertical ``ResizablePanel``
@@ -27,6 +31,7 @@ export default function ResizableSidebar({
   maxWidth = 600,
   side: _side = "left",
   className = "",
+  testId = "resizable-sidebar",
 }: ResizableSidebarProps) {
   const [width, setWidth] = useState<number>(() => {
     if (storageKey && typeof window !== "undefined") {
@@ -82,15 +87,11 @@ export default function ResizableSidebar({
   }, [maxWidth, minWidth, storageKey, width]);
 
   return (
-    <div
-      data-testid="resizable-sidebar"
-      className={`relative flex-shrink-0 ${className}`}
-      style={{ width }}
-    >
+    <div data-testid={testId} className={`relative flex-shrink-0 ${className}`} style={{ width }}>
       {children}
       {/* Drag handle — sliver on the right edge, widens on hover. */}
       <div
-        data-testid="resize-handle-x"
+        data-testid="resizer-handle"
         onMouseDown={handleMouseDown}
         className="group absolute top-0 right-0 h-full w-1 cursor-ew-resize hover:bg-cyan-500/30 active:bg-cyan-500/50 transition-colors z-10"
       >

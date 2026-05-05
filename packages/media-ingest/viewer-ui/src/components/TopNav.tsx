@@ -24,6 +24,7 @@ import {
   ExternalLink,
   FileText,
   HardDrive,
+  Play,
   Tv2,
   Workflow,
 } from "lucide-react";
@@ -42,6 +43,7 @@ const ITEMS: NavItem[] = [
   { to: "/s3", label: "S3 Explorer", icon: Database },
   { to: "/benchmarks", label: "Benchmarks", icon: BarChart3, prefix: true },
   { to: "/benchmarks/state", label: "State Inspector", icon: Workflow },
+  { to: "/benchmarks/runner", label: "Runner", icon: Play },
 ];
 
 interface ServiceLink {

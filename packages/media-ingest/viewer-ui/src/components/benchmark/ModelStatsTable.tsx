@@ -3,6 +3,8 @@ import type { ModelResult } from "@/types/benchmark";
 import { MetricLabel, GroupBadge, METRIC_TOOLTIPS } from "./shared";
 import type { GroupByDimension } from "./shared";
 import { useModelGrouping } from "./useModelGrouping";
+import { TrendSparkline } from "@/components/TrendSparkline";
+import { useTrendData } from "@/hooks/useTrendData";
 
 interface Row {
   name: string;
@@ -42,9 +44,17 @@ function sum(rows: Row[], key: keyof Row): number {
 export function ModelStatsTable({
   models,
   groupBy = "type",
+  selectedRunId = null,
+  onJumpRun,
 }: {
   models: ModelResult[];
   groupBy?: GroupByDimension;
+  /** Active run id — passes through to per-row TrendSparkline so the
+   *  matching dot is highlighted. ``null`` = following Latest. */
+  selectedRunId?: string | null;
+  /** Click handler when a sparkline dot is selected. Caller updates
+   *  the report source / URL. */
+  onJumpRun?: (runId: string) => void;
 }) {
   const rows = useMemo(() => toRows(models), [models]);
   const [sortCol, setSortCol] = useState<keyof Row>("name");
@@ -114,6 +124,10 @@ export function ModelStatsTable({
                 {icon(c.key)}
               </th>
             ))}
+            {/* Gap #8 — cross-run trend column. No sort handle: the order
+             *  is fixed (last 10 runs), and a sort would just confuse the
+             *  per-row sparkline anchor. */}
+            <th className="text-center py-2 px-2 select-none">trend (last 10)</th>
           </tr>
         </thead>
         <tbody>
@@ -153,10 +167,17 @@ export function ModelStatsTable({
                   </td>
                   <AggCell value={sum(group, "retries")} label="Σ" warn />
                   <AggCell value={sum(group, "errors")} label="Σ" error />
+                  {/* group-row spacer for the trend column — keeps the
+                   *  table grid aligned. No sparkline at the group level. */}
+                  <td className="py-1.5 px-2" />
                 </tr>
                 {!isCollapsed &&
                   sortedGroup(group).map((r) => (
-                    <tr key={r.name} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    <tr
+                      key={r.name}
+                      data-testid={`leaderboard-row-${r.name}`}
+                      className="border-b border-white/5 hover:bg-white/[0.02]"
+                    >
                       <td />
                       <td className="py-1.5 px-2 text-left text-zinc-200">{r.name}</td>
                       <td className="py-1.5 px-2 text-center text-zinc-300">{r.mentions}</td>
@@ -177,6 +198,14 @@ export function ModelStatsTable({
                         className={`py-1.5 px-2 text-center ${r.errors > 0 ? "text-red-400" : "text-zinc-300"}`}
                       >
                         {r.errors}
+                      </td>
+                      <td className="py-1.5 px-2 text-center">
+                        <LeaderboardRowTrend
+                          model={r.name}
+                          modelType={r.type}
+                          selectedRunId={selectedRunId}
+                          onJumpRun={onJumpRun}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -218,4 +247,49 @@ function AggCell({
 
 function GroupBlock({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
+}
+
+/** Per-row trend sparkline. Each row gets its own ``useTrendData`` call;
+ *  react-query dedups the underlying ``report.json`` fetches across rows
+ *  so the network sees one GET per (run, table) pair regardless of how
+ *  many encoders/llms are listed.
+ *
+ *  Metric choice: encoders + the ensemble row use ``encoder_strict_f1``
+ *  so the trend renders the QA signal data scientists care about. LLM
+ *  rows use ``encoder_mention_count`` instead because mention F1 is run-
+ *  level only on the ensemble row in the report — the per-LLM ``scores``
+ *  block is identical to the encoders' but is the "as-if-this-llm-were-
+ *  the-encoder" hypothetical, not really a per-LLM F1. Counts are the
+ *  honest signal. */
+function LeaderboardRowTrend({
+  model,
+  modelType,
+  selectedRunId,
+  onJumpRun,
+}: {
+  model: string;
+  modelType: string;
+  selectedRunId: string | null;
+  onJumpRun?: (runId: string) => void;
+}) {
+  const isConsensusRow = model === "ensemble" || model === "consensus";
+  const metric = isConsensusRow
+    ? ("consensus_strict_f1" as const)
+    : modelType === "encoder"
+      ? ("encoder_strict_f1" as const)
+      : ("encoder_mention_count" as const);
+  const { points } = useTrendData({
+    axis: "aggregate",
+    metric,
+    model,
+  });
+  return (
+    <TrendSparkline
+      points={points}
+      metric={metric}
+      currentRunId={selectedRunId}
+      onSelectRun={(id) => onJumpRun?.(id)}
+      trend="up-good"
+    />
+  );
 }

@@ -547,7 +547,14 @@ export default function BenchmarkReport() {
               </div>
 
               {/* Model stats table */}
-              <ModelStatsTable models={visibleModels} groupBy={groupBy} />
+              <ModelStatsTable
+                models={visibleModels}
+                groupBy={groupBy}
+                selectedRunId={selectedReportRunId}
+                onJumpRun={(runId) =>
+                  setReportSource(`/viewer/api/bench/runs/${encodeURIComponent(runId)}/report.json`)
+                }
+              />
             </div>
           )}
 

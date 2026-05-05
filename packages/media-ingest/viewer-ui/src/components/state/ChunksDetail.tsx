@@ -42,11 +42,15 @@ export function ChunksDetail({ events, docId }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const rows = useMemo<ChunkRow[]>(() => {
-    const out: ChunkRow[] = [];
+    // Dedupe by chunk_id — DuckDB hive-partitioned audit log preserves events
+    // across re-runs, so the same chunk_loaded gets replayed N times. The
+    // upstream emit_chunk_text is idempotent per-process but not per-store.
+    const byId = new Map<string, ChunkRow>();
     for (const e of events) {
       if (e.node_name !== "chunk_loaded" || !e.chunk_id) continue;
       if (!e.chunk_id.startsWith(`${docId}:`)) continue;
       if (!_isInputChunk(e.chunk_id)) continue;
+      if (byId.has(e.chunk_id)) continue;
       const d = (e.details ?? {}) as {
         text?: string;
         char_count?: number;
@@ -59,7 +63,7 @@ export function ChunksDetail({ events, docId }: Props) {
       };
       const meta = (d.chunk_metadata ?? {}) as Record<string, unknown>;
       const text = d.text ?? "";
-      out.push({
+      byId.set(e.chunk_id, {
         chunkId: e.chunk_id,
         index: d.chunk_index ?? null,
         charCount: d.char_count ?? text.length,
@@ -73,6 +77,7 @@ export function ChunksDetail({ events, docId }: Props) {
         metadata: meta,
       });
     }
+    const out = [...byId.values()];
     out.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
     return out;
   }, [events, docId]);
@@ -94,7 +99,7 @@ export function ChunksDetail({ events, docId }: Props) {
   }
 
   return (
-    <div className="p-3 font-mono text-[11px] space-y-2">
+    <div data-testid="chunks-detail" className="p-3 font-mono text-[11px] space-y-2">
       <div className="flex items-center gap-3 text-zinc-400">
         <span className="text-zinc-300">{rows.length} input chunks</span>
         <span className="text-zinc-600">·</span>
@@ -115,7 +120,12 @@ export function ChunksDetail({ events, docId }: Props) {
         {rows.map((r) => {
           const isOpen = expanded === r.chunkId;
           return (
-            <div key={r.chunkId} className="rounded border border-white/5 bg-white/[0.02]">
+            <div
+              key={r.chunkId}
+              data-testid={`chunk-row-${r.chunkId}`}
+              data-expanded={isOpen ? "true" : "false"}
+              className="rounded border border-white/5 bg-white/[0.02]"
+            >
               <button
                 type="button"
                 onClick={() => setExpanded(isOpen ? null : r.chunkId)}
@@ -142,7 +152,10 @@ export function ChunksDetail({ events, docId }: Props) {
               {isOpen && (
                 <div className="px-2 py-2 border-t border-white/5 space-y-2">
                   <div className="text-[9px] text-zinc-500 uppercase tracking-wide">full text</div>
-                  <div className="whitespace-pre-wrap text-zinc-200 text-[10.5px] max-h-48 overflow-y-auto">
+                  <div
+                    data-testid="chunk-row-fulltext"
+                    className="whitespace-pre-wrap text-zinc-200 text-[10.5px] max-h-48 overflow-y-auto"
+                  >
                     {r.fullText}
                   </div>
                   {Object.keys(r.metadata).length > 0 && (

@@ -17,12 +17,18 @@
 import { useMemo } from "react";
 
 import type { MentionLite, PropositionLite, RunEvent } from "@/types/benchmark";
+import { SpoCallInspect } from "@/components/state/SpoCallInspect";
 
 interface Props {
   chunkText: Record<string, unknown> | null;
   extracted: Record<string, unknown> | null;
   events: RunEvent[];
   hoveredErrorIndex: number | null;
+  /** When non-null, render the SPO prompt/response inspect block.
+   *  Both fields must be present for the inspect block to wire its
+   *  expand-button fetches. */
+  runId?: string | null;
+  chunkId?: string | null;
 }
 
 interface Span {
@@ -110,7 +116,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function ChunkTextPanel({ chunkText, extracted, hoveredErrorIndex }: Props) {
+export function ChunkTextPanel({ chunkText, extracted, hoveredErrorIndex, runId, chunkId }: Props) {
   const text = (chunkText?.text as string | undefined) ?? "";
   const truncated = chunkText?.truncated as boolean | undefined;
   const charCount = chunkText?.char_count as number | undefined;
@@ -160,7 +166,7 @@ export function ChunkTextPanel({ chunkText, extracted, hoveredErrorIndex }: Prop
   const extras = Object.entries(cmeta).filter(([k]) => !KNOWN_KEYS.has(k));
 
   return (
-    <div className="p-3 space-y-4">
+    <div data-testid="chunk-text-panel" className="p-3 space-y-4">
       <Section title="provenance">
         <MetaRow label="domain" value={domain} />
         <MetaRow
@@ -222,7 +228,10 @@ export function ChunkTextPanel({ chunkText, extracted, hoveredErrorIndex }: Prop
           {renderTextWithSpans(text, spans)}
         </div>
         {truncated && (
-          <div className="text-[10px] text-amber-400 font-mono mt-1">
+          <div
+            data-testid="chunk-text-truncated"
+            className="text-[10px] text-amber-400 font-mono mt-1"
+          >
             text truncated to {text.length} of {charCount} chars (event_tail max_chars cap)
           </div>
         )}
@@ -234,6 +243,7 @@ export function ChunkTextPanel({ chunkText, extracted, hoveredErrorIndex }: Prop
             {propositions.map((p, i) => (
               <div
                 key={i}
+                data-testid="proposition-row"
                 className="text-[11px] font-mono text-zinc-300 bg-surface-0 border border-white/5 rounded p-1.5"
               >
                 <span className="text-cyan-300">{p.subject}</span>
@@ -246,6 +256,15 @@ export function ChunkTextPanel({ chunkText, extracted, hoveredErrorIndex }: Prop
           </div>
         </Section>
       )}
+
+      {extracted && runId && chunkId ? (
+        <SpoCallInspect
+          details={extracted as Parameters<typeof SpoCallInspect>[0]["details"]}
+          runId={runId}
+          chunkId={chunkId}
+          key={`${runId}|${chunkId}`}
+        />
+      ) : null}
     </div>
   );
 }
