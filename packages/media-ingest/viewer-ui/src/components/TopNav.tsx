@@ -29,6 +29,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { ActiveGtBadge } from "./ActiveGtBadge";
 
 interface NavItem {
   to: string;
@@ -165,6 +166,8 @@ export function TopNav() {
         ))}
       </nav>
       <div className="flex-1" />
+      <ActiveGtBadge />
+      <div className="w-2" />
       <ServicesMenu />
     </header>
   );

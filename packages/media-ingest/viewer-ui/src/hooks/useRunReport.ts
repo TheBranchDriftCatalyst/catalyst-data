@@ -118,15 +118,29 @@ export function useRunReport(runId: string | null) {
 
 /** Fetch the "active" GT and flatten it to a list of mentions. Returns
  *  ``[]`` when the GT exists but is empty (i.e. the active GT has no
- *  mentions populated yet — common before the manual review pass). */
+ *  mentions populated yet — common before the manual review pass).
+ *
+ *  Reads the active GT name from URL param `?gt=` or localStorage `viewer:activeGt`,
+ *  falling back to the server's symbolic "active" if neither is set. */
 export function useActiveGroundTruth() {
+  // Get active GT name from URL, localStorage, or fall back to "active"
+  const getActiveGtPath = () => {
+    const params = new URLSearchParams(window.location.search);
+    const urlGt = params.get("gt");
+    if (urlGt) return urlGt;
+    const storedGt = window.localStorage.getItem("viewer:activeGt");
+    if (storedGt) return storedGt;
+    return "active";
+  };
+
   return useQuery<GtMention[]>({
-    queryKey: ["bench", "ground-truth", "active"],
+    queryKey: ["bench", "ground-truth", getActiveGtPath()],
     queryFn: async () => {
-      const res = await fetch("/viewer/api/bench/ground-truth/active.json");
+      const gtPath = getActiveGtPath();
+      const res = await fetch(`/viewer/api/bench/ground-truth/${encodeURIComponent(gtPath)}.json`);
       if (!res.ok) {
         if (res.status === 404) return [];
-        throw new Error(`active.json failed: ${res.status}`);
+        throw new Error(`${gtPath}.json failed: ${res.status}`);
       }
       const body = (await res.json()) as GtFile;
       const out: GtMention[] = [];
