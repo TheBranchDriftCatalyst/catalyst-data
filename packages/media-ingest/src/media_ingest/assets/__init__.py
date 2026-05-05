@@ -6,6 +6,7 @@ from media_ingest.assets.documents import media_documents
 from media_ingest.assets.entity_candidates import media_entity_candidates
 from media_ingest.assets.gold import media_gold_assets
 from media_ingest.assets.metadata import media_metadata
+from media_ingest.assets.persist_artifacts import mention_proposition_artifacts
 from media_ingest.assets.speaker_embeddings import media_speaker_embeddings
 from media_ingest.assets.speaker_profiles import media_speaker_profiles
 from media_ingest.assets.training import dpo_dataset, sft_dataset
@@ -25,6 +26,8 @@ __all__ = [
     "media_chunks",
     "media_gold_assets",
     "media_entity_candidates",
+    # Audit events (cold-path persist_artifacts emission)
+    "mention_proposition_artifacts",
     # Speaker identity (CD-34j.1)
     "media_speaker_embeddings",
     "media_speaker_profiles",

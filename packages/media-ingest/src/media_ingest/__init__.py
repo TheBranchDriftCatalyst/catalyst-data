@@ -54,6 +54,7 @@ from media_ingest.assets import (
     media_speaker_profiles,
     media_transcode,
     media_transcriptions,
+    mention_proposition_artifacts,
     sft_dataset,
 )
 from media_ingest.schedules import media_discovery_job, media_discovery_schedule
@@ -73,6 +74,8 @@ defs = Definitions(
         media_chunks,
         *media_gold_assets,
         media_entity_candidates,
+        # Audit events (cold-path persist_artifacts emission after mentions + assertions materialize)
+        mention_proposition_artifacts,
         # Speaker identity (CD-34j.1)
         media_speaker_embeddings,
         media_speaker_profiles,
