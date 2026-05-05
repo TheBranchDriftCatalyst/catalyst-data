@@ -8,6 +8,20 @@ export default defineConfig({
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
   workers: 1, // serial — shared live data, write ops must not conflict
+  // 150s per-test cap. State Inspector specs deep-link into the SPA,
+  // wait for poll-driven events (3s polling against a multi-MB events
+  // response that takes 30–60s on the FastAPI side from a cold parquet
+  // cache) to populate, and assert on rendered testids. Discovery alone
+  // can take 20s; the SPA's first poll for limit=50000 takes 40s+; then
+  // we need ~10s of margin for panel-render. 150s is generous but the
+  // dev-server cache amortizes across the suite so the practical cost
+  // stays modest.
+  timeout: 150_000,
+  // Global default for `expect(...)` waits. Specs override per-call when
+  // they need a tighter or looser bound — but the default of 5s is too
+  // tight for the SPA's poll-driven testids that depend on a 50000-event
+  // ndjson response landing.
+  expect: { timeout: 60_000 },
 
   /**
    * Multi-reporter setup:
@@ -60,7 +74,31 @@ export default defineConfig({
   ],
 
   use: {
-    baseURL: process.env.VIEWER_URL ?? "http://media-explorer.talos00",
+    // ENV BLEED PREVENTION
+    // ────────────────────
+    // The fallback here is `localhost:5173` — local Vite dev server,
+    // full stop. Deployed (talos / prod) hosts return SPA-fallback HTML
+    // for `/viewer/api/*` which silently breaks JSON-parsing fixtures
+    // and makes regression specs skip-by-default ("0 passed, 0 failed,
+    // N skipped"). NO production hostname is allowed in this fallback
+    // chain.
+    //
+    // ``localhost`` (not ``127.0.0.1``) because Vite's dev server binds
+    // exclusively to the ``localhost`` host header by default and
+    // returns a blank page when hit on the IPv4 literal — the Gap #4
+    // verifier hit this and had to override the script's URL manually.
+    // The env-guard in ``e2e/fixtures/coverage.ts`` still accepts
+    // 127.0.0.1 / ::1 if explicitly set, so dev configs that pin the
+    // IPv4 literal continue to work.
+    //
+    // If `PLAYWRIGHT_BASE_URL` or `VIEWER_URL` is set in the agent's
+    // shell, the env-guard in `e2e/fixtures/coverage.ts` will assert it
+    // resolves to a localhost address and fail the run loud if it does
+    // not. That's the active defense — this default is the passive one.
+    baseURL:
+      process.env.PLAYWRIGHT_BASE_URL ??
+      process.env.VIEWER_URL ??
+      "http://localhost:5173",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure",

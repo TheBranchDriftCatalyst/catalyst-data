@@ -7,7 +7,16 @@ import type { APIRequestContext } from "@playwright/test";
 export class APIHelper {
   constructor(
     private request: APIRequestContext,
-    private baseURL: string = "http://media-explorer.talos00",
+    // Default to the LOCAL viewer-ui dev server (vite, :5173). It proxies
+    // `/viewer/api/*` → :8080 (FastAPI). Never fall back to a deployed
+    // talos host: the SPA fallback returns HTML for unknown routes which
+    // makes downstream JSON parsing silently fail.
+    // ``localhost`` (not ``127.0.0.1``) because Vite's dev server binds
+    // to ``localhost`` only by default — the IPv4 literal returns blank
+    // pages. Env override accepts either via the env-guard allowlist.
+    private baseURL: string = process.env.PLAYWRIGHT_BASE_URL ??
+      process.env.VIEWER_URL ??
+      "http://localhost:5173",
   ) {}
 
   private url(path: string): string {
