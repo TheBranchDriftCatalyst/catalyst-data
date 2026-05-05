@@ -37,6 +37,7 @@ import { useRunStream } from "@/hooks/useRunStream";
 import { useRuns } from "@/hooks/useRuns";
 import { DocRailV2 } from "@/components/state/DocRailV2";
 import { RunPicker } from "@/components/state/RunPicker";
+import { ExportEventsButton } from "@/components/state/ExportEventsButton";
 import ResizablePanel from "@/components/ResizablePanel";
 import ResizableSidebar from "@/components/ResizableSidebar";
 import {
@@ -72,10 +73,12 @@ function readQuery(): {
   docId: string | null;
   node: SelectedGraphNode | null;
   runId: string | null;
+  compareRunId: string | null;
 } {
   const p = new URLSearchParams(window.location.search);
   const docId = p.get("doc");
   const runId = p.get("run");
+  const compareRunId = p.get("cmp");
   const raw = p.get("node");
   let node: SelectedGraphNode | null = null;
   if (raw) {
@@ -87,22 +90,28 @@ function readQuery(): {
       };
     }
   }
-  return { docId, node, runId };
+  return { docId, node, runId, compareRunId };
 }
 
-function writeQuery(docId: string | null, node: SelectedGraphNode | null, runId: string | null) {
+function writeQuery(
+  docId: string | null,
+  node: SelectedGraphNode | null,
+  runId: string | null,
+  compareRunId: string | null,
+) {
   // Preserve unknown query params (e.g. Gap #7's transient packPreviewMin /
   // packPreviewMaxCpm seeds) — the persist-selection effect would otherwise
   // clobber any param a sibling panel had just stashed in the URL.
   const existing = new URLSearchParams(window.location.search);
   const p = new URLSearchParams();
   for (const [k, v] of existing) {
-    if (k === "run" || k === "doc" || k === "node") continue;
+    if (k === "run" || k === "doc" || k === "node" || k === "cmp") continue;
     p.set(k, v);
   }
   if (runId) p.set("run", runId);
   if (docId) p.set("doc", docId);
   if (node) p.set("node", node.ref ? `${node.role}:${node.ref}` : node.role);
+  if (compareRunId) p.set("cmp", compareRunId);
   const qs = p.toString();
   const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
   window.history.replaceState({}, "", url);
@@ -110,6 +119,7 @@ function writeQuery(docId: string | null, node: SelectedGraphNode | null, runId:
 
 export function StateInspector() {
   const [pinnedRunId, setPinnedRunId] = useState<string | null>(null);
+  const [compareRunId, setCompareRunId] = useState<string | null>(null);
   const { events, connected, error } = useRunStream(pinnedRunId);
   const runs = useRuns();
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
@@ -121,12 +131,13 @@ export function StateInspector() {
     if (q.docId) setSelectedDoc(q.docId);
     if (q.node) setSelectedNode(q.node);
     if (q.runId) setPinnedRunId(q.runId);
+    if (q.compareRunId) setCompareRunId(q.compareRunId);
   }, []);
 
   // Persist selection to URL.
   useEffect(() => {
-    writeQuery(selectedDoc, selectedNode, pinnedRunId);
-  }, [selectedDoc, selectedNode, pinnedRunId]);
+    writeQuery(selectedDoc, selectedNode, pinnedRunId, compareRunId);
+  }, [selectedDoc, selectedNode, pinnedRunId, compareRunId]);
 
   // Switching run wipes the per-run selections — a doc/node from run X
   // probably doesn't exist (or means something different) in run Y.
@@ -136,6 +147,32 @@ export function StateInspector() {
     setSelectedNode(null);
   };
 
+  // Persist pinnedRunId to localStorage (match pattern with compareRunId).
+  useEffect(() => {
+    try {
+      if (pinnedRunId) {
+        localStorage.setItem("state-inspector-pinned-run", pinnedRunId);
+      } else {
+        localStorage.removeItem("state-inspector-pinned-run");
+      }
+    } catch {
+      // localStorage may be unavailable in some contexts; fail silently.
+    }
+  }, [pinnedRunId]);
+
+  // Persist compareRunId to localStorage.
+  useEffect(() => {
+    try {
+      if (compareRunId) {
+        localStorage.setItem("state-inspector-compare-run", compareRunId);
+      } else {
+        localStorage.removeItem("state-inspector-compare-run");
+      }
+    } catch {
+      // localStorage may be unavailable in some contexts; fail silently.
+    }
+  }, [compareRunId]);
+
   // Gap #8 — TrendSparkline click-to-jump. Click on an older run's dot
   // in a panel header should swap the run while KEEPING doc + node
   // selection. The semantics are deliberately the inverse of
@@ -144,6 +181,12 @@ export function StateInspector() {
   // re-pick on every hop. Pass this down to the detail components.
   const setPinnedRunIdPreservingSelection = (runId: string) => {
     setPinnedRunId(runId);
+  };
+
+  // Prevent compare run from being the same as active run.
+  const onCompareRunSelect = (runId: string | null) => {
+    if (runId === pinnedRunId) return;
+    setCompareRunId(runId);
   };
 
   // Default to the first observed doc once events arrive. Skip ``__run__``
@@ -195,6 +238,19 @@ export function StateInspector() {
             selectedRunId={pinnedRunId}
             onSelect={onRunSelect}
           />
+          {pinnedRunId && (
+            <>
+              <span className="text-zinc-600">cmp</span>
+              <RunPicker
+                runs={runs.runs}
+                liveRunId={runs.live}
+                selectedRunId={compareRunId}
+                onSelect={onCompareRunSelect}
+                latestLabel="—"
+              />
+            </>
+          )}
+          <ExportEventsButton runId={pinnedRunId} docId={selectedDoc} />
           <span
             data-testid="inspector-conn-badge"
             className={`px-1.5 py-0.5 rounded text-[10px] ${
@@ -258,6 +314,7 @@ export function StateInspector() {
                   onSelectNode={setSelectedNode}
                   runId={pinnedRunId ?? runs.latest}
                   onJumpRun={setPinnedRunIdPreservingSelection}
+                  compareRunId={compareRunId}
                 />
               ) : (
                 <div className="p-4 font-mono text-[10px] text-zinc-600">
@@ -304,6 +361,7 @@ function DetailRouter({
   onSelectNode,
   runId,
   onJumpRun,
+  compareRunId,
 }: {
   events: import("@/types/benchmark").RunEvent[];
   docId: string;
@@ -313,6 +371,7 @@ function DetailRouter({
   /** Gap #8 — click-to-jump from a sparkline dot. Selection-preserving
    *  variant of onRunSelect: only updates the run id. */
   onJumpRun: (runId: string) => void;
+  compareRunId: string | null;
 }) {
   if (node.role === "consensus") {
     return (
@@ -322,6 +381,7 @@ function DetailRouter({
           events={events}
           runId={runId}
           onJumpRun={onJumpRun}
+          compareRunId={compareRunId}
         />
       </div>
     );
@@ -376,7 +436,7 @@ function DetailRouter({
           />
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <DownstreamPanel events={events} docId={docId} />
+          <DownstreamPanel events={events} docId={docId} compareRunId={compareRunId} />
         </div>
       </div>
     );
