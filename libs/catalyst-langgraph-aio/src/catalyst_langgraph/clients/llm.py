@@ -93,6 +93,12 @@ class LLMClient:
         Handles reasoning models (DeepSeek-R1, Qwen3 thinking) that prepend
         ``<think>...</think>`` blocks before their JSON output, which breaks
         LangChain's built-in parser.
+
+        SPO bench capture (CD Gap #5): when the calling thread has an open
+        ``dagster_io.bench.spo_capture`` slot, we lazily write the raw
+        response text + usage metadata + parsing_error into it before
+        returning. Non-SPO callers leave the slot ``None`` and pay no
+        overhead.
         """
         prompt_chars = sum(len(str(getattr(m, "content", m))) for m in messages)
         logger.info(
@@ -102,6 +108,18 @@ class LLMClient:
             self.structured_method,
             prompt_chars,
         )
+        # Lazy import: the bench capture module lives in dagster_io and
+        # we don't want to hard-couple catalyst-langgraph-aio to it.
+        # ``is_capturing()`` returns False when the module is absent or
+        # no thread-local slot is open, so the hot path stays clean.
+        try:
+            from dagster_io.bench import spo_capture  # type: ignore[import-not-found]
+
+            _capture_active = spo_capture.is_capturing()
+        except Exception:
+            spo_capture = None  # type: ignore[assignment]
+            _capture_active = False
+
         t0 = time.perf_counter()
         chain = self._chat_model.with_structured_output(
             schema,
@@ -113,6 +131,29 @@ class LLMClient:
 
         parsed = raw_result.get("parsed")
         parsing_error = raw_result.get("parsing_error")
+
+        # Pull raw text + usage off the AIMessage. ``raw`` is present
+        # whenever ``include_raw=True`` (always, here); ``usage_metadata``
+        # may be missing on some adapters / vLLM builds — tolerate that.
+        if _capture_active and spo_capture is not None:
+            raw_msg = raw_result.get("raw")
+            raw_text = str(raw_msg.content) if raw_msg is not None and hasattr(raw_msg, "content") else ""
+            usage_meta = getattr(raw_msg, "usage_metadata", None) or {}
+            usage: dict[str, int] = {}
+            if isinstance(usage_meta, dict):
+                # LangChain normalises to (input_tokens, output_tokens, total_tokens);
+                # OpenAI raw uses (prompt_tokens, completion_tokens, total_tokens).
+                # Accept both shapes — emit OpenAI keys downstream for stability.
+                tokens_in = int(usage_meta.get("input_tokens") or usage_meta.get("prompt_tokens") or 0)
+                tokens_out = int(usage_meta.get("output_tokens") or usage_meta.get("completion_tokens") or 0)
+                tokens_total = int(usage_meta.get("total_tokens") or (tokens_in + tokens_out))
+                if tokens_in or tokens_out or tokens_total:
+                    usage = {
+                        "tokens_in": tokens_in,
+                        "tokens_out": tokens_out,
+                        "tokens_total": tokens_total,
+                    }
+            spo_capture.write(raw_text, usage=usage, parsing_error=parsing_error)
 
         if parsed is not None:
             logger.info("llm.structured_output: done, schema=%s, duration=%.3fs", schema.__name__, elapsed)

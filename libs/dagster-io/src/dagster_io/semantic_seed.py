@@ -9,7 +9,7 @@ runs or which machine runs it.
 
 ## Why this exists
 
-Today ``scripts/sample_gt_candidates.py`` recomputes embeddings on every
+Today ``scripts/benchmark/sample_gt_candidates.py`` recomputes embeddings on every
 invocation. That makes seed sampling expensive (embeds the whole corpus
 each run) and non-deterministic across re-embeddings (different model
 version → different vector → different "diverse" sample). Caching the

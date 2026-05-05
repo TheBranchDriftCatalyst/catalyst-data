@@ -252,7 +252,7 @@ class ChunkingResource(ConfigurableResource):
 
     chunk_size: int = 1000
     chunk_overlap: int = 200
-    prepend_title: bool = True
+    prepend_title: bool = False
 
     def _splitter(
         self,

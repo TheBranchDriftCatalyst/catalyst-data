@@ -573,13 +573,47 @@ async def _process_doc_spo_only(
         from dagster_io import event_store as _et
 
         if _et.is_configured():
-            _et.emit_chunk_extracted(
-                window_chunk_id,
-                model=bench_model,
-                doc_id=doc.doc_id,
-                mentions=window_mentions,
-                propositions=spo_accepted,
-            )
+            # Drain the SPO capture buffer for this window's chunk_id —
+            # populated by ExtractNode (catalyst-exgraph) when stage_name
+            # == "spo". Returns None on the legacy / non-LLM SPO path,
+            # in which case the chunk_extracted event keeps its existing
+            # shape. (Gap #5)
+            _spo_capture: dict | None = None
+            try:
+                from catalyst_exgraph.nodes.extract import consume_spo_capture as _consume
+
+                _spo_capture = _consume(window_chunk_id)
+            except Exception:
+                _spo_capture = None
+
+            if _spo_capture:
+                # Inline the prompt-hash / preview / usage / cost /
+                # parse_errors fields into chunk_extracted.details so
+                # the State Inspector can read them off the audit log
+                # without a side fetch.
+                _et.append(
+                    source="harness",
+                    node_name="chunk_extracted",
+                    status="completed",
+                    model=bench_model,
+                    doc_id=doc.doc_id,
+                    chunk_id=window_chunk_id,
+                    details={
+                        "mentions": window_mentions,
+                        "propositions": spo_accepted,
+                        "mention_count": len(window_mentions),
+                        "proposition_count": len(spo_accepted),
+                        **_spo_capture,
+                    },
+                )
+            else:
+                _et.emit_chunk_extracted(
+                    window_chunk_id,
+                    model=bench_model,
+                    doc_id=doc.doc_id,
+                    mentions=window_mentions,
+                    propositions=spo_accepted,
+                )
 
     return {
         "mentions": [],  # caller provides shared NER mentions
