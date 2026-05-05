@@ -30,6 +30,7 @@ import type { SelectedGraphNode } from "@/components/state/PipelineGraph";
 import { useActiveGroundTruth } from "@/hooks/useRunReport";
 
 import { DocCoverageGutter } from "./DocCoverageGutter";
+import { DeepLinkButton } from "./DeepLinkButton";
 import { PathologyRollup } from "./PathologyRollup";
 
 interface Props {

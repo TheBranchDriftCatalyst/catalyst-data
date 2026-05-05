@@ -40,6 +40,9 @@ interface Props {
   runId: string | null;
   /** Gap #8 — selection-preserving run jump from the trend sparkline. */
   onJumpRun?: (runId: string) => void;
+  /** Phase 2 A/B run-diff overlay — compare run id. Currently accepted
+   *  but not yet wired into F1Strip's compareScores; see follow-up. */
+  compareRunId?: string | null;
 }
 
 type SortKey = "votes" | "type" | "confidence";
@@ -99,7 +102,13 @@ function rejectedToMention(d: MentionRejectedDetails): Mention {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function ConsensusDetail({ chunkId, events, runId, onJumpRun }: Props) {
+export function ConsensusDetail({
+  chunkId,
+  events,
+  runId,
+  onJumpRun,
+  compareRunId: _compareRunId,
+}: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("votes");
   const [rejectedOpen, setRejectedOpen] = useState(false);
   // Gap #8 — last-10-runs trend for the consensus accepted count. Counts
