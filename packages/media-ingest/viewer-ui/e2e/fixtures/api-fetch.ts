@@ -146,3 +146,36 @@ export async function safeFetchJsonInPage<T = unknown>(
     );
   }
 }
+
+/**
+ * In-page (browser-side) fetch for ndjson (one JSON per line).
+ * Returns raw text with SPA-fallback guard. Callers handle per-line parsing.
+ *
+ * Note: callers that need a Node-side fetch should prefer `safeFetchJson`
+ * + `safeNdjsonFromResponse` against an `APIRequestContext` instead.
+ */
+export async function safeFetchNdjsonInPage(
+  page: Page,
+  path: string,
+): Promise<string> {
+  const result = await page.evaluate(async (p: string) => {
+    const r = await fetch(p);
+    const text = await r.text();
+    return {
+      ok: r.ok,
+      status: r.status,
+      contentType: r.headers.get("content-type") ?? "",
+      text,
+    };
+  }, path);
+  if (!result.ok || looksLikeHtml(result.text)) {
+    throw new Error(
+      `viewer-api unreachable at ${path} (in-page) — ` +
+        `got ${result.status} ${result.contentType}; ` +
+        `first 80 chars: ${describe(result.text)}. ` +
+        `Check that vite dev server (:5173) is up AND its /viewer/api/* ` +
+        `proxy to :8080 is wired (vite.config.ts).`,
+    );
+  }
+  return result.text;
+}

@@ -33,6 +33,7 @@
 import { test, expect } from "./fixtures/coverage";
 import type { Page } from "@playwright/test";
 import { firstPrunedWindow, resolveRunId } from "./fixtures/inspector-discovery";
+import { safeFetchNdjsonInPage } from "./fixtures/api-fetch";
 
 /**
  * Discovery helpers are now wired with `safeJsonFromResponse` /
@@ -67,54 +68,39 @@ async function fetchAllPrunedWindows(
   page: Page,
   runId: string,
 ): Promise<PrunedDetail[]> {
-  return await page.evaluate(async (id: string) => {
-    const path = `/viewer/api/bench/runs/${id}/events?limit=20000`;
-    const r = await fetch(path);
-    const text = await r.text();
-    // Loud SPA-fallback guard: HTML response (proxy misconfigured / vite
-    // down / VIEWER_URL pointed at a deployed host) means our regression
-    // assertion would silently see zero events. Throw with a detailed
-    // message so the spec fails LOUD rather than skipping.
-    const head = text.trim().slice(0, 80);
-    if (!r.ok || head.startsWith("<")) {
-      throw new Error(
-        `viewer-api unreachable at ${path} — got ${r.status} ${
-          r.headers.get("content-type") ?? "(no content-type)"
-        }; first 80 chars: ${head}. Check that vite dev server (:5173) is up ` +
-          `AND its /viewer/api/* proxy to :8080 is wired (vite.config.ts).`,
-      );
+  const path = `/viewer/api/bench/runs/${runId}/events?limit=20000`;
+  const text = await safeFetchNdjsonInPage(page, path);
+
+  const out: PrunedDetail[] = [];
+  for (const ln of text.split("\n")) {
+    if (!ln) continue;
+    let ev: Record<string, unknown>;
+    try {
+      ev = JSON.parse(ln);
+    } catch {
+      continue;
     }
-    const out: PrunedDetail[] = [];
-    for (const ln of text.split("\n")) {
-      if (!ln) continue;
-      let ev: Record<string, unknown>;
-      try {
-        ev = JSON.parse(ln);
-      } catch {
-        continue;
-      }
-      if (ev.node_name !== "evidence_window_pruned") continue;
-      const d = (ev.details ?? {}) as Record<string, unknown>;
-      const mc = typeof d.mention_count === "number" ? (d.mention_count as number) : 0;
-      const cc = typeof d.char_count === "number" ? (d.char_count as number) : 0;
-      const cpmRaw =
-        typeof d.chars_per_mention === "number" ? (d.chars_per_mention as number) : null;
-      let cpmEff: number | null;
-      if (cpmRaw != null) cpmEff = cpmRaw;
-      else if (mc > 0) cpmEff = cc / mc;
-      else cpmEff = null;
-      out.push({
-        reason: String(d.reason ?? ""),
-        windowId: String(d.window_id ?? ""),
-        docId: String(ev.doc_id ?? ""),
-        mentionCount: mc,
-        charCount: cc,
-        charsPerMention: cpmEff,
-        charsPerMentionRaw: cpmRaw,
-      });
-    }
-    return out;
-  }, runId);
+    if (ev.node_name !== "evidence_window_pruned") continue;
+    const d = (ev.details ?? {}) as Record<string, unknown>;
+    const mc = typeof d.mention_count === "number" ? (d.mention_count as number) : 0;
+    const cc = typeof d.char_count === "number" ? (d.char_count as number) : 0;
+    const cpmRaw =
+      typeof d.chars_per_mention === "number" ? (d.chars_per_mention as number) : null;
+    let cpmEff: number | null;
+    if (cpmRaw != null) cpmEff = cpmRaw;
+    else if (mc > 0) cpmEff = cc / mc;
+    else cpmEff = null;
+    out.push({
+      reason: String(d.reason ?? ""),
+      windowId: String(d.window_id ?? ""),
+      docId: String(ev.doc_id ?? ""),
+      mentionCount: mc,
+      charCount: cc,
+      charsPerMention: cpmEff,
+      charsPerMentionRaw: cpmRaw,
+    });
+  }
+  return out;
 }
 
 /** Find the API-side detail for a given (docId, windowId) pair. */
