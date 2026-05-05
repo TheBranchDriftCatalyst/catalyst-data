@@ -13,6 +13,7 @@ import { MentionTable, type Mention } from "./MentionTable";
 import { F1Strip, type F1Scores } from "./F1Strip";
 import { ConfidenceHistogram } from "./ConfidenceHistogram";
 import { TrendSparkline } from "../TrendSparkline";
+import { DeepLinkButton } from "./DeepLinkButton";
 
 interface Props {
   events: RunEvent[];
@@ -125,13 +126,16 @@ export function NerEncoderDetail({ events, docId, encoder, runId, onJumpRun }: P
           <div className="text-zinc-300 text-[12px]">{encoder}</div>
           <div className="text-zinc-500 text-[10px] mt-0.5">{docId}</div>
         </div>
-        <TrendSparkline
-          points={trendPoints}
-          metric="encoder_mention_count"
-          currentRunId={runId}
-          onSelectRun={(id) => onJumpRun?.(id)}
-          trend="up-good"
-        />
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <DeepLinkButton testidPrefix="encoder" panelName="encoder" />
+          <TrendSparkline
+            points={trendPoints}
+            metric="encoder_mention_count"
+            currentRunId={runId}
+            onSelectRun={(id) => onJumpRun?.(id)}
+            trend="up-good"
+          />
+        </div>
       </div>
       <div className="flex flex-wrap gap-3 text-[10px] text-zinc-400">
         <span>

@@ -30,6 +30,7 @@ import type { SelectedGraphNode } from "@/components/state/PipelineGraph";
 import { useActiveGroundTruth } from "@/hooks/useRunReport";
 
 import { DocCoverageGutter } from "./DocCoverageGutter";
+import { PathologyRollup } from "./PathologyRollup";
 
 interface Props {
   events: RunEvent[];
@@ -490,104 +491,112 @@ export function DocumentSourcePanel({ events, docId, selectedNode }: Props) {
           <span className="inline-flex items-center gap-1">
             <span className="w-2 h-2 rounded-sm bg-zinc-600/50" /> input
           </span>
+          <span className="text-zinc-600">·</span>
+          <DeepLinkButton testidPrefix="document" panelName="document" />
         </span>
       </div>
-      <div className="flex-1 min-h-0 flex">
-        {/* Chunk minimap — proportional bands per chunk, color-coded by lifecycle */}
-        <div
-          className="w-3 flex-shrink-0 flex flex-col bg-surface-1/80 border-r border-white/5"
-          title="Chunk minimap"
-        >
-          {chunkSpans.map((c) => {
-            const sel = selectedChunkId === c.chunkId;
-            const { bg, label } = _chunkStatusColor(c.chunkId, chunkStatus, sel);
-            const heightPct = ((c.end - c.start) / totalChars) * 100;
-            return (
-              <button
-                type="button"
-                key={c.chunkId}
-                onClick={() => onMinimapClick(c.start)}
-                className={`${bg} hover:brightness-125 transition-all border-b border-black/30 cursor-pointer`}
-                style={{ height: `${heightPct}%`, minHeight: "2px" }}
-                title={`${c.index != null ? `chunk #${c.index}` : c.chunkId} · ${label} · ${c.end - c.start}ch\n${c.preview}`}
-              />
-            );
-          })}
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex">
+          {/* Chunk minimap — proportional bands per chunk, color-coded by lifecycle */}
+          <div
+            className="w-3 flex-shrink-0 flex flex-col bg-surface-1/80 border-r border-white/5"
+            title="Chunk minimap"
+          >
+            {chunkSpans.map((c) => {
+              const sel = selectedChunkId === c.chunkId;
+              const { bg, label } = _chunkStatusColor(c.chunkId, chunkStatus, sel);
+              const heightPct = ((c.end - c.start) / totalChars) * 100;
+              return (
+                <button
+                  type="button"
+                  key={c.chunkId}
+                  onClick={() => onMinimapClick(c.start)}
+                  className={`${bg} hover:brightness-125 transition-all border-b border-black/30 cursor-pointer`}
+                  style={{ height: `${heightPct}%`, minHeight: "2px" }}
+                  title={`${c.index != null ? `chunk #${c.index}` : c.chunkId} · ${label} · ${c.end - c.start}ch\n${c.preview}`}
+                />
+              );
+            })}
+          </div>
+          <div
+            ref={scrollRef}
+            className="flex-1 min-w-0 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-300"
+          >
+            {segments.map((seg, i) => {
+              const body = seg.chunkStatus ? _chunkBodyStyle(seg.chunkStatus) : null;
+              const classes = [
+                body ? body.bg : "",
+                seg.isChunkStart ? (body?.border ?? "") : "",
+                seg.isSelected ? "ring-1 ring-cyan-400" : "",
+                // Selected spo_window overlay — saturated so it wins over the
+                // pack-window kept band underneath. Box-decoration-clone keeps
+                // the rounded corners intact when the run wraps across lines.
+                seg.inSelectedWindow
+                  ? "bg-cyan-500/30 ring-1 ring-cyan-400/80 rounded-sm box-decoration-clone"
+                  : "",
+                !seg.inSelectedWindow && seg.packStatus === "kept"
+                  ? "bg-emerald-500/15 border-y border-emerald-500/30"
+                  : "",
+                !seg.inSelectedWindow && seg.packStatus === "pruned"
+                  ? "bg-amber-500/15 border-y border-amber-500/30"
+                  : "",
+                seg.mentionType ? "underline decoration-violet-400 decoration-2" : "",
+                seg.isChunkStart ? "pl-1.5" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              const tooltip = seg.inSelectedWindow
+                ? `selected window · ${seg.selectedWindowId}`
+                : seg.packWindowId
+                  ? `${seg.packStatus === "kept" ? "kept" : "pruned"} window · ${seg.packWindowId} · ${seg.packMentions}m`
+                  : seg.mentionType
+                    ? `${seg.mentionType}: ${seg.mentionText}`
+                    : seg.chunkLabel
+                      ? `${seg.chunkLabel} · ${seg.chunkStatus ?? ""}\n${seg.chunkPreview}`
+                      : undefined;
+              return (
+                <span
+                  key={i}
+                  className={classes}
+                  title={tooltip}
+                  data-selected-window={seg.inSelectedWindow ? "true" : undefined}
+                  data-mention-source={seg.mentionSource ?? undefined}
+                  data-mention-type={seg.mentionType ?? undefined}
+                  data-pack-window-status={seg.packStatus ?? undefined}
+                >
+                  {seg.isChunkStart && body && (
+                    <span
+                      className={`inline-flex items-center gap-1 align-middle mr-1.5 px-1.5 py-0.5 rounded border text-[9px] font-mono uppercase tracking-wide ${body.chip}`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${body.chipDot}`} />
+                      {seg.chunkIndex != null ? `#${seg.chunkIndex}` : "chunk"}
+                      <span className="opacity-70">·</span>
+                      <span className="opacity-90">{seg.chunkStatus}</span>
+                    </span>
+                  )}
+                  {seg.text}
+                </span>
+              );
+            })}
+          </div>
+          {/* Right-edge coverage gutter (Gap #6) — mention density + GT
+              recall holes + selected-window marker. Renders even when the
+              doc has zero consensus mentions (pale zinc track) so its
+              presence cues "no coverage on this doc". */}
+          <DocCoverageGutter
+            totalChars={totalChars}
+            consensusSpans={docConsensusSpans}
+            gtSpans={docGtSpans}
+            selectedWindow={
+              selectedWindow ? { start: selectedWindow.start, end: selectedWindow.end } : null
+            }
+            scrollRef={scrollRef}
+          />
         </div>
-        <div
-          ref={scrollRef}
-          className="flex-1 min-w-0 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-300"
-        >
-          {segments.map((seg, i) => {
-            const body = seg.chunkStatus ? _chunkBodyStyle(seg.chunkStatus) : null;
-            const classes = [
-              body ? body.bg : "",
-              seg.isChunkStart ? (body?.border ?? "") : "",
-              seg.isSelected ? "ring-1 ring-cyan-400" : "",
-              // Selected spo_window overlay — saturated so it wins over the
-              // pack-window kept band underneath. Box-decoration-clone keeps
-              // the rounded corners intact when the run wraps across lines.
-              seg.inSelectedWindow
-                ? "bg-cyan-500/30 ring-1 ring-cyan-400/80 rounded-sm box-decoration-clone"
-                : "",
-              !seg.inSelectedWindow && seg.packStatus === "kept"
-                ? "bg-emerald-500/15 border-y border-emerald-500/30"
-                : "",
-              !seg.inSelectedWindow && seg.packStatus === "pruned"
-                ? "bg-amber-500/15 border-y border-amber-500/30"
-                : "",
-              seg.mentionType ? "underline decoration-violet-400 decoration-2" : "",
-              seg.isChunkStart ? "pl-1.5" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            const tooltip = seg.inSelectedWindow
-              ? `selected window · ${seg.selectedWindowId}`
-              : seg.packWindowId
-                ? `${seg.packStatus === "kept" ? "kept" : "pruned"} window · ${seg.packWindowId} · ${seg.packMentions}m`
-                : seg.mentionType
-                  ? `${seg.mentionType}: ${seg.mentionText}`
-                  : seg.chunkLabel
-                    ? `${seg.chunkLabel} · ${seg.chunkStatus ?? ""}\n${seg.chunkPreview}`
-                    : undefined;
-            return (
-              <span
-                key={i}
-                className={classes}
-                title={tooltip}
-                data-selected-window={seg.inSelectedWindow ? "true" : undefined}
-                data-mention-source={seg.mentionSource ?? undefined}
-                data-mention-type={seg.mentionType ?? undefined}
-                data-pack-window-status={seg.packStatus ?? undefined}
-              >
-                {seg.isChunkStart && body && (
-                  <span
-                    className={`inline-flex items-center gap-1 align-middle mr-1.5 px-1.5 py-0.5 rounded border text-[9px] font-mono uppercase tracking-wide ${body.chip}`}
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full ${body.chipDot}`} />
-                    {seg.chunkIndex != null ? `#${seg.chunkIndex}` : "chunk"}
-                    <span className="opacity-70">·</span>
-                    <span className="opacity-90">{seg.chunkStatus}</span>
-                  </span>
-                )}
-                {seg.text}
-              </span>
-            );
-          })}
+        {/* Pathology rollup — document-level health signals */}
+        <div className="flex-shrink-0 px-3 py-2 bg-surface-1/50 border-t border-white/5 overflow-x-auto">
+          <PathologyRollup events={events} docId={docId} />
         </div>
-        {/* Right-edge coverage gutter (Gap #6) — mention density + GT
-            recall holes + selected-window marker. Renders even when the
-            doc has zero consensus mentions (pale zinc track) so its
-            presence cues "no coverage on this doc". */}
-        <DocCoverageGutter
-          totalChars={totalChars}
-          consensusSpans={docConsensusSpans}
-          gtSpans={docGtSpans}
-          selectedWindow={
-            selectedWindow ? { start: selectedWindow.start, end: selectedWindow.end } : null
-          }
-          scrollRef={scrollRef}
-        />
       </div>
     </div>
   );

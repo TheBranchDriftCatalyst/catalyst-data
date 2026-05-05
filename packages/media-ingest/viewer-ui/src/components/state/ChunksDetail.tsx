@@ -9,6 +9,7 @@
 import { useMemo, useState } from "react";
 
 import type { RunEvent } from "@/types/benchmark";
+import { DeepLinkButton } from "./DeepLinkButton";
 
 interface Props {
   events: RunEvent[];
@@ -100,6 +101,10 @@ export function ChunksDetail({ events, docId }: Props) {
 
   return (
     <div data-testid="chunks-detail" className="p-3 font-mono text-[11px] space-y-2">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <span className="text-zinc-300 text-[10px]">chunks</span>
+        <DeepLinkButton testidPrefix="chunks" panelName="chunks" />
+      </div>
       <div className="flex items-center gap-3 text-zinc-400">
         <span className="text-zinc-300">{rows.length} input chunks</span>
         <span className="text-zinc-600">·</span>

@@ -22,6 +22,7 @@ import {
   type PackWindowRecord,
 } from "./PackThresholdHistograms";
 import { TrendSparkline } from "../TrendSparkline";
+import { DeepLinkButton } from "./DeepLinkButton";
 
 interface Props {
   events: RunEvent[];
@@ -208,13 +209,16 @@ export function PackDetail({ events, docId, runId, onJumpRun }: Props) {
     <div data-testid="pack-detail" className="p-3 font-mono text-[11px] space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div className="text-zinc-500 text-[10px]">pack — {docId}</div>
-        <TrendSparkline
-          points={trendPoints}
-          metric="pack_kept_pruned_ratio"
-          currentRunId={runId ?? null}
-          onSelectRun={(id) => onJumpRun?.(id)}
-          trend="up-good"
-        />
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <DeepLinkButton testidPrefix="pack" panelName="pack" />
+          <TrendSparkline
+            points={trendPoints}
+            metric="pack_kept_pruned_ratio"
+            currentRunId={runId ?? null}
+            onSelectRun={(id) => onJumpRun?.(id)}
+            trend="up-good"
+          />
+        </div>
       </div>
       {summary && (
         <div className="flex flex-wrap gap-3 text-zinc-400">
