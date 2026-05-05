@@ -27,9 +27,11 @@ import argparse
 import json
 import logging
 from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("bench.harness")
 import os
+import string
 import subprocess
 import sys
 import time
@@ -66,6 +68,256 @@ from tests.shared.report import build_report_json
 from tests.shared.store import BenchmarkStore
 
 
+def _replay_phase_a_events_from_cache(doc_id: str, cached: Any) -> None:
+    """Re-emit synthetic ``ner_encoder_completed`` + ``consensus_completed``
+    events from a ``CachedNerResult`` so the State Inspector graph topology
+    renders even when Phase A is served entirely from the cluster cache.
+
+    Without this, warm-hit docs produce a graph with the ``document`` node
+    floating disconnected above ``pack`` (because no encoder/consensus
+    events were ever emitted for that doc).
+
+    Per-mention ``mention_decision`` / ``mention_rejected`` events are
+    also re-emitted from ``cached.mentions`` / ``cached.rejected_mentions``
+    so ConsensusDetail's accepted/rejected tables render the same on
+    cache hit as on cache miss. Without that synthesis the panel showed
+    "147 accepted · 0 rejected" in the header but an empty table — the
+    badges read from ``consensus_completed`` while the table reads from
+    the per-mention events.
+    """
+    per_encoder = cached.per_encoder_mentions or {}
+    encoder_names = list(per_encoder.keys())
+    if not encoder_names:
+        return
+
+    for enc_name, mentions in per_encoder.items():
+        chunk_id = f"{doc_id}:_ner_{enc_name}"
+        event_store.append(
+            source="harness",
+            node_name="ner_encoder_completed",
+            status="completed",
+            model=enc_name,
+            doc_id=doc_id,
+            chunk_id=chunk_id,
+            details={
+                "encoder": enc_name,
+                "mention_count": len(mentions),
+                "duration_s": 0.0,
+                "from_cache": True,
+            },
+        )
+        # Also re-emit the chunk_extracted with mentions so the encoder's
+        # detail panel + doc-source highlight still work on warm replay.
+        event_store.append(
+            source="harness",
+            node_name="chunk_extracted",
+            status="completed",
+            model=enc_name,
+            doc_id=doc_id,
+            chunk_id=chunk_id,
+            details={
+                "mention_count": len(mentions),
+                "mentions": mentions,
+                "from_cache": True,
+            },
+        )
+
+    consensus_chunk_id = f"{doc_id}:_consensus"
+
+    # Per-mention decision events — what ConsensusDetail's accepted /
+    # rejected tables read from. Mirrors the live ConsensusNode emit
+    # shape (see libs/catalyst-exgraph/src/catalyst_exgraph/nodes/consensus.py)
+    # so the panel renders identically on warm replay.
+    n_enc = len(encoder_names)
+    for m in cached.mentions or []:
+        event_store.append(
+            source="harness",
+            node_name="mention_decision",
+            status="accepted",
+            doc_id=doc_id,
+            chunk_id=consensus_chunk_id,
+            details={
+                "text": m.get("text", ""),
+                "canonical_type": m.get("canonical_type", "?"),
+                "vote_count": m.get("vote_count", 0),
+                "n_encoders": m.get("n_encoders", n_enc),
+                "source_models": m.get("source_models", []),
+                "mean_confidence": round(float(m.get("mean_confidence", 0.0) or 0.0), 4),
+                "type_votes": m.get("type_votes", {}),
+                "span_provenance": m.get("span_provenance", ""),
+                "span_disagreement_chars": m.get("span_disagreement_chars", 0),
+                "from_cache": True,
+            },
+        )
+
+    rejected_list = getattr(cached, "rejected_mentions", None) or []
+    for m in rejected_list:
+        event_store.append(
+            source="harness",
+            node_name="mention_rejected",
+            status="rejected",
+            doc_id=doc_id,
+            chunk_id=consensus_chunk_id,
+            details={
+                "text": m.get("text", ""),
+                "vote_count": m.get("vote_count", 0),
+                "n_encoders": m.get("n_encoders", n_enc),
+                "quorum": m.get("quorum", 0),
+                "rule": m.get("rule", ""),
+                "reason": m.get("reason", "below_quorum"),
+                # Gap #9 — pass through cluster source_models so cache-hit
+                # replay is byte-identical to a fresh ConsensusNode run
+                # (which now also emits this field on rejected events).
+                "source_models": m.get("source_models", []),
+                "from_cache": True,
+            },
+        )
+
+    event_store.append(
+        source="harness",
+        node_name="consensus_completed",
+        status="completed",
+        doc_id=doc_id,
+        chunk_id=consensus_chunk_id,
+        details={
+            "accepted_count": len(cached.mentions or []),
+            "rejected_count": len(rejected_list),
+            "n_encoders": n_enc,
+            "from_cache": True,
+        },
+    )
+    event_store.append(
+        source="harness",
+        node_name="chunk_extracted",
+        status="completed",
+        doc_id=doc_id,
+        chunk_id=consensus_chunk_id,
+        details={
+            "mention_count": len(cached.mentions or []),
+            "mentions": cached.mentions or [],
+            "from_cache": True,
+        },
+    )
+
+    # Gap #10 — synthetic ``persist_artifacts`` event so the State
+    # Inspector's downstream lineage panel renders on warm replays.
+    # Pass the cached mentions/propositions counts through the canonical
+    # schema (``catalyst_exgraph.nodes.persist.emit_persist_artifacts``)
+    # so the panel sees the same shape it would on a fresh persist op.
+    # The S3 paths and dagster_run_id aren't known at replay time
+    # (they belong to whichever Dagster run materialised the cluster
+    # cache); we surface what we have and let the panel render the
+    # rest as "—". Keeping the emit here means a 100%-warm bench run
+    # still produces downstream cards instead of an empty panel.
+    try:
+        from catalyst_exgraph.nodes.persist import emit_persist_artifacts
+
+        n_mentions = len(cached.mentions or [])
+        # ``cached.clusters`` is ``list[dict]`` (see CachedNerResult in
+        # libs/dagster-io/src/dagster_io/cluster_cache.py) — iterate the
+        # list directly and dict-key the propositions list. The
+        # ``isinstance`` guard preserves the original ``getattr`` defensive
+        # feel in case a cached entry is somehow not a dict.
+        n_props = sum(
+            len((c.get("propositions") if isinstance(c, dict) else None) or []) for c in (cached.clusters or [])
+        )
+        emit_persist_artifacts(
+            doc_id=doc_id,
+            mentions_written=n_mentions,
+            propositions_written=n_props,
+            row_counts={
+                "media_ingest/mention_artifacts": n_mentions,
+                **({"media_ingest/proposition_artifacts": n_props} if n_props else {}),
+            },
+            output_paths={},  # cache replay has no fresh S3 path
+            extra={"from_cache": True},
+        )
+    except Exception:  # noqa: BLE001 — narrow but visible: never kill replay,
+        # but never silently swallow either. The bare ``pass`` here is what
+        # hid CD-gf6f for so long; ``logger.exception`` surfaces the stack
+        # trace to stderr/audit so future regressions are diagnosable.
+        logger.exception(
+            "cache-replay persist_artifacts emit failed for doc_id=%s",
+            doc_id,
+        )
+
+
+def _ensure_media_chunks_materialized(doc_ids: list[str]) -> None:
+    """Pre-condition for --all-videos: every manifest doc must have its
+    ``media_chunks`` row in S3 (silver layer). When a doc is missing — most
+    commonly because the operator ran ``--regen`` and wiped the silver tree
+    without re-running the seed — we trigger ``scripts/dev/seed_local.py``
+    for the missing doc(s) so the bench can proceed.
+
+    We do NOT drive Whisper transcription / diarization here. Those live
+    upstream (``task bench:fixtures:regen`` materialises ``media_transcriptions``
+    + ``media_diarization`` + ``media_segment_merge`` in gold/). The seed
+    assumes ``media_segment_merge`` already exists; if it doesn't the seed
+    will skip the doc with a clear "no media_segment_merge in S3 — run
+    bench:fixtures:regen first" message, which we re-surface here.
+    """
+    import subprocess
+
+    from tests.shared.medallion import _build_client, _list_chunk_keys
+
+    if not doc_ids:
+        return
+
+    client = _build_client()
+    by_code_loc = _list_chunk_keys(client)
+    media_keys = by_code_loc.get("media_ingest", [])
+    materialized: set[str] = set()
+    for k in media_keys:
+        # gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl
+        parts = k.split("/")
+        if len(parts) >= 5 and parts[3] == "media_chunks":
+            materialized.add(parts[4])
+
+    missing = [d for d in doc_ids if d not in materialized]
+    if not missing:
+        return
+
+    print(
+        f"\n  ⚠ media_chunks missing for {len(missing)} doc(s): "
+        f"{', '.join(missing[:5])}{'…' if len(missing) > 5 else ''}"
+    )
+    print("  → triggering scripts/dev/seed_local.py --domain media to materialize")
+
+    try:
+        # No --regen so existing partitions stay; the seed only writes missing
+        # ones. Inherits env (DAGSTER_S3_*, LLM_API_KEY, etc.) from the bench.
+        result = subprocess.run(
+            ["mise", "exec", "--", "python", "scripts/dev/seed_local.py", "--domain", "media"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "."},
+        )
+        # Re-list to see which docs actually landed.
+        by_code_loc = _list_chunk_keys(_build_client())
+        media_keys = by_code_loc.get("media_ingest", [])
+        materialized = {
+            k.split("/")[4] for k in media_keys if len(k.split("/")) >= 5 and k.split("/")[3] == "media_chunks"
+        }
+        still_missing = [d for d in missing if d not in materialized]
+        if still_missing:
+            print(
+                f"  ⚠ {len(still_missing)} doc(s) still missing after seed "
+                f"(likely no media_segment_merge upstream): {', '.join(still_missing[:5])}"
+            )
+            print(
+                "  → run `task bench:fixtures:regen` to materialize "
+                "media_transcriptions + media_diarization + media_segment_merge first"
+            )
+        else:
+            print(f"  ✓ all {len(missing)} missing media_chunks now materialised")
+        # Surface seed stderr only when something failed.
+        if result.returncode != 0 and result.stderr:
+            print(result.stderr.splitlines()[-5:] if result.stderr else "")
+    except FileNotFoundError as exc:
+        print(f"  ⚠ couldn't auto-seed media chunks ({exc}); run `task seed:media` manually")
+
+
 def _ansi_palette(use_color: bool) -> dict[str, str]:
     """ANSI escape palette gated on TTY presence — synthwave-leaning.
 
@@ -94,6 +346,7 @@ def _phase_a_build_cluster_cache(
     ensemble_models: list[str] | None = None,
     quorum: int | None = None,
     progress_log: Callable[[str], None] | None = None,
+    predicate: Any = None,
 ) -> tuple[list, dict, dict, dict]:
     """Phase A: NER ensemble + cluster once per doc.
 
@@ -183,7 +436,7 @@ def _phase_a_build_cluster_cache(
             )
 
         # Build ensemble pipeline
-        ensemble_pipeline = _build_ensemble_pipeline_for_phase_a(encoder_cfgs, quorum=quorum)
+        ensemble_pipeline = _build_ensemble_pipeline_for_phase_a(encoder_cfgs, quorum=quorum, predicate=predicate)
 
         cluster_cache = ClusterCache()
         params: dict = {}
@@ -229,6 +482,13 @@ def _phase_a_build_cluster_cache(
                 mentions_by_doc[doc.doc_id] = cached.mentions
                 for enc_name, enc_mentions in cached.per_encoder_mentions.items():
                     per_encoder_by_doc.setdefault(enc_name, {})[doc.doc_id] = enc_mentions
+                # Re-emit synthetic encoder + consensus completion events so
+                # the State Inspector renders the full graph topology even
+                # when Phase A served entirely from cache. Without this the
+                # graph appears truncated: ``document`` floats alone above
+                # ``pack`` because no ``ner_encoder_completed`` /
+                # ``consensus_completed`` events ever reach the UI.
+                _replay_phase_a_events_from_cache(doc.doc_id, cached)
                 n_warm += 1
                 _emit(
                     f"  phase_a [{i}/{n_docs_total}] {doc.doc_id}  warm  "
@@ -391,7 +651,11 @@ def _read_encoder_event_stats() -> dict[str, dict]:
     return result
 
 
-def _build_ensemble_pipeline_for_phase_a(encoder_cfgs: list, quorum: int | None = None):
+def _build_ensemble_pipeline_for_phase_a(
+    encoder_cfgs: list,
+    quorum: int | None = None,
+    predicate: Any = None,
+):
     """Build a ``build_ensemble_pipeline`` instance for the Phase A encoder panel.
 
     Resolves one ExtractionClient per encoder using ``_resolve_client`` and
@@ -399,6 +663,9 @@ def _build_ensemble_pipeline_for_phase_a(encoder_cfgs: list, quorum: int | None 
     and ``max_retries=0`` (encoders are deterministic).
 
     ``quorum`` overrides the default ``ceil(N/2)`` in ConsensusNode when set.
+    ``predicate`` (CompiledPredicate) replaces the integer-quorum check
+    with arbitrary boolean/arithmetic logic — see
+    ``catalyst_exgraph.consensus_predicate``.
     """
     from catalyst_exgraph.config import ner_stage_config
     from catalyst_exgraph.pipeline import build_ensemble_pipeline
@@ -426,6 +693,7 @@ def _build_ensemble_pipeline_for_phase_a(encoder_cfgs: list, quorum: int | None 
         mcp_client=mcp_client,
         embedder=None,  # proximity-only clustering in Phase A
         quorum=quorum,
+        predicate=predicate,
     )
 
 
@@ -561,10 +829,22 @@ def _run_model(
     # For any model with "encoder" in its tags that participated in Phase A,
     # _phase_a_build_cluster_cache already saved the per-encoder fixture.
     # Return it immediately (no SPO, no LLM calls).
+    #
+    # Encoders MUST NOT fall into the SPO path even when ``_in_phase_a_panel``
+    # is False — that happens with legacy cluster-cache entries that don't
+    # store ``per_encoder_mentions``, which collapses ``phase_a_encoder_names``
+    # to an empty set on warm hits. Falling through ran each encoder a second
+    # time over evidence windows via ``extract_with_shared_clusters``, which
+    # emitted ``chunk_extracted`` on ``:win-...`` chunks and made the State
+    # Inspector graph render gliner-large / gliner-pii as bogus SPO nodes
+    # alongside the real LLMs. The cheap fix: encoder tier short-circuits
+    # always, with a synthetic empty fixture as a last resort so the model
+    # still appears in the report (just without SPO output, which encoders
+    # are not capable of producing anyway).
     _is_encoder_tier = "encoder" in cfg.tags or "extraction-specialist" in cfg.tags
     _in_phase_a_panel = phase_a_encoder_names is not None and cfg.name in phase_a_encoder_names
 
-    if _is_encoder_tier and _in_phase_a_panel:
+    if _is_encoder_tier:
         fixture = store.load_fixture(f"extraction_{cfg.model}")
         if fixture is not None:
             run = store.load_run(run_id)
@@ -572,8 +852,34 @@ def _run_model(
                 run.save_extraction(cfg.model, fixture)
             store.save_extraction(cfg.model, fixture)
             return fixture
-        # Pre-saved fixture missing — fall through to the legacy path below so
-        # we still produce output rather than silently returning None.
+        # Pre-saved Phase A fixture missing AND we still don't want to run
+        # the SPO loop (encoders can't produce propositions). Emit a clear
+        # audit signal so the operator knows why this model has empty output
+        # in the report — typically means Phase A was skipped (--spo-only)
+        # or the cache entry is from before the per-encoder fixture pattern.
+        event_store.append(
+            source="harness",
+            node_name="model_run",
+            status="error",
+            model=cfg.name,
+            details={
+                "reason": "encoder_fixture_missing",
+                "in_phase_a_panel": _in_phase_a_panel,
+                "hint": (
+                    "Phase A didn't save extraction_<encoder> for this model. "
+                    "Re-run without --spo-only / --regen the cluster cache, or "
+                    "drop this encoder from --ensemble."
+                ),
+            },
+        )
+        return {
+            "model": cfg.model,
+            "name": cfg.name,
+            "tags": list(cfg.tags),
+            "results": [],
+            "stats": {"mention_count": 0, "assertion_count": 0},
+            "error": "encoder_fixture_missing",
+        }
 
     # ── Synthetic "ensemble" model: return the ensemble fixture from Phase A ─
     if cfg.name == "ensemble" or cfg.model == "ensemble":
@@ -1027,7 +1333,8 @@ examples:
   python tests/benchmark_harness.py --ensemble-only                  # NER bench only
   python tests/benchmark_harness.py --spo-only --run-id 2024-01-01-120000
   python tests/benchmark_harness.py --no-consensus                   # v3 fairness path
-  python tests/benchmark_harness.py --ensemble-quorum 2             # override quorum
+  python tests/benchmark_harness.py --ner-quorum 'a + b + c >= 2'  # majority-of-3
+  python tests/benchmark_harness.py --ner-quorum 2                 # int shorthand for 'sum >= 2'
   python tests/benchmark_harness.py --ensemble-gt                    # GT only
   python tests/benchmark_harness.py --list-gt                        # show ground truths
   python tests/benchmark_harness.py --list-runs                      # show runs
@@ -1139,12 +1446,20 @@ examples:
         ),
     )
     ensemble_group.add_argument(
-        "--ensemble-quorum",
-        type=int,
-        metavar="K",
+        "--ner-quorum",
+        type=str,
+        metavar="EXPR",
         help=(
-            "Override consensus quorum for ConsensusNode (default: ceil(N/2)). "
-            "Must satisfy 1 ≤ K ≤ N where N is the number of --ensemble encoders."
+            "Consensus rule expression. Variables are letters (a..z) "
+            "mapping to --ensemble in order, OR slugs of the encoder name "
+            "(e.g. 'gliner_large'). Examples:\n"
+            "  --ner-quorum='a + b + c >= 2'   (majority of 3, default)\n"
+            "  --ner-quorum='2*a + b + c >= 3' (encoder a counts double)\n"
+            "  --ner-quorum='a & (b | c)'      (logical AND/OR)\n"
+            "  --ner-quorum='gliner_large + nuextract_2_0_8b >= 2'\n"
+            "An integer K is shorthand for 'sum(all encoders) >= K'. "
+            "Misconfigurations (unreachable, trivially-true, "
+            "single-source) abort the run with a diagnostic banner."
         ),
     )
 
@@ -1254,13 +1569,46 @@ examples:
     if not ensemble_model_names:
         parser.error("no ensemble encoders configured; pass --ensemble or check benchmark_config.py tags")
 
-    ensemble_quorum: int | None = getattr(args, "ensemble_quorum", None)
-    if ensemble_quorum is not None:
-        n_ensemble = len(ensemble_model_names)
-        if not (1 <= ensemble_quorum <= n_ensemble):
+    # ── --ner-quorum compilation + diagnostics ──────────────────────────
+    ensemble_quorum: int | None = None
+    ner_predicate = None
+    raw_quorum = getattr(args, "ner_quorum", None)
+    if raw_quorum is not None and raw_quorum.strip():
+        try:
+            # Bare integer is shorthand for "sum(all encoders) >= K"; compile
+            # it into the same predicate machinery for consistent diagnostics.
+            int_form = int(raw_quorum.strip())
+            n_ensemble = len(ensemble_model_names)
+            if not (1 <= int_form <= n_ensemble):
+                parser.error(f"--ner-quorum={int_form} out of range: must satisfy 1 ≤ K ≤ {n_ensemble}")
+            letters = "+".join(string.ascii_lowercase[:n_ensemble])
+            expr_text = f"{letters} >= {int_form}"
+        except ValueError:
+            expr_text = raw_quorum.strip()
+
+        from catalyst_exgraph.consensus_predicate import (
+            ConsensusExprError,
+            compile_consensus_expr,
+            diagnose_predicate,
+        )
+
+        try:
+            ner_predicate = compile_consensus_expr(expr_text, ensemble_model_names)
+        except ConsensusExprError as exc:
+            parser.error(f"--ner-quorum: {exc}")
+
+        diag = diagnose_predicate(ner_predicate)
+        # Always show the summary line; users want to see what their rule
+        # resolved to. Coloured banner for hard errors / warnings.
+        print(f"\n  ner-quorum: {diag.summary}")
+        for w in diag.warnings:
+            print(f"  ⚠  {w}")
+        if diag.hard_errors:
+            for e in diag.hard_errors:
+                print(f"  ✗  {e}")
             parser.error(
-                f"--ensemble-quorum {ensemble_quorum} out of range: "
-                f"must satisfy 1 ≤ K ≤ {n_ensemble} (number of --ensemble encoders)"
+                "--ner-quorum: predicate has fatal misconfiguration(s); "
+                "fix the expression or omit the flag for the default majority."
             )
 
     if getattr(args, "spo_models", None):
@@ -1347,6 +1695,16 @@ examples:
         except Exception:
             manifest_videos = []
     cached_audio_doc_ids = [d for d in store.list_pipeline_cache_doc_ids() if d != "model_cache"]
+
+    # Auto-materialize media_chunks for any manifest video missing from S3.
+    # Pre-condition for --all-videos: the bench can't extract over chunks that
+    # don't exist. We don't drive Whisper here (too slow + GPU-dependent); we
+    # just call the seed which assumes media_segment_merge is already in gold/
+    # and runs chunker over it. If the segment_merge is also missing, the user
+    # gets a clear hint in the error log to run ``task bench:fixtures:regen``.
+    if args.all_videos and manifest_videos:
+        _ensure_media_chunks_materialized([v.get("doc_id") for v in manifest_videos if v.get("doc_id")])
+
     benchmark_chunks = load_chunks()
 
     n_local = sum(1 for m in models if "cloud" not in m.tags)
@@ -1551,6 +1909,7 @@ examples:
                 store=store,
                 ensemble_models=ensemble_model_names if getattr(args, "ensemble", None) else None,
                 quorum=ensemble_quorum,
+                predicate=ner_predicate,
                 progress_log=ui.log,
             )
             _phase_a_duration = time.monotonic() - t_phase_a
