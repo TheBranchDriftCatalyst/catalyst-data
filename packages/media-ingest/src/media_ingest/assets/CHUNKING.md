@@ -78,7 +78,7 @@ Audio-specific (passed to `chunk_speaker_segments`):
 - `fallback_chunk_size` — tier-3 splitter chunk size (default `max_chars // 2`)
 - `gap_threshold_s` — segment merge gap (in `media_segment_merge`, currently 7.0s)
 
-Run `python scripts/chunk_stats.py` against test fixtures to see:
+Run `python scripts/fixtures/chunk_stats.py` against test fixtures to see:
 
 - Segment merge collapse ratio
 - Pause distribution (gap lengths between words)

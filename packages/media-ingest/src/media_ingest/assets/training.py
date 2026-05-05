@@ -4,7 +4,7 @@ These assets read the silver+gold medallion artifacts plus the active
 ``bench/ground-truth/active.json`` and emit JSONL training corpora to
 ``s3://<bucket>/bench/training/sft/<domain>/data.jsonl`` and
 ``.../dpo/<domain>/data.jsonl``. An off-cluster fine-tuning script
-(``scripts/pull_training_dataset.py``, Phase 3.3) downloads the JSONL
+(``scripts/training/pull_training_dataset.py``, Phase 3.3) downloads the JSONL
 to a GPU box without re-running this asset.
 
 Hybrid-(c) ground truth: where a chunk's per-chunk ``reviewed`` flag is

@@ -38,7 +38,7 @@ regexTarget = "match"
 # source (packages/knowledge-graph/src/knowledge_graph/resources.py,
 # packages/media-ingest/src/media_ingest/viewer/services/annotation_store.py),
 # TypeScript source (packages/knowledge-graph-api/src/env.ts), Tiltfiles,
-# scripts/dashboard.sh, and README.md. A regex allowlist (rather than a path
+# scripts/ops/dashboard.sh, and README.md. A regex allowlist (rather than a path
 # allowlist) lets us keep the rules active for any *other* string in those
 # files while whitelisting just these three well-known values.
 regexes = [
@@ -59,7 +59,7 @@ regexes = [
   '''kg-homelab''',
 
   # k8s/knowledge-graph/deployment.yaml, k8s/platform/neo4j.yaml,
-  # packages/knowledge-graph-api/src/env.ts, Tiltfile, scripts/dashboard.sh
+  # packages/knowledge-graph-api/src/env.ts, Tiltfile, scripts/ops/dashboard.sh
   '''neo4j-homelab''',
 ]
 

@@ -61,6 +61,81 @@ def _list_chunk_keys(client) -> dict[str, list[str]]:
     return by_code_loc
 
 
+def _read_metadata_sidecar(client, data_jsonl_key: str) -> dict | None:
+    """Best-effort read of the ``_metadata.json`` sidecar next to a chunks
+    ``data.jsonl`` key. Returns ``None`` on any miss / decode failure so a
+    legacy materialization without a sidecar (or one removed by a manual
+    bucket cleanup) doesn't kill the bench run.
+
+    The IOManager (``MinioIOManager._build_metadata``) writes the sidecar
+    in lockstep with each ``data.jsonl``, so on a healthy bucket every
+    listed data file has one. CD-d7tb relies on the sidecar's ``run_id``
+    + ``upstream_assets`` + ``timestamp`` to wire the harness ``asset_read``
+    events back to the Dagster materialization that produced them.
+    """
+    if not data_jsonl_key.endswith("data.jsonl"):
+        return None
+    sidecar_key = data_jsonl_key[: -len("data.jsonl")] + "_metadata.json"
+    try:
+        raw = client.get_object(sidecar_key)
+    except Exception:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return None
+
+
+def _emit_asset_read_events(client, keys_by_domain: dict[str, list[str]]) -> None:
+    """Emit one ``source=harness, node_name=asset_read`` bench event per
+    chunk file the harness is about to read (CD-d7tb).
+
+    Pairs with the Dagster-side ``asset_materialized`` events emitted by
+    ``_emit_asset_materialization_events`` (CD-7pr0): the harness side
+    closes the loop so StateInspector can trace
+    "this consensus event came from chunks materialized by run abc123".
+
+    Skipped silently when ``event_store`` is unconfigured — unit tests
+    and one-off scripts that import ``load_chunks`` outside a bench run
+    aren't forced to wire the writer up.
+    """
+    from dagster_io.bench import event_store
+
+    if not event_store.is_configured():
+        return
+
+    bucket = os.environ.get("DAGSTER_S3_BUCKET", "dagster")
+    for _domain, keys in keys_by_domain.items():
+        for key in sorted(keys):
+            m = _KEY_RE.match(key)
+            if m is None:
+                continue
+            sidecar = _read_metadata_sidecar(client, key) or {}
+            partition_key = m.group("partition")
+            event_store.append(
+                source="harness",
+                node_name="asset_read",
+                status="ok",
+                code_location=m.group("code_loc"),
+                # ``doc_id`` is the partition key for partitioned assets;
+                # unpartitioned reads (open-leaks) land in ``__run__``
+                # alongside the run-level summary.
+                doc_id=partition_key,
+                details={
+                    "asset_key": sidecar.get("asset_key") or m.group("asset"),
+                    "partition_key": partition_key,
+                    "dagster_run_id": sidecar.get("run_id"),
+                    "layer": m.group("layer"),
+                    "output_path": f"s3://{bucket}/{key}",
+                    "row_count": sidecar.get("count"),
+                    "size_bytes": sidecar.get("size_bytes"),
+                    "schema": sidecar.get("schema"),
+                    "upstream_assets": sidecar.get("upstream_assets") or [],
+                    "materialized_at": sidecar.get("timestamp"),
+                },
+            )
+
+
 def load_chunks(
     doc_ids: list[str] | None = None,
     sample_per_domain: int | None = None,
@@ -80,6 +155,12 @@ def load_chunks(
     """
     client = _build_client()
     keys_by_domain = _list_chunk_keys(client)
+
+    # Emit ``asset_read`` events for every key we'll read at this call,
+    # before any sample_per_domain truncation kicks in — a sampled run
+    # still touches every key (round-robin) so all upstream lineage
+    # belongs in the audit log.
+    _emit_asset_read_events(client, keys_by_domain)
 
     merged: list[dict] = []
     for _domain, keys in keys_by_domain.items():

@@ -1,5 +1,5 @@
 # Audio fixture manifest — maps source video files to stable doc_ids.
-# Used by scripts/regen_audio_fixtures.py to populate the per-video
+# Used by scripts/fixtures/regen_audio_fixtures.py to populate the per-video
 # pipeline-cache (transcription + diarization).
 #
 # Each entry: { doc_id, file (relative to this dir), title (optional) }.

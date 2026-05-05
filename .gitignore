@@ -19,7 +19,7 @@ tests/demo_video.mp4
 
 # Media-ingest video fixtures — large binaries (~100s of MB each compressed via
 # AV1/HEVC), regenerable by re-downloading from metube via audio_manifest.yaml
-# and running scripts/compress_fixtures.py. The audio_manifest.yaml IS committed
+# and running scripts/fixtures/compress_fixtures.py. The audio_manifest.yaml IS committed
 # (small YAML pinning doc_id → filename → source URL).
 packages/media-ingest/tests/fixtures/*.mp4
 packages/media-ingest/tests/fixtures/*.mkv

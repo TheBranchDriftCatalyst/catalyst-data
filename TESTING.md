@@ -8,7 +8,7 @@ This project uses pytest with a cascading fixture pattern. Integration tests run
 # First-time setup: pull API keys + IO config from the catalyst-cluster k8s
 # secrets and write per-domain .envrc files (chmod 600, all gitignored).
 # Idempotent — re-run any time the cluster secrets rotate.
-./scripts/pull-dev-secrets.sh
+./scripts/ops/pull-dev-secrets.sh
 direnv allow                          # at the repo root, then in each package
 
 # Run dagster dev with all 3 code locations using LocalJsonIOManager —
@@ -89,7 +89,7 @@ from that tree via a single glob — it never touches per-domain inputs.
 packages/media-ingest/tests/fixtures/
     audio_manifest.yaml              # 7 source videos -> stable doc_ids
     demo_video.mp4                   # smallest fixture; default for single-video integration tests
-    <other source videos>.mp4        # gitignored when present (compressed via scripts/compress_fixtures.py)
+    <other source videos>.mp4        # gitignored when present (compressed via scripts/fixtures/compress_fixtures.py)
 
 packages/congress-data/tests/fixtures/
     bill_manifest.yaml               # bill_ids the integration test materializes
@@ -270,10 +270,10 @@ in order; later steps depend on artifacts produced by earlier ones:
 
 | Step | Wraps | Reads | Writes | When to run |
 |------|-------|-------|--------|-------------|
-| `scripts/compress_fixtures.py` | `media_ingest.assets.transcode._transcode_video` | `*.mp4` source files | replaces `*.mp4` in place | After dropping new source videos into the fixture dir; brings them under git-friendly size |
-| `scripts/regen_audio_fixtures.py` (via `task bench:fixtures:regen`) | `_select_backend(MediaIngestConfig)` + `_run_diarization` | `*.mp4` + manifest | `pipeline-cache/<doc_id>/0_transcription.json`, `1_diarization.json` | After compressing fixtures, or when changing `WHISPER_BACKEND` / `MLX_MODEL_ID` |
+| `scripts/fixtures/compress_fixtures.py` | `media_ingest.assets.transcode._transcode_video` | `*.mp4` source files | replaces `*.mp4` in place | After dropping new source videos into the fixture dir; brings them under git-friendly size |
+| `scripts/fixtures/regen_audio_fixtures.py` (via `task bench:fixtures:regen`) | `_select_backend(MediaIngestConfig)` + `_run_diarization` | `*.mp4` + manifest | `pipeline-cache/<doc_id>/0_transcription.json`, `1_diarization.json` | After compressing fixtures, or when changing `WHISPER_BACKEND` / `MLX_MODEL_ID` |
 | `task bench:chunks:regen:media` | `media_chunks` Dagster asset via `LocalJsonIOManager` | cached diarization (per-doc-id) | `.test-output/media-ingest/gold/media_ingest/media/media_chunks/<doc_id>/data.jsonl` | After audio regen, or when changing chunker config (`CHUNK_SIZE`, pause threshold) |
-| `scripts/bench_extract_per_video.py` | `extract_validated()` | per-doc-id chunks (via `load_chunks(doc_ids=...)`) | `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json` (+ flat aggregate roll-up) | Invoked as a subprocess by `benchmark_harness.py --all-videos`; not run directly |
+| `scripts/benchmark/bench_extract_per_video.py` | `extract_validated()` | per-doc-id chunks (via `load_chunks(doc_ids=...)`) | `runs/<run-id>/extractions/<doc_id>/extraction_<model>.json` (+ flat aggregate roll-up) | Invoked as a subprocess by `benchmark_harness.py --all-videos`; not run directly |
 
 Taskfile shortcuts:
 
@@ -301,7 +301,7 @@ PYTHONPATH=. python tests/benchmark_harness.py --all-videos --models gliner-medi
 ```
 
 `--all-videos` swaps the harness's per-model subprocess from the single-video
-pytest path to `scripts/bench_extract_per_video.py`, which iterates the
+pytest path to `scripts/benchmark/bench_extract_per_video.py`, which iterates the
 manifest. For each video:
 
 1. Loads cached diarization at `pipeline-cache/<doc_id>/1_diarization.json`
