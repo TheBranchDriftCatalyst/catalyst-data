@@ -123,6 +123,7 @@ class ConsensusNode:
         quorum: int | None = None,
         per_type_quorum: dict[str, int] | None = None,
         span_overlap_threshold: float = 0.5,
+        predicate: Any = None,
     ) -> None:
         self.encoder_names = list(encoders)
         self.n_encoders = len(encoders)
@@ -133,6 +134,10 @@ class ConsensusNode:
         else:
             self.per_type_quorum = dict(per_type_quorum)
         self.span_overlap_threshold = span_overlap_threshold
+        # Optional CompiledPredicate (catalyst_exgraph.consensus_predicate).
+        # When set, replaces the integer-quorum check with arbitrary
+        # boolean/arithmetic logic over the encoder vote vector.
+        self.predicate = predicate
 
     # ── Main entry point ────────────────────────────────────────────────────
 
@@ -207,10 +212,19 @@ class ConsensusNode:
             canonical_type = result["canonical_type"]
             vote_count = result["vote_count"]
 
-            # Determine quorum for this type
+            # Determine acceptance: predicate (when set) overrides the
+            # integer-quorum check. The predicate takes a per-encoder
+            # vote dict ``{encoder_name: bool}`` derived from
+            # source_models.  Per-type quorum still applies as a floor —
+            # it's checked first so PII overrides keep working.
             k = self.per_type_quorum.get(canonical_type, self.default_quorum)
+            if self.predicate is not None:
+                votes = {name: name in result["source_models"] for name in self.encoder_names}
+                accepted_by_rule = bool(self.predicate.evaluate(votes))
+            else:
+                accepted_by_rule = vote_count >= k
 
-            if vote_count >= k:
+            if accepted_by_rule:
                 # Span disagreement: max chars difference between span from the
                 # chosen provider and the worst-case other span in the cluster
                 span_disagree = self._span_disagreement(cluster, result["span_start"], result["span_end"])
@@ -252,13 +266,16 @@ class ConsensusNode:
                     },
                 )
             else:
+                rule_text = self.predicate.expr_text if self.predicate is not None else f"vote_count >= {k}"
+                reason = "below_predicate" if self.predicate is not None else "below_quorum"
                 rejected_rec = {
                     "text": result["canonical_text"],
                     "canonical_type": canonical_type,
                     "vote_count": vote_count,
                     "n_encoders": self.n_encoders,
                     "quorum": k,
-                    "reason": "below_quorum",
+                    "rule": rule_text,
+                    "reason": reason,
                     "source_models": result["source_models"],
                     "raw_mentions": cluster,
                 }
@@ -275,7 +292,14 @@ class ConsensusNode:
                         "vote_count": vote_count,
                         "n_encoders": self.n_encoders,
                         "quorum": k,
-                        "reason": "below_quorum",
+                        "rule": rule_text,
+                        "reason": reason,
+                        # Gap #9 — surface which encoders argued for the
+                        # rejected mention so the data scientist can spot
+                        # asymmetric-coverage cases (e.g. gliner-pii alone
+                        # below quorum) and tune per_type_quorum overrides.
+                        # Mirrors mention_decision's source_models field.
+                        "source_models": result["source_models"],
                     },
                 )
 

@@ -224,6 +224,21 @@ class PackEvidenceNode:
         elapsed = time.perf_counter() - t0
         mean_tokens = sum(window_token_counts) / len(window_token_counts) if window_token_counts else 0.0
 
+        # Surface kept-window doc ranges so the State Inspector can paint each
+        # window over the doc-source panel without re-deriving from spo
+        # chunk_extracted events (those don't always carry char offsets).
+        kept_records: list[dict[str, Any]] = [
+            {
+                "window_id": w.get("window_id", ""),
+                "cluster_id": w.get("cluster_id", ""),
+                "doc_char_start": w.get("doc_char_start"),
+                "doc_char_end": w.get("doc_char_end"),
+                "mention_count": len(w.get("mention_indices") or []),
+                "char_count": len(w.get("text") or ""),
+            }
+            for w in kept_windows
+        ]
+
         logger.info(
             "%s: %d clusters → %d windows kept, %d pruned (model=%s, total_tokens≈%d)",
             node_name,
@@ -251,6 +266,8 @@ class PackEvidenceNode:
                     context_tokens=context_tokens,
                     prune_min_mentions=_PACK_MIN_MENTIONS,
                     prune_max_chars_per_mention=_PACK_MAX_CHARS_PER_MENTION,
+                    kept_windows=kept_records,
+                    pruned_windows=pruned_records,
                 )
             ],
         }

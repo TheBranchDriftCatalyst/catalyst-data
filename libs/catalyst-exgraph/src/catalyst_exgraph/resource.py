@@ -128,6 +128,25 @@ class ExtractionResource(ConfigurableResource):
     spo_ensemble: list[str] | None = None
     """List of model names for ensemble SPO. None = single model."""
 
+    # Phase 4 (CD-y4u0 / consensus expression): override the consensus
+    # vote rule.  The expression uses single-letter variables that map to
+    # ``ner_ensemble`` in order — ``a → ensemble[0]``, ``b → ensemble[1]``,
+    # etc.  When unset (the default), the consensus stage uses
+    # ``ceil(N/2)`` (simple majority).  Examples:
+    #
+    #     "a + b + c >= 2"      # majority of 3
+    #     "a + b + c + d >= 3"  # 3-of-4 super-majority
+    #     "2*a + b + c >= 3"    # encoder 'a' counts double
+    #     "a & (b | c)"         # logical: a AND (b OR c)
+    #
+    # See ``catalyst_exgraph.consensus_predicate.compile_consensus_expr``
+    # for the full grammar and pathology detection.  Expressions are
+    # validated at execution time; misconfigurations (unreachable accept,
+    # trivial accept, accepts-with-zero-votes) abort the run with a
+    # diagnostic banner so silent low-quality runs are impossible.
+    ner_quorum_expr: str | None = None
+    """Consensus expression like ``"a + b + c >= 2"``. None → simple majority."""
+
     def _is_encoder(self, model: str) -> bool:
         """Check if model is an encoder (no repair capability)."""
         return any(x in model.lower() for x in ("gliner", "nuextract", "universalner", "uniner"))

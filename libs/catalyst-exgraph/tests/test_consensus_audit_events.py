@@ -178,6 +178,53 @@ async def test_mention_rejected_event_has_required_fields(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_mention_rejected_event_has_source_models(tmp_path):
+    """Gap #9: mention_rejected events expose the cluster's source_models list.
+
+    Mirrors mention_decision's source_models contract — the audit event
+    must carry which encoders argued for the rejected mention so the data
+    scientist can tune per_type_quorum overrides for asymmetric-coverage
+    cases (e.g. gliner-pii alone below quorum).
+    """
+    # Two distinct rejected clusters: a lone-voter (gliner-pii only) and a
+    # multi-voter pair (a+b but quorum=3) so we can verify both cases.
+    encoders = ["gliner-pii", "a", "b"]
+    per_encoder = {
+        "gliner-pii": [_mention("ssn-only", "gliner-pii", mention_type="OTHER", span_start=0)],
+        "a": [_mention("multi", "a", mention_type="OTHER", span_start=20)],
+        "b": [_mention("multi", "b", mention_type="OTHER", span_start=20)],
+    }
+
+    # quorum=3 forces both clusters to be rejected (lone has 1 vote, multi has 2).
+    # per_type_quorum={} disables PII override so OTHER goes through default quorum.
+    node = ConsensusNode(encoders=encoders, quorum=3, per_type_quorum={})
+    result = await node(_state(per_encoder))
+
+    assert len(result["rejected_mentions"]) == 2
+
+    events = _read_events(tmp_path)
+    rejections = [e for e in events if e["node_name"] == "mention_rejected"]
+    assert len(rejections) == 2
+
+    # Every rejection must carry source_models — list, not set, ordering preserved.
+    by_text = {r["details"]["text"]: r["details"] for r in rejections}
+    assert "ssn-only" in by_text
+    assert "multi" in by_text
+
+    lone = by_text["ssn-only"]
+    assert "source_models" in lone, "rejected event missing source_models"
+    assert isinstance(lone["source_models"], list), "source_models must be a list (ordering preserved)"
+    assert lone["source_models"] == ["gliner-pii"]
+
+    multi = by_text["multi"]
+    assert "source_models" in multi
+    assert isinstance(multi["source_models"], list)
+    # Order follows first-seen-encoder per _resolve_cluster (deterministic).
+    assert sorted(multi["source_models"]) == ["a", "b"]
+    assert len(multi["source_models"]) == 2
+
+
+@pytest.mark.asyncio
 async def test_consensus_completed_event_emitted(tmp_path):
     """consensus_completed event is emitted with summary stats."""
     encoders = ["a", "b", "c"]

@@ -164,7 +164,7 @@ def build_ner_pipeline(
     return graph.compile()
 
 
-def build_ensemble_pipeline(
+def build_ensemble_pipeline(  # noqa: PLR0913
     encoders: list[StageConfig],
     clients: dict[str, ExtractionClient],
     mcp_client: Any,
@@ -174,6 +174,7 @@ def build_ensemble_pipeline(
     per_encoder_timeout_s: float = 60.0,
     quorum: int | None = None,
     per_type_quorum: dict[str, int] | None = None,
+    predicate: Any = None,
 ) -> Any:
     """Build the v4 NER-ensemble pipeline (Phase B, CD-94ow).
 
@@ -236,6 +237,7 @@ def build_ensemble_pipeline(
         encoders=encoder_names,
         quorum=quorum,
         per_type_quorum=per_type_quorum,
+        predicate=predicate,
     )
     graph.add_node("consensus", consensus_node)
     node_names.append("consensus")
