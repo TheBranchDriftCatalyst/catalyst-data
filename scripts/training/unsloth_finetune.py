@@ -8,11 +8,11 @@ assets (``packages/media-ingest/src/media_ingest/assets/training.py``).
 
 Workflow:
     # 1. Pull the latest dataset from S3 (or cluster MinIO via port-forward)
-    python scripts/pull_training_dataset.py --kind sft --output ./sft.jsonl
+    python scripts/training/pull_training_dataset.py --kind sft --output ./sft.jsonl
 
     # 2. Fine-tune (this script) — needs a CUDA GPU; CPU works for the
     #    smallest base models but is impractically slow.
-    python scripts/unsloth_finetune.py \\
+    python scripts/training/unsloth_finetune.py \\
         --kind sft \\
         --dataset ./sft.jsonl \\
         --base-model unsloth/llama-3.2-1b-Instruct-bnb-4bit \\

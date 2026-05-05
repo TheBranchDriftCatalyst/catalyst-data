@@ -2,8 +2,8 @@
 """Chunk pipeline stats — analyze diarization, merging, and chunking quality.
 
 Usage:
-    python scripts/chunk_stats.py                           # uses test fixtures
-    python scripts/chunk_stats.py --fixtures tests/fixtures # explicit path
+    python scripts/fixtures/chunk_stats.py                           # uses test fixtures
+    python scripts/fixtures/chunk_stats.py --fixtures tests/fixtures # explicit path
 """
 
 import argparse

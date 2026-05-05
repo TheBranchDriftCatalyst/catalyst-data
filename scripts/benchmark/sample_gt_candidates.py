@@ -37,9 +37,9 @@ Output: ``.test-output/gt-candidates.json`` with the chosen
 
 Usage::
 
-    python scripts/sample_gt_candidates.py --target 200 --seed 42
-    python scripts/sample_gt_candidates.py --target 200 --seed 42 --score-extractions --diagnostics
-    python scripts/sample_gt_candidates.py --target 200 --seed 42 --media 80 --congress 60 --leaks 60
+    python scripts/benchmark/sample_gt_candidates.py --target 200 --seed 42
+    python scripts/benchmark/sample_gt_candidates.py --target 200 --seed 42 --score-extractions --diagnostics
+    python scripts/benchmark/sample_gt_candidates.py --target 200 --seed 42 --media 80 --congress 60 --leaks 60
 
 The script does NOT write anything to ground-truth/ — it only writes the
 candidate list. Human annotation happens via the viewer-ui GT editor against
@@ -61,7 +61,7 @@ from typing import Any
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from tests.shared.medallion import load_chunks  # noqa: E402

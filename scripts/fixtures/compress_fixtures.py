@@ -15,10 +15,10 @@ tests/fixtures/media-ingest/ to keep the repo small.
 
 Usage::
 
-    python scripts/compress_fixtures.py tests/fixtures/media-ingest/
-    python scripts/compress_fixtures.py PATH --backend svt-av1 --crf 45
-    python scripts/compress_fixtures.py PATH --scale 360 --audio-mono-16k
-    python scripts/compress_fixtures.py PATH --max-duration 600
+    python scripts/fixtures/compress_fixtures.py tests/fixtures/media-ingest/
+    python scripts/fixtures/compress_fixtures.py PATH --backend svt-av1 --crf 45
+    python scripts/fixtures/compress_fixtures.py PATH --scale 360 --audio-mono-16k
+    python scripts/fixtures/compress_fixtures.py PATH --max-duration 600
 
 Defaults: videotoolbox-hevc on macOS / svt-av1 elsewhere, scale to 480p,
 Opus 64kbps stereo audio.
@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 # Allow running from repo root without installing
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "media-ingest" / "src"))
 
 from media_ingest.assets.transcode import _transcode_video  # noqa: E402

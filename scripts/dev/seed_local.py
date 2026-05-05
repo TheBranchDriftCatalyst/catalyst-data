@@ -98,6 +98,24 @@ def _maybe_regen(prefix: str) -> None:
         print(f"  --regen: skipped ({exc})")
 
 
+def _embedding_resource():
+    """Build EmbeddingResource for the dev seed.
+
+    Routes through the LiteLLM proxy (LLM_BASE_URL / LLM_API_KEY) when those
+    are set — that's the same proxy the rest of the stack hits, no need for a
+    separate OPENAI_API_KEY. Falls back to defaults (api.openai.com) only when
+    neither LiteLLM nor OpenAI envs exist; in that case the seed will fail
+    loudly on the first embedding call instead of silently producing junk.
+    """
+    from dagster_io import EmbeddingResource
+
+    llm_base = os.environ.get("LLM_BASE_URL", "")
+    llm_key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if llm_base and llm_key:
+        return EmbeddingResource(provider="litellm", base_url=llm_base, api_key=llm_key)
+    return EmbeddingResource()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # media-ingest
 # ─────────────────────────────────────────────────────────────────────────────
@@ -116,7 +134,7 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
     from media_ingest.assets.chunks import media_chunks
     from media_ingest.partitions import media_partitions
 
-    from dagster_io import ChunkingResource, EmbeddingResource, select_io_managers
+    from dagster_io import ChunkingResource, select_io_managers
     from dagster_io.s3_client import S3Client
 
     if regen:
@@ -169,9 +187,9 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
             if k in ("io_manager", "optional_io_manager")
         },
         "chunking": ChunkingResource(prepend_title=False),
-        "embedding": EmbeddingResource(),
-        "embeddings": EmbeddingResource(),
-        "embedding_seed": EmbeddingResource(),
+        "embedding": _embedding_resource(),
+        "embeddings": _embedding_resource(),
+        "embedding_seed": _embedding_resource(),
     }
     # EmbeddingResource normally builds its langchain client inside
     # setup_for_execution; outside Dagster's lifecycle (this materialize)
@@ -310,7 +328,7 @@ def _seed_congress(limit: int, with_gold: bool, regen: bool) -> dict:
     )
     from dagster import DagsterInstance, materialize
 
-    from dagster_io import ChunkingResource, EmbeddingResource, select_io_managers
+    from dagster_io import ChunkingResource, select_io_managers
 
     if regen:
         _maybe_regen("silver/congress_data/")
@@ -342,8 +360,8 @@ def _seed_congress(limit: int, with_gold: bool, regen: bool) -> dict:
     resources = {
         **select_io_managers(default_local_dir=".test-output/congress-data"),
         "chunking": ChunkingResource(),
-        "embeddings": EmbeddingResource(),
-        "embedding_seed": EmbeddingResource(),
+        "embeddings": _embedding_resource(),
+        "embedding_seed": _embedding_resource(),
     }
     for key in ("embeddings", "embedding_seed"):
         resources[key].setup_for_execution(None)
@@ -418,7 +436,7 @@ def _seed_leaks(limit: int, with_gold: bool, regen: bool) -> dict:
     from open_leaks.assets.documents import leak_documents
     from open_leaks.assets.extraction import wikileaks_cables
 
-    from dagster_io import ChunkingResource, EmbeddingResource, select_io_managers
+    from dagster_io import ChunkingResource, select_io_managers
 
     # leak_documents reads icij_offshore_entities + epstein_court_docs in
     # addition to wikileaks_cables; we only have a sample CSV for cables, so
@@ -478,8 +496,8 @@ def _seed_leaks(limit: int, with_gold: bool, regen: bool) -> dict:
             if k == "io_manager"
         },
         "chunking": ChunkingResource(),
-        "embeddings": EmbeddingResource(),
-        "embedding_seed": EmbeddingResource(),
+        "embeddings": _embedding_resource(),
+        "embedding_seed": _embedding_resource(),
     }
     for key in ("embeddings", "embedding_seed"):
         resources[key].setup_for_execution(None)

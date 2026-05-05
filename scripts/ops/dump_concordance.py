@@ -8,9 +8,9 @@ Produces 2 files:
 No IDs, no cross-referencing. Every row tells the full story.
 
 Usage:
-    python scripts/dump_concordance.py                     # via kubectl (default)
-    python scripts/dump_concordance.py --host localhost     # direct PG connection
-    python scripts/dump_concordance.py -o /tmp/audit        # custom output dir
+    python scripts/ops/dump_concordance.py                     # via kubectl (default)
+    python scripts/ops/dump_concordance.py --host localhost     # direct PG connection
+    python scripts/ops/dump_concordance.py -o /tmp/audit        # custom output dir
 """
 
 from __future__ import annotations

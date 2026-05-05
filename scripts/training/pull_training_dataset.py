@@ -4,9 +4,9 @@ from S3 to a local path so a GPU box can fine-tune without re-running the
 Dagster asset.
 
 Usage:
-    python scripts/pull_training_dataset.py --kind sft
-    python scripts/pull_training_dataset.py --kind dpo --domain media_ingest
-    python scripts/pull_training_dataset.py --kind sft --output ~/datasets/sft.jsonl
+    python scripts/training/pull_training_dataset.py --kind sft
+    python scripts/training/pull_training_dataset.py --kind dpo --domain media_ingest
+    python scripts/training/pull_training_dataset.py --kind sft --output ~/datasets/sft.jsonl
 
 S3 keys (matches packages/media-ingest/src/media_ingest/assets/training.py):
     bench/training/sft/<domain>/data.jsonl

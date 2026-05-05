@@ -3,9 +3,9 @@
 # Queries the cluster for all catalyst-data services and their status
 #
 # Usage:
-#   ./scripts/dashboard.sh              # Full dashboard
-#   ./scripts/dashboard.sh --summary    # One-line status for Tilt/CI
-#   ./scripts/dashboard.sh --plain      # ANSI-only (no gum), auto-detected for non-TTY
+#   ./scripts/ops/dashboard.sh              # Full dashboard
+#   ./scripts/ops/dashboard.sh --summary    # One-line status for Tilt/CI
+#   ./scripts/ops/dashboard.sh --plain      # ANSI-only (no gum), auto-detected for non-TTY
 #
 # shellcheck disable=SC2016,SC2034
 
@@ -13,10 +13,10 @@ set -euo pipefail
 
 # Get script directory and source common library
 DASHBOARD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${DASHBOARD_SCRIPT_DIR}/.." && pwd)"
+PROJECT_ROOT="$(cd "${DASHBOARD_SCRIPT_DIR}/../.." && pwd)"
 
-# shellcheck source=lib/dashboard-common.sh
-source "${DASHBOARD_SCRIPT_DIR}/lib/dashboard-common.sh"
+# shellcheck source=../lib/dashboard-common.sh
+source "${DASHBOARD_SCRIPT_DIR}/../lib/dashboard-common.sh"
 
 # ============================================================================
 # Configuration
@@ -321,7 +321,7 @@ print_quick_commands() {
   echo -e "  ${CYAN}psql-kg${RESET}      │ kubectl exec -it -n catalyst-data deploy/postgres-knowledge -- psql -U kg -d knowledge_graph"
   echo -e "  ${CYAN}cypher${RESET}       │ kubectl exec -it -n catalyst-data deploy/neo4j -- cypher-shell -u neo4j -p neo4j-homelab"
   echo -e "  ${CYAN}tilt${RESET}         │ tilt up"
-  echo -e "  ${CYAN}dashboard${RESET}    │ ./scripts/dashboard.sh"
+  echo -e "  ${CYAN}dashboard${RESET}    │ ./scripts/ops/dashboard.sh"
   echo ""
 }
 
