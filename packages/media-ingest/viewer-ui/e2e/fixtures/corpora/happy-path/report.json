@@ -1,0 +1,48 @@
+{
+  "docs": [
+    "happy-path-doc-001"
+  ],
+  "ground_truth": {
+    "available": true,
+    "mention_count": 5
+  },
+  "models": [
+    {
+      "name": "gliner-m",
+      "scores": {
+        "mention_strict_f1": 0.7519,
+        "mention_strict_precision": 0.7975,
+        "mention_strict_recall": 0.7992
+      },
+      "type": "encoder"
+    },
+    {
+      "name": "gliner-l",
+      "scores": {
+        "mention_strict_f1": 0.7132,
+        "mention_strict_precision": 0.7541,
+        "mention_strict_recall": 0.7684
+      },
+      "type": "encoder"
+    },
+    {
+      "name": "tner-roberta",
+      "scores": {
+        "mention_strict_f1": 0.8017,
+        "mention_strict_precision": 0.809,
+        "mention_strict_recall": 0.7162
+      },
+      "type": "encoder"
+    },
+    {
+      "name": "ensemble",
+      "scores": {
+        "mention_strict_f1": 0.85,
+        "mention_strict_precision": 0.88,
+        "mention_strict_recall": 0.82
+      },
+      "type": "consensus"
+    }
+  ],
+  "run_id": "fixture-happy-path"
+}

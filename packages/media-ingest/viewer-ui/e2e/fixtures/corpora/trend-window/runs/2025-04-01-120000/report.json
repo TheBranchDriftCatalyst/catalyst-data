@@ -1,0 +1,39 @@
+{
+  "docs": [
+    "trend-doc-001"
+  ],
+  "ground_truth": {
+    "available": true,
+    "mention_count": 3
+  },
+  "models": [
+    {
+      "name": "gliner-m",
+      "scores": {
+        "mention_strict_f1": 0.6486,
+        "mention_strict_precision": 0.6686,
+        "mention_strict_recall": 0.6285999999999999
+      },
+      "type": "encoder"
+    },
+    {
+      "name": "gliner-l",
+      "scores": {
+        "mention_strict_f1": 0.6486,
+        "mention_strict_precision": 0.6686,
+        "mention_strict_recall": 0.6285999999999999
+      },
+      "type": "encoder"
+    },
+    {
+      "name": "ensemble",
+      "scores": {
+        "mention_strict_f1": 0.6786,
+        "mention_strict_precision": 0.6986,
+        "mention_strict_recall": 0.6586
+      },
+      "type": "consensus"
+    }
+  ],
+  "run_id": "2025-04-01-120000"
+}

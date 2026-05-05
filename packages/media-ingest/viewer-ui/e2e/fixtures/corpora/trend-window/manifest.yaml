@@ -1,0 +1,5 @@
+# trend-window corpus (CD-1qqy) — ≥10 historical runs of same doc
+doc_id: trend-doc-001
+covers_gaps:
+  - #8
+run_count: 10

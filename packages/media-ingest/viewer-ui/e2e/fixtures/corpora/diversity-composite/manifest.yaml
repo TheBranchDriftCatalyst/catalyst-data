@@ -1,0 +1,6 @@
+# TODO(CD-1qqy follow-up): diversity-composite corpus
+status: stub
+covers_gaps:
+  - #2
+  - #7-composite
+todo: see scripts/dev/seed_e2e_fixtures.py docstring

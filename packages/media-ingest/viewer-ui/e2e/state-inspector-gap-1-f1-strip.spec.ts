@@ -17,12 +17,22 @@
  *    expected mention shape.
  */
 import { test, expect } from "./fixtures/coverage";
+import { useFixtureCorpus } from "./fixtures/fixture-mode";
 import {
   firstDocWithConsensus,
   firstEncoderWithMentions,
   resolveRunId,
   runReportInfo,
 } from "./fixtures/inspector-discovery";
+
+// CD-1qqy: when `PLAYWRIGHT_FIXTURE_MODE=1` the happy-path corpus is
+// served from disk via `page.route` interception. The corpus is engineered
+// to satisfy every skip-gate in this file (active GT, ≥3 encoders with
+// strict_f1, ensemble scores). Live mode (env unset): no-op, helpers
+// hit the dev API exactly as before.
+test.beforeEach(async ({ page }) => {
+  await useFixtureCorpus(page, "happy-path");
+});
 
 const TWO_DP = /^\d+\.\d{2}$/;
 const DELTA_FMT = /^Δ\s*[+-]?\d+\.\d{2}$/;

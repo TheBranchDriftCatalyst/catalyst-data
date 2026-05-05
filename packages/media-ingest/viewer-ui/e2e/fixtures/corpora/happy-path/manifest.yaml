@@ -1,0 +1,13 @@
+# happy-path corpus (CD-1qqy) — full pipeline, active GT, ≥3 encoders
+doc_id: happy-path-doc-001
+covers_gaps:
+  - #1
+  - #3
+  - #4
+  - #9
+  - #10
+encoders:
+  - gliner-m
+  - gliner-l
+  - tner-roberta
+event_count: 30

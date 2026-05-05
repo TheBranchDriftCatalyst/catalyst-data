@@ -19,7 +19,22 @@
  *   PLAYWRIGHT_MIN_RUN_AGE_MS — min age before a run is queryable (default 3min)
  */
 import { request as plRequest, type APIRequestContext, type Page } from "@playwright/test";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { safeJsonFromResponse, safeNdjsonFromResponse } from "./api-fetch";
+
+// CD-1qqy: when fixture mode is on we read directly from the corpus
+// dir rather than using APIRequestContext. The route-handler in
+// `fixture-mode.ts` covers in-page (SPA) fetches; the Node-side
+// helpers in this file go through this filesystem shortcut so they
+// don't try to hit a backend that may not exist in CI.
+const FIXTURE_MODE = process.env.PLAYWRIGHT_FIXTURE_MODE === "1";
+const FIXTURE_CORPUS = process.env.PLAYWRIGHT_FIXTURE_CORPUS ?? "happy-path";
+// ESM-safe `__dirname`: the project's tsconfig emits ES modules, so
+// the CommonJS `__dirname` global isn't available at runtime.
+const _DIR = dirname(fileURLToPath(import.meta.url));
+const CORPORA_DIR = join(_DIR, "corpora");
 
 type EvDetails = Record<string, unknown>;
 interface BenchEvent {
@@ -91,7 +106,46 @@ async function getApi(page: Page): Promise<APIRequestContext> {
   return ctx;
 }
 
+/** Fixture-mode: enumerate the active corpus's run ids by walking disk.
+ *  Mirrors what `fixture-mode.ts` exposes via `page.route`, but readable
+ *  from Node-side helpers that bypass the route layer. */
+function fixtureListRuns(): RunsListing {
+  const root = join(CORPORA_DIR, FIXTURE_CORPUS);
+  if (!existsSync(root)) {
+    throw new Error(
+      `PLAYWRIGHT_FIXTURE_MODE=1 but corpus '${FIXTURE_CORPUS}' missing: ${root}. ` +
+        `Run \`python scripts/dev/seed_e2e_fixtures.py --corpus ${FIXTURE_CORPUS}\`.`,
+    );
+  }
+  const runsSubdir = join(root, "runs");
+  if (existsSync(runsSubdir) && statSync(runsSubdir).isDirectory()) {
+    const runs = readdirSync(runsSubdir)
+      .filter((d) => statSync(join(runsSubdir, d)).isDirectory())
+      .sort()
+      .reverse(); // newest-first
+    return { runs, latest: runs[0] ?? null, live: null };
+  }
+  // Single-run corpus — use the same synthetic run id as fixture-mode.ts.
+  const SINGLE_RUN = `2025-04-01-115500-fixture-${FIXTURE_CORPUS}`;
+  return { runs: [SINGLE_RUN], latest: SINGLE_RUN, live: null };
+}
+
+function fixtureReadRunFile(
+  runId: string,
+  filename: "report.json" | "events.ndjson",
+): string | null {
+  const root = join(CORPORA_DIR, FIXTURE_CORPUS);
+  // single-run vs multi-run dispatch matches fixture-mode.ts/readRunFile
+  const single = join(root, filename);
+  if (existsSync(single) && !existsSync(join(root, "runs"))) {
+    return readFileSync(single, "utf-8");
+  }
+  const multi = join(root, "runs", runId, filename);
+  return existsSync(multi) ? readFileSync(multi, "utf-8") : null;
+}
+
 export async function listRuns(page: Page): Promise<RunsListing> {
+  if (FIXTURE_MODE) return fixtureListRuns();
   const api = await getApi(page);
   const resp = await api.get("/viewer/api/bench/runs");
   // Use safeJsonFromResponse so an SPA-fallback HTML body (proves dev
@@ -131,6 +185,21 @@ async function getEvents(page: Page): Promise<BenchEvent[]> {
   const promise = (async () => {
     const runId = await resolveRunId(page);
     if (!runId) return [] as BenchEvent[];
+    // Fixture mode: read events.ndjson from disk directly.
+    if (FIXTURE_MODE) {
+      const text = fixtureReadRunFile(runId, "events.ndjson");
+      if (text == null) return [] as BenchEvent[];
+      const out: BenchEvent[] = [];
+      for (const ln of text.split("\n")) {
+        if (!ln) continue;
+        try {
+          out.push(JSON.parse(ln) as BenchEvent);
+        } catch {
+          /* skip malformed line */
+        }
+      }
+      return out;
+    }
     const api = await getApi(page);
     // Cap at 1000 events (~9MB / ~3s warm) — discovery only needs to find
     // the first event matching each shape, not exhaustively scan the run.
@@ -352,13 +421,6 @@ export async function runReportInfo(
 } | null> {
   const runId = await resolveRunId(page);
   if (!runId) return null;
-  const api = await getApi(page);
-  const path = `/viewer/api/bench/runs/${runId}/report.json`;
-  const resp = await api.get(path);
-  // 404 on report.json is a legitimate "no report yet" signal — return
-  // null so callers can skip with a real reason. SPA-fallback HTML on
-  // ANY status (including 200) is infra breakage: throw loud.
-  if (resp.status() === 404) return null;
   type ReportBody = {
     ground_truth?: { available?: boolean; mention_count?: number };
     models?: Array<{
@@ -371,7 +433,21 @@ export async function runReportInfo(
       };
     }>;
   };
-  const body = await safeJsonFromResponse<ReportBody>(resp, path);
+  let body: ReportBody;
+  if (FIXTURE_MODE) {
+    const text = fixtureReadRunFile(runId, "report.json");
+    if (text == null) return null;
+    body = JSON.parse(text) as ReportBody;
+  } else {
+    const api = await getApi(page);
+    const path = `/viewer/api/bench/runs/${runId}/report.json`;
+    const resp = await api.get(path);
+    // 404 on report.json is a legitimate "no report yet" signal — return
+    // null so callers can skip with a real reason. SPA-fallback HTML on
+    // ANY status (including 200) is infra breakage: throw loud.
+    if (resp.status() === 404) return null;
+    body = await safeJsonFromResponse<ReportBody>(resp, path);
+  }
   const gtAvailable = !!body.ground_truth?.available;
   const gtMentionCount =
     typeof body.ground_truth?.mention_count === "number"
