@@ -1,7 +1,8 @@
-# TODO(CD-1qqy follow-up): edge-cases corpus
-status: stub
+# edge-cases corpus (CD-1qqy) — null confidence, null reason, zero-mention doc
+docs:
+  - edge-cases-null-conf-001
+  - edge-cases-zero-mention-002
 covers_gaps:
   - #3-empty
   - #7-null
-  - zero-mention
-todo: see scripts/dev/seed_e2e_fixtures.py docstring
+event_count: 9

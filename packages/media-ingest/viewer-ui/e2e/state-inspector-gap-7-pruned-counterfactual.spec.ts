@@ -31,6 +31,7 @@
  *     that actually clears the window without flipping the inequality.
  */
 import { test, expect } from "./fixtures/coverage";
+import { useFixtureCorpus } from "./fixtures/fixture-mode";
 import type { Page } from "@playwright/test";
 import { firstPrunedWindow, resolveRunId } from "./fixtures/inspector-discovery";
 import { safeFetchNdjsonInPage } from "./fixtures/api-fetch";
@@ -131,9 +132,15 @@ async function gotoPrunedDetail(
 }
 
 test.describe("State Inspector — Gap 7 — Pruned-window counterfactual", () => {
-  test("pruned_window selection renders counterfactual block @smoke", async ({
-    page,
-  }) => {
+  test.describe("simple/single-reason pruned windows (happy-path corpus)", () => {
+    // CD-1qqy: happy-path corpus provides simple pruned windows
+    test.beforeEach(async ({ page }) => {
+      await useFixtureCorpus(page, "happy-path");
+    });
+
+    test("pruned_window selection renders counterfactual block @smoke", async ({
+      page,
+    }) => {
     const tgt = await firstPrunedWindow(page);
     test.skip(!tgt, "no evidence_window_pruned events present in resolved run");
     const runId = await resolveRunId(page);
@@ -397,10 +404,17 @@ test.describe("State Inspector — Gap 7 — Pruned-window counterfactual", () =
       expect(readout).toContain(expected);
     }
   });
+  });
 
-  test("composite-reason pruned window renders both counterfactual rows", async ({
-    page,
-  }) => {
+  test.describe("composite-reason pruned windows (diversity-composite corpus)", () => {
+    // CD-1qqy: diversity-composite corpus provides composite prune_reason="low_confidence,sparse_density"
+    test.beforeEach(async ({ page }) => {
+      await useFixtureCorpus(page, "diversity-composite");
+    });
+
+    test("composite-reason pruned window renders both counterfactual rows", async ({
+      page,
+    }) => {
     // Discover a pruned window whose reason string contains BOTH
     // "too_few_mentions" AND "sparse_density". The pack node sometimes emits
     // a single composite reason ("too_few_mentions+sparse_density") when both
@@ -475,10 +489,13 @@ test.describe("State Inspector — Gap 7 — Pruned-window counterfactual", () =
       page.getByTestId("pruned-counterfactual-row-sparse-density"),
     ).toBeVisible();
   });
+  });
 
   test("writeQuery preserves unknown URL params on selection change", async ({
     page,
   }) => {
+    // Use happy-path corpus for this generic test (doesn't need composite reason)
+    await useFixtureCorpus(page, "happy-path");
     // Direct regression on writeQuery's drive-by fix (StateInspector.tsx
     // ~L96-101): the persist-selection effect MUST preserve unknown query
     // params (e.g. packPreviewMin / packPreviewMaxCpm) so the handoff seed

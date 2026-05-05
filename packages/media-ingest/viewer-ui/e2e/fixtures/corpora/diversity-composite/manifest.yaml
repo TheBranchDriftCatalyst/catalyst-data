@@ -1,6 +1,11 @@
-# TODO(CD-1qqy follow-up): diversity-composite corpus
-status: stub
+# diversity-composite corpus (CD-1qqy) — ≥3 encoders with varied jaccard pairwise
+doc_id: diversity-composite-doc-001
 covers_gaps:
   - #2
   - #7-composite
-todo: see scripts/dev/seed_e2e_fixtures.py docstring
+  - #9-cross-cut
+encoders:
+  - gliner-l
+  - gliner-pii
+  - gliner-news
+event_count: 14

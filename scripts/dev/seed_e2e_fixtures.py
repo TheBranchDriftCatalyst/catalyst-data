@@ -505,39 +505,391 @@ def build_trend_window() -> None:
     print(f"  trend-window: {len(runs)} runs → {out}")
 
 
-def build_diversity_composite_stub() -> None:
-    """TODO(CD-1qqy follow-up): emit a corpus engineered for Gap #2
-    (≥3 encoders with varied jaccard pairwise) and Gap #7 composite-reason
-    pruning. Stub written to mark intent + keep the dir tree complete."""
+def _build_diversity_composite(rng: random.Random) -> tuple[list[dict], dict]:
+    """One doc, 1 chunk, ~10 mentions, 3 encoders with overlapping but
+    non-identical sets to produce varied Jaccard off-diagonals for Gap #2
+    (encoder co-vote matrix).
+
+    Also includes:
+      - ≥1 pack_evidence event with kept + pruned windows
+      - ≥1 evidence_window_pruned with composite prune_reason="low_confidence,sparse_density"
+      - ≥1 rejected mention with source_models populated (Gap #9 cross-cut)
+
+    Mention coverage by encoder (deliberately non-uniform):
+      - gliner-l: accepts mentions {0, 1, 2, 4, 5, 7}      [6 accepted]
+      - gliner-pii: accepts mentions {1, 2, 3, 4, 6, 8}    [6 accepted]
+      - gliner-news: accepts mentions {2, 3, 4, 5, 8, 9}   [6 accepted]
+
+    This produces a jaccard matrix with variance:
+      - [0,1]: J({0,1,2,4,5,7} ∩ {1,2,3,4,6,8}) / |∪| = 3/9 = 0.33
+      - [0,2]: J({0,1,2,4,5,7} ∩ {2,3,4,5,8,9}) / |∪| = 3/9 = 0.33
+      - [1,2]: J({1,2,3,4,6,8} ∩ {2,3,4,5,8,9}) / |∪| = 4/8 = 0.50
+    """
+    doc_id = "diversity-composite-doc-001"
+    encoders = ["gliner-l", "gliner-pii", "gliner-news"]
+    spo_model = "gpt-4o-mini"
+    events: list[dict] = []
+    seq = 0
+
+    def add(**kw: Any) -> None:
+        nonlocal seq
+        events.append(_ev(seq=seq, **kw))
+        seq += 1
+
+    # 1. chunk_loaded
+    add(
+        node_name="chunk_loaded",
+        doc_id=doc_id,
+        chunk_id=f"{doc_id}:c000",
+        chunk_idx=0,
+        details={"text": "diversity sample chunk", "char_count": 300},
+    )
+
+    # 2. Per-encoder chunk_extracted with deliberate mention set coverage
+    # 10 total mentions (0-9), each encoder sees a subset
+    all_mentions = []
+    for i in range(10):
+        all_mentions.append(
+            {
+                "text": f"Entity{i}",
+                "label": rng.choice(["PERSON", "ORG", "GPE", "LOCATION"]),
+                "span_start": 20 + i * 20,
+                "span_end": 30 + i * 20,
+                "confidence": round(rng.uniform(0.5, 0.9), 3),
+            }
+        )
+
+    # gliner-l accepts {0, 1, 2, 4, 5, 7}
+    encoder_coverage = {
+        "gliner-l": [0, 1, 2, 4, 5, 7],
+        "gliner-pii": [1, 2, 3, 4, 6, 8],
+        "gliner-news": [2, 3, 4, 5, 8, 9],
+    }
+
+    for enc in encoders:
+        indices = encoder_coverage[enc]
+        mentions = [all_mentions[i] for i in indices]
+        add(
+            node_name="chunk_extracted",
+            doc_id=doc_id,
+            chunk_id=f"{doc_id}:c000:_ner_{enc}",
+            chunk_idx=0,
+            model=enc,
+            details={"mentions": mentions, "encoder": enc},
+        )
+        add(
+            node_name="ner_encoder_completed",
+            doc_id=doc_id,
+            model=enc,
+            details={"mention_count": len(mentions)},
+        )
+
+    # 3. mention_decision — accepted (multi-encoder consensus)
+    # Entity2, Entity4 covered by all 3 encoders
+    for ent_idx in [2, 4]:
+        add(
+            node_name="mention_decision",
+            doc_id=doc_id,
+            chunk_id=f"{doc_id}:_consensus",
+            details={
+                "decision": "accepted",
+                "text": f"Entity{ent_idx}",
+                "label": all_mentions[ent_idx]["label"],
+                "source_models": list(encoders),
+                "vote_count": 3,
+                "confidence": round(rng.uniform(0.75, 0.95), 3),
+            },
+        )
+
+    # 4. mention_decision — rejected (single encoder only)
+    # Entity0 is gliner-l only
+    add(
+        node_name="mention_decision",
+        doc_id=doc_id,
+        chunk_id=f"{doc_id}:_consensus",
+        details={
+            "decision": "rejected",
+            "text": "Entity0",
+            "label": all_mentions[0]["label"],
+            "source_models": [encoders[0]],
+            "vote_count": 1,
+            "confidence": round(rng.uniform(0.3, 0.5), 3),
+            "reject_reason": "single_source",
+        },
+    )
+
+    # 5. SPO windows
+    for w in range(2):
+        win_id = f"win-{w:03d}"
+        add(
+            node_name="chunk_extracted",
+            doc_id=doc_id,
+            chunk_id=f"{doc_id}:{win_id}",
+            model=spo_model,
+            details={
+                "window_id": win_id,
+                "proposition_count": 2 + w,
+                "mention_count": 3 + w,
+            },
+        )
+
+    # 6. evidence_window_pruned with composite reason (Gap #7)
+    add(
+        node_name="evidence_window_pruned",
+        doc_id=doc_id,
+        chunk_id=f"{doc_id}:win-100",
+        details={
+            "window_id": "win-100",
+            "prune_reason": "low_confidence,sparse_density",
+            "mention_count": 1,
+            "candidates_per_mention": 0.3,
+        },
+    )
+
+    # 7. pack_evidence with kept + pruned
+    add(
+        node_name="pack_evidence",
+        status="completed",
+        doc_id=doc_id,
+        details={
+            "kept_windows": [{"window_id": f"win-{w:03d}", "mention_count": 3 + w} for w in range(2)],
+            "pruned_windows": [
+                {
+                    "window_id": "win-100",
+                    "mention_count": 1,
+                    "prune_reason": "low_confidence,sparse_density",
+                }
+            ],
+        },
+    )
+
+    # ── report.json ──────────────────────────────────────────
+    report = {
+        "run_id": "fixture-diversity-composite",
+        "ground_truth": {"available": True, "mention_count": 2},
+        "models": [
+            {
+                "name": enc,
+                "type": "encoder",
+                "scores": {
+                    "mention_strict_precision": round(rng.uniform(0.65, 0.80), 4),
+                    "mention_strict_recall": round(rng.uniform(0.60, 0.75), 4),
+                    "mention_strict_f1": round(rng.uniform(0.62, 0.77), 4),
+                },
+            }
+            for enc in encoders
+        ]
+        + [
+            {
+                "name": "ensemble",
+                "type": "consensus",
+                "scores": {
+                    "mention_strict_precision": 0.80,
+                    "mention_strict_recall": 0.75,
+                    "mention_strict_f1": 0.77,
+                },
+            }
+        ],
+        "docs": [doc_id],
+    }
+    return events, report
+
+
+def build_diversity_composite() -> None:
+    rng = random.Random(RANDOM_SEED + 2)
+    events, report = _build_diversity_composite(rng)
     out = CORPORA_DIR / "diversity-composite"
-    out.mkdir(parents=True, exist_ok=True)
+    _write_ndjson(out / "events.ndjson", events)
+    _write_json(out / "report.json", report)
     _write_manifest(
         out / "manifest.yaml",
         {
-            "_header": "TODO(CD-1qqy follow-up): diversity-composite corpus",
-            "status": "stub",
-            "covers_gaps": ["#2", "#7-composite"],
-            "todo": "see scripts/dev/seed_e2e_fixtures.py docstring",
+            "_header": "diversity-composite corpus (CD-1qqy) — ≥3 encoders with varied jaccard pairwise",
+            "doc_id": "diversity-composite-doc-001",
+            "covers_gaps": ["#2", "#7-composite", "#9-cross-cut"],
+            "encoders": ["gliner-l", "gliner-pii", "gliner-news"],
+            "event_count": len(events),
+        },
+    )
+    print(f"  diversity-composite: {len(events)} events → {out}")
+
+
+def _build_edge_cases(rng: random.Random) -> tuple[list[dict], dict]:
+    """Two docs to cover edge cases:
+
+    Doc 1: encoder with all-null confidence (Gap #3 empty branch) +
+    pruned window with prune_reason=null (Gap #7 null branch).
+
+    Doc 2: zero-mention doc (chunks loaded but no chunk_extracted events).
+    """
+    doc1_id = "edge-cases-null-conf-001"
+    doc2_id = "edge-cases-zero-mention-002"
+    encoder_null_conf = "gliner-null-conf"
+    spo_model = "gpt-4o-mini"
+    events: list[dict] = []
+    seq = 0
+
+    def add(**kw: Any) -> None:
+        nonlocal seq
+        events.append(_ev(seq=seq, **kw))
+        seq += 1
+
+    # ── Doc 1: null-confidence encoder + null-reason pruned window ────────
+
+    # 1a. chunk_loaded for doc1
+    add(
+        node_name="chunk_loaded",
+        doc_id=doc1_id,
+        chunk_id=f"{doc1_id}:c000",
+        chunk_idx=0,
+        details={"text": "null confidence edge case", "char_count": 200},
+    )
+
+    # 1b. chunk_extracted for doc1 with every mention having confidence=null
+    mentions_null_conf = []
+    for i in range(5):
+        mentions_null_conf.append(
+            {
+                "text": f"NullEntity{i}",
+                "label": "PERSON",
+                "span_start": 10 + i * 15,
+                "span_end": 20 + i * 15,
+                "confidence": None,  # Explicitly null
+            }
+        )
+    add(
+        node_name="chunk_extracted",
+        doc_id=doc1_id,
+        chunk_id=f"{doc1_id}:c000:_ner_{encoder_null_conf}",
+        chunk_idx=0,
+        model=encoder_null_conf,
+        details={"mentions": mentions_null_conf, "encoder": encoder_null_conf},
+    )
+    add(
+        node_name="ner_encoder_completed",
+        doc_id=doc1_id,
+        model=encoder_null_conf,
+        details={"mention_count": len(mentions_null_conf)},
+    )
+
+    # 1c. One consensus mention (so doc appears in lists)
+    add(
+        node_name="mention_decision",
+        doc_id=doc1_id,
+        chunk_id=f"{doc1_id}:_consensus",
+        details={
+            "decision": "accepted",
+            "text": "NullEntity0",
+            "label": "PERSON",
+            "source_models": [encoder_null_conf],
+            "vote_count": 1,
+            "confidence": 0.6,
         },
     )
 
+    # 1d. SPO window for pack_evidence
+    add(
+        node_name="chunk_extracted",
+        doc_id=doc1_id,
+        chunk_id=f"{doc1_id}:win-000",
+        model=spo_model,
+        details={
+            "window_id": "win-000",
+            "proposition_count": 1,
+            "mention_count": 2,
+        },
+    )
 
-def build_edge_cases_stub() -> None:
-    """TODO(CD-1qqy follow-up): emit a corpus for empty/null branches:
-    one encoder with all-null confidence (Gap #3 empty branch),
-    one pruned window with prune_reason=null (Gap #7 null branch),
-    one zero-mention doc."""
+    # 1e. evidence_window_pruned with prune_reason=null (Gap #7)
+    add(
+        node_name="evidence_window_pruned",
+        doc_id=doc1_id,
+        chunk_id=f"{doc1_id}:win-null-reason",
+        details={
+            "window_id": "win-null-reason",
+            "prune_reason": None,  # Explicitly null reason
+            "mention_count": 0,
+            "candidates_per_mention": 0,
+        },
+    )
+
+    # 1f. pack_evidence for doc1
+    add(
+        node_name="pack_evidence",
+        status="completed",
+        doc_id=doc1_id,
+        details={
+            "kept_windows": [{"window_id": "win-000", "mention_count": 2}],
+            "pruned_windows": [
+                {
+                    "window_id": "win-null-reason",
+                    "mention_count": 0,
+                    "prune_reason": None,
+                }
+            ],
+        },
+    )
+
+    # ── Doc 2: zero-mention doc ──────────────────────────────────────────
+
+    # 2a. chunk_loaded for doc2 (chunks exist but no extracted mentions)
+    add(
+        node_name="chunk_loaded",
+        doc_id=doc2_id,
+        chunk_id=f"{doc2_id}:c000",
+        chunk_idx=0,
+        details={"text": "document with zero mentions", "char_count": 150},
+    )
+
+    # 2b. No chunk_extracted events at all — doc has zero mentions
+
+    # 2c. One empty pack_evidence for completeness
+    add(
+        node_name="pack_evidence",
+        status="completed",
+        doc_id=doc2_id,
+        details={
+            "kept_windows": [],
+            "pruned_windows": [],
+        },
+    )
+
+    # ── report.json: covers both docs ────────────────────────────────────
+    report = {
+        "run_id": "fixture-edge-cases",
+        "ground_truth": {"available": False, "mention_count": 0},
+        "models": [
+            {
+                "name": encoder_null_conf,
+                "type": "encoder",
+                "scores": {
+                    "mention_strict_precision": 0,
+                    "mention_strict_recall": 0,
+                    "mention_strict_f1": 0,
+                },
+            }
+        ],
+        "docs": [doc1_id, doc2_id],
+    }
+    return events, report
+
+
+def build_edge_cases() -> None:
+    rng = random.Random(RANDOM_SEED + 3)
+    events, report = _build_edge_cases(rng)
     out = CORPORA_DIR / "edge-cases"
-    out.mkdir(parents=True, exist_ok=True)
+    _write_ndjson(out / "events.ndjson", events)
+    _write_json(out / "report.json", report)
     _write_manifest(
         out / "manifest.yaml",
         {
-            "_header": "TODO(CD-1qqy follow-up): edge-cases corpus",
-            "status": "stub",
-            "covers_gaps": ["#3-empty", "#7-null", "zero-mention"],
-            "todo": "see scripts/dev/seed_e2e_fixtures.py docstring",
+            "_header": "edge-cases corpus (CD-1qqy) — null confidence, null reason, zero-mention doc",
+            "docs": ["edge-cases-null-conf-001", "edge-cases-zero-mention-002"],
+            "covers_gaps": ["#3-empty", "#7-null"],
+            "event_count": len(events),
         },
     )
+    print(f"  edge-cases: {len(events)} events → {out}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -562,9 +914,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.corpus in ("all", "trend-window"):
         build_trend_window()
     if args.corpus in ("all", "diversity-composite"):
-        build_diversity_composite_stub()
+        build_diversity_composite()
     if args.corpus in ("all", "edge-cases"):
-        build_edge_cases_stub()
+        build_edge_cases()
 
     return 0
 

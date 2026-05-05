@@ -28,6 +28,7 @@
  */
 import { request as plRequest } from "@playwright/test";
 import { test, expect } from "./fixtures/coverage";
+import { useFixtureCorpus } from "./fixtures/fixture-mode";
 import {
   firstDocWithConsensus,
   resolveRunId,
@@ -139,6 +140,11 @@ async function openCovoteDetails(page: import("@playwright/test").Page) {
 test.describe.configure({ timeout: 120_000 });
 
 test.describe("State Inspector — Gap 9 — rejected source_models chip", () => {
+  // CD-1qqy: happy-path corpus provides rejected mentions with source_models
+  test.beforeEach(async ({ page }) => {
+    await useFixtureCorpus(page, "happy-path");
+  });
+
   test("rejected mentions render source-models chip when field present @smoke", async ({
     page,
   }) => {

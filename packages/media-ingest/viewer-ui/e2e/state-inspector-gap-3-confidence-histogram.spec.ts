@@ -16,6 +16,7 @@
  * Source-of-truth assertions: `scripts/qa-verify-gaps.mjs` (Gap #3 block).
  */
 import { test, expect } from "./fixtures/coverage";
+import { useFixtureCorpus } from "./fixtures/fixture-mode";
 import {
   firstEncoderWithConfidence,
   firstEncoderWithMentions,
@@ -36,7 +37,13 @@ test.describe.configure({ timeout: 180_000 });
 const PANEL_TIMEOUT = 90_000;
 
 test.describe("State Inspector — Gap #3 — Confidence histogram", () => {
-  test("histogram renders inside encoder panel @smoke", async ({ page }) => {
+  test.describe("numeric confidence branch (happy-path corpus)", () => {
+    // CD-1qqy: happy-path corpus provides encoders with numeric confidence values
+    test.beforeEach(async ({ page }) => {
+      await useFixtureCorpus(page, "happy-path");
+    });
+
+    test("histogram renders inside encoder panel @smoke", async ({ page }) => {
     const tgt = await firstEncoderWithConfidence(page);
     test.skip(!tgt, "no encoder reports per-mention confidence in resolved run");
     await page.goto(
@@ -142,10 +149,17 @@ test.describe("State Inspector — Gap #3 — Confidence histogram", () => {
     const preview = panel.getByTestId("confidence-preview");
     await expect(preview).toContainText(/at conf ≥ 0\.00:\s*keep\s+\d+\s*\/\s*\d+/);
   });
+  });
 
-  test("empty state renders for encoders with only null-confidence mentions", async ({
-    page,
-  }) => {
+  test.describe("empty confidence branch (edge-cases corpus)", () => {
+    // CD-1qqy: edge-cases corpus provides encoder with null-confidence mentions
+    test.beforeEach(async ({ page }) => {
+      await useFixtureCorpus(page, "edge-cases");
+    });
+
+    test("empty state renders for encoders with only null-confidence mentions", async ({
+      page,
+    }) => {
     const allEncoders = await firstEncoderWithMentions(page);
     test.skip(!allEncoders, "no encoder with mentions in resolved run");
     // The current bench corpus does not include any encoder that emits
@@ -161,5 +175,6 @@ test.describe("State Inspector — Gap #3 — Confidence histogram", () => {
     // Future: when an encoder lands that emits null-confidence-only, the
     // skip flips off and this assertion fires:
     // await expect(page.getByTestId("confidence-empty")).toBeVisible();
+  });
   });
 });

@@ -20,6 +20,7 @@
  *   - test.describe block matches `--grep "Gap 10"`.
  */
 import { test, expect, type Page } from "./fixtures/coverage";
+import { useFixtureCorpus } from "./fixtures/fixture-mode";
 import { request as plRequest } from "@playwright/test";
 import { firstDocWithPersist, resolveRunId } from "./fixtures/inspector-discovery";
 import { safeNdjsonFromResponse } from "./fixtures/api-fetch";
@@ -139,6 +140,11 @@ async function firstDocWithPartialFailure(
 }
 
 test.describe("State Inspector — Gap 10 — downstream lineage panel", () => {
+  // CD-1qqy: happy-path corpus provides persist_artifacts with asset_keys + dagster_run_id
+  test.beforeEach(async ({ page }) => {
+    await useFixtureCorpus(page, "happy-path");
+  });
+
   test("persist node selection renders DownstreamPanel @smoke", async ({ page }) => {
     const tgt = await firstDocWithPersist(page);
     test.skip(!tgt, "no doc with persist_artifacts events in resolved run");

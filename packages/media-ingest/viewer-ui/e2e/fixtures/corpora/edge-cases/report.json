@@ -1,0 +1,22 @@
+{
+  "docs": [
+    "edge-cases-null-conf-001",
+    "edge-cases-zero-mention-002"
+  ],
+  "ground_truth": {
+    "available": false,
+    "mention_count": 0
+  },
+  "models": [
+    {
+      "name": "gliner-null-conf",
+      "scores": {
+        "mention_strict_f1": 0,
+        "mention_strict_precision": 0,
+        "mention_strict_recall": 0
+      },
+      "type": "encoder"
+    }
+  ],
+  "run_id": "fixture-edge-cases"
+}

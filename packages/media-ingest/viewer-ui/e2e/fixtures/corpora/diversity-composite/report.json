@@ -1,0 +1,48 @@
+{
+  "docs": [
+    "diversity-composite-doc-001"
+  ],
+  "ground_truth": {
+    "available": true,
+    "mention_count": 2
+  },
+  "models": [
+    {
+      "name": "gliner-l",
+      "scores": {
+        "mention_strict_f1": 0.6577,
+        "mention_strict_precision": 0.739,
+        "mention_strict_recall": 0.6455
+      },
+      "type": "encoder"
+    },
+    {
+      "name": "gliner-pii",
+      "scores": {
+        "mention_strict_f1": 0.7472,
+        "mention_strict_precision": 0.793,
+        "mention_strict_recall": 0.6839
+      },
+      "type": "encoder"
+    },
+    {
+      "name": "gliner-news",
+      "scores": {
+        "mention_strict_f1": 0.7427,
+        "mention_strict_precision": 0.7587,
+        "mention_strict_recall": 0.7077
+      },
+      "type": "encoder"
+    },
+    {
+      "name": "ensemble",
+      "scores": {
+        "mention_strict_f1": 0.77,
+        "mention_strict_precision": 0.8,
+        "mention_strict_recall": 0.75
+      },
+      "type": "consensus"
+    }
+  ],
+  "run_id": "fixture-diversity-composite"
+}

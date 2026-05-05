@@ -18,6 +18,7 @@
  * assertion id (a1, a2 …) corresponds to a `test()` here.
  */
 import { test, expect } from "./fixtures/coverage";
+import { useFixtureCorpus } from "./fixtures/fixture-mode";
 import {
   firstDocWithNEncoders,
   resolveRunId,
@@ -53,6 +54,10 @@ test.describe.configure({ timeout: 180_000 });
 const PANEL_TIMEOUT = 90_000;
 
 test.describe("State Inspector — Gap #2 — Encoder co-vote matrix", () => {
+  // CD-1qqy: diversity-composite corpus provides ≥3 encoders with varied Jaccard matrix
+  test.beforeEach(async ({ page }) => {
+    await useFixtureCorpus(page, "diversity-composite");
+  });
   test("inline 2-encoder summary renders for 2-encoder docs @smoke", async ({
     page,
   }) => {

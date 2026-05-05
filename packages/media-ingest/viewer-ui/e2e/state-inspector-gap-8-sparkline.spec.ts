@@ -18,6 +18,7 @@
  *   - test.describe block matches `--grep "Gap 8"`.
  */
 import { test, expect, type Page } from "./fixtures/coverage";
+import { useFixtureCorpus } from "./fixtures/fixture-mode";
 import {
   firstDocWithConsensus,
   firstDocWithPackEvidence,
@@ -50,6 +51,11 @@ async function olderThanCurrent(page: Page, currentRunId: string): Promise<strin
 }
 
 test.describe("State Inspector — Gap 8 — TrendSparkline rail", () => {
+  // CD-1qqy: trend-window corpus provides ≥10 runs of same doc with varying F1
+  test.beforeEach(async ({ page }) => {
+    await useFixtureCorpus(page, "trend-window");
+  });
+
   test("encoder panel renders sparkline @smoke", async ({ page }) => {
     const tgt = await firstEncoderWithMentions(page);
     test.skip(!tgt, "no encoder with mentions in resolved run");
