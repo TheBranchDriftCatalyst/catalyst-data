@@ -44,9 +44,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from dagster_io.bench import S3BenchmarkStore
+from dagster_io.bench.prompt_store import get_prompt, get_response
 from dagster_io.logging import get_logger
 
 logger = get_logger(__name__)
@@ -894,3 +895,49 @@ def list_top_extractions(
             raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
         return {"models": run.list_extractions(), "scope": f"run:{run_id}"}
     return {"models": store.list_extractions(), "scope": "top-level"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPO prompt + raw-response inspection (Gap #5)
+#
+# The bench audit log inlines a truncated preview into chunk_extracted.details
+# for SPO chunks. The full text is content-addressed in S3 via
+# ``dagster_io.bench.prompt_store``; these routes fetch it on demand so the
+# State Inspector's "show full prompt" pane stays a side fetch (not a
+# 500 KB inline blob on every event).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/prompts/{prompt_hash}", response_class=PlainTextResponse)
+def get_prompt_text(prompt_hash: str) -> str:
+    """Return the full rendered SPO prompt for a content hash, as plain text.
+
+    The hash is the 16-hex-char prefix of ``sha256(system + "\n\n" + user)``
+    written into ``chunk_extracted.details.prompt_hash``. 404 when the
+    archive is missing (legacy run, archive write failed, etc.).
+    """
+    store = _bench_store()
+    text = get_prompt(store, prompt_hash)
+    if text is None:
+        raise HTTPException(status_code=404, detail=f"prompt not found: {prompt_hash}")
+    return text
+
+
+@router.get("/runs/{run_id}/responses/{chunk_id_safe:path}", response_class=PlainTextResponse)
+def get_response_text(run_id: str, chunk_id_safe: str) -> str:
+    """Return the full raw LLM response for a (run, chunk) pair, as plain text.
+
+    ``chunk_id_safe`` is the chunk_id with ``/`` replaced by ``_`` — chunk
+    ids carry ``:`` separators which S3 keys handle fine, but ``/`` would
+    fragment the response across pseudo-prefixes. The path matcher uses
+    ``:path`` so a chunk_id like ``doc-1:win-abc12345`` round-trips
+    through the URL without escape gymnastics.
+    """
+    store = _bench_store()
+    text = get_response(store, run_id, chunk_id_safe)
+    if text is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"response not found for run={run_id} chunk={chunk_id_safe}",
+        )
+    return text
