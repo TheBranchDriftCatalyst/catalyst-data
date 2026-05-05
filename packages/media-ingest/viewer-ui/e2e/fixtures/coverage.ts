@@ -17,6 +17,7 @@ import { test as base, expect } from "@playwright/test";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — monocart ships its own .d.ts but resolution can be quirky in some setups
 import MCR from "monocart-reporter";
+import { useFixtureCorpus } from "./fixture-mode";
 
 // ── ENV BLEED GUARD ───────────────────────────────────────────────────────
 // First line of defense against ENV bleed. Every E2E spec imports `test`
@@ -73,6 +74,22 @@ export const test = base.extend({
         const records = await page.coverage.stopJSCoverage();
         await MCR.addCoverageReport(records, test.info());
       }
+    },
+    { auto: true },
+  ],
+  // Auto-fixture: install the default fixture corpus (happy-path) on
+  // every page. Specs that need a different corpus override by calling
+  // `useFixtureCorpus(page, name)` from their own beforeEach — the
+  // second call replaces the route registration and the per-page
+  // corpus pin (it's idempotent by design).
+  fixtureCorpus: [
+    async ({ page }, use) => {
+      // Some non-State-Inspector specs (smoke, s3-explorer) navigate to
+      // pages that never hit /viewer/api/bench/**, so the route handlers
+      // are unused but harmless. Still install — keeps the surface
+      // uniform and dodges the live API for any incidental bench probes.
+      await useFixtureCorpus(page, "happy-path");
+      await use(undefined);
     },
     { auto: true },
   ],

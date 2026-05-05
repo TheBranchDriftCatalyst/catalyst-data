@@ -25,11 +25,10 @@ import {
   runReportInfo,
 } from "./fixtures/inspector-discovery";
 
-// CD-1qqy: when `PLAYWRIGHT_FIXTURE_MODE=1` the happy-path corpus is
-// served from disk via `page.route` interception. The corpus is engineered
+// CD-1qqy: happy-path corpus is served from disk via `page.route`
+// interception + Node-side filesystem reads. The corpus is engineered
 // to satisfy every skip-gate in this file (active GT, ≥3 encoders with
-// strict_f1, ensemble scores). Live mode (env unset): no-op, helpers
-// hit the dev API exactly as before.
+// strict_f1, ensemble scores).
 test.beforeEach(async ({ page }) => {
   await useFixtureCorpus(page, "happy-path");
 });

@@ -1,36 +1,32 @@
 /**
  * Runtime-discovery helpers for State Inspector Playwright specs.
  *
- * Each helper takes a `Page`, scans the latest viable bench run's events,
- * and returns either a typed match or `null` so callers can do
+ * Each helper takes a `Page`, scans the active corpus's events, and
+ * returns either a typed match or `null` so callers can do
  * `test.skip(!result, "no shape match")`.
  *
- * Caching: events are cached per-Page in a module-scope WeakMap (keyed
- * by Page, value is a Promise<Event[]>) — so 3 helper calls in one test
- * make 1 fetch. Cache is for the Page's lifetime; Playwright tears down
- * the Page between tests so cross-test contamination is impossible.
- * Use `clearDiscoveryCache(page)` to force a re-fetch mid-test.
+ * **Fixture-mode is the only mode.** The `useFixtureCorpus(page, name)`
+ * helper sets which corpus a page is reading; specs that don't call it
+ * get the default ("happy-path"). The Node-side helpers here read
+ * `events.ndjson` and `report.json` directly off disk — there is no
+ * APIRequestContext / live-API fallback. The page-side `page.route`
+ * interception (also in fixture-mode.ts) covers SPA fetches.
  *
- * The fetch happens inside `page.evaluate` so it goes through the same
- * vite proxy the SPA uses (`/viewer/api/...` → :8080).
+ * Caching: events are cached per-Page in a module-scope WeakMap so 3
+ * helper calls in one test make 1 disk read. Playwright tears down the
+ * Page between tests so cross-test contamination is impossible. Use
+ * `clearDiscoveryCache(page)` to force a re-read mid-test.
  *
  * Env overrides:
- *   PLAYWRIGHT_RUN_ID         — pin a specific run for debugging
+ *   PLAYWRIGHT_RUN_ID — pin a specific run id for debugging
  *   PLAYWRIGHT_MIN_RUN_AGE_MS — min age before a run is queryable (default 3min)
  */
-import { request as plRequest, type APIRequestContext, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { safeJsonFromResponse, safeNdjsonFromResponse } from "./api-fetch";
+import { getCorpusForPage } from "./fixture-mode";
 
-// CD-1qqy: when fixture mode is on we read directly from the corpus
-// dir rather than using APIRequestContext. The route-handler in
-// `fixture-mode.ts` covers in-page (SPA) fetches; the Node-side
-// helpers in this file go through this filesystem shortcut so they
-// don't try to hit a backend that may not exist in CI.
-const FIXTURE_MODE = process.env.PLAYWRIGHT_FIXTURE_MODE === "1";
-const FIXTURE_CORPUS = process.env.PLAYWRIGHT_FIXTURE_CORPUS ?? "happy-path";
 // ESM-safe `__dirname`: the project's tsconfig emits ES modules, so
 // the CommonJS `__dirname` global isn't available at runtime.
 const _DIR = dirname(fileURLToPath(import.meta.url));
@@ -71,52 +67,26 @@ export function clearDiscoveryCache(page: Page): void {
   cache.delete(page);
 }
 
-/** Build a Node-side APIRequestContext bound to the same baseURL the page
- *  uses. Doing the discovery fetches over Node bypasses two failure modes
- *  we hit when running through ``page.evaluate(fetch(...))`` against the
- *  Vite dev server:
- *    1. Vite's HMR + ndjson chunked transfer encoding occasionally
- *       confuses Chromium's fetch implementation with "TypeError: Failed
- *       to fetch" on payloads of a few MB.
- *    2. Helpers can run before ``page.goto`` lands a real origin, in
- *       which case ``fetch("/...")`` errors with "Failed to parse URL".
- *    Using APIRequestContext sidesteps both. */
-const apiCache = new WeakMap<Page, APIRequestContext>();
-
-async function getApi(page: Page): Promise<APIRequestContext> {
-  const existing = apiCache.get(page);
-  if (existing) return existing;
-  // Local viewer-ui dev server (vite, :5173) proxies `/viewer/api/*` →
-  // :8080 (FastAPI) — so a single base URL is sufficient. Never default to
-  // a deployed talos host here: the SPA fallback for unknown routes
-  // returns `<!doctype html>...</html>`, JSON.parse fails silently, every
-  // helper returns null, and every `test.skip(!result)` hits — leaving
-  // regression specs reporting `0/0/N skipped` instead of failing loud.
-  // ``localhost`` (not ``127.0.0.1``) because Vite's dev server binds
-  // exclusively to the ``localhost`` host header by default and serves
-  // a blank page on the IPv4 literal — Gap #4 verifier hit this. The
-  // env-guard allowlist (`localhost | 127.0.0.1 | ::1`) still accepts
-  // either as an explicit override.
-  const baseURL =
-    process.env.PLAYWRIGHT_BASE_URL ??
-    process.env.VIEWER_URL ??
-    "http://localhost:5173";
-  const ctx = await plRequest.newContext({ baseURL });
-  apiCache.set(page, ctx);
-  return ctx;
-}
-
-/** Fixture-mode: enumerate the active corpus's run ids by walking disk.
- *  Mirrors what `fixture-mode.ts` exposes via `page.route`, but readable
- *  from Node-side helpers that bypass the route layer. */
-function fixtureListRuns(): RunsListing {
-  const root = join(CORPORA_DIR, FIXTURE_CORPUS);
+/** Resolve the corpus root for a page. Specs that called
+ *  `useFixtureCorpus(page, name)` get their pinned corpus; everything
+ *  else defaults to "happy-path". */
+function corpusRoot(page: Page): string {
+  const name = getCorpusForPage(page) ?? "happy-path";
+  const root = join(CORPORA_DIR, name);
   if (!existsSync(root)) {
     throw new Error(
-      `PLAYWRIGHT_FIXTURE_MODE=1 but corpus '${FIXTURE_CORPUS}' missing: ${root}. ` +
-        `Run \`python scripts/dev/seed_e2e_fixtures.py --corpus ${FIXTURE_CORPUS}\`.`,
+      `corpus '${name}' missing: ${root}. ` +
+        `Run \`python scripts/dev/seed_e2e_fixtures.py --corpus ${name}\`.`,
     );
   }
+  return root;
+}
+
+/** Enumerate the active corpus's run ids by walking disk. Mirrors what
+ *  `fixture-mode.ts`'s page.route handler exposes, but read directly so
+ *  Node-side helpers don't have to round-trip through Chromium. */
+function fixtureListRuns(page: Page): RunsListing {
+  const root = corpusRoot(page);
   const runsSubdir = join(root, "runs");
   if (existsSync(runsSubdir) && statSync(runsSubdir).isDirectory()) {
     const runs = readdirSync(runsSubdir)
@@ -126,15 +96,17 @@ function fixtureListRuns(): RunsListing {
     return { runs, latest: runs[0] ?? null, live: null };
   }
   // Single-run corpus — use the same synthetic run id as fixture-mode.ts.
-  const SINGLE_RUN = `2025-04-01-115500-fixture-${FIXTURE_CORPUS}`;
+  const corpusName = getCorpusForPage(page) ?? "happy-path";
+  const SINGLE_RUN = `2025-04-01-115500-fixture-${corpusName}`;
   return { runs: [SINGLE_RUN], latest: SINGLE_RUN, live: null };
 }
 
 function fixtureReadRunFile(
+  page: Page,
   runId: string,
   filename: "report.json" | "events.ndjson",
 ): string | null {
-  const root = join(CORPORA_DIR, FIXTURE_CORPUS);
+  const root = corpusRoot(page);
   // single-run vs multi-run dispatch matches fixture-mode.ts/readRunFile
   const single = join(root, filename);
   if (existsSync(single) && !existsSync(join(root, "runs"))) {
@@ -145,19 +117,7 @@ function fixtureReadRunFile(
 }
 
 export async function listRuns(page: Page): Promise<RunsListing> {
-  if (FIXTURE_MODE) return fixtureListRuns();
-  const api = await getApi(page);
-  const resp = await api.get("/viewer/api/bench/runs");
-  // Use safeJsonFromResponse so an SPA-fallback HTML body (proves dev
-  // server proxy is broken or VIEWER_URL points at a deployed host)
-  // throws LOUDLY instead of silently returning empty runs that make
-  // every regression spec skip-by-default.
-  const body = await safeJsonFromResponse<{
-    runs?: string[];
-    latest?: string | null;
-    live?: string | null;
-  }>(resp, "/viewer/api/bench/runs");
-  return { runs: body.runs ?? [], latest: body.latest ?? null, live: body.live ?? null };
+  return fixtureListRuns(page);
 }
 export const fetchRuns = listRuns;
 
@@ -185,45 +145,12 @@ async function getEvents(page: Page): Promise<BenchEvent[]> {
   const promise = (async () => {
     const runId = await resolveRunId(page);
     if (!runId) return [] as BenchEvent[];
-    // Fixture mode: read events.ndjson from disk directly.
-    if (FIXTURE_MODE) {
-      const text = fixtureReadRunFile(runId, "events.ndjson");
-      if (text == null) return [] as BenchEvent[];
-      const out: BenchEvent[] = [];
-      for (const ln of text.split("\n")) {
-        if (!ln) continue;
-        try {
-          out.push(JSON.parse(ln) as BenchEvent);
-        } catch {
-          /* skip malformed line */
-        }
-      }
-      return out;
-    }
-    const api = await getApi(page);
-    // Cap at 1000 events (~9MB / ~3s warm) — discovery only needs to find
-    // the first event matching each shape, not exhaustively scan the run.
-    // 1000 is a deliberate floor: the SPA's polling fetch uses limit=50000
-    // and the helper-found event MUST be inside that window for the test's
-    // SPA-side assertion to land. Capping discovery low keeps helper +
-    // SPA in lockstep — pick events the SPA will definitely have polled.
-    const limit = process.env.PLAYWRIGHT_DISCOVERY_LIMIT ?? "1000";
-    const path = `/viewer/api/bench/runs/${runId}/events?limit=${limit}`;
-    const resp = await api.get(path, { timeout: 60_000 });
-    // Loud guard: SPA-fallback HTML => throw, not return-empty.
-    // (Empty events are a real signal — for instance a run that produced
-    // no events — but HTML-instead-of-ndjson means infrastructure is
-    // misconfigured and the test should fail with a useful message.)
-    const text = await safeNdjsonFromResponse(resp, path);
+    const text = fixtureReadRunFile(page, runId, "events.ndjson");
+    if (text == null) return [] as BenchEvent[];
     const out: BenchEvent[] = [];
     for (const ln of text.split("\n")) {
       if (!ln) continue;
       try {
-        // The /runs/$RUN/events endpoint reads from a hive-partitioned
-        // parquet store and returns events from multiple run_ids (the SPA
-        // does the same fetch and renders them all). We don't filter by
-        // ev.run_id here — keep behavior in lockstep with the SPA so a
-        // doc the helper finds is also a doc the SPA can render.
         out.push(JSON.parse(ln) as BenchEvent);
       } catch {
         /* skip malformed line */
@@ -433,21 +360,9 @@ export async function runReportInfo(
       };
     }>;
   };
-  let body: ReportBody;
-  if (FIXTURE_MODE) {
-    const text = fixtureReadRunFile(runId, "report.json");
-    if (text == null) return null;
-    body = JSON.parse(text) as ReportBody;
-  } else {
-    const api = await getApi(page);
-    const path = `/viewer/api/bench/runs/${runId}/report.json`;
-    const resp = await api.get(path);
-    // 404 on report.json is a legitimate "no report yet" signal — return
-    // null so callers can skip with a real reason. SPA-fallback HTML on
-    // ANY status (including 200) is infra breakage: throw loud.
-    if (resp.status() === 404) return null;
-    body = await safeJsonFromResponse<ReportBody>(resp, path);
-  }
+  const text = fixtureReadRunFile(page, runId, "report.json");
+  if (text == null) return null;
+  const body = JSON.parse(text) as ReportBody;
   const gtAvailable = !!body.ground_truth?.available;
   const gtMentionCount =
     typeof body.ground_truth?.mention_count === "number"

@@ -79,11 +79,11 @@ tasks:
 
   # ── E2E Tests (Playwright) ───────────────────────────────────────────────
 
-  test:e2e:fixtures:
-    desc: Run viewer-ui e2e tests with fixture corpora (all Gap specs)
+  test:e2e:gaps:
+    desc: Run viewer-ui Gap specs (seeds corpora first; fixture mode is the only mode)
     cmds:
       - python scripts/dev/seed_e2e_fixtures.py --corpus all
-      - cd packages/media-ingest/viewer-ui && PLAYWRIGHT_FIXTURE_MODE=1 npx playwright test --grep "Gap #" --reporter=line
+      - cd packages/media-ingest/viewer-ui && npx playwright test --grep "Gap #" --reporter=line
 
   # ── Linting ──────────────────────────────────────────────────────────────
 

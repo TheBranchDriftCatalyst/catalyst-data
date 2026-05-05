@@ -4,8 +4,9 @@ const isCI = !!process.env.CI;
 
 export default defineConfig({
   testDir: "./e2e",
-  // CD-1qqy: globalSetup gates `PLAYWRIGHT_FIXTURE_MODE=1` on the corpus
-  // dir being present + populated. No-op when env is unset.
+  // CD-1qqy: globalSetup fails loud when corpora are missing — fixture
+  // mode is the only mode, so the corpora dir must be populated before
+  // any spec runs.
   globalSetup: "./playwright-global-setup.ts",
   fullyParallel: false,
   forbidOnly: isCI,

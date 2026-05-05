@@ -1,17 +1,18 @@
 /**
  * Fixture-mode network interception for Playwright (CD-1qqy).
  *
- * When `PLAYWRIGHT_FIXTURE_MODE=1` is set, every spec gets a
- * `page.route('**\/viewer/api/bench/runs/**', ...)` handler installed
- * via the `useFixtureCorpus(page, name)` helper. The handler resolves
- * three URL shapes:
+ * Fixture mode is the only mode. Specs call `useFixtureCorpus(page, name)`
+ * to install a `page.route('**\/viewer/api/bench/**', ...)` handler that
+ * serves the named corpus's bytes off disk. Handlers resolve four URL
+ * shapes:
  *
  *   GET /viewer/api/bench/runs                       → runs index
  *   GET /viewer/api/bench/runs/<run_id>/report.json  → report.json
  *   GET /viewer/api/bench/runs/<run_id>/events       → ndjson body
+ *   GET /viewer/api/bench/ground-truth/<name>.json   → corpus GT (if present)
  *
  * Single-corpus corpora (happy-path, diversity-composite, edge-cases)
- * pretend to be one run named `fixture-<corpus>-<YYYY-MM-DD-HHMMSS>`
+ * pretend to be one run named `<YYYY-MM-DD-HHMMSS>-fixture-<corpus>`
  * (the timestamp makes the run id older than `MIN_RUN_AGE_MS` so
  * `resolveRunId` accepts it without override).
  *
@@ -19,21 +20,29 @@
  * verbatim — the manifest's `doc_id` is shared across them so the
  * sparkline's "this doc, history of runs" pivot resolves correctly.
  *
- * Live mode (env unset): this file's helpers are no-ops, so behavior
- * is unchanged — Playwright fetches go through to the dev server.
+ * Per-page corpus tracking: `useFixtureCorpus` records the corpus name
+ * in a WeakMap so Node-side helpers in `inspector-discovery.ts` can
+ * read the same corpus the route handler is serving. Specs that don't
+ * call `useFixtureCorpus` get the default corpus ("happy-path").
  */
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page, Route } from "@playwright/test";
 
-const FIXTURE_MODE = process.env.PLAYWRIGHT_FIXTURE_MODE === "1";
-
 // Repo-root-relative path to the corpora dir. Resolved off this file's
 // own location so it works regardless of cwd. Project compiles to
 // ES modules so the CommonJS `__dirname` global isn't available.
 const _DIR = dirname(fileURLToPath(import.meta.url));
 const CORPORA_DIR = join(_DIR, "corpora");
+
+// Per-page corpus selection. inspector-discovery's Node-side helpers
+// look this up to know which corpus dir to read.
+const corpusByPage = new WeakMap<Page, CorpusName>();
+
+export function getCorpusForPage(page: Page): CorpusName | undefined {
+  return corpusByPage.get(page);
+}
 
 export type CorpusName =
   | "happy-path"
@@ -52,12 +61,6 @@ export interface CorpusInfo {
   rootDir: string;
 }
 
-/** Whether fixture mode is active. Cheap helper for callers that want
- *  to branch (e.g. discovery helpers reading a corpus file directly). */
-export function isFixtureMode(): boolean {
-  return FIXTURE_MODE;
-}
-
 export function corpusDir(name: CorpusName): string {
   return join(CORPORA_DIR, name);
 }
@@ -73,7 +76,7 @@ function loadCorpus(name: CorpusName): CorpusInfo {
   const rootDir = corpusDir(name);
   if (!existsSync(rootDir)) {
     throw new Error(
-      `PLAYWRIGHT_FIXTURE_MODE=1 but corpus dir does not exist: ${rootDir}. ` +
+      `Corpus dir does not exist: ${rootDir}. ` +
         `Run \`python scripts/dev/seed_e2e_fixtures.py --corpus ${name}\` first.`,
     );
   }
@@ -134,19 +137,20 @@ function readGroundTruth(info: CorpusInfo): string | null {
 }
 
 /**
- * Install a route handler that intercepts `/viewer/api/bench/runs*`
- * calls and serves bytes from the named corpus. No-op when
- * `PLAYWRIGHT_FIXTURE_MODE` is not set — live API behavior preserved.
+ * Install route handlers that intercept `/viewer/api/bench/runs*` and
+ * `/viewer/api/bench/ground-truth/*` calls and serve bytes from the
+ * named corpus. Also pins the page→corpus mapping so Node-side
+ * helpers (inspector-discovery) read the same corpus.
  *
- * Idempotent — calling twice on the same page replaces the handler
- * (Playwright internally tracks one route registration per glob).
+ * Idempotent — calling twice on the same page replaces both the
+ * handler registration and the corpus pin.
  */
 export async function useFixtureCorpus(
   page: Page,
   name: CorpusName,
-): Promise<CorpusInfo | null> {
-  if (!FIXTURE_MODE) return null;
+): Promise<CorpusInfo> {
   const info = loadCorpus(name);
+  corpusByPage.set(page, name);
 
   await page.route("**/viewer/api/bench/runs**", async (route: Route) => {
     const url = new URL(route.request().url());

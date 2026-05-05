@@ -5,8 +5,8 @@ Generates four synthetic bench-run corpora — `happy-path`,
 `diversity-composite`, `edge-cases`, `trend-window` — that together cover
 every State Inspector "Gap #N" regression spec. The corpora plug into
 Playwright's network-route layer (`page.route('**/api/bench/runs/**')`)
-when `PLAYWRIGHT_FIXTURE_MODE=1` is set, so dev / staging bench data is
-fully decoupled from e2e coverage.
+unconditionally — fixture mode is the only mode for State Inspector
+specs, so dev / staging bench data is fully decoupled from e2e coverage.
 
 Hardcoded RNG seed (``RANDOM_SEED = 1qqy_2025``-flavoured constant 0x1qqy
 truncated to int) means same bytes every run — verified by re-running and
