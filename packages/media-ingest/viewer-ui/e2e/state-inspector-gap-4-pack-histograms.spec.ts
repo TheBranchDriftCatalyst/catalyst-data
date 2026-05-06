@@ -16,7 +16,7 @@
  * Source-of-truth assertions: `scripts/qa-verify-gap4.mjs`.
  */
 import { test, expect } from "./fixtures/coverage";
-import { useFixtureCorpus } from "./fixtures/fixture-mode";
+import { useCorpus } from "./fixtures/corpora";
 import type { Page } from "@playwright/test";
 import {
   firstDocWithKeptAndPruned,
@@ -81,7 +81,7 @@ const PANEL_TIMEOUT = 90_000;
 test.describe("State Inspector — Gap #4 — Pack threshold histograms", () => {
   // CD-1qqy: happy-path corpus provides kept_windows + pruned_windows
   test.beforeEach(async ({ page }) => {
-    await useFixtureCorpus(page, "happy-path");
+    await useCorpus(page, "happy-path");
   });
 
   test("pack panel mounts threshold-histograms root @smoke", async ({ page }) => {

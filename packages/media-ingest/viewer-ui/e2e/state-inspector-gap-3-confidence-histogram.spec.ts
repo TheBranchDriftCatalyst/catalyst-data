@@ -16,7 +16,7 @@
  * Source-of-truth assertions: `scripts/qa-verify-gaps.mjs` (Gap #3 block).
  */
 import { test, expect } from "./fixtures/coverage";
-import { useFixtureCorpus } from "./fixtures/fixture-mode";
+import { useCorpus } from "./fixtures/corpora";
 import {
   firstEncoderWithConfidence,
   firstEncoderWithMentions,
@@ -40,7 +40,7 @@ test.describe("State Inspector — Gap #3 — Confidence histogram", () => {
   test.describe("numeric confidence branch (happy-path corpus)", () => {
     // CD-1qqy: happy-path corpus provides encoders with numeric confidence values
     test.beforeEach(async ({ page }) => {
-      await useFixtureCorpus(page, "happy-path");
+      await useCorpus(page, "happy-path");
     });
 
     test("histogram renders inside encoder panel @smoke", async ({ page }) => {
@@ -154,7 +154,7 @@ test.describe("State Inspector — Gap #3 — Confidence histogram", () => {
   test.describe("empty confidence branch (edge-cases corpus)", () => {
     // CD-1qqy: edge-cases corpus provides encoder with null-confidence mentions
     test.beforeEach(async ({ page }) => {
-      await useFixtureCorpus(page, "edge-cases");
+      await useCorpus(page, "edge-cases");
     });
 
     test("empty state renders for encoders with only null-confidence mentions", async ({

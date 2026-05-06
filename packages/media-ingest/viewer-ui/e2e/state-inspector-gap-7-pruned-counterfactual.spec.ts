@@ -31,7 +31,7 @@
  *     that actually clears the window without flipping the inequality.
  */
 import { test, expect } from "./fixtures/coverage";
-import { useFixtureCorpus } from "./fixtures/fixture-mode";
+import { useCorpus } from "./fixtures/corpora";
 import type { Page } from "@playwright/test";
 import { firstPrunedWindow, resolveRunId } from "./fixtures/inspector-discovery";
 import { safeFetchNdjsonInPage } from "./fixtures/api-fetch";
@@ -135,7 +135,7 @@ test.describe("State Inspector — Gap 7 — Pruned-window counterfactual", () =
   test.describe("simple/single-reason pruned windows (happy-path corpus)", () => {
     // CD-1qqy: happy-path corpus provides simple pruned windows
     test.beforeEach(async ({ page }) => {
-      await useFixtureCorpus(page, "happy-path");
+      await useCorpus(page, "happy-path");
     });
 
     test("pruned_window selection renders counterfactual block @smoke", async ({
@@ -409,7 +409,7 @@ test.describe("State Inspector — Gap 7 — Pruned-window counterfactual", () =
   test.describe("composite-reason pruned windows (diversity-composite corpus)", () => {
     // CD-1qqy: diversity-composite corpus provides composite prune_reason="low_confidence,sparse_density"
     test.beforeEach(async ({ page }) => {
-      await useFixtureCorpus(page, "diversity-composite");
+      await useCorpus(page, "diversity-composite");
     });
 
     test("composite-reason pruned window renders both counterfactual rows", async ({
@@ -495,7 +495,7 @@ test.describe("State Inspector — Gap 7 — Pruned-window counterfactual", () =
     page,
   }) => {
     // Use happy-path corpus for this generic test (doesn't need composite reason)
-    await useFixtureCorpus(page, "happy-path");
+    await useCorpus(page, "happy-path");
     // Direct regression on writeQuery's drive-by fix (StateInspector.tsx
     // ~L96-101): the persist-selection effect MUST preserve unknown query
     // params (e.g. packPreviewMin / packPreviewMaxCpm) so the handoff seed

@@ -5,12 +5,12 @@
  * returns either a typed match or `null` so callers can do
  * `test.skip(!result, "no shape match")`.
  *
- * **Fixture-mode is the only mode.** The `useFixtureCorpus(page, name)`
+ * **Fixture-mode is the only mode.** The `useCorpus(page, name)`
  * helper sets which corpus a page is reading; specs that don't call it
  * get the default ("happy-path"). The Node-side helpers here read
  * `events.ndjson` and `report.json` directly off disk — there is no
  * APIRequestContext / live-API fallback. The page-side `page.route`
- * interception (also in fixture-mode.ts) covers SPA fetches.
+ * interception (also in corpora.ts) covers SPA fetches.
  *
  * Caching: events are cached per-Page in a module-scope WeakMap so 3
  * helper calls in one test make 1 disk read. Playwright tears down the
@@ -25,7 +25,7 @@ import { type Page } from "@playwright/test";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getCorpusForPage } from "./fixture-mode";
+import { getCorpusForPage } from "./corpora";
 
 // ESM-safe `__dirname`: the project's tsconfig emits ES modules, so
 // the CommonJS `__dirname` global isn't available at runtime.
@@ -68,7 +68,7 @@ export function clearDiscoveryCache(page: Page): void {
 }
 
 /** Resolve the corpus root for a page. Specs that called
- *  `useFixtureCorpus(page, name)` get their pinned corpus; everything
+ *  `useCorpus(page, name)` get their pinned corpus; everything
  *  else defaults to "happy-path". */
 function corpusRoot(page: Page): string {
   const name = getCorpusForPage(page) ?? "happy-path";
@@ -83,7 +83,7 @@ function corpusRoot(page: Page): string {
 }
 
 /** Enumerate the active corpus's run ids by walking disk. Mirrors what
- *  `fixture-mode.ts`'s page.route handler exposes, but read directly so
+ *  `corpora.ts`'s page.route handler exposes, but read directly so
  *  Node-side helpers don't have to round-trip through Chromium. */
 function fixtureListRuns(page: Page): RunsListing {
   const root = corpusRoot(page);
@@ -95,7 +95,7 @@ function fixtureListRuns(page: Page): RunsListing {
       .reverse(); // newest-first
     return { runs, latest: runs[0] ?? null, live: null };
   }
-  // Single-run corpus — use the same synthetic run id as fixture-mode.ts.
+  // Single-run corpus — use the same synthetic run id as corpora.ts.
   const corpusName = getCorpusForPage(page) ?? "happy-path";
   const SINGLE_RUN = `2025-04-01-115500-fixture-${corpusName}`;
   return { runs: [SINGLE_RUN], latest: SINGLE_RUN, live: null };
@@ -107,7 +107,7 @@ function fixtureReadRunFile(
   filename: "report.json" | "events.ndjson",
 ): string | null {
   const root = corpusRoot(page);
-  // single-run vs multi-run dispatch matches fixture-mode.ts/readRunFile
+  // single-run vs multi-run dispatch matches corpora.ts/readRunFile
   const single = join(root, filename);
   if (existsSync(single) && !existsSync(join(root, "runs"))) {
     return readFileSync(single, "utf-8");

@@ -17,7 +17,7 @@
  *    expected mention shape.
  */
 import { test, expect } from "./fixtures/coverage";
-import { useFixtureCorpus } from "./fixtures/fixture-mode";
+import { useCorpus } from "./fixtures/corpora";
 import {
   firstDocWithConsensus,
   firstEncoderWithMentions,
@@ -30,7 +30,7 @@ import {
 // to satisfy every skip-gate in this file (active GT, ≥3 encoders with
 // strict_f1, ensemble scores).
 test.beforeEach(async ({ page }) => {
-  await useFixtureCorpus(page, "happy-path");
+  await useCorpus(page, "happy-path");
 });
 
 const TWO_DP = /^\d+\.\d{2}$/;
