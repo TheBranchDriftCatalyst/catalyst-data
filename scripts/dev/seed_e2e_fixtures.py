@@ -189,6 +189,38 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
             details={"mention_count": 12},
         )
 
+    # 2b. Failed encoder — exercises encoder-error UI branch (state-inspector-encoder.spec L37).
+    # Real ner_ensemble emits chunk_extracted with status=error + details.error
+    # AND a matching ner_encoder_completed (status=error) under the same
+    # `:_ner_<enc>` chunk key. NerEncoderDetail reads status off the
+    # `ner_encoder_completed` event for the same chunkId.
+    failed_enc = "gliner-broken"
+    failed_chunk = f"{doc_id}:_ner_{failed_enc}"
+    add(
+        node_name="chunk_extracted",
+        status="error",
+        doc_id=doc_id,
+        chunk_id=failed_chunk,
+        chunk_idx=0,
+        model=failed_enc,
+        details={
+            "encoder": failed_enc,
+            "error": {"type": "ModelLoadError", "message": "model weights failed to load"},
+            "mentions": [],
+        },
+    )
+    add(
+        node_name="ner_encoder_completed",
+        status="error",
+        doc_id=doc_id,
+        chunk_id=failed_chunk,
+        model=failed_enc,
+        details={
+            "error": {"type": "ModelLoadError", "message": "model weights failed to load"},
+            "mention_count": 0,
+        },
+    )
+
     # 3. mention_decision — accepted (covered by ≥2 encoders)
     # Each accepted spec carries (text, label, sources, span_start, span_end);
     # spans are anchored against the chunk_loaded text (200-char chunks
@@ -244,32 +276,44 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
             },
         )
 
-    # 4. mention_rejected — single-source, varied source_models. Real
-    # consensus emits these as a distinct node (not mention_decision with
-    # decision=rejected) so ConsensusDetail's filter
+    # 4. mention_rejected — varied source_models for Gap #9. Need
+    # ≥1 single-voter (cyan), ≥1 multi-voter (zinc), ≥1 legacy (no
+    # source_models field), and ≥5 with source_models for the co-vote
+    # matrix accepted+rejected mode test.
+    #
+    # Real consensus emits these as a distinct node (not mention_decision
+    # with decision=rejected) so ConsensusDetail's filter
     # ``e.node_name === "mention_rejected"`` finds them.
     rejected_specs = [
-        ("Spurious0", "PERSON", [encoders[0]]),
-        ("Spurious1", "ORG", [encoders[1]]),
-        ("Spurious2", "GPE", [encoders[2]]),
+        # (text, label, source_models or None for legacy)
+        ("Spurious0", "PERSON", [encoders[0]]),  # lone-voter
+        ("Spurious1", "ORG", [encoders[1]]),  # lone-voter
+        ("Spurious2", "GPE", [encoders[2]]),  # lone-voter
+        ("Spurious3", "PERSON", [encoders[0], encoders[1]]),  # multi-voter
+        ("Spurious4", "ORG", encoders[:3]),  # multi-voter
+        ("Spurious5", "GPE", [encoders[1], encoders[2]]),  # multi-voter
+        ("LegacyA", "PERSON", None),  # legacy (no source_models)
+        ("LegacyB", "ORG", None),  # legacy
     ]
     for ent_text, label, sources in rejected_specs:
+        details: dict[str, Any] = {
+            "text": ent_text,
+            "canonical_type": label,
+            "label": label,
+            "n_encoders": len(encoders),
+            "quorum": 2,
+            "confidence": round(rng.uniform(0.3, 0.55), 3),
+            "reject_reason": "single_source" if sources and len(sources) == 1 else "low_vote",
+            "reason": "single_source" if sources and len(sources) == 1 else "low_vote",
+        }
+        if sources is not None:
+            details["source_models"] = list(sources)
+            details["vote_count"] = len(sources)
         add(
             node_name="mention_rejected",
             doc_id=doc_id,
             chunk_id=f"{doc_id}:_consensus",
-            details={
-                "text": ent_text,
-                "canonical_type": label,
-                "label": label,
-                "n_encoders": len(encoders),
-                "quorum": 2,
-                "source_models": list(sources),
-                "vote_count": len(sources),
-                "confidence": round(rng.uniform(0.3, 0.55), 3),
-                "reject_reason": "single_source",
-                "reason": "single_source",
-            },
+            details=details,
         )
 
     # 5. SPO windows: chunk_loaded + chunk_extracted per window. The window
@@ -305,22 +349,35 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
             },
         )
 
-    # 6. evidence_window_pruned (Gap #4 needs ≥1 pruned + Gap #7 likes it)
+    # 6. evidence_window_pruned — Gap #4 needs ≥1 pruned, Gap #7 needs the
+    # variants below to exercise every counterfactual-row branch in
+    # PrunedDetail.tsx:
+    #   * too_few_mentions    + mention_count > 0     → min-mentions inequality
+    #   * sparse_density      + chars_per_mention set → max-cpm inequality
+    #   * any reason          + mention_count == 0    → degenerate caption
+    #   * composite reason    → both rows render together (diversity-composite)
     pruned_specs = [
-        ("win-100", "low_confidence"),
-        ("win-101", "sparse_density"),
+        # (wid,                    reason,             mention_count, chars_per_mention)
+        ("win-100", "too_few_mentions", 2, None),
+        ("win-101", "sparse_density", 3, 180.0),
+        ("win-102", "low_confidence", 0, None),  # degenerate (mention_count==0)
+        ("win-103", "low_confidence", 1, None),
     ]
-    for wid, reason in pruned_specs:
+    for wid, reason, mc, cpm in pruned_specs:
+        details: dict[str, Any] = {
+            "window_id": wid,
+            "prune_reason": reason,
+            "mention_count": mc,
+            "candidates_per_mention": 0.5,
+        }
+        if cpm is not None:
+            details["chars_per_mention"] = cpm
+            details["char_count"] = int(round(cpm * max(mc, 1)))
         add(
             node_name="evidence_window_pruned",
             doc_id=doc_id,
             chunk_id=f"{doc_id}:{wid}",
-            details={
-                "window_id": wid,
-                "prune_reason": reason,
-                "mention_count": 1,
-                "candidates_per_mention": 0.5,
-            },
+            details=details,
         )
 
     # 7. pack_evidence — both kept and pruned (Gap #4).
@@ -349,18 +406,32 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
         },
     )
 
-    # 8. persist_artifacts — Gap #10 lineage
+    # 8. persist_artifacts — Gap #10 lineage. Includes:
+    # - asset_keys + dagster_run_id for the happy path (deep-link)
+    # - per_asset_status with one error entry → partial-failure card test
+    # - output_paths matching length so card-count assertion lines up
+    asset_keys = [
+        "media_ingest/extractions",
+        "media_ingest/propositions",
+        "media_ingest/embeddings",
+    ]
     add(
         node_name="persist_artifacts",
         status="completed",
         doc_id=doc_id,
         details={
-            "asset_keys": [
-                "media_ingest/extractions",
-                "media_ingest/propositions",
-            ],
+            "asset_keys": asset_keys,
+            # Real backend emits output_paths as {asset_key: s3_uri} dict —
+            # see packages/media-ingest/.../persist_artifacts.py:78.
+            "output_paths": {k: f"s3://dagster/gold/{k}/{doc_id}/data.parquet" for k in asset_keys},
+            "per_asset_status": {
+                asset_keys[0]: {"status": "ok"},
+                asset_keys[1]: {"status": "ok"},
+                # Last asset failed — exercises the amber-border + reason branch
+                asset_keys[2]: {"status": "error", "reason": "S3 PUT timeout"},
+            },
             "dagster_run_id": "11111111-2222-3333-4444-555555555555",
-            "artifact_count": 2,
+            "artifact_count": 3,
         },
     )
 

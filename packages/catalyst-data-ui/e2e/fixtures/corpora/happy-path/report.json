@@ -10,9 +10,9 @@
     {
       "name": "gliner-m",
       "scores": {
-        "mention_strict_f1": 0.7894,
-        "mention_strict_precision": 0.8312,
-        "mention_strict_recall": 0.7139
+        "mention_strict_f1": 0.8173,
+        "mention_strict_precision": 0.7438,
+        "mention_strict_recall": 0.6871
       },
       "stats": {
         "chunk_count": 3,
@@ -24,9 +24,9 @@
     {
       "name": "gliner-l",
       "scores": {
-        "mention_strict_f1": 0.7209,
-        "mention_strict_precision": 0.7089,
-        "mention_strict_recall": 0.6772
+        "mention_strict_f1": 0.7006,
+        "mention_strict_precision": 0.7745,
+        "mention_strict_recall": 0.7565
       },
       "stats": {
         "chunk_count": 3,
@@ -38,9 +38,9 @@
     {
       "name": "tner-roberta",
       "scores": {
-        "mention_strict_f1": 0.7495,
-        "mention_strict_precision": 0.7371,
-        "mention_strict_recall": 0.7971
+        "mention_strict_f1": 0.7607,
+        "mention_strict_precision": 0.7877,
+        "mention_strict_recall": 0.7859
       },
       "stats": {
         "chunk_count": 3,

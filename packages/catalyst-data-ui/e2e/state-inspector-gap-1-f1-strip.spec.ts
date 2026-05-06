@@ -195,6 +195,11 @@ test.describe("State Inspector — Gap #1 — F1 strip + GT chips", () => {
   });
 
   test("F1 strip absent when run has no ground truth", async ({ page }) => {
+    // Switch to edge-cases corpus which advertises ground_truth.available=false,
+    // so the strip-absent assertion is meaningful. The default useCorpus
+    // beforeEach picks happy-path which has GT — that path is covered by
+    // the strip-PRESENT tests above.
+    await useCorpus(page, "edge-cases");
     const info = await runReportInfo(page);
     test.skip(!info, "no resolved run");
     test.skip(
@@ -203,7 +208,12 @@ test.describe("State Inspector — Gap #1 — F1 strip + GT chips", () => {
     );
     const tgt = await firstDocWithConsensus(page);
     test.skip(!tgt, "no doc with consensus");
-    await page.goto(await deepLink(page, tgt!.docId, "consensus"));
+    // Pin the run to the edge-cases fixture run so the page sees the
+    // GT-less report.json.
+    const edgeRunId = "2025-04-01-115500-fixture-edge-cases";
+    await page.goto(
+      `/viewer/benchmarks/state?run=${encodeURIComponent(edgeRunId)}&doc=${encodeURIComponent(tgt!.docId)}&node=consensus`,
+    );
     const panel = page.getByTestId("consensus-detail");
     await expect(panel).toBeVisible({ timeout: PANEL_TIMEOUT });
     expect(await panel.getByTestId("f1-strip").count()).toBe(0);

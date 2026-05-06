@@ -10,4 +10,4 @@ encoders:
   - gliner-m
   - gliner-l
   - tner-roberta
-event_count: 34
+event_count: 43

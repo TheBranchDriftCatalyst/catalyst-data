@@ -27,17 +27,21 @@ export default defineConfig({
   // around shared module state); files run in parallel across workers.
   fullyParallel: false,
   forbidOnly: isCI,
-  retries: isCI ? 1 : 0,
+  // 1 retry covers the occasional Vite cold-compile contention when 4
+  // workers all navigate to a fresh route at once and `waitForLoadState`
+  // overshoots the per-test budget. Always-on (not just CI) so local
+  // suite runs are deterministic, not race-flaky.
+  retries: 1,
   workers: WORKERS,
-  // Per-test cap — fixture-mode serves all data from disk, so a passing
-  // test takes ≤5s; 30s leaves margin for Vite cold-compile on the first
-  // navigation. (When tests fail, this just affects how long they take
-  // to fail.)
-  timeout: 30_000,
-  // Global default for `expect(...)` waits. Fixture-mode is instant; 8s
-  // is enough for any synchronous render assertion. Specs that genuinely
-  // need to wait longer (e.g. for a poll cycle) override per-call.
-  expect: { timeout: 8_000 },
+  // Per-test cap. Real-backend mode fetches 13 run reports on every page
+  // navigation (TrendSparkline) — under 4-worker contention the first
+  // page load can spike past Vite's HMR + uvicorn handler chain. 60s
+  // accommodates that without masking real test bugs (real failures
+  // surface in <2s).
+  timeout: 60_000,
+  // Global default for `expect(...)` waits. 12s tolerates the same
+  // fan-out without papering over genuinely slow assertions.
+  expect: { timeout: 12_000 },
 
   /**
    * Multi-reporter setup:
