@@ -30,12 +30,12 @@ viewer's `AuditViewer` / `StateInspector`.
   `s3://<bucket>/bench/runs/<run_id>/events.jsonl` every 5 s. Final flush
   at `:1723-1729` + canonical archive in `bench/store.py:203-210`.
 - **Reader (viewer)**: `useRunStream`
-  (`packages/media-ingest/viewer-ui/src/hooks/useRunStream.ts`) polls
+  (`packages/catalyst-data-ui/src/hooks/useRunStream.ts`) polls
   `GET /viewer/api/bench/runs/<id>/events.jsonl` every 3 s
   (`packages/media-ingest/src/media_ingest/viewer/routes/bench.py:211-234`).
   Consumers: `AuditViewer.tsx`, `StateInspector{,V2}.tsx`, `EventStream.tsx`,
   `ChunkRail.tsx`, `ChunkTextPanel.tsx`. Shape: `RunEvent` in
-  `packages/media-ingest/viewer-ui/src/types/benchmark.ts:133-152`.
+  `packages/catalyst-data-ui/src/types/benchmark.ts:133-152`.
 - **Run-bus**: already retired; polling is the only live path.
 
 ## 1. Schema

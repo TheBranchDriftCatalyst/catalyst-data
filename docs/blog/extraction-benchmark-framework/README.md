@@ -304,7 +304,7 @@ python tests/benchmark_harness.py --ensemble-gt
 python tests/benchmark_harness.py --local-only
 
 # View results in the browser
-cd packages/media-ingest/viewer-ui && npm run dev
+cd packages/catalyst-data-ui && npm run dev
 # Navigate to http://localhost:5173/viewer/benchmarks
 ```
 

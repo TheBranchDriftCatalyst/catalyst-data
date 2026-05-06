@@ -128,5 +128,22 @@ export default defineConfig({
     },
   ],
 
-  // No webServer — tests run against the live deployed instance
+  // Auto-start the Vite dev server so `npx playwright test` (and
+  // `--ui` mode) is one command. If Vite is already listening on
+  // :5173 (Tilt resource, separate `npm run dev`, etc.), it's reused.
+  // Fixture mode answers every `/viewer/api/**` request from disk, so
+  // the FastAPI backend on :8080 is NOT a prerequisite — Vite alone
+  // is enough to run the full e2e suite.
+  webServer: {
+    // Run vite directly (no `npm run` wrapper) so the spawn doesn't
+    // re-enter npm's RC loader and surface the parent yarnrc warnings
+    // (yarnrc keys leak into npm's "env config" pass through some
+    // mise/zsh export chain in this workspace).
+    command: "npx vite",
+    url: "http://localhost:5173/viewer/",
+    reuseExistingServer: true,
+    timeout: 60_000,
+    stdout: "ignore",
+    stderr: "pipe",
+  },
 });

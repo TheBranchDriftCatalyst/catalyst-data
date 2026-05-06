@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-09
 **Status:** Design
-**Scope:** `packages/media-ingest/viewer-ui/` (React/TS) + `packages/media-ingest/src/media_ingest/viewer/` (Python API)
+**Scope:** `packages/catalyst-data-ui/` (React/TS) + `packages/media-ingest/src/media_ingest/viewer/` (Python API)
 
 ---
 

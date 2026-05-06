@@ -13,9 +13,9 @@
 # ---------- stage 0: build React SPA ----------
 FROM node:22-slim AS ui-builder
 WORKDIR /ui
-COPY packages/media-ingest/viewer-ui/package.json packages/media-ingest/viewer-ui/package-lock.json ./
+COPY packages/catalyst-data-ui/package.json packages/catalyst-data-ui/package-lock.json ./
 RUN npm ci
-COPY packages/media-ingest/viewer-ui/ .
+COPY packages/catalyst-data-ui/ .
 RUN npm run build
 
 # ---------- stage 1: install libs + source ----------

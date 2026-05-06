@@ -10,27 +10,27 @@
     {
       "name": "gliner-m",
       "scores": {
-        "mention_strict_f1": 0.7519,
-        "mention_strict_precision": 0.7975,
-        "mention_strict_recall": 0.7992
+        "mention_strict_f1": 0.7418,
+        "mention_strict_precision": 0.7356,
+        "mention_strict_recall": 0.759
       },
       "type": "encoder"
     },
     {
       "name": "gliner-l",
       "scores": {
-        "mention_strict_f1": 0.7132,
-        "mention_strict_precision": 0.7541,
-        "mention_strict_recall": 0.7684
+        "mention_strict_f1": 0.8025,
+        "mention_strict_precision": 0.8304,
+        "mention_strict_recall": 0.7333
       },
       "type": "encoder"
     },
     {
       "name": "tner-roberta",
       "scores": {
-        "mention_strict_f1": 0.8017,
-        "mention_strict_precision": 0.809,
-        "mention_strict_recall": 0.7162
+        "mention_strict_f1": 0.6883,
+        "mention_strict_precision": 0.7639,
+        "mention_strict_recall": 0.7672
       },
       "type": "encoder"
     },

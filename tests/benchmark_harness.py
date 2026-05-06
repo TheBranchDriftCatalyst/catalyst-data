@@ -1545,7 +1545,7 @@ examples:
         return
 
     if getattr(args, "view", False):
-        viewer_dir = ROOT / "packages" / "media-ingest" / "viewer-ui"
+        viewer_dir = ROOT / "packages" / "catalyst-data-ui"
         print(f"  Starting viewer SPA from {viewer_dir}")
         print("  Open http://localhost:5173/viewer/benchmarks")
         subprocess.run(["npx", "vite"], cwd=str(viewer_dir))

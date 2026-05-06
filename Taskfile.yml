@@ -83,7 +83,7 @@ tasks:
     desc: Run viewer-ui Gap specs (seeds corpora first; fixture mode is the only mode)
     cmds:
       - python scripts/dev/seed_e2e_fixtures.py --corpus all
-      - cd packages/media-ingest/viewer-ui && npx playwright test --grep "Gap #" --reporter=line
+      - cd packages/catalyst-data-ui && npx playwright test --grep "Gap #" --reporter=line
 
   # ── Linting ──────────────────────────────────────────────────────────────
 
@@ -106,8 +106,8 @@ tasks:
       - ruff format .
 
   lint:frontend:
-    desc: Run frontend linters (viewer-ui)
-    dir: packages/media-ingest/viewer-ui
+    desc: Run frontend linters (catalyst-data-ui)
+    dir: packages/catalyst-data-ui
     cmds:
       - npm run lint
       - npm run format:check
@@ -252,7 +252,7 @@ tasks:
 
   bench:view:
     desc: "Start benchmark viewer SPA"
-    dir: packages/media-ingest/viewer-ui
+    dir: packages/catalyst-data-ui
     cmds:
       - echo "Opening http://localhost:5173/viewer/benchmarks"
       - npm run dev
@@ -381,7 +381,7 @@ tasks:
 
   dev:viewer:ui:
     desc: "Vite SPA only (port 5173). Pair with dev:viewer:api or rely on Tilt for both."
-    dir: packages/media-ingest/viewer-ui
+    dir: packages/catalyst-data-ui
     cmds:
       - npm run dev
 

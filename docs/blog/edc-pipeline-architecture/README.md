@@ -473,7 +473,7 @@ The intent is simple: if a model produces a wrong assertion — say it attribute
 
 ## 9. Debugging Surfaces: StateInspector and AuditViewer
 
-Two interfaces in the React viewer SPA (`packages/media-ingest/viewer-ui/`) make the pipeline's internals observable during development and benchmarking.
+Two interfaces in the React viewer SPA (`packages/catalyst-data-ui/`) make the pipeline's internals observable during development and benchmarking.
 
 **StateInspector** (`/viewer/state-inspector`). A three-pane interface: left rail selects model → domain → document, center pane shows a scrollable chunk timeline with per-chunk extraction status, right pane drills into a selected chunk and shows the extraction events in sequence — `chunk_loaded`, `extract_ner`, `validate_ner`, per-window SPO events, `chunk_extracted`. The events stream live from a unified `events.jsonl` file written by the harness and exposed via SSE from the FastAPI viewer backend. In the v3 topology, the right pane will surface the evidence window breakdown: which entities were clustered together, what text the SPO model received, what it extracted.
 
@@ -536,7 +536,7 @@ PYTHONPATH=. python tests/benchmark_harness.py --spo-only --run-id 2026-05-01-12
 PYTHONPATH=. python tests/benchmark_harness.py --no-consensus
 
 # StateInspector + Benchmark Viewer
-cd packages/media-ingest/viewer-ui && npm run dev
+cd packages/catalyst-data-ui && npm run dev
 # Navigate to http://localhost:5173/viewer/state-inspector
 # Navigate to http://localhost:5173/viewer/benchmarks
 ```

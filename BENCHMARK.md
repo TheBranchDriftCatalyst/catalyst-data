@@ -272,7 +272,7 @@ Both strict and relaxed variants are computed for mentions and propositions.
 
 ## Viewer UI
 
-Start: `task bench:view` or `cd packages/media-ingest/viewer-ui && npm run dev`
+Start: `task bench:view` or `cd packages/catalyst-data-ui && npm run dev`
 
 URL: `http://localhost:5173/viewer/benchmarks`
 

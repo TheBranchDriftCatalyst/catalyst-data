@@ -14,7 +14,7 @@ diffing, no system date / pid / uuid leaks.
 
 Output layout (all paths relative to repo root)::
 
-    packages/media-ingest/viewer-ui/e2e/fixtures/corpora/
+    packages/catalyst-data-ui/e2e/fixtures/corpora/
       happy-path/
         manifest.yaml
         events.ndjson
@@ -62,7 +62,7 @@ from typing import Any
 RANDOM_SEED = 0x1AABBCCDD
 
 ROOT = Path(__file__).resolve().parents[2]
-CORPORA_DIR = ROOT / "packages" / "media-ingest" / "viewer-ui" / "e2e" / "fixtures" / "corpora"
+CORPORA_DIR = ROOT / "packages" / "catalyst-data-ui" / "e2e" / "fixtures" / "corpora"
 
 
 def _ts(seq: int) -> str:

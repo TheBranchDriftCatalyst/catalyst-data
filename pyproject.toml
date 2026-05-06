@@ -32,7 +32,7 @@ src = ["libs", "packages"]
 # .claude/worktrees/ holds temporary subagent scratch worktrees — full
 # copies of the repo with their own pyproject.toml files that would
 # trip ruff's config discovery and double-count every error.
-extend-exclude = [".claude", ".beads", "packages/media-ingest/viewer-ui/node_modules"]
+extend-exclude = [".claude", ".beads", "packages/catalyst-data-ui/node_modules"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

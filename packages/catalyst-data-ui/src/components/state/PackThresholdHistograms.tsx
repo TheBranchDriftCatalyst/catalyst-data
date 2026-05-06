@@ -442,7 +442,6 @@ export function PackThresholdHistograms({
       min: Number.isFinite(minNum) ? minNum : null,
       cpm: Number.isFinite(cpmNum) ? cpmNum : null,
     };
-     
   }, []);
 
   const [previewMin, setPreviewMin] = useState<number>(

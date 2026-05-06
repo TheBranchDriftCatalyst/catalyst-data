@@ -42,17 +42,17 @@ pre-commit:
     # directory so npm scripts resolve the local package's tooling.
     eslint-viewer:
       tags: frontend lint
-      glob: "packages/media-ingest/viewer-ui/src/**/*.{ts,tsx}"
-      root: "packages/media-ingest/viewer-ui/"
-      # Pass staged filenames (relative to viewer-ui root) so eslint only
+      glob: "packages/catalyst-data-ui/src/**/*.{ts,tsx}"
+      root: "packages/catalyst-data-ui/"
+      # Pass staged filenames (relative to catalyst-data-ui root) so eslint only
       # touches what we changed. --fix auto-repairs; stage_fixed re-adds.
       run: npx eslint --fix {staged_files}
       stage_fixed: true
 
     prettier-viewer:
       tags: frontend format
-      glob: "packages/media-ingest/viewer-ui/src/**/*.{ts,tsx,css,json,html}"
-      root: "packages/media-ingest/viewer-ui/"
+      glob: "packages/catalyst-data-ui/src/**/*.{ts,tsx,css,json,html}"
+      root: "packages/catalyst-data-ui/"
       run: npx prettier --write {staged_files}
       stage_fixed: true
 

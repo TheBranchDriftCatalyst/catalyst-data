@@ -126,28 +126,62 @@ function readGroundTruth(info: CorpusInfo): string | null {
 
 // ── Synthetic doc text from chunk_loaded events ───────────────────────
 
-function chunkTextFromCorpus(info: CorpusInfo, docId: string): string {
+interface DocTextChunk {
+  chunk_id: string;
+  index: number;
+  start: number;
+  end: number;
+  text_preview: string;
+}
+
+interface DocTextPayload {
+  doc_id: string;
+  text: string;
+  char_count: number;
+  source: string;
+  chunks: DocTextChunk[];
+}
+
+function chunkTextFromCorpus(info: CorpusInfo, docId: string): DocTextPayload {
   const runId = info.latest;
   const events = readRunFile(info, runId, "events.ndjson");
-  if (!events) return "";
+  if (!events) return { doc_id: docId, text: "", char_count: 0, source: "fixture", chunks: [] };
   const parts: string[] = [];
+  const chunks: DocTextChunk[] = [];
+  let cursor = 0;
+  let chunkIndex = 0;
   for (const line of events.split("\n")) {
     if (!line) continue;
     try {
       const ev = JSON.parse(line) as {
         node_name?: string;
         doc_id?: string;
+        chunk_id?: string;
         details?: { text?: string };
       };
       if (ev.node_name !== "chunk_loaded") continue;
       if (ev.doc_id !== docId) continue;
       const t = ev.details?.text;
-      if (typeof t === "string") parts.push(t);
+      if (typeof t !== "string") continue;
+      const start = cursor;
+      const end = start + t.length;
+      parts.push(t);
+      chunks.push({
+        chunk_id: ev.chunk_id ?? `${docId}:chunk-${chunkIndex}`,
+        index: chunkIndex,
+        start,
+        end,
+        text_preview: t.slice(0, 80),
+      });
+      // \n\n separator between chunks (matches join below)
+      cursor = end + 2;
+      chunkIndex += 1;
     } catch {
       /* skip malformed */
     }
   }
-  return parts.join("\n\n");
+  const text = parts.join("\n\n");
+  return { doc_id: docId, text, char_count: text.length, source: "fixture", chunks };
 }
 
 // ── Synthetic S3 tree ──────────────────────────────────────────────────
@@ -361,11 +395,10 @@ export async function useCorpus(page: Page, name: CorpusName): Promise<CorpusInf
       const m = path.match(/\/viewer\/api\/docs\/([^/]+)\/text$/);
       if (m) {
         const docId = decodeURIComponent(m[1]);
-        const text = chunkTextFromCorpus(info, docId);
         return route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ doc_id: docId, text }),
+          body: JSON.stringify(chunkTextFromCorpus(info, docId)),
         });
       }
     }

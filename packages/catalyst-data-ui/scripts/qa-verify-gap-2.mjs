@@ -620,7 +620,7 @@ async function writeReport({ runIdFor3, runIdFor2 }) {
   lines.push("");
   lines.push("## Gap #2 — Encoder Co-vote / Agreement Matrix");
   lines.push("");
-  lines.push(`- Component: \`packages/media-ingest/viewer-ui/src/components/state/EncoderCovoteMatrix.tsx\``);
+  lines.push(`- Component: \`packages/catalyst-data-ui/src/components/state/EncoderCovoteMatrix.tsx\``);
   lines.push(`- Spec: \`.test-output/inspector-tour/data-scientist-gaps.md\` Gap #2`);
   if (target3) {
     lines.push(
