@@ -14,6 +14,11 @@
         "mention_strict_precision": 0.739,
         "mention_strict_recall": 0.6455
       },
+      "stats": {
+        "chunk_count": 2,
+        "duration_s": 1.1,
+        "mention_count": 6
+      },
       "type": "encoder"
     },
     {
@@ -22,6 +27,11 @@
         "mention_strict_f1": 0.7472,
         "mention_strict_precision": 0.793,
         "mention_strict_recall": 0.6839
+      },
+      "stats": {
+        "chunk_count": 2,
+        "duration_s": 1.1,
+        "mention_count": 6
       },
       "type": "encoder"
     },
@@ -32,6 +42,11 @@
         "mention_strict_precision": 0.7587,
         "mention_strict_recall": 0.7077
       },
+      "stats": {
+        "chunk_count": 2,
+        "duration_s": 1.1,
+        "mention_count": 6
+      },
       "type": "encoder"
     },
     {
@@ -40,6 +55,12 @@
         "mention_strict_f1": 0.77,
         "mention_strict_precision": 0.8,
         "mention_strict_recall": 0.75
+      },
+      "stats": {
+        "assertion_count": 3,
+        "chunk_count": 2,
+        "duration_s": 0.7,
+        "mention_count": 4
       },
       "type": "consensus"
     }

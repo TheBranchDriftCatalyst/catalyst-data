@@ -15,6 +15,11 @@
         "mention_strict_precision": 0,
         "mention_strict_recall": 0
       },
+      "stats": {
+        "chunk_count": 2,
+        "duration_s": 1.0,
+        "mention_count": 1
+      },
       "type": "encoder"
     }
   ],

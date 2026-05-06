@@ -14,6 +14,11 @@
         "mention_strict_precision": 0.8586,
         "mention_strict_recall": 0.8186
       },
+      "stats": {
+        "chunk_count": 3,
+        "duration_s": 1.65,
+        "mention_count": 15
+      },
       "type": "encoder"
     },
     {
@@ -23,6 +28,11 @@
         "mention_strict_precision": 0.8586,
         "mention_strict_recall": 0.8186
       },
+      "stats": {
+        "chunk_count": 3,
+        "duration_s": 1.65,
+        "mention_count": 15
+      },
       "type": "encoder"
     },
     {
@@ -31,6 +41,12 @@
         "mention_strict_f1": 0.8686,
         "mention_strict_precision": 0.8886000000000001,
         "mention_strict_recall": 0.8486
+      },
+      "stats": {
+        "assertion_count": 13,
+        "chunk_count": 3,
+        "duration_s": 1.1600000000000001,
+        "mention_count": 14
       },
       "type": "consensus"
     }

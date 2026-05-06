@@ -104,6 +104,18 @@ export async function safeFetchJson<T = unknown>(
 }
 
 /**
+ * Ensure the page has navigated to a real origin so relative-URL fetches
+ * inside `page.evaluate` resolve. When tests call us before `page.goto`,
+ * `window.location` is `about:blank` and `fetch("/viewer/...")` throws
+ * "Failed to parse URL". We land on the SPA root once and stay there.
+ */
+async function ensurePageOrigin(page: Page): Promise<void> {
+  if (page.url() === "about:blank") {
+    await page.goto("/viewer/");
+  }
+}
+
+/**
  * In-page (browser-side) variant — runs `fetch` inside `page.evaluate`
  * so the request goes through the same Vite proxy the SPA uses. Throws
  * the same loud error on SPA-fallback HTML responses.
@@ -116,6 +128,7 @@ export async function safeFetchJsonInPage<T = unknown>(
   page: Page,
   path: string,
 ): Promise<T> {
+  await ensurePageOrigin(page);
   const result = await page.evaluate(async (p: string) => {
     const r = await fetch(p);
     const text = await r.text();
@@ -158,6 +171,7 @@ export async function safeFetchNdjsonInPage(
   page: Page,
   path: string,
 ): Promise<string> {
+  await ensurePageOrigin(page);
   const result = await page.evaluate(async (p: string) => {
     const r = await fetch(p);
     const text = await r.text();

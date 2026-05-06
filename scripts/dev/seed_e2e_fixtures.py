@@ -284,6 +284,10 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
     )
 
     # ── report.json with active GT + ensemble scores ────────────────────
+    # ``stats`` populates the trend-rail surfaces in the SPA: useTrendData
+    # reads stats.mention_count for consensus_accepted_count and the
+    # encoder rows' stats for encoder_mention_count. Without stats the
+    # sparkline renders an empty polyline (TrendPoint.value = null).
     report = {
         "run_id": "fixture-happy-path",
         "ground_truth": {"available": True, "mention_count": 5},
@@ -296,6 +300,11 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
                     "mention_strict_recall": round(rng.uniform(0.65, 0.80), 4),
                     "mention_strict_f1": round(rng.uniform(0.68, 0.82), 4),
                 },
+                "stats": {
+                    "mention_count": 8,
+                    "chunk_count": 3,
+                    "duration_s": 1.4,
+                },
             }
             for enc in encoders
         ]
@@ -307,6 +316,12 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
                     "mention_strict_precision": 0.88,
                     "mention_strict_recall": 0.82,
                     "mention_strict_f1": 0.85,
+                },
+                "stats": {
+                    "mention_count": 5,
+                    "chunk_count": 3,
+                    "assertion_count": 4,
+                    "duration_s": 0.9,
                 },
             }
         ],
@@ -451,6 +466,10 @@ def _build_trend_window(rng: random.Random) -> list[tuple[str, list[dict], dict]
 
         # F1 varies across runs to make the sparkline non-flat
         f1 = round(0.65 + (i * 0.02) + rng.uniform(-0.01, 0.01), 4)
+        # mention_count drift makes Gap #8 sparkline visibly non-flat for
+        # consensus_accepted_count; chunk_count + assertion_count likewise
+        # populate spo_mean_props_per_window.
+        mc_consensus = 5 + i  # 5..14 across 10 runs
         report = {
             "run_id": run_id,
             "ground_truth": {"available": True, "mention_count": 3},
@@ -463,6 +482,11 @@ def _build_trend_window(rng: random.Random) -> list[tuple[str, list[dict], dict]
                         "mention_strict_recall": f1 - 0.02,
                         "mention_strict_f1": f1,
                     },
+                    "stats": {
+                        "mention_count": 6 + i,
+                        "chunk_count": 3,
+                        "duration_s": 1.2 + i * 0.05,
+                    },
                 }
                 for enc in encoders
             ]
@@ -474,6 +498,12 @@ def _build_trend_window(rng: random.Random) -> list[tuple[str, list[dict], dict]
                         "mention_strict_precision": f1 + 0.05,
                         "mention_strict_recall": f1 + 0.01,
                         "mention_strict_f1": f1 + 0.03,
+                    },
+                    "stats": {
+                        "mention_count": mc_consensus,
+                        "chunk_count": 3,
+                        "assertion_count": 4 + i,
+                        "duration_s": 0.8 + i * 0.04,
                     },
                 }
             ],
@@ -727,6 +757,7 @@ def _build_diversity_composite(rng: random.Random) -> tuple[list[dict], dict]:
                     "mention_strict_recall": round(rng.uniform(0.60, 0.75), 4),
                     "mention_strict_f1": round(rng.uniform(0.62, 0.77), 4),
                 },
+                "stats": {"mention_count": 6, "chunk_count": 2, "duration_s": 1.1},
             }
             for enc in encoders
         ]
@@ -738,6 +769,12 @@ def _build_diversity_composite(rng: random.Random) -> tuple[list[dict], dict]:
                     "mention_strict_precision": 0.80,
                     "mention_strict_recall": 0.75,
                     "mention_strict_f1": 0.77,
+                },
+                "stats": {
+                    "mention_count": 4,
+                    "chunk_count": 2,
+                    "assertion_count": 3,
+                    "duration_s": 0.7,
                 },
             }
         ],
@@ -918,6 +955,7 @@ def _build_edge_cases(rng: random.Random) -> tuple[list[dict], dict]:
                     "mention_strict_recall": 0,
                     "mention_strict_f1": 0,
                 },
+                "stats": {"mention_count": 1, "chunk_count": 2, "duration_s": 1.0},
             }
         ],
         "docs": [doc1_id, doc2_id],

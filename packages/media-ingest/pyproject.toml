@@ -40,6 +40,10 @@ dev = [
     "dagster-webserver>=1.13",
     "pytest>=8.3",
     "ruff>=0.8",
+    # moto-server is the e2e S3 mock — Playwright globalSetup boots it
+    # alongside Vite + uvicorn so the FastAPI viewer talks to a real
+    # boto3-compatible S3 (seeded from corpora) without needing MinIO.
+    "moto[server]>=5.0",
 ]
 
 [tool.hatch.build.targets.wheel]

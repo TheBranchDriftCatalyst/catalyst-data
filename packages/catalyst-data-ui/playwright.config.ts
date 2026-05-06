@@ -128,22 +128,60 @@ export default defineConfig({
     },
   ],
 
-  // Auto-start the Vite dev server so `npx playwright test` (and
-  // `--ui` mode) is one command. If Vite is already listening on
-  // :5173 (Tilt resource, separate `npm run dev`, etc.), it's reused.
-  // Fixture mode answers every `/viewer/api/**` request from disk, so
-  // the FastAPI backend on :8080 is NOT a prerequisite — Vite alone
-  // is enough to run the full e2e suite.
-  webServer: {
-    // Run vite directly (no `npm run` wrapper) so the spawn doesn't
-    // re-enter npm's RC loader and surface the parent yarnrc warnings
-    // (yarnrc keys leak into npm's "env config" pass through some
-    // mise/zsh export chain in this workspace).
-    command: "npx vite",
-    url: "http://localhost:5173/viewer/",
-    reuseExistingServer: true,
-    timeout: 60_000,
-    stdout: "ignore",
-    stderr: "pipe",
-  },
+  // Three-server stack so `npx playwright test` and `--ui` are one
+  // command. The SPA exercises the REAL FastAPI handlers; only S3 is
+  // mocked (via moto). globalSetup seeds the corpora into moto's bucket
+  // before any spec runs.
+  //
+  //   :5173  vite dev (SPA)        — proxies /viewer/api/* → :8080
+  //   :8080  uvicorn FastAPI       — reads bench data + S3 from moto
+  //   :4566  moto-server (S3 mock) — boto3-compatible, in-memory
+  //
+  // No TS interception layer. No mock-server.ts. The dev-mode + test-
+  // mode wire-up is identical (just MinIO replaced by moto), which is
+  // what made the rip-and-replace worth doing.
+  webServer: [
+    {
+      command: "npx vite",
+      url: "http://localhost:5173/viewer/",
+      reuseExistingServer: true,
+      timeout: 60_000,
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+    {
+      // moto needs to be up BEFORE uvicorn boots so the FastAPI's
+      // boto3 calls during route handler init don't 503. Playwright
+      // starts webServer entries in array order with healthcheck gate.
+      command: "mise exec -- moto_server --port 4566",
+      url: "http://localhost:4566/moto-api/",
+      reuseExistingServer: true,
+      timeout: 30_000,
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+    {
+      // Run from repo root so PYTHONPATH resolves the source layout.
+      // env steers boto3 at moto. `--reload` is intentionally OFF —
+      // tests want a stable image of the backend.
+      command:
+        "cd ../.. && mise exec -- python -c \"" +
+        "import uvicorn; from media_ingest.viewer.app import create_viewer_app; " +
+        "uvicorn.run(create_viewer_app(), host='127.0.0.1', port=8080, log_level='warning')" +
+        "\"",
+      url: "http://localhost:8080/viewer/health",
+      reuseExistingServer: true,
+      timeout: 60_000,
+      stdout: "ignore",
+      stderr: "pipe",
+      env: {
+        PYTHONPATH:
+          "packages/media-ingest/src:libs/dagster-io/src:libs/catalyst-contracts-core/src",
+        DAGSTER_S3_ENDPOINT_URL: "http://localhost:4566",
+        DAGSTER_S3_ACCESS_KEY: "test",
+        DAGSTER_S3_SECRET_KEY: "test",
+        DAGSTER_S3_BUCKET: "dagster",
+      },
+    },
+  ],
 });
