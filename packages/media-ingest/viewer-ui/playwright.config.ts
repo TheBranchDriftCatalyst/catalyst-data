@@ -1,6 +1,21 @@
 import { defineConfig } from "@playwright/test";
+import os from "node:os";
 
 const isCI = !!process.env.CI;
+
+// Coverage collection (V8 + monocart) adds 1-3s/test of overhead and is
+// only useful when you actually want a coverage report. Off by default;
+// flip on with `COLLECT_COVERAGE=1` for the report run.
+const COLLECT_COVERAGE = process.env.COLLECT_COVERAGE === "1";
+
+// Workers: file-level parallelism (each worker runs one spec file at a
+// time, tests within a file stay serial). With `workers: 1` the previous
+// full run took 53 minutes; bumping to ~half the available cores gets it
+// to ~10-15 minutes. Override via `PW_WORKERS` if a slow machine needs
+// throttling.
+const WORKERS = process.env.PW_WORKERS
+  ? Math.max(1, parseInt(process.env.PW_WORKERS, 10))
+  : Math.max(2, Math.floor(os.cpus().length / 2));
 
 export default defineConfig({
   testDir: "./e2e",
@@ -8,24 +23,21 @@ export default defineConfig({
   // mode is the only mode, so the corpora dir must be populated before
   // any spec runs.
   globalSetup: "./playwright-global-setup.ts",
+  // Tests within a file stay serial (avoids any in-file ordering surprises
+  // around shared module state); files run in parallel across workers.
   fullyParallel: false,
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
-  workers: 1, // serial — shared live data, write ops must not conflict
-  // 150s per-test cap. State Inspector specs deep-link into the SPA,
-  // wait for poll-driven events (3s polling against a multi-MB events
-  // response that takes 30–60s on the FastAPI side from a cold parquet
-  // cache) to populate, and assert on rendered testids. Discovery alone
-  // can take 20s; the SPA's first poll for limit=50000 takes 40s+; then
-  // we need ~10s of margin for panel-render. 150s is generous but the
-  // dev-server cache amortizes across the suite so the practical cost
-  // stays modest.
-  timeout: 150_000,
-  // Global default for `expect(...)` waits. Specs override per-call when
-  // they need a tighter or looser bound — but the default of 5s is too
-  // tight for the SPA's poll-driven testids that depend on a 50000-event
-  // ndjson response landing.
-  expect: { timeout: 60_000 },
+  workers: WORKERS,
+  // Per-test cap — fixture-mode serves all data from disk, so a passing
+  // test takes ≤5s; 30s leaves margin for Vite cold-compile on the first
+  // navigation. (When tests fail, this just affects how long they take
+  // to fail.)
+  timeout: 30_000,
+  // Global default for `expect(...)` waits. Fixture-mode is instant; 8s
+  // is enough for any synchronous render assertion. Specs that genuinely
+  // need to wait longer (e.g. for a poll cycle) override per-call.
+  expect: { timeout: 8_000 },
 
   /**
    * Multi-reporter setup:
@@ -43,38 +55,34 @@ export default defineConfig({
     ["junit", { outputFile: "test-results/junit.xml" }],
     ["json", { outputFile: "test-results/results.json" }],
     ...(isCI ? ([["github"]] as const) : []),
-    [
-      "monocart-reporter",
-      {
-        name: "S3 Explorer E2E + Coverage",
-        outputFile: "test-results/monocart/index.html",
-        coverage: {
-          // Accept every script. `sourceFilter` then narrows the post-
-          // sourcemap-resolution view to OUR src/ files. Vite dev serves
-          // modules with various URL shapes (localhost-relative, query-
-          // strung, /@id/...) so a URL-based entryFilter is fragile —
-          // we'd rather over-collect cheaply and filter at the source map
-          // layer where real .tsx paths emerge.
-          entryFilter: () => true,
-          // Match any source under src/ — Vite production sourcemaps emit
-          // paths relative to the dist/ directory, e.g.
-          //   ../../src/pages/S3Explorer.tsx
-          //   ../../src/api/client.ts
-          // Reject node_modules so coverage % stays attributable to our code.
-          sourceFilter: (sourcePath: string) => {
-            if (!sourcePath) return false;
-            if (sourcePath.includes("node_modules")) return false;
-            return /(^|\/)src\/.*\.(tsx?|jsx?)$/.test(sourcePath);
-          },
-          reports: [
-            ["v8"], // monocart's native HTML + JSON
-            ["lcovonly", { file: "lcov.info" }], // for Codecov / SonarQube
-            ["console-summary"], // prints %% to stdout at end of run
+    // monocart V8 coverage is gated behind COLLECT_COVERAGE=1 because it
+    // adds 1-3s/test of overhead and is only useful when generating a
+    // coverage report. Default runs skip it entirely.
+    ...(COLLECT_COVERAGE
+      ? ([
+          [
+            "monocart-reporter",
+            {
+              name: "Viewer UI E2E + Coverage",
+              outputFile: "test-results/monocart/index.html",
+              coverage: {
+                entryFilter: () => true,
+                sourceFilter: (sourcePath: string) => {
+                  if (!sourcePath) return false;
+                  if (sourcePath.includes("node_modules")) return false;
+                  return /(^|\/)src\/.*\.(tsx?|jsx?)$/.test(sourcePath);
+                },
+                reports: [
+                  ["v8"],
+                  ["lcovonly", { file: "lcov.info" }],
+                  ["console-summary"],
+                ],
+                outputDir: "test-results/coverage",
+              },
+            },
           ],
-          outputDir: "test-results/coverage",
-        },
-      },
-    ],
+        ] as const)
+      : []),
   ],
 
   use: {

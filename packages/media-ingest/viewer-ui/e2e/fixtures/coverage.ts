@@ -59,11 +59,15 @@ import { useCorpus } from "./corpora";
   }
 })();
 
+const COLLECT_COVERAGE = process.env.COLLECT_COVERAGE === "1";
+
 export const test = base.extend({
-  // Auto-fixture: runs even when a test doesn't reference `coverage`.
+  // Auto-fixture: starts/stops V8 coverage and forwards records to
+  // monocart. Off by default — bumps each test by 1-3s, only worth it
+  // when generating a coverage report. Enable with `COLLECT_COVERAGE=1`.
   coverage: [
     async ({ page, browserName }, use) => {
-      const supported = browserName === "chromium";
+      const supported = COLLECT_COVERAGE && browserName === "chromium";
       if (supported) {
         await page.coverage.startJSCoverage({
           resetOnNavigation: false,
