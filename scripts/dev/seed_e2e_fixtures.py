@@ -127,13 +127,31 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
         seq += 1
 
     # 1. chunk_loaded — base chunks
+    # Each chunk is exactly 200 chars and seeds the same Entity{i}_{j} tokens
+    # at the same offsets the encoder mention events later report. That way
+    # /viewer/api/docs/<doc>/text returns the chunked text + DocumentSourcePanel
+    # can paint inline encoder/consensus highlights at the encoded spans.
+    chunk_texts: list[str] = []
     for i in range(3):
+        # Layout each entity at its declared span:
+        #   j=0 → [10..20)   "Entity{i}_0"
+        #   j=1 → [25..35)   "Entity{i}_1"
+        #   j=2 → [40..50)   "Entity{i}_2"
+        #   j=3 → [55..65)   "Entity{i}_3"
+        text = list(" " * 200)
+        for j in range(4):
+            entity = f"Entity{i}_{j}"
+            start = 10 + j * 15
+            for k, ch in enumerate(entity):
+                text[start + k] = ch
+        text_str = "".join(text)
+        chunk_texts.append(text_str)
         add(
             node_name="chunk_loaded",
             doc_id=doc_id,
             chunk_id=f"{doc_id}:c{i:03d}",
             chunk_idx=i,
-            details={"text": f"sample chunk {i}", "char_count": 200 + i},
+            details={"text": text_str, "char_count": len(text_str)},
         )
 
     # 2. chunk_extracted per encoder × chunk — with confidence + mentions
@@ -151,10 +169,15 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
                         "confidence": conf,
                     }
                 )
+            # Real ner_ensemble emits per-encoder chunk_extracted events keyed
+            # by ``{doc_id}:_ner_{encoder}`` (no chunk-index segment) — see
+            # libs/catalyst-exgraph/.../ner_ensemble.py. NerEncoderDetail
+            # constructs that exact key client-side. Match it so the SPA's
+            # events.find() resolves and the histogram has data.
             add(
                 node_name="chunk_extracted",
                 doc_id=doc_id,
-                chunk_id=f"{doc_id}:c{i:03d}:_ner_{enc}",
+                chunk_id=f"{doc_id}:_ner_{enc}",
                 chunk_idx=i,
                 model=enc,
                 details={"mentions": mentions, "encoder": enc},
@@ -167,14 +190,40 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
         )
 
     # 3. mention_decision — accepted (covered by ≥2 encoders)
+    # Each accepted spec carries (text, label, sources, span_start, span_end);
+    # spans are anchored against the chunk_loaded text (200-char chunks
+    # joined by \n\n) so the DocumentSourcePanel can paint inline highlights.
     accepted_specs = [
-        ("Entity0_0", "PERSON", encoders[:3], "accepted"),
-        ("Entity0_1", "ORG", encoders[:2], "accepted"),
-        ("Entity1_0", "GPE", encoders[:3], "accepted"),
-        ("Entity1_1", "PERSON", encoders[:2], "accepted"),
-        ("Entity2_0", "ORG", encoders[:3], "accepted"),
+        ("Entity0_0", "PERSON", encoders[:3], 10, 20),
+        ("Entity0_1", "ORG", encoders[:2], 25, 35),
+        ("Entity1_0", "GPE", encoders[:3], 215, 225),  # chunk 1
+        ("Entity1_1", "PERSON", encoders[:2], 230, 240),
+        ("Entity2_0", "ORG", encoders[:3], 420, 430),  # chunk 2
     ]
-    for ent_text, label, sources, _ in accepted_specs:
+    # 3a. chunk_extracted on `:_consensus` so inline span painter
+    # (DocumentSourcePanel._collectConsensusSpans) has data — the spec
+    # for "consensus selection paints inline accepted-mention spans"
+    # depends on this exact event shape.
+    add(
+        node_name="chunk_extracted",
+        doc_id=doc_id,
+        chunk_id=f"{doc_id}:_consensus",
+        chunk_idx=0,
+        details={
+            "mentions": [
+                {
+                    "text": ent_text,
+                    "canonical_type": label,
+                    "mention_type": label,
+                    "span_start": ss,
+                    "span_end": se,
+                    "confidence": round(rng.uniform(0.7, 0.95), 3),
+                }
+                for ent_text, label, _src, ss, se in accepted_specs
+            ],
+        },
+    )
+    for ent_text, label, sources, _ss, _se in accepted_specs:
         add(
             node_name="mention_decision",
             doc_id=doc_id,
@@ -195,7 +244,10 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
             },
         )
 
-    # 4. mention_decision — rejected (single-source, varied source_models)
+    # 4. mention_rejected — single-source, varied source_models. Real
+    # consensus emits these as a distinct node (not mention_decision with
+    # decision=rejected) so ConsensusDetail's filter
+    # ``e.node_name === "mention_rejected"`` finds them.
     rejected_specs = [
         ("Spurious0", "PERSON", [encoders[0]]),
         ("Spurious1", "ORG", [encoders[1]]),
@@ -203,11 +255,10 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
     ]
     for ent_text, label, sources in rejected_specs:
         add(
-            node_name="mention_decision",
+            node_name="mention_rejected",
             doc_id=doc_id,
             chunk_id=f"{doc_id}:_consensus",
             details={
-                "decision": "rejected",
                 "text": ent_text,
                 "canonical_type": label,
                 "label": label,
@@ -221,18 +272,36 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
             },
         )
 
-    # 5. SPO windows (chunk_extracted with :win- suffix, has propositions)
+    # 5. SPO windows: chunk_loaded + chunk_extracted per window. The window
+    # detail panel (ChunkTextPanel) gates on the chunk_loaded.details; without
+    # it the panel falls back to a placeholder and the SPO test times out
+    # waiting for the chunk-text-panel testid.
     for w in range(3):
         win_id = f"win-{w:03d}"
+        win_chunk = f"{doc_id}:{win_id}"
+        add(
+            node_name="chunk_loaded",
+            doc_id=doc_id,
+            chunk_id=win_chunk,
+            chunk_idx=w,
+            details={
+                "text": f"Window {w} text from {win_id}",
+                "char_count": 32,
+                "chunk_metadata": {"window_id": win_id, "strategy": "evidence_window"},
+            },
+        )
         add(
             node_name="chunk_extracted",
             doc_id=doc_id,
-            chunk_id=f"{doc_id}:{win_id}",
+            chunk_id=win_chunk,
             model=spo_model,
             details={
                 "window_id": win_id,
                 "proposition_count": 3 + w,
                 "mention_count": 4,
+                "propositions": [
+                    {"subject": f"S{w}_{p}", "predicate": "is", "object": f"O{w}_{p}"} for p in range(3 + w)
+                ],
             },
         )
 
@@ -254,13 +323,25 @@ def _build_happy_path(rng: random.Random) -> tuple[list[dict], dict]:
             },
         )
 
-    # 7. pack_evidence — both kept and pruned (Gap #4)
+    # 7. pack_evidence — both kept and pruned (Gap #4).
+    # ``doc_char_start`` / ``doc_char_end`` anchor each kept window's
+    # band on the doc-source panel (DocumentSourcePanel._collectPackWindows
+    # drops windows missing either offset). Place windows in distinct
+    # chunks so the inline emerald bands don't overlap.
     add(
         node_name="pack_evidence",
         status="completed",
         doc_id=doc_id,
         details={
-            "kept_windows": [{"window_id": f"win-{w:03d}", "mention_count": 4 + w} for w in range(3)],
+            "kept_windows": [
+                {
+                    "window_id": f"win-{w:03d}",
+                    "mention_count": 4 + w,
+                    "doc_char_start": w * 200,
+                    "doc_char_end": w * 200 + 100,
+                }
+                for w in range(3)
+            ],
             "pruned_windows": [
                 {"window_id": "win-100", "mention_count": 1, "prune_reason": "low_confidence"},
                 {"window_id": "win-101", "mention_count": 1, "prune_reason": "sparse_density"},
@@ -417,7 +498,7 @@ def _build_trend_window(rng: random.Random) -> list[tuple[str, list[dict], dict]
             add(
                 node_name="chunk_extracted",
                 doc_id=doc_id,
-                chunk_id=f"{doc_id}:c000:_ner_{enc}",
+                chunk_id=f"{doc_id}:_ner_{enc}",
                 chunk_idx=0,
                 model=enc,
                 details={"mentions": mentions, "encoder": enc},
@@ -653,7 +734,7 @@ def _build_diversity_composite(rng: random.Random) -> tuple[list[dict], dict]:
         add(
             node_name="chunk_extracted",
             doc_id=doc_id,
-            chunk_id=f"{doc_id}:c000:_ner_{enc}",
+            chunk_id=f"{doc_id}:_ner_{enc}",
             chunk_idx=0,
             model=enc,
             details={"mentions": mentions, "encoder": enc},
@@ -848,7 +929,7 @@ def _build_edge_cases(rng: random.Random) -> tuple[list[dict], dict]:
     add(
         node_name="chunk_extracted",
         doc_id=doc1_id,
-        chunk_id=f"{doc1_id}:c000:_ner_{encoder_null_conf}",
+        chunk_id=f"{doc1_id}:_ner_{encoder_null_conf}",
         chunk_idx=0,
         model=encoder_null_conf,
         details={"mentions": mentions_null_conf, "encoder": encoder_null_conf},

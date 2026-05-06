@@ -422,6 +422,10 @@ test.describe("State Inspector — Gap 7 — Pruned-window counterfactual", () =
     // /sparse_density/ separately (StateInspector.tsx ~L446-447) so a
     // composite reason MUST render both rows. If no such window exists in any
     // reachable run, skip cleanly.
+    //
+    // page.evaluate runs against the page's window — relative URLs need a
+    // real origin, which `about:blank` is not. Navigate to the SPA root first.
+    await page.goto("/viewer/");
     const target = await page.evaluate(async () => {
       const r = await fetch("/viewer/api/bench/runs");
       const text = await r.text();
@@ -507,6 +511,7 @@ test.describe("State Inspector — Gap 7 — Pruned-window counterfactual", () =
     // React state doesn't observe URL events. Instead, we trigger
     // writeQuery by simulating a real selection change: click a pipeline
     // node (which calls setSelectedNode → writeQuery).
+    await page.goto("/viewer/");
     const docId = await page.evaluate(async () => {
       const r = await fetch("/viewer/api/bench/runs");
       const text = await r.text();

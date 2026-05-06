@@ -1,28 +1,21 @@
 import { test } from "./fixtures/coverage";
-import { useCorpus } from "./fixtures/corpora";
 
-test("gap-8 sparkline render probe", async ({ page }) => {
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(`PAGEERR: ${e.message}`));
-  page.on("response", (resp) => {
-    if (resp.url().includes("/viewer/api/")) {
-      console.log(`RESP ${resp.status()} ${resp.url()}`);
-    }
-  });
-
-  await useCorpus(page, "trend-window");
-  // The sparkline test goes after consensus panel; trend-doc-001 has consensus.
-  await page.goto("/viewer/benchmarks/state?doc=trend-doc-001&node=consensus");
-  await page.waitForTimeout(8000);
-
-  const consensusVisible = await page.getByTestId("consensus-detail").isVisible();
-  console.log("CONSENSUS-VISIBLE:", consensusVisible);
-
-  const sparklineCount = await page.getByTestId("trend-sparkline").count();
-  console.log("SPARKLINE-COUNT:", sparklineCount);
-
-  const points = await page.locator('[data-testid^="trend-sparkline-point-"]').count();
-  console.log("SPARKLINE-POINTS:", points);
-
-  for (const e of errors.slice(0, 5)) console.log(e);
+test("encoder mentions probe", async ({ page }) => {
+  page.on("pageerror", (e) => console.log(`PAGEERR: ${e.message}`));
+  await page.goto(
+    "/viewer/benchmarks/state?run=2025-04-01-115500-fixture-happy-path&doc=happy-path-doc-001&node=ner_encoder:gliner-m",
+  );
+  await page.waitForTimeout(6000);
+  const panelVisible = await page.getByTestId("ner-encoder-detail").isVisible();
+  console.log("PANEL:", panelVisible);
+  const status = await page.getByTestId("ner-encoder-status").textContent();
+  console.log("STATUS:", status);
+  const rowCount = await page.locator("[data-testid='ner-encoder-mention-row']").count();
+  console.log("ROWS:", rowCount);
+  const histBins = await page.locator("[data-testid^='confidence-bin-']").count();
+  console.log("BINS:", histBins);
+  const encSpans = await page.locator("[data-mention-source='encoder']").count();
+  console.log("ENC-SPANS:", encSpans);
+  const conSpans = await page.locator("[data-mention-source='consensus']").count();
+  console.log("CON-SPANS:", conSpans);
 });

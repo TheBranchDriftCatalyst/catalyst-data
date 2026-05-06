@@ -68,7 +68,11 @@ test.describe("State Inspector — cross-cutting", () => {
 
   test("unknown run id renders without crashing", async ({ page }) => {
     await page.goto("/viewer/benchmarks/state?run=run-does-not-exist");
-    await expect(page.getByTestId("run-picker-trigger")).toBeVisible({ timeout: 60_000 });
+    // The page renders TWO run-picker-trigger buttons (rail + panel header).
+    // Either being visible is enough for this not-crashed assertion.
+    await expect(page.getByTestId("run-picker-trigger").first()).toBeVisible({
+      timeout: 60_000,
+    });
     await expect(page.getByTestId("inspector-conn-badge")).toBeVisible();
   });
 

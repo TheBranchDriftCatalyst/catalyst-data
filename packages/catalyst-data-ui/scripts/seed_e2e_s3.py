@@ -23,6 +23,7 @@ tree is "what gets served on /viewer/api/s3/*").
 Run-id convention mirrors `corpora.ts`:
     2025-04-01-115500-fixture-<corpus-name>
 """
+
 from __future__ import annotations
 
 import json
@@ -61,8 +62,7 @@ MEDALLION_TREE: list[tuple[str, bytes, str]] = [
     ),
     (
         "silver/media_ingest/media/media_chunks/audio_001/data.jsonl",
-        b'{"chunk_id":"audio_001:c0","text":"chunk 0"}\n'
-        b'{"chunk_id":"audio_001:c1","text":"chunk 1"}',
+        b'{"chunk_id":"audio_001:c0","text":"chunk 0"}\n{"chunk_id":"audio_001:c1","text":"chunk 1"}',
         "application/x-ndjson",
     ),
     (
@@ -101,9 +101,9 @@ def _ndjson_to_parquet_bytes(events_path: Path) -> bytes:
             rows.append(json.loads(line))
     if not rows:
         # Empty parquet — still valid, bench routes return [] gracefully.
-        table = pa.Table.from_pylist(
-            [{"run_id": "", "seq": 0, "node_name": "", "ts": ""}], preserve_index=False
-        ).slice(0, 0)
+        table = pa.Table.from_pylist([{"run_id": "", "seq": 0, "node_name": "", "ts": ""}], preserve_index=False).slice(
+            0, 0
+        )
     else:
         # Hoist run_id into every row (bench.py expects this column for
         # the live-vs-archived probe). Derive from the corpus name later
@@ -183,6 +183,46 @@ def _put_run(client, run_id: str, report: Path | None, events: Path | None) -> N
         )
 
 
+def _seed_chunks_assets(client, events_path: Path) -> None:
+    """Walk chunk_loaded events and emit per-doc media_chunks data.jsonl
+    so /viewer/api/docs/<doc>/text can resolve via the real chunks-asset
+    code path. Each chunk is one row keyed by document_id + index.
+    """
+    by_doc: dict[str, list[dict]] = {}
+    with events_path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            ev = json.loads(line)
+            if ev.get("node_name") != "chunk_loaded":
+                continue
+            doc = ev.get("doc_id")
+            if not doc:
+                continue
+            details = ev.get("details") or {}
+            by_doc.setdefault(doc, []).append(
+                {
+                    "document_id": doc,
+                    "chunk_id": ev.get("chunk_id"),
+                    "index": ev.get("chunk_idx", len(by_doc[doc]) if doc in by_doc else 0),
+                    "total_chunks": None,  # patched below
+                    "text": details.get("text", ""),
+                    "metadata": {},
+                }
+            )
+    for doc, rows in by_doc.items():
+        for r in rows:
+            r["total_chunks"] = len(rows)
+        body = "\n".join(json.dumps(r, separators=(",", ":")) for r in rows).encode("utf-8")
+        client.put_object(
+            Bucket=BUCKET,
+            Key=f"silver/media_ingest/media/media_chunks/{doc}/data.jsonl",
+            Body=body,
+            ContentType="application/x-ndjson",
+        )
+
+
 def seed_corpus(client, corpus_dir: Path) -> None:
     name = corpus_dir.name
 
@@ -194,10 +234,17 @@ def seed_corpus(client, corpus_dir: Path) -> None:
         run_dirs = sorted(d for d in runs_subdir.iterdir() if d.is_dir())
         for d in run_dirs:
             _put_run(client, d.name, d / "report.json", d / "events.ndjson")
+        # Multi-run corpora share a single doc across runs — seed chunks
+        # from the first run's events.
+        if run_dirs:
+            _seed_chunks_assets(client, run_dirs[0] / "events.ndjson")
         print(f"[seed] {name}: {len(run_dirs)} runs (multi)")
     else:
         run_id = f"{RUN_ID_PREFIX}{name}"
         _put_run(client, run_id, corpus_dir / "report.json", corpus_dir / "events.ndjson")
+        events_file = corpus_dir / "events.ndjson"
+        if events_file.exists():
+            _seed_chunks_assets(client, events_file)
         print(f"[seed] {name}: 1 run (flat) run_id={run_id}")
 
     # ground-truth.json → bench/ground-truth/active.json — only one active
