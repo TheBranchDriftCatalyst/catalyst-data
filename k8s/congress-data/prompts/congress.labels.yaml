@@ -1,0 +1,353 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Congress-Data Domain Label Pack
+#
+# One file, four "prompts" — one per voter in the NER ensemble. Each voter
+# has a different prompting idiom; this pack expresses the same canonical
+# entity taxonomy in each model's native shape.
+#
+# Loaded by catalyst-exgraph at pipeline build time via
+#   StageConfig(prompt_dir=..., label_pack_id="congress")
+# which resolves to <prompt_dir>/congress.labels.yaml.
+#
+# Each section's `model` field overrides the encoder client default; everything
+# else feeds the client's domain-tailoring hooks.
+# ─────────────────────────────────────────────────────────────────────────────
+version: 1
+domain: congress-data
+description: >
+  U.S. legislative-process entity taxonomy tuned for bill text, committee
+  reports, the Congressional Record, and Congress.gov action logs.
+
+# Canonical type universe — the consensus voter aligns each encoder's native
+# label namespace back to these IDs via the `canonical_type` field on each
+# section below. Keep this list short; aliases live on the encoder sections.
+canonical_types:
+  - PERSON             # legislators, officials, witnesses
+  - ORG                # committees, agencies, departments
+  - GPE                # states, districts, countries
+  - LOC                # geographic features
+  - DATE               # specific dates, sessions
+  - MONEY              # appropriations, dollar amounts
+  - NORP               # parties, caucuses
+  - FACILITY           # Capitol, military bases
+  - BILL               # bill citations (H.R., S., S.J.Res. …)
+  - PUBLIC_LAW         # P.L. 119-1
+  - LAW_CITATION       # U.S.C. / Stat. citations
+  - COMMITTEE_REF      # named committee/subcommittee (subtype of ORG, kept separate for routing)
+  - AMENDMENT          # S.Amdt.34, H.Amdt.112
+  - SECTION_REF        # § 1001(a)(2)
+  - ROLL_CALL_VOTE     # roll-call numbers
+  - VOTE_RESULT        # Passed / Failed / yeas-nays tallies
+  - ACTION             # legislative action verbs as named events
+  - POLICY_AREA        # CRS controlled vocab
+  - SPONSOR_ROLE       # sponsor / cosponsor / chair / ranking member
+  - DOCUMENT           # CRS reports, GAO reports
+  - ROLE               # Speaker, Whip, Secretary, …
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. GLiNER — descriptive natural-language labels
+#
+# Bi-encoder family handles 20+ labels without degradation. Each label is a
+# noun phrase rich enough to disambiguate from neighbors. Threshold dropped
+# from the 0.5 default → 0.3 because descriptive labels score lower in
+# absolute terms; the ensemble vote handles precision downstream.
+# ─────────────────────────────────────────────────────────────────────────────
+gliner:
+  model: knowledgator/gliner-bi-large-v1.0
+  threshold: 0.3
+  flat_ner: false        # allow nested spans (e.g. "Subtitle B of H.R. 1234")
+  window_tokens: 320
+  window_overlap_tokens: 32
+
+  # label_text → canonical_type
+  labels:
+    "member of the U.S. Congress, a senator or representative": PERSON
+    "U.S. senator":                                              PERSON
+    "U.S. representative":                                       PERSON
+    "executive branch official such as a cabinet secretary":     PERSON
+    "witness testifying before a congressional committee":       PERSON
+
+    "U.S. congressional committee or subcommittee":              COMMITTEE_REF
+    "federal agency, department, or independent commission":     ORG
+    "political party, caucus, or coalition":                     NORP
+
+    "bill number such as H.R. 1234 or S. 567 or S.J.Res. 12":    BILL
+    "public law citation such as P.L. 119-1":                    PUBLIC_LAW
+    "United States Code citation such as 5 U.S.C. section 552":  LAW_CITATION
+    "Statutes at Large citation such as 136 Stat. 1818":         LAW_CITATION
+    "amendment number such as S.Amdt. 34 or H.Amdt. 112":        AMENDMENT
+    "named act of legislation such as the Clean Air Act":        BILL
+    "section or subsection reference such as section 1001(a)(2)": SECTION_REF
+
+    "U.S. state, territory, or D.C., by name or postal code":    GPE
+    "congressional district":                                    GPE
+    "U.S. city or locality":                                     GPE
+    "geographic region or feature":                              LOC
+
+    "chamber of Congress (House of Representatives or Senate)":  ORG
+    "legislative role such as sponsor, cosponsor, chair, ranking member": SPONSOR_ROLE
+    "leadership role such as Speaker, Majority Leader, Whip":    ROLE
+
+    "roll call vote number or identifier":                       ROLL_CALL_VOTE
+    "vote outcome such as Passed, Failed, Agreed to":            VOTE_RESULT
+    "yeas-nays tally such as 218-212":                           VOTE_RESULT
+
+    "legislative action such as referred, reported, passed, signed, vetoed": ACTION
+    "policy area such as Energy, Health, Agriculture":           POLICY_AREA
+
+    "date of a legislative action":                              DATE
+    "congressional session identifier such as 119th Congress, 1st Session": DATE
+
+    "monetary amount or appropriation":                          MONEY
+    "government building such as the Capitol or White House":    FACILITY
+    "official report such as a CRS report or GAO report":        DOCUMENT
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. NuExtract — typed JSON template (v2.0 `### Template:` protocol)
+#
+# Descriptive keys ARE the prompt: each key becomes a semantic anchor. Mix of
+# verbatim-string (copy from input, for identifiers), string (paraphrasable),
+# date-time, integer, and enums (closed sets). Nested objects + arrays of
+# objects let us emit STRUCTURED RELATIONS in one shot — sponsor→state→party
+# arrives pre-linked.
+#
+# Sized just under the ~10-top-level-keys rule of thumb. If a bill's text
+# crosses that boundary, split by phase (introduction / committee / floor /
+# vote / enrollment) using `template_variants` below.
+# ─────────────────────────────────────────────────────────────────────────────
+nuextract:
+  model: numind/NuExtract-2.0-4B   # 8B preferred if available
+  temperature: 0.0
+  # Where each NuExtract key maps back into the canonical type universe so the
+  # consensus voter can align it with GLiNER/UniNER spans.
+  canonical_type_map:
+    "Bill.BillNumber":               BILL
+    "Bill.ShortTitle":                BILL
+    "Bill.Sponsor.Name":              PERSON
+    "Bill.Sponsor.State":             GPE
+    "Bill.Sponsor.Party":             NORP
+    "Bill.Cosponsors[].Name":         PERSON
+    "Bill.Cosponsors[].State":        GPE
+    "Bill.Cosponsors[].Party":        NORP
+    "Bill.ReferredToCommittees[]":    COMMITTEE_REF
+    "Actions[].ActionText":           ACTION
+    "Actions[].Date":                 DATE
+    "Actions[].Chamber":              ORG
+    "Amendments[].AmendmentNumber":   AMENDMENT
+    "Amendments[].SponsorName":       PERSON
+    "RollCallVotes[].RollCallNumber": ROLL_CALL_VOTE
+    "RollCallVotes[].Result":         VOTE_RESULT
+    "RollCallVotes[].YeaCount":       VOTE_RESULT
+    "RollCallVotes[].NayCount":       VOTE_RESULT
+    "PublicLaw.Citation":             PUBLIC_LAW
+    "PublicLaw.SignedDate":           DATE
+    "SectionReferences[]":            SECTION_REF
+    "PolicyArea":                     POLICY_AREA
+
+  template:
+    Bill:
+      BillNumber:     verbatim-string
+      ShortTitle:     verbatim-string
+      OfficialTitle:  string
+      Chamber:        ["House", "Senate"]
+      IntroducedDate: date-time
+      Sponsor:
+        Name:  verbatim-string
+        State: verbatim-string
+        Party: ["D", "R", "I"]
+      Cosponsors:
+        - Name:  verbatim-string
+          State: verbatim-string
+          Party: ["D", "R", "I"]
+      ReferredToCommittees:
+        - verbatim-string
+    Actions:
+      - Date:    date-time
+        Chamber: ["House", "Senate", "Joint"]
+        ActionText: verbatim-string
+        ActionType: ["Introduction", "Referral", "Markup", "Reported", "Floor Consideration",
+                     "Floor Vote", "Conference", "Presented to President", "Signed", "Vetoed",
+                     "Override Vote", "Pocket Vetoed"]
+    Amendments:
+      - AmendmentNumber: verbatim-string
+        SponsorName:     verbatim-string
+        Purpose:         string
+        Disposition:     ["Agreed to", "Rejected", "Withdrawn", "Pending"]
+    RollCallVotes:
+      - RollCallNumber: verbatim-string
+        Question:       verbatim-string
+        Result:         ["Passed", "Failed", "Agreed to", "Rejected", "Sustained", "Overridden"]
+        YeaCount:       integer
+        NayCount:       integer
+        ChamberOfVote:  ["House", "Senate"]
+    PublicLaw:
+      Citation:   verbatim-string
+      SignedDate: date-time
+    SectionReferences:
+      - verbatim-string
+    PolicyArea: verbatim-string
+
+  # When a chunk is dense enough to blow the ~10-key rule, swap to one of these
+  # phase-specific templates. Pipeline picks based on the chunk's `action_type`
+  # metadata from the section-aware chunker (see congress-data/CHUNKING.md).
+  template_variants:
+    floor_action:
+      RollCallVotes:
+        - RollCallNumber: verbatim-string
+          Question:       verbatim-string
+          Result:         ["Passed", "Failed", "Agreed to", "Rejected"]
+          YeaCount:       integer
+          NayCount:       integer
+          PartyBreakdown:
+            DemocratYea:  integer
+            DemocratNay:  integer
+            RepublicanYea: integer
+            RepublicanNay: integer
+      MotionsConsidered:
+        - MotionText: verbatim-string
+          MovedBy:    verbatim-string
+          Disposition: ["Agreed to", "Rejected", "Tabled", "Withdrawn"]
+    committee_phase:
+      CommitteeActions:
+        - CommitteeName: verbatim-string
+          ActionDate:    date-time
+          ActionType:    ["Referral", "Hearing", "Markup", "Reported Favorably",
+                          "Reported Unfavorably", "Reported Without Recommendation",
+                          "Discharged"]
+          ReportNumber:  verbatim-string
+      Witnesses:
+        - Name:         verbatim-string
+          Affiliation:  verbatim-string
+          Role:         ["Government", "Industry", "Academic", "Advocacy", "Private Citizen"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. UniversalNER — conversational one-type-per-turn queries
+#
+# Each canonical type maps to one or more probe queries; the merger unions
+# the results. Multi-probe is for types where the legislative subtype
+# ("senator", "representative") recalls better than the generic ("person")
+# on chamber-specific text. Keep the assistant prime exactly "I've read this
+# text." — it's part of UniNER's training distribution; paraphrasing it
+# degrades recall.
+#
+# Forward-pass cost = sum of unique queries across all types. Aim for ~15.
+# ─────────────────────────────────────────────────────────────────────────────
+universalner:
+  model: Universal-NER/UniNER-7B-all
+  temperature: 0.0
+  assistant_prime: "I've read this text."     # leave verbatim — see note above
+  max_chars_per_call: 6000                    # truncate; 7B model + ~10 turns
+
+  # canonical_type → list of probe queries (unioned)
+  queries:
+    PERSON:
+      - "senator"
+      - "representative"
+      - "member of Congress"
+      - "cabinet secretary or executive branch official"
+    COMMITTEE_REF:
+      - "congressional committee"
+      - "congressional subcommittee"
+    ORG:
+      - "federal agency"
+      - "government department"
+    BILL:
+      - "bill"
+      - "piece of legislation"
+      - "act of Congress"
+    PUBLIC_LAW:
+      - "public law"
+    LAW_CITATION:
+      - "United States Code citation"
+      - "Statutes at Large citation"
+    AMENDMENT:
+      - "amendment to a bill"
+    SECTION_REF:
+      - "section reference"
+    ROLL_CALL_VOTE:
+      - "roll call vote"
+    VOTE_RESULT:
+      - "vote result"
+    SPONSOR_ROLE:
+      - "sponsor of a bill"
+      - "cosponsor of a bill"
+    GPE:
+      - "U.S. state"
+      - "congressional district"
+    NORP:
+      - "political party"
+      - "political caucus"
+    DATE:
+      - "date"
+      - "congressional session"
+    MONEY:
+      - "monetary amount"
+      - "appropriation"
+    POLICY_AREA:
+      - "policy area"
+    FACILITY:
+      - "government building"
+    DOCUMENT:
+      - "official report"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Regex — deterministic 4th voter, 100% precision on format-validated IDs
+#
+# Runs before the model-based encoders. Its votes carry confidence=1.0 and
+# break ties on format-validated identifiers (bill numbers, P.L. cites, etc.).
+# Patterns are intentionally tight — if it matches, it's correct.
+# ─────────────────────────────────────────────────────────────────────────────
+regex:
+  patterns:
+    BILL:
+      - '\b(?:H\.R\.|S\.|H\.J\.Res\.|S\.J\.Res\.|H\.Con\.Res\.|S\.Con\.Res\.|H\.Res\.|S\.Res\.)\s?\d{1,5}\b'
+    PUBLIC_LAW:
+      - '\bP(?:ub)?\.?\s?L(?:aw)?\.?\s?\d{2,3}-\d{1,4}\b'
+      - '\bPublic\s+Law\s+\d{2,3}-\d{1,4}\b'
+    LAW_CITATION:
+      - '\b\d{1,2}\s+U\.S\.C\.\s*§+\s*\d+(?:\([a-z]\))?(?:\(\d+\))?\b'
+      - '\b\d+\s+Stat\.\s+\d+\b'
+    AMENDMENT:
+      - '\b(?:H|S)\.Amdt\.\s?\d{1,5}\b'
+      - '\bAmendment\s+No\.\s+\d{1,5}\b'
+    SECTION_REF:
+      - '§§?\s?\d+(?:\([a-z]\))?(?:\(\d+\))?'
+      - '\bSec(?:tion)?\.?\s+\d+(?:\([a-z]\))?\b'
+      - '\bTitle\s+[IVX]+\b'
+      - '\bSubtitle\s+[A-Z]\b'
+    ROLL_CALL_VOTE:
+      - '\bRoll(?:\s*Call)?\s*(?:No\.|Number)?\s*\d{1,4}\b'
+    NORP:
+      - '\b\((?:D|R|I)-[A-Z]{2}(?:-\d{1,2})?\)'   # party-state suffix: (D-NY-12)
+    GPE:
+      - '\b(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b'
+    DATE:
+      - '\b\d{1,3}(?:st|nd|rd|th)\s+Congress(?:,\s+\d(?:st|nd|rd|th)\s+Session)?\b'
+
+  # Hint to consensus_predicate: regex votes always win ties for these types.
+  authoritative_for:
+    - BILL
+    - PUBLIC_LAW
+    - LAW_CITATION
+    - AMENDMENT
+    - ROLL_CALL_VOTE
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Consensus tuning — how the 4 voters reconcile
+# ─────────────────────────────────────────────────────────────────────────────
+consensus:
+  span_iou_threshold: 0.5          # spans agree if IoU ≥ 0.5
+  type_agreement:
+    # Canonical types that may be voted as equivalent (UniNER's "person" and
+    # GLiNER's "U.S. senator" both → PERSON). The labels sections above already
+    # encode this mapping; this is the override list for special cases.
+    PERSON:
+      aliases: [SENATOR, REPRESENTATIVE]
+    ORG:
+      aliases: [COMMITTEE_REF, FEDERAL_AGENCY, CHAMBER]
+    BILL:
+      aliases: [LEGISLATION, ACT]
+  # Confidence weighting: scored encoders contribute their score; binary
+  # encoders (NuExtract, regex) contribute 1.0 per emission.
+  scored_voters: [gliner, universalner]
+  binary_voters: [nuextract, regex]
