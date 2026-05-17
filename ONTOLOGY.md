@@ -1062,6 +1062,94 @@ The right pattern is:
 7. **spatialize the graph with diffusion/spectral structure plus geo anchors**,
 8. **keep humans in the merge loop where ambiguity is real**.
 
+---
+
+## 19. Implementation cross-reference (catalyst-llm + catalyst-data)
+
+This section maps the theory above to the actual code paths in
+`catalyst-llm` (extraction layer) and `catalyst-data` (storage + Dagster
+code locations).
+
+### §2 mention / entity / proposition / fact assertion split
+
+| Theory | Code |
+|---|---|
+| Mention `m = (d, s, e, τ)` | `catalyst_exgraph.models.extraction_output.MentionCandidate` (raw NER output); `catalyst_exgraph.consensus_taxonomy.ConsensusMention` (post-vote) |
+| Entity `e ∈ ℰ` | `knowledge_graph` package's `EntityCandidate` (gold, within-source) → `CanonicalEntity` (platinum, cross-source) |
+| Proposition `p = (predicate, a₁..aₙ, σ)` | `catalyst_exgraph.models.amr_assertion.AmrAssertion` carries the n-ary structure via AMR variables + qualifiers; legacy SPO path uses `catalyst_exgraph.models.extraction_output.PropositionCandidate` |
+| Fact assertion `f = (p, source, t, g, c)` | `Assertion` + `Provenance` in `catalyst-data/packages/knowledge-graph/src/knowledge_graph/resources.py` |
+
+### §3 linguistic foundation
+
+| Section | Implementation |
+|---|---|
+| §3.1 OpenIE as proposal generator | NER ensemble (`catalyst_exgraph.nodes.ner_ensemble.NerEnsembleNode`, 4 voters: GLiNER, NuExtract, UniversalNER, Regex) produces candidate spans; consensus voter promotes them |
+| §3.2 SRL as proposition spine | AMR-frame projection in `catalyst_exgraph.nodes.amr_project.AmrToAssertionNode` — PropBank frames carry SRL-equivalent argument structure (`:ARG0`/`:ARG1`/`:ARG2`); `role_overrides` per-frame in the LabelPack map non-standard cases |
+| §3.3 AMR for graph-native semantics | **Shipped.** `catalyst_langgraph.clients.amr_parser.AmrParserClient` (wraps amrlib) → `AmrToAssertionNode`. Polarity, modality, conditionals all flow through AMR graph attributes |
+
+### §4 SPO ceiling vs qualified assertions
+
+| Section | Implementation |
+|---|---|
+| §4.1 SPO triples as floor | `PropositionCandidate(subject, predicate, object)` — legacy path, still supported |
+| §4.2 SPO failure modes (qualifiers, modality, temporal, negation) | Solved by `AmrAssertion` — carries `polarity`, `modality`, `qualifiers` dict from AMR adjuncts (`:time`, `:location`, `:condition`, `:manner`) |
+| §4.3 qualified assertions `(s, p, o, Q, Π)` | `AmrAssertion` + `Provenance` is exactly this 5-tuple shape. **RDF-star bridge** lands the quoted-triple form on demand via `knowledge_graph.rdf_bridge.export_subgraph_as_turtle_star` (n10s plugin on Neo4j) |
+
+### §5 entity concordance
+
+| Section | Implementation |
+|---|---|
+| §5.1 entity linking | NER ensemble + consensus voter (`catalyst_exgraph.nodes.consensus.ConsensusNode`); `canonical_entity_refs` on `AmrAssertion` carries the resolved mention_id |
+| §5.2 entity alignment across graphs | `catalyst-data/packages/knowledge-graph/src/knowledge_graph/`: `ConcordanceEngine` (within-source, gold) + `CrossSourceAligner` (cross-source, platinum) |
+| §5.3.1 weighted multi-signal scoring | Implemented at `knowledge_graph.resources.GraphDBResource` — exact_name (1.0), substring w/ IDF (0.7), embedding cos (0.6), Jaccard IDF (0.5); corroboration rule requires ≥2 signals or exact match |
+| §5.4 object model | `Mention` → `EntityCandidate` → `CanonicalEntity` → `AlignmentEdge`; HITL overrides via `viewer_entity_overrides` table |
+
+### §6 schema induction (Tier-1 core + Tier-2 induced)
+
+| Section | Implementation |
+|---|---|
+| Tier-1 core ontology | `pack.canonical_types` list in the LabelPack (PERSON, ORG, BILL, COMMITTEE_REF, …) |
+| Tier-2 induced predicates | `proposition_extraction.prompt` controlled vocab + `pack.amr_frames.extended_predicates` for AMR-only predicates the SPO prompt doesn't carry |
+| EDC pattern (Extract → Define → Canonicalize) | (1) NER ensemble = Extract; (2) LabelPack canonical_types + amr_frames = Define; (3) ConsensusNode + ConcordanceEngine = Canonicalize |
+
+### §7 spatial grounding
+
+| Section | Implementation |
+|---|---|
+| §7.1 georeferenced entities | NOT YET IMPLEMENTED. The pipeline carries GPE / LOC mention types but no H3 cells or GeoSPARQL geometries on entities |
+| §7.2 GeoSPARQL 1.1 | RDF-star export bridge via n10s plugin (`packages/knowledge-graph/src/knowledge_graph/rdf_bridge.py`) gives us a path to GeoSPARQL once we wire H3 → WKT |
+| §7.3 H3 indexing | Tracked but not implemented |
+
+### §15 recommended stack
+
+| Recommendation | Status |
+|---|---|
+| Property graph primary (Neo4j) | ✅ `k8s/platform/neo4j.yaml` deploys Neo4j 5-community w/ APOC + n10s |
+| RDF-star bridge for interop | ✅ `n10s` plugin deployed; `knowledge_graph.rdf_bridge` exports Turtle-star via `n10s.rdf.export.cypher` |
+| H3 + GeoSPARQL for geo | ⚠️ scaffold only — not wired to entities yet |
+| Human-supervised review queue | ✅ `viewer_entity_overrides` table; alignment edges flag low-confidence merges |
+
+### Greenfield AMR-as-spine pipeline (current production path)
+
+```
+chunk text
+  → NER ensemble (4 voters from LabelPack: GLiNER + NuExtract + UniNER + Regex)
+  → ConsensusNode (per-encoder mentions → ConsensusMention list)
+  → AmrParserClient.parse(chunk) → list[AmrSentenceParse]
+  → AmrToAssertionNode (PENMAN walk + role_overrides + entity-ref resolution)
+  → list[AmrAssertion]
+  → Provenance stamping → Neo4j (Statement nodes) → on-demand RDF-star export
+```
+
+Domain configuration is **one YAML per domain** in
+`catalyst-data/k8s/<domain>/prompts/<domain>.labels.yaml` — congress
+and media-ingest packs in tree. Pack carries: `canonical_types`,
+`gliner.labels`, `nuextract.template`, `universalner.queries`,
+`regex.patterns`, `amr_frames.frames`, `amr_frames.role_overrides`,
+`consensus`. See `catalyst-llm/packages/catalyst-langgraph/README.md`
+for the full LabelPack schema and `catalyst-llm/packages/catalyst-exgraph/examples/amr_congress_mvp.py`
+for a runnable end-to-end demo.
+
 That direction is consistent with current LLM-based KG construction work, entity linking/alignment advances, and geospatial KG practice around GeoSPARQL, H3, and large-scale geo knowledge integration. ([ACL Anthology][1])
 
 [1]: https://aclanthology.org/2024.emnlp-main.548.pdf?utm_source=chatgpt.com "Extract, Define, Canonicalize: An LLM-based Framework ..."
