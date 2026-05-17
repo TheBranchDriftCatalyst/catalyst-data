@@ -84,14 +84,30 @@ services:
     depends_on:
       neo4j:
         condition: service_healthy
-    entrypoint: >
-      /bin/bash -c "
+    # Block-literal (|) so newlines + bash continuations survive YAML parsing.
+    # A folded scalar (>) collapses newlines to spaces, which silently breaks
+    # multi-line shell scripts (the cypher-shell continuations get joined and
+    # the bare 'CREATE CONSTRAINT ...' line is then interpreted as a command).
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
         set -e
+        echo 'Waiting for neo4j Bolt to accept queries...'
+        # Tilt's dc_resource dependency only tracks 'container started', not
+        # docker-compose's `condition: service_healthy`, so we cannot rely on
+        # the upstream healthcheck — retry until Bolt is actually live.
+        for i in $(seq 1 60); do
+          if cypher-shell -a bolt://neo4j:7687 -u neo4j -p neo4j-homelab 'RETURN 1' >/dev/null 2>&1; then
+            echo "Bolt reachable after $$i attempts."
+            break
+          fi
+          sleep 2
+        done
         echo 'Running n10s init...'
         cypher-shell -a bolt://neo4j:7687 -u neo4j -p neo4j-homelab \
           'CREATE CONSTRAINT n10s_unique_uri IF NOT EXISTS FOR (r:Resource) REQUIRE r.uri IS UNIQUE;'
         cypher-shell -a bolt://neo4j:7687 -u neo4j -p neo4j-homelab \
-          \"CALL n10s.graphconfig.init({handleVocabUris: 'IGNORE', handleMultival: 'ARRAY', keepLangTag: true, handleRDFTypes: 'LABELS_AND_NODES'});\" \
+          "CALL n10s.graphconfig.init({handleVocabUris: 'IGNORE', handleMultival: 'ARRAY', keepLangTag: true, handleRDFTypes: 'LABELS_AND_NODES'});" \
           || cypher-shell -a bolt://neo4j:7687 -u neo4j -p neo4j-homelab 'CALL n10s.graphconfig.show()' >/dev/null
         echo 'n10s init complete.'
-      "
