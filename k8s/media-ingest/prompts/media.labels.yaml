@@ -1,0 +1,573 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Media-Ingest Domain Label Pack
+#
+# One file, four "prompts" — one per voter in the NER ensemble, plus a
+# PropBank-frame table for the AMR-to-assertion projection node. Tuned
+# for transcribed audio/video (interview, news discussion, geopolitical
+# analysis) where speaker-diarization labels (SPEAKER_00, …) sit
+# alongside named entities and speech-act predicates dominate.
+#
+# Loaded by catalyst-exgraph at pipeline build time via
+#   StageConfig(prompt_dir=..., label_pack_id="media").
+# Resolves to <prompt_dir>/media.labels.yaml.
+#
+# Source-of-truth alignment:
+#   - Entity universe        → mention_extraction.prompt (this directory).
+#   - Canonical predicates   → proposition_extraction.prompt (this directory).
+# The AMR frame table below MUST map every predicate it targets back to a
+# predicate name declared in proposition_extraction.prompt; the QA test
+# enforces this cross-validation.
+# ─────────────────────────────────────────────────────────────────────────────
+version: 1
+domain: media-ingest
+description: >
+  Entity + predicate taxonomy for transcribed audio/video content. Adds
+  speaker-label handling (SPEAKER_00 …) and a speech-act-heavy predicate
+  vocabulary (states / claims / denies / criticizes / …) on top of the
+  geopolitical entity universe (strategic assets, financial instruments,
+  NORPs, GPEs).
+
+# Canonical type universe — the consensus voter aligns each encoder's native
+# label namespace back to these IDs. SPEAKER is media-ingest specific:
+# diarization tags aren't entities in the NER sense, but they ARE valid
+# subjects of speech-act assertions, so they need their own routing slot.
+canonical_types:
+  - PERSON               # interview subjects, politicians, public figures
+  - ORG                  # companies, agencies, media outlets, think tanks
+  - GPE                  # countries, states, cities
+  - LOC                  # geographic regions, landmarks, bodies of water
+  - DATE                 # specific dates, time periods, years
+  - EVENT                # wars, summits, hearings, elections, incidents
+  - MONEY                # financial figures, amounts, valuations
+  - LAW                  # legislation, regulations, court cases, EOs
+  - NORP                 # parties, ethnic groups, national groups
+  - FACILITY             # buildings, military bases, embassies
+  - DOCUMENT             # reports, studies, publications
+  - BOOK                 # authored works
+  - ROLE                 # job titles, positions
+  - STRATEGIC_ASSET      # chokepoints, pipelines, trade routes
+  - FINANCIAL_INSTRUMENT # stocks, bonds, funds, derivatives, currencies
+  - SPEAKER              # diarization label (SPEAKER_00, Speaker 1, …)
+  - OTHER
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. GLiNER — descriptive natural-language labels
+#
+# Bi-encoder family handles 20+ labels without degradation. Phrasing is
+# tuned to disambiguate neighbors (politician vs. role title, strategic
+# asset vs. facility). Threshold dropped from 0.5 → 0.3 because
+# descriptive labels score lower in absolute terms; the ensemble vote
+# handles precision downstream. flat_ner=false so we capture nested
+# spans like "the CEO of OpenAI" (ROLE inside ORG).
+# ─────────────────────────────────────────────────────────────────────────────
+gliner:
+  model: knowledgator/gliner-bi-large-v1.0
+  threshold: 0.3
+  flat_ner: false
+  window_tokens: 320
+  window_overlap_tokens: 32
+
+  # label_text → canonical_type
+  labels:
+    "speaker label such as SPEAKER_00 or SPEAKER_01":                 SPEAKER
+    "politician, official, or public figure mentioned by name":       PERSON
+    "interview subject or guest mentioned by name":                   PERSON
+    "journalist, anchor, or reporter mentioned by name":              PERSON
+    "company, agency, institution, or media outlet":                  ORG
+    "think tank, advocacy group, or non-governmental organization":   ORG
+    "country, state, or city":                                        GPE
+    "geographic region, landmark, or body of water":                  LOC
+    "specific date, time period, or year":                            DATE
+    "event such as a war, summit, election, hearing, or incident":    EVENT
+    "monetary figure, financial amount, or valuation":                MONEY
+    "law, regulation, court case, or executive order":                LAW
+    "political party, ethnic group, or national group":               NORP
+    "building, military base, embassy, or airport":                   FACILITY
+    "report, study, or published publication":                        DOCUMENT
+    "book or authored work":                                          BOOK
+    "job title or position such as Secretary of State or CEO":        ROLE
+    "strategic asset such as a chokepoint, pipeline, or trade route": STRATEGIC_ASSET
+    "military installation or weapons platform":                      STRATEGIC_ASSET
+    "financial instrument such as a stock, bond, fund, or currency":  FINANCIAL_INSTRUMENT
+    "stock index or benchmark such as S&P 500 or Dow Jones":          FINANCIAL_INSTRUMENT
+    "treasury bond, government debt, or sovereign debt instrument":   FINANCIAL_INSTRUMENT
+    "cryptocurrency or digital asset":                                FINANCIAL_INSTRUMENT
+    "intelligence agency or security service":                        ORG
+    "government department or ministry":                              ORG
+    "international organization or treaty body":                      ORG
+    "trade route, shipping lane, or maritime chokepoint":             STRATEGIC_ASSET
+    "energy pipeline or transmission infrastructure":                 STRATEGIC_ASSET
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. NuExtract — typed JSON template (v2.0 `### Template:` protocol)
+#
+# Shape diverges from congress's Bill→Sponsor nesting. Media-ingest is
+# discourse-shaped: who said what, to whom, hedged or not. The top-level
+# keys mirror that:
+#
+#   Speakers          — diarization labels with optional resolved names
+#   Entities          — typed buckets of verbatim entity strings
+#   Claims            — speech-act payload (speaker / claim / hedged / negated)
+#   StrategicAssets   — first-class geopolitical objects
+#   FinancialInstruments — first-class financial objects
+#
+# Kept under the ~10-top-level-keys rule of thumb; no template_variants
+# (no obvious phase split for transcripts).
+# ─────────────────────────────────────────────────────────────────────────────
+nuextract:
+  model: numind/NuExtract-2.0-4B
+  temperature: 0.0
+  # Each leaf path → canonical type so the consensus voter can align
+  # NuExtract emissions with GLiNER/UniNER spans.
+  canonical_type_map:
+    "Speakers[].Label":                  SPEAKER
+    "Speakers[].ResolvedName":           PERSON
+    "Entities.People[]":                 PERSON
+    "Entities.Organizations[]":          ORG
+    "Entities.Places[]":                 GPE
+    "Entities.Regions[]":                LOC
+    "Entities.Dates[]":                  DATE
+    "Entities.Events[]":                 EVENT
+    "Entities.Laws[]":                   LAW
+    "Entities.Groups[]":                 NORP
+    "Entities.Facilities[]":             FACILITY
+    "Entities.Documents[]":              DOCUMENT
+    "Entities.Books[]":                  BOOK
+    "Entities.Roles[]":                  ROLE
+    "Entities.MoneyAmounts[]":           MONEY
+    "Claims[].Speaker":                  SPEAKER
+    "Claims[].Claim":                    OTHER
+    "Claims[].Time":                     DATE
+    "Claims[].SourceAttribution":        OTHER
+    "StrategicAssets[]":                 STRATEGIC_ASSET
+    "FinancialInstruments[]":            FINANCIAL_INSTRUMENT
+
+  template:
+    Speakers:
+      - Label:         verbatim-string
+        ResolvedName:  verbatim-string
+    Entities:
+      People:          ["verbatim-string"]
+      Organizations:   ["verbatim-string"]
+      Places:          ["verbatim-string"]
+      Regions:         ["verbatim-string"]
+      Dates:           ["verbatim-string"]
+      Events:          ["verbatim-string"]
+      Laws:            ["verbatim-string"]
+      Groups:          ["verbatim-string"]
+      Facilities:      ["verbatim-string"]
+      Documents:       ["verbatim-string"]
+      Books:           ["verbatim-string"]
+      Roles:           ["verbatim-string"]
+      MoneyAmounts:    ["verbatim-string"]
+    Claims:
+      - Speaker:            verbatim-string
+        Claim:              verbatim-string
+        Hedged:             boolean
+        Negated:            boolean
+        Time:               string
+        SourceAttribution:  string
+    StrategicAssets:        ["verbatim-string"]
+    FinancialInstruments:   ["verbatim-string"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. UniversalNER — conversational one-type-per-turn queries
+#
+# Multi-probe queries for types where the domain-specific subtype recalls
+# better than the generic head ("chokepoint" beats "strategic asset" on
+# geopolitical transcripts; "Treasury bond" beats "financial instrument"
+# on market commentary). Total query count ≈ 25 for cost control. The
+# assistant_prime "I've read this text." is verbatim — paraphrasing it
+# degrades recall (part of UniNER's training distribution).
+# ─────────────────────────────────────────────────────────────────────────────
+universalner:
+  model: Universal-NER/UniNER-7B-all
+  temperature: 0.0
+  assistant_prime: "I've read this text."
+  max_chars_per_call: 6000
+
+  # canonical_type → list of probe queries (unioned)
+  queries:
+    PERSON:
+      - "politician"
+      - "public official"
+      - "interview subject"
+      - "person"
+    ORG:
+      - "organization"
+      - "government agency"
+      - "media outlet"
+    GPE:
+      - "country, state, or city"
+    LOC:
+      - "geographic region or landmark"
+    DATE:
+      - "date"
+    EVENT:
+      - "event"
+      - "war or conflict"
+    MONEY:
+      - "monetary amount"
+    LAW:
+      - "law or executive order"
+      - "court case"
+    NORP:
+      - "political party or national group"
+    FACILITY:
+      - "building or military base"
+    DOCUMENT:
+      - "report or publication"
+    BOOK:
+      - "book"
+    ROLE:
+      - "job title or role"
+    STRATEGIC_ASSET:
+      - "strategic asset"
+      - "chokepoint"
+      - "pipeline"
+      - "trade route"
+    FINANCIAL_INSTRUMENT:
+      - "financial instrument"
+      - "stock or bond"
+      - "currency"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Regex — deterministic 4th voter, 100% precision on format-validated IDs
+#
+# Runs before the model-based encoders. Its votes carry confidence=1.0 and
+# break ties on format-validated identifiers. SPEAKER patterns are critical:
+# the diarizer guarantees the SPEAKER_NN form, so regex is the only reliable
+# detector (and the model voters are explicitly trained to ignore the label).
+# ─────────────────────────────────────────────────────────────────────────────
+regex:
+  patterns:
+    SPEAKER:
+      # Matches SPEAKER_00, Speaker_42, SPEAKER 1, Speaker 12 — the diarizer
+      # output, not the literal word "speaker".
+      - '\b(?:SPEAKER|Speaker)[_\s]?\d{1,2}\b'
+    MONEY:
+      # $-prefix is the discriminator vs. plain "200 million" (which is too
+      # ambiguous — could be casualty counts, populations, …). Keep tight.
+      - '\$\d[\d,]*(?:\.\d+)?(?:\s*(?:billion|million|trillion|thousand|k|M|B|T))?\b'
+    DATE:
+      # ISO date + year-only. Year-only is permissive on purpose: recall
+      # matters more than precision here, and the ensemble vote filters.
+      - '\b\d{4}-\d{2}-\d{2}\b'
+      - '\b(?:19|20)\d{2}\b'
+    LAW:
+      # Court-case "X v. Y" — extremely high precision once the v. is seen.
+      # Each side may be a Capitalized word (optionally followed by another)
+      # OR an all-caps abbreviation (FEC, EPA, NLRB, …) so we catch landmark
+      # cases like "Citizens United v. FEC" alongside "Roe v. Wade".
+      - '\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?|[A-Z]{2,})\s+v\.\s+(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?|[A-Z]{2,})\b'
+      # Executive Order with a 4-5 digit number.
+      - '\bExecutive\s+Order\s+\d{4,5}\b'
+
+  # Hint to consensus_predicate: regex votes always win ties for these types.
+  # SPEAKER + MONEY (when $-gated) + the structured LAW patterns are
+  # deterministic enough to outrank any model voter.
+  authoritative_for:
+    - SPEAKER
+    - MONEY
+    - LAW
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. AMR frames — PropBank frame → canonical predicate
+#
+# AMR parsers emit predicate nodes labelled with PropBank frames
+# (say-01, claim-01, own-01, …). The AMR-to-assertion projection node
+# walks each frame and looks up the canonical predicate from this table.
+# Predicate vocabulary aligns 1:1 with proposition_extraction.prompt's
+# declared list (speech acts + actions); the QA cross-validation test
+# enforces this — every value below MUST appear in that prompt.
+#
+# unknown_frame_action = "novel" — emit NOVEL_{frame} so unmapped frames
+# surface in review rather than silently dropping.
+#
+# Polysemy notes:
+#   - run-01 → operates: covers "Putin runs Russia" sense. The "run a
+#     marathon" sense is mis-mapped here; trust the role-fill check
+#     downstream to drop nonsense applications.
+#   - build-01 → created: covers "built the company"; the literal
+#     construction sense is rare in interview/news content.
+# ─────────────────────────────────────────────────────────────────────────────
+amr_frames:
+  unknown_frame_action: novel
+  frames:
+    # ── Speech acts ─────────────────────────────────────────────
+    say-01:              states
+    state-01:            states
+    declare-01:          states
+    tell-01:             states
+    claim-01:            claims
+    assert-02:           claims
+    allege-01:           claims
+    deny-01:             denies
+    refute-01:           denies
+    reject-01:           denies
+    confirm-01:          confirms
+    verify-01:           confirms
+    acknowledge-01:      acknowledges
+    admit-01:            acknowledges
+    concede-01:          acknowledges
+    question-01:         questions
+    ask-01:              questions
+    challenge-01:        questions
+    respond-01:          responds_to
+    reply-01:            responds_to
+    answer-01:           responds_to
+    reference-01:        references
+    cite-01:             references
+    mention-01:          references
+    discuss-01:          discusses
+    debate-01:           discusses
+    address-02:          discusses
+    criticize-01:        criticizes
+    attack-01:           criticizes
+    condemn-01:          criticizes
+    support-01:          supports
+    endorse-01:          supports
+    back-09:             supports
+    oppose-01:           opposes
+    object-01:           opposes
+    resist-01:           opposes
+
+    # ── Actions / relationships ─────────────────────────────────
+    own-01:              owns
+    possess-01:          owns
+    operate-01:          operates
+    run-01:              operates           # polysemy — "Putin runs Russia" sense
+    manage-01:           operates
+    lead-02:             leads
+    head-01:             leads
+    found-01:            founded
+    establish-01:        founded
+    work-01:             works_for
+    employ-01:           works_for
+    join-01:             member_of
+    belong-01:           member_of
+    provide-01:          provides
+    supply-01:           provides
+    deliver-01:          provides
+    increase-01:         increased
+    raise-01:            increased
+    decrease-01:         decreased
+    lower-01:            decreased
+    reduce-01:           decreased
+    leave-11:            departed
+    depart-01:           departed
+    resign-01:           departed
+    transfer-01:         transfers
+    move-01:             transfers
+    create-01:           created
+    build-01:            created            # polysemy — "built the company" sense
+    establish-02:        created
+
+    # ── Shared infrastructure (also in congress pack) ───────────
+    have-org-role-91:    member_of          # AMR's role frame — see role_overrides
+
+  role_overrides:
+    # Speech-act frames: ARG0 is the speaker, ARG1 is the claim content.
+    # ARG2 (when present) is the source attribution — surface it as a
+    # qualifier rather than as a separate triple. The projection node
+    # uses "source_attribution" as the qualifier slot name.
+    #
+    # Coverage rule: every frame that maps to a speech-act canonical
+    # predicate (states / claims / denies / confirms / acknowledges /
+    # questions / responds_to / references / discusses / criticizes /
+    # supports / opposes) needs ARG2 → source_attribution so "according
+    # to X" lands as a qualifier rather than emitting a stray triple.
+    say-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    state-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    declare-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    claim-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    assert-02:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    allege-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    tell-01:
+      # tell-01: ARG0 = speaker, ARG1 = listener, ARG2 = content. We want
+      # the content as object and the listener as a qualifier (recipient).
+      ARG0: subject
+      ARG1: recipient
+      ARG2: object
+    # ── denies ──────────────────────────────────────────────────
+    deny-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    refute-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    reject-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    # ── confirms ────────────────────────────────────────────────
+    confirm-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    verify-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    # ── acknowledges ────────────────────────────────────────────
+    acknowledge-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    admit-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    concede-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    # ── questions ───────────────────────────────────────────────
+    question-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    ask-01:
+      # ask-01: ARG0 = asker, ARG1 = thing asked, ARG2 = listener. Mirrors
+      # tell-01 — listener is a qualifier (recipient), not a triple.
+      ARG0: subject
+      ARG1: object
+      ARG2: recipient
+    challenge-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    # ── responds_to ─────────────────────────────────────────────
+    respond-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    reply-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    answer-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    # ── references ──────────────────────────────────────────────
+    reference-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    cite-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    mention-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    # ── discusses ───────────────────────────────────────────────
+    discuss-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    debate-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    address-02:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    # ── criticizes ──────────────────────────────────────────────
+    criticize-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    attack-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    condemn-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    # ── supports ────────────────────────────────────────────────
+    support-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    endorse-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    back-09:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    # ── opposes ─────────────────────────────────────────────────
+    oppose-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    object-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+    resist-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: source_attribution
+
+    # have-org-role-91 has its own argument structure: ARG0 = person,
+    # ARG1 = organization, ARG2 = role. Mirrors the congress pack's
+    # handling — the projection node converts ARG2 to a qualifier.
+    have-org-role-91:
+      ARG0: subject
+      ARG1: object
+      ARG2: role_value
+
+    # transfer-01: ARG0 = agent, ARG1 = thing transferred, ARG2 = recipient.
+    # Default ARG0/ARG1 = subject/object captures the agent → thing edge;
+    # the recipient becomes a qualifier so we don't fabricate a second triple.
+    transfer-01:
+      ARG0: subject
+      ARG1: object
+      ARG2: recipient
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Consensus tuning — how the 4 voters reconcile
+# ─────────────────────────────────────────────────────────────────────────────
+consensus:
+  span_iou_threshold: 0.5
+  type_agreement:
+    # Aliases tolerated when voters disagree on subtype but agree on type.
+    PERSON:
+      aliases: [POLITICIAN, JOURNALIST, INTERVIEW_SUBJECT]
+    ORG:
+      aliases: [AGENCY, MEDIA_OUTLET, THINK_TANK]
+    STRATEGIC_ASSET:
+      aliases: [CHOKEPOINT, PIPELINE, TRADE_ROUTE]
+    FINANCIAL_INSTRUMENT:
+      aliases: [STOCK, BOND, CURRENCY, CRYPTOCURRENCY]
+  # Confidence weighting: scored encoders contribute their score; binary
+  # encoders (NuExtract, regex) contribute 1.0 per emission.
+  scored_voters: [gliner, universalner]
+  binary_voters: [nuextract, regex]

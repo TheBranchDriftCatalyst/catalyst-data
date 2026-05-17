@@ -333,7 +333,152 @@ regex:
     - ROLL_CALL_VOTE
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Consensus tuning — how the 4 voters reconcile
+# 5. AMR frames — PropBank frame → canonical predicate
+#
+# AMR parsers emit predicate nodes labelled with PropBank frames
+# (introduce-01, refer-01, vote-01, …). The AMR-to-assertion projection
+# node walks each frame and looks up the canonical predicate from this
+# table. Predicate vocabulary aligns with the canonical predicates in
+# proposition_extraction.prompt (sponsors / refers_to / passed / vetoed_by
+# etc.) plus a few legislative-process refinements that AMR exposes
+# cleanly but plain LLM extraction tends to collapse.
+#
+# unknown_frame_action = "novel" — emit NOVEL_{frame} so unmapped frames
+# surface in review rather than silently dropping or polluting the
+# canonical vocab.
+# ─────────────────────────────────────────────────────────────────────────────
+amr_frames:
+  unknown_frame_action: novel        # flag unknown frames for human review
+  # Canonical predicate values below are aligned with the SPO prompt's
+  # controlled vocabulary in proposition_extraction.prompt wherever a
+  # 1:1 equivalent exists. Predicates that legitimately extend the
+  # prompt vocab (committee-procedure verbs AMR exposes cleanly that
+  # the LLM SPO path tends to collapse) are listed under
+  # `extended_predicates` so the cross-validation QA test treats them
+  # as deliberate extensions, not contract violations.
+  frames:
+    # ── Sponsorship ──────────────────────────────────────────────
+    introduce-01:        introduces            # "Smith introduced H.R. 1234"
+    sponsor-01:          sponsors              # "Smith is the sponsor of …"
+    co-sponsor-01:       co_sponsors
+    cosponsor-01:        co_sponsors
+    # withdraw-01 in legislative context is cosponsorship withdrawal —
+    # AMR encodes this as co-sponsor with :polarity -, so we map to
+    # co_sponsors and let the projection node read :polarity off the
+    # graph to set negated=True. Avoids inventing a separate predicate
+    # that the SPO validator would reject.
+    withdraw-01:         co_sponsors
+
+    # ── Legislative process ─────────────────────────────────────
+    refer-01:            refers_to
+    report-01:           reported_by           # EXTENSION
+    discharge-01:        discharged_from       # EXTENSION
+    consider-02:         considered_by         # EXTENSION
+    place-01:            placed_on_calendar    # EXTENSION
+
+    # ── Floor action ────────────────────────────────────────────
+    pass-03:             passed                # "the bill passed the House"
+    pass-09:             passed                # alternative frame for passage
+    fail-01:             failed
+    agree-01:            agreed_to             # EXTENSION (procedural agreement, not policy support)
+    reject-01:           rejected              # EXTENSION
+    # vote-01 is polarity-blind at the frame level; the AMR :polarity
+    # edge on the vote node determines votes_for vs votes_against. The
+    # projection node MUST read polarity before emitting — `voted_on`
+    # is the neutral fallback when polarity is absent.
+    vote-01:             voted_on              # EXTENSION (polarity-aware mapping done downstream)
+    move-01:             motion_to_recommit    # EXTENSION (context-dependent)
+
+    # ── Amendment ───────────────────────────────────────────────
+    amend-01:            amends
+    propose-01:          amends                # when subject is a Member proposing an amendment
+    strike-01:           struck_amendment      # EXTENSION
+
+    # ── Enactment ───────────────────────────────────────────────
+    present-01:          presented_to_president  # EXTENSION
+    sign-01:             signed_by
+    # "becomes law" — semantically equivalent to enactment (10-day rule
+    # or signing). Folded into `enacted` to keep the predicate vocab
+    # compact; the AMR graph still distinguishes the two frames.
+    become-01:           enacted
+    enact-01:            enacted
+    veto-01:             vetoed_by
+    override-01:         override_succeeded    # EXTENSION
+
+    # ── Jurisdiction / committee membership ─────────────────────
+    chair-01:            chairs
+    rank-01:             ranks_on              # EXTENSION (ranking member, distinct from chair)
+    sit-02:              member_of
+    have-org-role-91:    member_of             # ARG2 role-value handled via role_overrides
+
+    # ── Citation / cross-reference ──────────────────────────────
+    cite-01:             cites                 # EXTENSION
+    repeal-01:           repeals               # EXTENSION
+    supersede-01:        supersedes            # EXTENSION
+    codify-01:           codified_at           # EXTENSION
+
+  # Canonical predicates emitted by this pack that intentionally extend
+  # the SPO prompt's controlled vocabulary. The cross-validation QA
+  # test asserts `set(frames.values()) ⊆ prompt_predicates ∪ extended_predicates`.
+  # Anything emitted but missing from BOTH lists is a contract bug.
+  extended_predicates:
+    - agreed_to
+    - cites
+    - codified_at
+    - considered_by
+    - discharged_from
+    - motion_to_recommit
+    - override_succeeded
+    - placed_on_calendar
+    - presented_to_president
+    - ranks_on
+    - rejected
+    - repeals
+    - reported_by
+    - struck_amendment
+    - supersedes
+    - voted_on
+
+  role_overrides:
+    # have-org-role-91 has its own argument structure: ARG0 = person,
+    # ARG1 = organization, ARG2 = role. Tell the projection node to
+    # interpret these differently from the default ARG0=subject/ARG1=object.
+    have-org-role-91:
+      ARG0: subject       # the person
+      ARG1: object        # the org
+      ARG2: role_value    # the role title — becomes a qualifier, not a separate triple
+
+    # withdraw-01 (cosponsorship withdrawal): ARG0 = Member, ARG1 = bill,
+    # ARG2 = (optional) reason. The projection node should also read
+    # :polarity off the AMR node and set negated=True on the assertion.
+    withdraw-01:
+      ARG0: subject
+      ARG1: object
+
+    # Passive-voice legislative procedure frames. Standard PropBank
+    # rolesets put the patient on ARG1 and the destination on ARG2; the
+    # agent (ARG0) is usually unstated in passive voice (e.g., "the bill
+    # was referred to the Committee"). For the canonical SPO projection
+    # we want bill→refers_to→committee, not (empty)→refers_to→bill, so
+    # remap ARG1→subject and ARG2→object.
+    #
+    # Surfaced by the AMR MVP demo (examples/amr_congress_mvp.py): with
+    # the default ARG0=subject/ARG1=object mapping, refer-01 produced
+    # assertions with empty subject_text because the AMR node had no
+    # ARG0. Same shape applies to report-01 (committee → bill) and
+    # discharge-01 (committee → bill).
+    refer-01:
+      ARG1: subject       # the bill being referred
+      ARG2: object        # the destination committee
+    report-01:
+      ARG0: subject       # the reporting committee
+      ARG1: object        # the bill being reported
+    discharge-01:
+      ARG0: subject       # the discharging committee
+      ARG1: object        # the bill being discharged
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Consensus tuning — how the 4 voters reconcile
 # ─────────────────────────────────────────────────────────────────────────────
 consensus:
   span_iou_threshold: 0.5          # spans agree if IoU ≥ 0.5
