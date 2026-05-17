@@ -43,3 +43,55 @@ services:
         mc mb --ignore-existing local/dagster &&
         echo 'bucket dagster ready'
       "
+
+  # Neo4j with APOC + Neosemantics (n10s) plugins — same plugin set as the
+  # k8s deployment in k8s/platform/neo4j.yaml. Pinned to 5-community to
+  # match prod. Bolt on 7687, HTTP browser on 7474.
+  #
+  # n10s gives us the RDF-star bridge: when we want to export the assertion
+  # graph as Turtle-star for geo-KG interop (GeoSPARQL, KnowWhereGraph),
+  # `n10s.rdf.export.cypher()` does it without dual-write.
+  #
+  # The neo4j-n10s-init service runs the one-time n10s.graphconfig.init()
+  # call so RDF operations work. Idempotent.
+  neo4j:
+    image: neo4j:5-community
+    container_name: catalyst-data-neo4j-dev
+    ports:
+      - "7474:7474"  # Browser / HTTP API
+      - "7687:7687"  # Bolt
+    environment:
+      NEO4J_AUTH: neo4j/neo4j-homelab
+      NEO4J_PLUGINS: '["apoc", "n10s"]'
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*,n10s.*"
+      NEO4J_dbms_security_procedures_allowlist: "apoc.*,n10s.*"
+      NEO4J_server_config_strict__validation_enabled: "false"
+    volumes:
+      - ./.test-output/neo4j-data:/data
+      - ./.test-output/neo4j-plugins:/plugins
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p neo4j-homelab 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # One-shot: configures n10s graphconfig. Mirrors the k8s Job at
+  # k8s/platform/neo4j-n10s-init.yaml. Safe to re-run.
+  neo4j-n10s-init:
+    image: neo4j:5-community
+    container_name: catalyst-data-neo4j-n10s-init
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    entrypoint: >
+      /bin/bash -c "
+        set -e
+        echo 'Running n10s init...'
+        cypher-shell -a bolt://neo4j:7687 -u neo4j -p neo4j-homelab \
+          'CREATE CONSTRAINT n10s_unique_uri IF NOT EXISTS FOR (r:Resource) REQUIRE r.uri IS UNIQUE;'
+        cypher-shell -a bolt://neo4j:7687 -u neo4j -p neo4j-homelab \
+          \"CALL n10s.graphconfig.init({handleVocabUris: 'IGNORE', handleMultival: 'ARRAY', keepLangTag: true, handleRDFTypes: 'LABELS_AND_NODES'});\" \
+          || cypher-shell -a bolt://neo4j:7687 -u neo4j -p neo4j-homelab 'CALL n10s.graphconfig.show()' >/dev/null
+        echo 'n10s init complete.'
+      "

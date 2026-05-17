@@ -43,7 +43,16 @@ spec:
             - name: NEO4J_AUTH
               value: neo4j/neo4j-homelab
             - name: NEO4J_PLUGINS
-              value: '["apoc"]'
+              value: '["apoc", "n10s"]'
+            # n10s (Neosemantics) is the RDF-star bridge — lets us export
+            # the assertion graph as Turtle-star for geo-KG interop
+            # (GeoSPARQL, KnowWhereGraph) without dual-writing.
+            # See https://neo4j.com/labs/neosemantics/ and the init Job
+            # below that runs the required graphconfig.init() Cypher.
+            - name: NEO4J_dbms_security_procedures_unrestricted
+              value: "apoc.*,n10s.*"
+            - name: NEO4J_dbms_security_procedures_allowlist
+              value: "apoc.*,n10s.*"
             - name: NEO4J_server_config_strict__validation_enabled
               value: "false"
             - name: NEO4J_dbms_memory_heap_initial__size

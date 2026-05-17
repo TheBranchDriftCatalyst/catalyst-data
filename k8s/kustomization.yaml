@@ -29,6 +29,7 @@ resources:
   - platform/postgres-knowledge.yaml
   - platform/neo4j.yaml
   - platform/neo4j-ingressroute.yaml
+  - platform/neo4j-n10s-init.yaml
   # Code locations
   - congress-data/deployment.yaml
   - congress-data/service.yaml

@@ -15,6 +15,10 @@ dependencies = [
     "pydantic>=2.9",
     "neo4j>=5.28",
     "psycopg[binary]>=3.2",
+    # RDF / RDF-star round-trip support — the assertion graph lives primary
+    # in Neo4j, but we export Turtle-star via the n10s plugin for geo-KG
+    # interop and federation. rdflib is the parser/serializer.
+    "rdflib>=7.1",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +26,9 @@ dev = [
     "dagster-webserver>=1.13",
     "pytest>=8.3",
     "ruff>=0.9",
+    # Embedded RDF-star store for tests — lets us parse Turtle-star from
+    # n10s exports without spinning up a separate triplestore.
+    "pyoxigraph>=0.4",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -1,0 +1,115 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# n10s (Neosemantics) initialization Job
+#
+# Neosemantics requires two pieces of one-time setup before any RDF/RDF-star
+# operation works on a Neo4j instance:
+#
+#   1. A uniqueness constraint on (Resource.uri) — n10s uses this to dedupe
+#      imported resources.
+#   2. A call to n10s.graphconfig.init() with the chosen handling modes for
+#      vocabulary URIs and multi-valued literals.
+#
+# Both are idempotent — n10s.graphconfig.init() errors with a known "already
+# initialized" message on re-runs, which the script swallows. The CONSTRAINT
+# is created with IF NOT EXISTS.
+#
+# This Job is intended to be applied once via Kustomize; it can also be
+# re-applied safely whenever neo4j.yaml or the n10s plugin version is bumped.
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neo4j-n10s-init-script
+  labels:
+    app: neo4j
+    app.kubernetes.io/part-of: catalyst-data
+data:
+  init.cypher: |
+    // 1. Uniqueness constraint on Resource.uri — required by n10s.
+    CREATE CONSTRAINT n10s_unique_uri IF NOT EXISTS
+      FOR (r:Resource) REQUIRE r.uri IS UNIQUE;
+
+    // 2. Initialize n10s graph config.
+    //
+    //   handleVocabUris: 'IGNORE'      — strip vocabulary namespaces, store
+    //                                    local names only. Keeps the property
+    //                                    graph compact; we don't need round-trip
+    //                                    URI preservation for our internal store.
+    //   handleMultival:  'ARRAY'       — multi-valued literals become Cypher
+    //                                    arrays (vs. OVERWRITE which drops them).
+    //   keepLangTag:     true          — preserve @en / @es language tags.
+    //   handleRDFTypes:  'LABELS_AND_NODES' — RDF rdf:type both labels and
+    //                                    Resource(:Class) nodes for downstream
+    //                                    reasoning queries.
+    //
+    // Safe to re-run — n10s returns a "already initialized" failure that the
+    // wrapper script tolerates.
+    CALL n10s.graphconfig.init({
+      handleVocabUris:  'IGNORE',
+      handleMultival:   'ARRAY',
+      keepLangTag:      true,
+      handleRDFTypes:   'LABELS_AND_NODES'
+    });
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: neo4j-n10s-init
+  labels:
+    app: neo4j
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: neo4j-n10s-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: cypher-shell
+          image: neo4j:5-community
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for Neo4j to accept connections..."
+              for i in {1..60}; do
+                if cypher-shell -a "bolt://neo4j:7687" -u neo4j -p "${NEO4J_PASSWORD}" \
+                     "RETURN 1" >/dev/null 2>&1; then
+                  echo "Neo4j is up."
+                  break
+                fi
+                sleep 5
+              done
+
+              echo "Running n10s init..."
+              # We tolerate the "already initialized" error so this Job is
+              # safe to re-apply on every cluster reconcile.
+              if ! cypher-shell -a "bolt://neo4j:7687" -u neo4j -p "${NEO4J_PASSWORD}" \
+                   --file /scripts/init.cypher; then
+                echo "n10s init returned non-zero. Checking whether it's the idempotent 'already initialized' case..."
+                if cypher-shell -a "bolt://neo4j:7687" -u neo4j -p "${NEO4J_PASSWORD}" \
+                     "CALL n10s.graphconfig.show()" >/dev/null 2>&1; then
+                  echo "n10s already initialized — treating as success."
+                  exit 0
+                fi
+                echo "n10s init failed and graphconfig is not present. Bailing."
+                exit 1
+              fi
+              echo "n10s init complete."
+          env:
+            - name: NEO4J_PASSWORD
+              value: neo4j-homelab
+          volumeMounts:
+            - name: init-script
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: init-script
+          configMap:
+            name: neo4j-n10s-init-script
