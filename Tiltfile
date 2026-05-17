@@ -52,11 +52,27 @@ docker_compose('docker-compose.dev.yml')
 dc_resource('minio', labels=[LABEL_INFRA])
 dc_resource('minio-init', labels=[LABEL_INFRA], resource_deps=['minio'])
 
+# Neo4j + n10s — the assertion-graph store and its RDF-star bridge.
+# docker-compose.dev.yml ships both services with the same plugin set as
+# the prod k8s deployment (k8s/platform/neo4j.yaml + n10s-init.yaml).
+# n10s init is one-shot and runs CALL n10s.graphconfig.init(...) so RDF
+# export works on first use; idempotent on re-up.
+dc_resource('neo4j', labels=[LABEL_INFRA])
+dc_resource('neo4j-n10s-init', labels=[LABEL_INFRA], resource_deps=['neo4j'])
+
 cmd_button(
     name='btn-open-minio-console',
     resource='minio',
     argv=['sh', '-c', 'open http://localhost:9001 || echo "Open http://localhost:9001 (minio / minio123)"'],
     text='Open MinIO Console',
+    icon_name='open_in_browser',
+)
+
+cmd_button(
+    name='btn-open-neo4j-browser',
+    resource='neo4j',
+    argv=['sh', '-c', 'open http://localhost:7474 || echo "Open http://localhost:7474 (neo4j / neo4j-homelab)"'],
+    text='Open Neo4j Browser',
     icon_name='open_in_browser',
 )
 
