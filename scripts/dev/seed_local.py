@@ -96,18 +96,28 @@ def _maybe_regen(prefix: str) -> None:
 def _embedding_resource():
     """Build EmbeddingResource for the dev seed.
 
-    Routes through the LiteLLM proxy (LLM_BASE_URL / LLM_API_KEY) when those
-    are set — that's the same proxy the rest of the stack hits, no need for a
-    separate OPENAI_API_KEY. Falls back to defaults (api.openai.com) only when
-    neither LiteLLM nor OpenAI envs exist; in that case the seed will fail
-    loudly on the first embedding call instead of silently producing junk.
+    Routes through the LiteLLM proxy whenever a LiteLLM-issued key is present
+    (LLM_API_KEY or OPENAI_API_KEY starting with ``sk-litellm-``) — that's the
+    same proxy the rest of the stack hits, no need for a separate
+    OPENAI_API_KEY. The base URL prefers an explicit ``LLM_BASE_URL`` (set by
+    each per-domain ``packages/*/.envrc``) and otherwise falls back to the
+    off-cluster talos00 ingress (same default as the repo-root ``.envrc`` and
+    ``tests/benchmark_config.py``) — required because the bare ``.envrc.cluster``
+    only exports keys, not the proxy URL.
+
+    Falls back to OpenAI-default (``api.openai.com`` with a real
+    ``OPENAI_API_KEY``) only when no LiteLLM key is detected; in that case
+    the seed will fail loudly on the first embedding call instead of
+    silently producing junk.
     """
     from dagster_io import EmbeddingResource
 
     llm_base = os.environ.get("LLM_BASE_URL", "")
-    llm_key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    if llm_base and llm_key:
-        return EmbeddingResource(provider="litellm", base_url=llm_base, api_key=llm_key)
+    llm_key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    is_litellm_key = llm_key.startswith("sk-litellm-")
+    if is_litellm_key or llm_base:
+        base_url = llm_base or "http://litellm.talos00/v1"
+        return EmbeddingResource(provider="litellm", base_url=base_url, api_key=llm_key)
     return EmbeddingResource()
 
 
