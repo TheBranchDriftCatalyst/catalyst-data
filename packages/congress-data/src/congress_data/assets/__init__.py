@@ -31,6 +31,9 @@ from congress_data.assets.member_tail import (
     member_document,
     member_sponsored,
 )
+from congress_data.assets.structured_assertions import (
+    congress_structured_assertions,
+)
 
 __all__ = [
     # Head
@@ -58,4 +61,6 @@ __all__ = [
     "member_chunks",
     # Member gold (factory-generated)
     "member_gold_assets",
+    # Structured (non-AMR) assertions from API fields
+    "congress_structured_assertions",
 ]
