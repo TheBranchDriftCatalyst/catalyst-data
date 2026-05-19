@@ -1,0 +1,53 @@
+---
+# Overlay: local (k3d dev cluster)
+#
+# Hostnames: *.local.lan (add entries in /etc/hosts on the dev machine
+# pointing at 127.0.0.1 — k3d's loadbalancer listens on 80/443 there).
+# Cluster context: k3d-catalyst-dev (shared via ../../infra/k3d/)
+#
+# Notes:
+#   - Secrets that ESO provisions on talos00 (1Password) are generated
+#     locally from gitignored *.env files in this dir. Copy each
+#     *.env.example → *.env and fill in dev values. See SETUP.md.
+#   - The catalyst-llm services (litellm, ollama) are NOT in this
+#     cluster — code-server deployments hard-code
+#     `litellm.catalyst-llm.svc.cluster.local:4000` and
+#     `alloy.monitoring.svc.cluster.local:4317`. In dev you can either
+#     point at the remote prod proxy via ExternalName Services
+#     (added here for litellm only), or skip the LLM-touching code paths.
+#   - NFS-backed PVs in base/storage/ reference TrueNAS at 192.168.1.36
+#     and won't bind in k3d. Code paths that need media file access
+#     should be exercised via the Tilt docker-compose path, not k3d.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: catalyst-data
+
+resources:
+  - ../base
+  - ingressroute.yaml
+  - litellm-externalname.yaml
+
+# Equivalents of the ExternalSecrets in talos00/. Same target Secret
+# names and key shape — base Deployments resolve them transparently.
+secretGenerator:
+  - name: dagster-s3-credentials
+    envs:
+      - dagster-s3-credentials.env
+    options:
+      disableNameSuffixHash: true
+  - name: congress-data-secrets
+    envs:
+      - congress-data-secrets.env
+    options:
+      disableNameSuffixHash: true
+  - name: llm-credentials
+    envs:
+      - llm-credentials.env
+    options:
+      disableNameSuffixHash: true
+  - name: hf-credentials
+    envs:
+      - hf-credentials.env
+    options:
+      disableNameSuffixHash: true

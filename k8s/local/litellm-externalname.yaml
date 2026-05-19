@@ -1,0 +1,31 @@
+---
+# Cross-namespace ExternalName so catalyst-data code-server Deployments
+# can resolve `litellm.catalyst-llm.svc.cluster.local:4000` in k3d.
+# In prod this name resolves to the in-cluster LiteLLM Pod (catalyst-llm/);
+# locally we redirect to the deployed talos00 proxy via Traefik.
+#
+# This Service intentionally lives in the `catalyst-llm` namespace, not
+# `catalyst-data`. The `namespace: catalyst-llm` field below is preserved
+# AGAINST the overlay's `namespace: catalyst-data` because the local
+# kustomization carries no namespace transformer for it (see kustomization.yaml).
+#
+# Requires: `catalyst-llm` namespace to exist. If you also apply the
+# catalyst-llm k8s/local overlay it'll be created there; otherwise:
+#   kubectl create namespace catalyst-llm
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: catalyst-llm
+  labels:
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/part-of: catalyst-llm
+    app.kubernetes.io/managed-by: kustomize-local-overlay
+spec:
+  type: ExternalName
+  externalName: litellm.talos00
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+      protocol: TCP

@@ -35,6 +35,11 @@ packages/media-ingest/tests/.output/
 .envrc.cluster
 .envrc.local
 **/.envrc
+
+# Local-only secret material consumed by `kustomize build k8s/local`.
+# Examples (*.env.example) ARE committed — copy them to *.env and fill in.
+k8s/local/*.env
+!k8s/local/*.env.example
 .coverage
 *.executed.ipynb
 .DS_Store

@@ -1,0 +1,35 @@
+---
+# Overlay: talos00 (production homelab cluster)
+#
+# Hostnames: *.talos00 (resolve to the talos00 ingress LB)
+# Cluster context: admin@catalyst-cluster
+#
+# Reconciled by Argo CD via:
+#   talos-homelab/infrastructure/base/argocd/applications/catalyst-data.yaml
+#   (spec.source.path: k8s → recommend updating to k8s/talos00)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: catalyst-data
+
+resources:
+  - ../base
+  # Secrets (consumed by base deployments — ExternalSecrets fed by 1Password
+  # via ESO ClusterSecretStore. Local overlay generates equivalents from a
+  # gitignored .env file.)
+  - externalsecret-s3.yaml
+  - externalsecret-congress.yaml
+  - externalsecret-llm.yaml
+  - externalsecret-hf.yaml
+  # IngressRoutes — *.talos00 hostnames
+  - dagster-ingressroute.yaml
+  - neo4j-ingressroute.yaml
+  - media-explorer-ingressroute.yaml
+  - knowledge-graph-api-ingressroute.yaml
+  - homepage-ingressroute.yaml
+  # Monitoring (ServiceMonitor, PrometheusRule, Grafana Dashboard) —
+  # depends on prometheus-operator + grafana-operator CRDs which only
+  # live on the prod cluster.
+  - servicemonitor.yaml
+  - prometheusrule.yaml
+  - grafana-dashboard.yaml
