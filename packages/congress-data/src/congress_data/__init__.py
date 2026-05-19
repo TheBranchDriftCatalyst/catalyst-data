@@ -71,6 +71,9 @@ from congress_data.assets.member_tail import (
     member_sponsored,
 )
 
+# ── Structured-projection assets (Cosponsor/PublicLaw → Assertion) ─────────
+from congress_data.assets.structured_assertions import congress_structured_assertions
+
 # ── Schedules ────────────────────────────────────────────────────────────────
 from congress_data.schedules import (
     bills_discovery_job,
@@ -99,6 +102,7 @@ defs = Definitions(
         bill_document,
         bill_chunks,
         *bill_gold_assets,
+        congress_structured_assertions,
         # TAIL per-member (partitioned on congress_member)
         member_detail,
         member_committee_assignments,

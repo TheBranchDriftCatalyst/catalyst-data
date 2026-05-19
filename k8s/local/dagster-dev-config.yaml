@@ -42,6 +42,12 @@ data:
   CATALYST_MEDIA_ROOT_METUBE: "packages/media-ingest/tests/fixtures"
   CATALYST_MEDIA_ROOT_TUBESYNC: "packages/media-ingest/tests/fixtures"
 
+  # ── Prompt registry (AMR label packs + LLM prompts) ───────────
+  # ExtractionResource looks up label packs at <PROMPT_REGISTRY_DIR>/<pack>/.
+  # The Tiltfile resolves this relative path against PROJECT_DIR before
+  # piping to serve_env, same pattern as the media discovery roots.
+  PROMPT_REGISTRY_DIR: "k8s/base/congress-data/prompts"
+
   # ── Whisper backend — Mac default ──────────────────────────────
   # talos uses openvino (Intel GPU); on Apple Silicon prefer
   # mlx-whisper (Metal) — but mlx is an optional install

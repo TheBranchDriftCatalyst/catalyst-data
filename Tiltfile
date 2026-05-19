@@ -167,7 +167,7 @@ else:
 # Resolve relative paths in the ConfigMap (e.g. CATALYST_MEDIA_ROOT_METUBE
 # is checked-in as ``packages/media-ingest/tests/fixtures`` — relative to
 # the repo root). Promote to absolute before piping to serve_env.
-for _rel_var in ('CATALYST_MEDIA_ROOT_METUBE', 'CATALYST_MEDIA_ROOT_TUBESYNC'):
+for _rel_var in ('CATALYST_MEDIA_ROOT_METUBE', 'CATALYST_MEDIA_ROOT_TUBESYNC', 'PROMPT_REGISTRY_DIR'):
     _val = _dagster_dev_config.get(_rel_var)
     if _val and not _val.startswith('/'):
         _dagster_dev_config[_rel_var] = os.path.join(PROJECT_DIR, _val)

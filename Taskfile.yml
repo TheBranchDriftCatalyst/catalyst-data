@@ -126,7 +126,12 @@ tasks:
       OTEL_METRICS_EXPORTER: none
       OTEL_TRACES_EXPORTER: none
     cmds:
-      - dagster dev -m media_ingest -m congress_data -m open_leaks {{.CLI_ARGS}}
+      # `uv run` resolves through the workspace .venv where amrlib's
+      # model_stog cache + all other Python deps live. Bare `dagster dev`
+      # would resolve via Mise's system Python (no amrlib data dir) and
+      # bill_extraction would silently 0-extract. The `--` separator
+      # prevents `uv run` from intercepting `-m` (its own module flag).
+      - uv run -- dagster dev -m media_ingest -m congress_data -m open_leaks {{.CLI_ARGS}}
 
   dagster:materialize:congress:
     desc: Kick off congress discovery + sensor pipeline
