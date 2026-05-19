@@ -1,0 +1,135 @@
+---
+# Local-dev MinIO — single-pod Deployment for the k3d catalyst-dev cluster.
+#
+# Talos prod uses the MinIO Operator (a separate "Tenant" CR managed in the
+# minio-operator namespace) — that's stateful, scaled, and lives in its own
+# ArgoCD application. This file is the local equivalent: a plain Deployment
+# + PVC + Service + bucket-init Job. Same S3 API surface (port 9000) +
+# same console (port 9001), same credentials (minio / minio123). Code paths
+# don't care which one they're talking to.
+#
+# Persistence: PVC on `local-path` storage class (k3d default). State
+# survives `tilt down` / `tilt up` cycles. To wipe, delete the PVC.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  labels:
+    app: minio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  labels:
+    app: minio
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          env:
+            - name: MINIO_ROOT_USER
+              value: minio
+            - name: MINIO_ROOT_PASSWORD
+              value: minio123
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  labels:
+    app: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+# One-shot: ensures the `dagster` bucket exists. Idempotent — re-runs
+# on Tilt restart are no-ops. Mirrors the docker-compose minio-init.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+  labels:
+    app: minio-init
+spec:
+  template:
+    metadata:
+      labels:
+        app: minio-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              until mc alias set local http://minio:9000 minio minio123 >/dev/null 2>&1; do
+                echo "waiting for minio..."
+                sleep 2
+              done
+              mc mb --ignore-existing local/dagster
+              echo "bucket 'dagster' ready"

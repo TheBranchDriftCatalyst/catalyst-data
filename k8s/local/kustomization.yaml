@@ -1,53 +1,35 @@
 ---
-# Overlay: local (k3d dev cluster)
+# Overlay: local (k3d catalyst-dev cluster) — CD-48tr scope
 #
-# Hostnames: *.local.lan (add entries in /etc/hosts on the dev machine
-# pointing at 127.0.0.1 — k3d's loadbalancer listens on 80/443 there).
 # Cluster context: k3d-catalyst-dev (shared via ../../infra/k3d/)
+# Namespace:       catalyst-data
 #
-# Notes:
-#   - Secrets that ESO provisions on talos00 (1Password) are generated
-#     locally from gitignored *.env files in this dir. Copy each
-#     *.env.example → *.env and fill in dev values. See SETUP.md.
-#   - The catalyst-llm services (litellm, ollama) are NOT in this
-#     cluster — code-server deployments hard-code
-#     `litellm.catalyst-llm.svc.cluster.local:4000` and
-#     `alloy.monitoring.svc.cluster.local:4317`. In dev you can either
-#     point at the remote prod proxy via ExternalName Services
-#     (added here for litellm only), or skip the LLM-touching code paths.
-#   - NFS-backed PVs in base/storage/ reference TrueNAS at 192.168.1.36
-#     and won't bind in k3d. Code paths that need media file access
-#     should be exercised via the Tilt docker-compose path, not k3d.
+# CD-48tr (May 2026) moved the data-layer services (MinIO + Neo4j) from
+# docker-compose.dev.yml into this k3d-targeted overlay. Dagster code
+# locations (congress-data, media-ingest, open-leaks, knowledge-graph)
+# still run as host-Python processes via `task dev` — they reach the
+# in-cluster services via port-forwards Tilt exposes on localhost:
+#   MinIO   :9000 / :9001
+#   Neo4j   :7474 (HTTP) / :7687 (Bolt)
+#
+# This overlay deliberately references individual files in ../base/ to
+# build the minimum set; that triggers kustomize's load-restrictor
+# security check, so Tilt's kustomize() call in ../../Tiltfile passes
+# `--load-restrictor=LoadRestrictionsNone` to disable it. Tilt itself
+# is local dev-only so the restrictor isn't load-bearing here.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: catalyst-data
 
 resources:
-  - ../base
-  - ingressroute.yaml
-  - litellm-externalname.yaml
-
-# Equivalents of the ExternalSecrets in talos00/. Same target Secret
-# names and key shape — base Deployments resolve them transparently.
-secretGenerator:
-  - name: dagster-s3-credentials
-    envs:
-      - dagster-s3-credentials.env
-    options:
-      disableNameSuffixHash: true
-  - name: congress-data-secrets
-    envs:
-      - congress-data-secrets.env
-    options:
-      disableNameSuffixHash: true
-  - name: llm-credentials
-    envs:
-      - llm-credentials.env
-    options:
-      disableNameSuffixHash: true
-  - name: hf-credentials
-    envs:
-      - hf-credentials.env
-    options:
-      disableNameSuffixHash: true
+  # Namespace decl from base.
+  - ../base/namespace.yaml
+  # Neo4j Deployment + PVC + Service (local-path storage class works
+  # in k3d) plus the one-shot n10s.graphconfig.init() Job.
+  - ../base/platform/neo4j.yaml
+  - ../base/platform/neo4j-n10s-init.yaml
+  # MinIO Deployment + PVC + Service + bucket-init Job (local-only —
+  # talos prod runs MinIO Operator Tenant in its own namespace, so this
+  # local manifest doesn't live in ../base/).
+  - minio.yaml

@@ -32,33 +32,79 @@ print("""
 
 # ============================================
 # LABEL CONSTANTS
-# ============================================
-LABEL_INFRA = '1-infrastructure'
-LABEL_DAGSTER = '2-dagster-platform'
-LABEL_BENCH = '3-bench-viewer'
-LABEL_OPS = '4-ops'
-
-# ============================================
-# INFRASTRUCTURE — Local MinIO via docker-compose
 #
-# `tilt up` boots the MinIO container with a persistent volume so the
-# `dagster` bucket (and everything in it) survives `tilt down` cycles.
-# The minio-init service auto-creates the bucket on first boot — the
-# Tilt resource for it surfaces success/failure in its own log lane.
+# When this Tiltfile runs as the entry point (`tilt up` from this dir),
+# labels stay as-is (e.g. '1-infrastructure'). When it's include()d from
+# the workspace aggregator at ../, every label gets prefixed with the
+# project name so resources read like 'catalyst-data.1-infrastructure'
+# — keeps catalyst-llm + catalyst-data resources distinguishable in the
+# unified Tilt UI.
+# ============================================
+PROJECT_NAME = 'catalyst-data'
+_running_standalone = config.main_dir.rstrip('/').endswith('/' + PROJECT_NAME)
+
+
+def _label(base):
+    if _running_standalone:
+        return base
+    return PROJECT_NAME + '.' + base
+
+
+LABEL_INFRA = _label('1-infrastructure')
+LABEL_DAGSTER = _label('2-dagster-platform')
+LABEL_BENCH = _label('3-bench-viewer')
+LABEL_OPS = _label('4-ops')
+
+# ============================================
+# INFRASTRUCTURE — k3d cluster + local overlay (CD-48tr, May 2026)
+#
+# MinIO + Neo4j now run inside the shared catalyst-dev k3d cluster
+# (namespace: catalyst-data), not docker-compose. The Tilt-managed
+# bring-up applies the kustomize overlay at k8s/local/, which renders
+# minio.yaml (a local-only Deployment), Neo4j from k8s/base/platform/,
+# and the n10s-init Job. Port-forwards keep the legacy localhost:9000 /
+# 7474 / 7687 endpoints stable so host-Python Dagster (still run via
+# `task dev`) doesn't notice the swap.
+#
+# Persistence: PVCs on the k3d default `local-path` storage class
+# survive `tilt down` / `tilt up` cycles. Wipe via `kubectl delete pvc`.
+# The old docker-compose volumes at .test-output/minio-data/ +
+# .test-output/neo4j-data/ are NO LONGER USED — safe to delete.
 # ============================================
 
-docker_compose('docker-compose.dev.yml')
+# Shared dev cluster (catalyst-dev k3d) — defines `k3d-cluster` resource
+# + calls allow_k8s_contexts('k3d-catalyst-dev'). Tilt dedupes when this
+# is include()'d from multiple project Tiltfiles in the aggregator.
+include('../../infra/k3d/cluster.Tiltfile')
 
-dc_resource('minio', labels=[LABEL_INFRA])
-dc_resource('minio-init', labels=[LABEL_INFRA], resource_deps=['minio'])
+# Render the local overlay. --load-restrictor=LoadRestrictionsNone lets
+# the overlay reference individual files in ../base/ (Neo4j + namespace)
+# without duplicating them into k8s/local/. Tilt is dev-only so the
+# default kustomize security restrictor isn't load-bearing here.
+k8s_yaml(kustomize('k8s/local', flags=['--load-restrictor=LoadRestrictionsNone']))
 
-# Neo4j + n10s — the assertion-graph store and its RDF-star bridge.
-# docker-compose.dev.yml ships both services with the same plugin set as
-# the prod k8s deployment (k8s/platform/neo4j.yaml + n10s-init.yaml).
-# n10s init is one-shot and runs CALL n10s.graphconfig.init(...) so RDF
-# export works on first use; idempotent on re-up.
-dc_resource('neo4j', labels=[LABEL_INFRA])
-dc_resource('neo4j-n10s-init', labels=[LABEL_INFRA], resource_deps=['neo4j'])
+k8s_resource(
+    'minio',
+    port_forwards=['9000:9000', '9001:9001'],
+    labels=[LABEL_INFRA],
+    resource_deps=['k3d-cluster'],
+)
+k8s_resource(
+    'minio-init',
+    labels=[LABEL_INFRA],
+    resource_deps=['minio'],
+)
+k8s_resource(
+    'neo4j',
+    port_forwards=['7474:7474', '7687:7687'],
+    labels=[LABEL_INFRA],
+    resource_deps=['k3d-cluster'],
+)
+k8s_resource(
+    'neo4j-n10s-init',
+    labels=[LABEL_INFRA],
+    resource_deps=['neo4j'],
+)
 
 cmd_button(
     name='btn-open-minio-console',
