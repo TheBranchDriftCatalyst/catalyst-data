@@ -1,5 +1,14 @@
 """Media file processing pipeline — Dagster code location."""
 
+import os
+
+# Self-identify so dagster_io.path_builder._code_location_from_context
+# resolves correctly. setdefault — explicit env wins (k8s deployments
+# set DAGSTER_CODE_LOCATION via run_k8s_config). For `task dev` on a
+# host, each ``-m <location>`` subprocess inherits this from its own
+# __init__ load so multi-location dev works without per-shell setup.
+os.environ.setdefault("DAGSTER_CODE_LOCATION", "media_ingest")
+
 from dagster_io.logging import configure_logging
 from dagster_io.metrics import start_metrics_server
 from dagster_io.observability import configure_tracing
@@ -11,7 +20,7 @@ start_metrics_server()
 # ── Media Viewer (FastAPI) — runs as a daemon thread on port 8080 ────────────
 # Only start the viewer in the code-server pod, NOT in ephemeral run/step pods.
 # The viewer's uvicorn event loop can deadlock dagster's k8s_job_executor.
-import os
+# ``os`` is already imported at the top.
 
 if os.environ.get("DAGSTER_IS_CODE_SERVER", "").lower() in ("1", "true"):
     import threading

@@ -133,7 +133,23 @@ cmd_button(
 
 local_resource(
     'dagster-dev',
-    serve_cmd='task dev',
+    # Source .envrc.cluster so CONGRESS_API_KEY / LLM_API_KEY / HF_TOKEN
+    # flow through to dagster's code-location processes — then immediately
+    # re-export the four DAGSTER_S3_* vars to their *local* k3d values.
+    # The file ships prod-cluster values (DAGSTER_S3_BUCKET=catalyst-data,
+    # ENDPOINT=minio.minio.svc.cluster.local), which the local dev rail
+    # MUST override or every IO write hits the wrong bucket on the prod
+    # MinIO. The script short-circuits cleanly if .envrc.cluster is
+    # missing (fresh checkout that hasn't run pull-dev-secrets.sh yet).
+    serve_cmd=' '.join([
+        'bash -lc',
+        '"[ -f .envrc.cluster ] && source .envrc.cluster ;',
+        'export DAGSTER_S3_ENDPOINT_URL=http://localhost:9000 ;',
+        'export DAGSTER_S3_ACCESS_KEY=minio ;',
+        'export DAGSTER_S3_SECRET_KEY=minio123 ;',
+        'export DAGSTER_S3_BUCKET=dagster ;',
+        'exec task dev"',
+    ]),
     deps=[
         'packages/media-ingest/src',
         'packages/congress-data/src',

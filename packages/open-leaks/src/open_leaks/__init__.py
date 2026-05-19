@@ -1,5 +1,14 @@
 """Open-source leaked documents pipeline — Dagster code location."""
 
+import os
+
+# Self-identify so dagster_io.path_builder._code_location_from_context
+# resolves correctly. setdefault — explicit env wins (k8s deployments
+# set DAGSTER_CODE_LOCATION via run_k8s_config). For `task dev` on a
+# host, each ``-m <location>`` subprocess inherits this from its own
+# __init__ load so multi-location dev works without per-shell setup.
+os.environ.setdefault("DAGSTER_CODE_LOCATION", "open_leaks")
+
 from dagster_io.logging import configure_logging
 from dagster_io.metrics import start_metrics_server
 from dagster_io.observability import configure_tracing
