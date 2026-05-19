@@ -334,6 +334,10 @@ Congress.gov API (partition: 119-hres-1)
     -> Gold: bill_mentions, bill_assertions, bill_embeddings
 ```
 
+> Run `task install:amr` once (downloads ~500MB amrlib STOG checkpoint) before
+> `task seed:congress --with-gold` — without the weights the AMR projection
+> path silently emits zero `bill_assertions`.
+
 ## Extraction Benchmarking
 
 See [BENCHMARK.md](BENCHMARK.md) for the full extraction benchmark reference, including:

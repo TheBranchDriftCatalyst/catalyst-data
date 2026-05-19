@@ -171,6 +171,13 @@ tasks:
         print(f'Killed {len(runs)} runs')
         "
 
+  # ── Install / Setup ──────────────────────────────────────────────────────
+
+  install:amr:
+    desc: "Download + install amrlib STOG parser (~500MB, one-time). Idempotent. Required before `task seed:congress --with-gold` produces non-zero bill_assertions from the AMR projection path."
+    cmds:
+      - uv run python scripts/dev/install_amrlib_model.py
+
   # ── Dev seed ─────────────────────────────────────────────────────────────
   # Drives Dagster's own materialize() against a small partition-limited
   # slice of each domain so a fresh `tilt up` has real data to render.
