@@ -14,6 +14,10 @@ dependencies = [
     "catalyst-contracts-core",
     "catalyst-llm-contract-mcp",
     "catalyst-langgraph-aio",
+    # Wave 1, Step 3 (bead llm-g0b): extract_validated() now wraps
+    # ExtractionResource.extract_assertions(). The legacy LangGraph
+    # driver that lived in dagster_io.extraction has been retired.
+    "catalyst-exgraph",
     "pydantic>=2.9",
     "langchain-core>=0.3",
     "langchain-openai>=0.3",
@@ -46,7 +50,26 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.9",
     "pyarrow>=17.0",
+    # Wave 1 / Step 3 (bead llm-g0b, QA-3): property-based tests over
+    # extract_validated + the unified Mention/Assertion re-exports.
+    "hypothesis>=6.0",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dagster_io"]
+
+# Wave 1, Step 3 (bead llm-g0b): wire workspace cross-repo paths to the
+# canonical catalyst-llm packages. catalyst-contracts-core supplies the
+# unified Mention/Assertion/Provenance shapes; catalyst-exgraph supplies
+# ExtractionResource (the only extraction path). Editable installs so
+# in-repo edits show up without re-installing.
+#
+# catalyst-langgraph-aio and catalyst-llm-contract-mcp still resolve to
+# the local legacy snapshots in libs/_* — those are slated for deletion
+# in Step 5 once everything has been migrated off them.
+[tool.uv.sources]
+catalyst-contracts-core = { path = "../../../catalyst-llm/packages/catalyst-contracts-core", editable = true }
+catalyst-exgraph = { path = "../../../catalyst-llm/packages/catalyst-exgraph", editable = true }
+catalyst-langgraph-aio = { path = "../_catalyst-langgraph-aio", editable = true }
+catalyst-llm-contract-mcp = { path = "../_catalyst-llm-contract-mcp", editable = true }
+

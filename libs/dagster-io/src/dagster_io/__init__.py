@@ -16,14 +16,6 @@ from dagster_io.chunking import (
 from dagster_io.concordance import ConcordanceEngine, CrossSourceAligner
 from dagster_io.document import Document
 from dagster_io.embedding_config import EmbeddingConfig, EmbeddingConfigResource
-from dagster_io.extraction_schemas import (
-    AssertionExtractionResult,
-    AssertionQualifiers,
-    MentionExtraction,
-    MentionExtractionResult,
-    normalize_predicate,
-    parse_mention_type,
-)
 from dagster_io.io_backend import select_io_managers
 from dagster_io.io_manager import MinioIOManager, OptionalMinioIOManager
 from dagster_io.llm import EmbeddingResource, LLMResource
@@ -136,13 +128,6 @@ __all__ = [
     "ExtractionMethod",
     "SpeakerEmbedding",
     "SpeakerProfile",
-    # Extraction schemas
-    "MentionExtraction",
-    "MentionExtractionResult",
-    "parse_mention_type",
-    "AssertionQualifiers",
-    "AssertionExtractionResult",
-    "normalize_predicate",
     # Asset config
     "LLM_ASSET_K8S_CONFIG",
     "EMBEDDING_ASSET_K8S_CONFIG",

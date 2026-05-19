@@ -8,9 +8,53 @@ Usage:
 
     result = score_mentions(predicted, ground_truth, source_text)
     print(f"Mention F1: {result['f1']:.3f}")
+
+Field-name compatibility
+------------------------
+Wave 1 (bead llm-g0b) unified the gold-layer wire shape on the canonical
+``catalyst_contracts_core`` ``Mention`` / ``Assertion`` schemas:
+
+  Mention   : ``canonical_type``, ``provenance.chunk_id``
+  Assertion : ``subject_text``, ``object_text``, ``predicted``, ``amr_frame``,
+              ``polarity``, ``modality``, ``provenance.chunk_id``
+
+Bench fixtures written by ``benchmark_harness.py`` (via ``model_dump``)
+always carry the new field names. Legacy GT files on disk (and the
+human-edited ``active.json``) still use ``mention_type`` / ``subject`` /
+``object``. The accessor helpers below prefer the new field, falling back
+to the legacy name so the scorer is shape-agnostic across both inputs.
 """
 
 from __future__ import annotations
+
+
+def _mention_type(m: dict) -> str:
+    """Return the canonical mention type from either the new wire shape
+    (``canonical_type``) or the legacy GT shape (``mention_type``)."""
+    return m.get("canonical_type") or m.get("mention_type") or ""
+
+
+def _mention_chunk_id(m: dict) -> str:
+    """Resolve a mention's chunk_id from ``provenance.chunk_id`` (new shape)
+    or a top-level ``chunk_id`` (legacy GT shape)."""
+    prov = m.get("provenance") or {}
+    return prov.get("chunk_id") or m.get("chunk_id") or ""
+
+
+def _assertion_subject(p: dict) -> str:
+    """Resolve an assertion's subject text from ``subject_text`` (new shape)
+    or ``subject`` (legacy GT shape)."""
+    return p.get("subject_text") or p.get("subject") or ""
+
+
+def _assertion_object(p: dict) -> str:
+    """Resolve an assertion's object text from ``object_text`` (new shape)
+    or ``object`` (legacy GT shape). May be ``None`` for intransitive AMR
+    predicates."""
+    val = p.get("object_text")
+    if val is None:
+        val = p.get("object")
+    return val or ""
 
 
 def score_provenance(mentions: list[dict], assertions: list[dict]) -> dict:
@@ -145,10 +189,10 @@ def score_mentions(
     Returns dict with precision, recall, f1 (strict and relaxed),
     type_accuracy, span_accuracy, and per-mention details.
     """
-    gt_strict = {(_normalize(m["text"]), m.get("mention_type", "").upper()) for m in ground_truth}
+    gt_strict = {(_normalize(m["text"]), _mention_type(m).upper()) for m in ground_truth}
     gt_relaxed = {_normalize(m["text"]) for m in ground_truth}
 
-    pred_strict = {(_normalize(m["text"]), m.get("mention_type", "").upper()) for m in predicted}
+    pred_strict = {(_normalize(m["text"]), _mention_type(m).upper()) for m in predicted}
     pred_relaxed = {_normalize(m["text"]) for m in predicted}
 
     # Strict match (text + type)
@@ -166,12 +210,12 @@ def score_mentions(
     # Type accuracy: among text-matched mentions, what fraction have correct type
     type_correct = 0
     type_total = 0
-    gt_by_text = {_normalize(m["text"]): m.get("mention_type", "").upper() for m in ground_truth}
+    gt_by_text = {_normalize(m["text"]): _mention_type(m).upper() for m in ground_truth}
     for m in predicted:
         norm = _normalize(m["text"])
         if norm in gt_by_text:
             type_total += 1
-            if m.get("mention_type", "").upper() == gt_by_text[norm]:
+            if _mention_type(m).upper() == gt_by_text[norm]:
                 type_correct += 1
     type_accuracy = type_correct / type_total if type_total else 0.0
 
@@ -185,7 +229,7 @@ def score_mentions(
         # Resolve source text: per-chunk dict takes priority, then single source_text
         src = None
         if chunk_texts:
-            src = chunk_texts.get(m.get("chunk_id", ""))
+            src = chunk_texts.get(_mention_chunk_id(m))
         elif source_text:
             src = source_text
         if src and 0 <= s < e <= len(src):
@@ -230,23 +274,17 @@ def score_propositions(
     Returns dict with precision, recall, f1, and per-proposition details.
     """
 
-    def _get_subj(p: dict) -> str:
-        return p.get("subject") or p.get("subject_text") or ""
-
-    def _get_obj(p: dict) -> str:
-        return p.get("object") or p.get("object_text") or ""
-
     def _triple_strict(p: dict) -> tuple:
         return (
-            _normalize(_get_subj(p)),
+            _normalize(_assertion_subject(p)),
             _normalize(p.get("predicate", "")),
-            _normalize(_get_obj(p)),
+            _normalize(_assertion_object(p)),
         )
 
     def _triple_relaxed(p: dict) -> tuple:
         return (
-            _normalize(_get_subj(p)),
-            _normalize(_get_obj(p)),
+            _normalize(_assertion_subject(p)),
+            _normalize(_assertion_object(p)),
         )
 
     gt_strict = {_triple_strict(p) for p in ground_truth}
@@ -315,32 +353,30 @@ def score_per_chunk(
     lists if a model only emits mentions.
     """
 
-    def _chunk_id(item: dict) -> str:
-        prov = item.get("provenance") or {}
-        return prov.get("chunk_id") or item.get("chunk_id") or ""
-
-    # Bucket by chunk
+    # Bucket by chunk — ``_mention_chunk_id`` handles both shapes
+    # (``provenance.chunk_id`` for the new wire shape; top-level ``chunk_id``
+    # for legacy GT entries).
     pred_m_by_chunk: dict[str, list[dict]] = {}
     for m in predicted_mentions or []:
-        cid = _chunk_id(m)
+        cid = _mention_chunk_id(m)
         if cid:
             pred_m_by_chunk.setdefault(cid, []).append(m)
 
     gt_m_by_chunk: dict[str, list[dict]] = {}
     for m in gt_mentions or []:
-        cid = _chunk_id(m)
+        cid = _mention_chunk_id(m)
         if cid:
             gt_m_by_chunk.setdefault(cid, []).append(m)
 
     pred_p_by_chunk: dict[str, list[dict]] = {}
     for p in predicted_propositions or []:
-        cid = _chunk_id(p)
+        cid = _mention_chunk_id(p)
         if cid:
             pred_p_by_chunk.setdefault(cid, []).append(p)
 
     gt_p_by_chunk: dict[str, list[dict]] = {}
     for p in gt_propositions or []:
-        cid = _chunk_id(p)
+        cid = _mention_chunk_id(p)
         if cid:
             gt_p_by_chunk.setdefault(cid, []).append(p)
 

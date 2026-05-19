@@ -1,11 +1,18 @@
-"""Shared factory functions and embedding helpers for concordance tests."""
+"""Shared factory functions and embedding helpers for concordance tests.
+
+Wave 1 / Step 3 (bead llm-g0b): ``Mention`` is now the contracts-core
+shape (``frozen=True``, ``extra="forbid"``) which requires a
+``Provenance`` and uses ``canonical_type`` instead of ``mention_type``.
+The factory adapts the ergonomic test-side kwargs to the new shape so
+existing concordance tests keep reading naturally.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import math
 
-from dagster_io.models import EntityCandidate, Mention, MentionType
+from dagster_io.models import EntityCandidate, Mention, MentionType, Provenance
 
 
 def make_mention(
@@ -13,12 +20,40 @@ def make_mention(
     mention_type: MentionType = MentionType.PERSON,
     document_id: str = "doc-1",
     chunk_id: str = "chunk-0",
+    *,
+    span_start: int = 0,
+    span_end: int | None = None,
 ) -> Mention:
+    """Build a contracts-core ``Mention`` from concordance-test ergonomics.
+
+    Maps the legacy kwargs (``mention_type``, ``document_id``, ``chunk_id``)
+    onto the new Mention shape:
+      * ``mention_type`` (MentionType enum) → ``canonical_type: str``
+      * ``document_id`` + ``chunk_id`` → fields on the synthesized
+        ``Provenance`` (NOT top-level on Mention; the new shape moves
+        provenance fields under ``.provenance``)
+      * ``mention_id`` is deterministically derived from
+        (document_id, chunk_id, text, type) so identity stays stable
+        across test runs.
+    """
+    if span_end is None:
+        span_end = span_start + max(len(text), 1)
+
+    mention_id = hashlib.sha256(f"{document_id}|{chunk_id}|{text}|{mention_type.value}".encode()).hexdigest()[:16]
+
     return Mention(
-        document_id=document_id,
-        chunk_id=chunk_id,
+        mention_id=mention_id,
         text=text,
-        mention_type=mention_type,
+        canonical_type=mention_type.value,
+        span_start=span_start,
+        span_end=span_end,
+        provenance=Provenance(
+            source_document_id=document_id,
+            chunk_id=chunk_id,
+            span_start=span_start,
+            span_end=span_end,
+            extraction_method="manual",  # closest valid value for test fixtures
+        ),
     )
 
 

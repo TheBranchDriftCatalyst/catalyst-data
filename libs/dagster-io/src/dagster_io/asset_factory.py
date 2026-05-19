@@ -148,12 +148,14 @@ def extraction_assets(config: PipelineConfig) -> list[AssetsDefinition]:
             return
 
         # ── Single extract_validated call produces both mentions and assertions
+        # Returns an ExtractionResult (NOT a tuple) per Wave 1 Step 3 (bead llm-g0b).
         llm_start = time.monotonic()
-        all_mentions, all_assertions = extract_validated(
+        result = extract_validated(
             chunks,
             code_location=_cfg.code_location,
             max_concurrency=5,
         )
+        all_mentions, all_assertions = result.mentions, result.assertions
         llm_elapsed = time.monotonic() - llm_start
 
         # ── Yield mentions

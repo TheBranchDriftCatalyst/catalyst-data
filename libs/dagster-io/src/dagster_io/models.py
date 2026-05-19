@@ -1,12 +1,24 @@
 """EDC core models — Extract, Define, Canonicalize.
 
-Shared Pydantic models for the knowledge graph pipeline:
-- Provenance: extraction lineage tracking
-- Mention: entity span extracted from text
-- EntityCandidate: grouped mentions within a code location
-- CanonicalEntity: cross-source resolved entity
-- Assertion: qualified S-P-O triple with provenance
-- AlignmentEdge: cross-source entity alignment record
+Wave 1 (bead ``llm-g0b``) unified ``Mention`` and ``Assertion`` into
+``catalyst-contracts-core``. The shapes in this module are now re-exports
+of the canonical contracts-core types. ``EntityCandidate``,
+``CanonicalEntity``, ``AlignmentEdge``, ``SpeakerEmbedding``, and
+``SpeakerProfile`` remain catalyst-data-side persisted models (not
+extraction outputs) and stay local.
+
+Re-exports from catalyst-contracts-core:
+    - Provenance
+    - Mention   (AMR-aware + entity-link-aware)
+    - Assertion (AMR-aware + entity-link-aware)
+    - MentionType, AlignmentType, ExtractionMethod (enums)
+
+Local catalyst-data models (not extraction outputs):
+    - EntityCandidate    : grouped mentions within a code location
+    - CanonicalEntity    : cross-source resolved entity (platinum layer)
+    - AlignmentEdge      : cross-source entity alignment record
+    - SpeakerEmbedding   : per-speaker centroid from one partition
+    - SpeakerProfile     : cross-file speaker identity
 """
 
 from __future__ import annotations
@@ -14,20 +26,20 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-# Canonical source: catalyst-contracts-core — re-exported for backward compat.
-# ExtractionMethod is re-exported via dagster_io/__init__.py even though it is
-# not referenced directly in this module; the noqa prevents ruff from stripping
-# it as an "unused" import on future autofix passes.
-from catalyst_contracts_core.enums import (
+# Canonical source: catalyst-contracts-core. Re-exported here so existing
+# call sites ``from dagster_io.models import Assertion, Mention, Provenance``
+# keep resolving — they now point at the unified contracts-core types.
+from catalyst_contracts_core import (
     AlignmentType,
-    ExtractionMethod,  # noqa: F401
+    Assertion,
+    ExtractionMethod,
+    Mention,
     MentionType,
+    Provenance,
 )
-from catalyst_contracts_core.types import Provenance
 
 
 def _deterministic_id(*parts: str) -> str:
@@ -40,30 +52,6 @@ def _content_hash(*parts: str) -> str:
     """Full SHA-256 hash for content dedup."""
     payload = "|".join(parts)
     return hashlib.sha256(payload.encode()).hexdigest()
-
-
-class Mention(BaseModel):
-    """A single entity mention extracted from a text chunk."""
-
-    mention_id: str = Field(default="", description="Deterministic hash of key fields")
-    document_id: str
-    chunk_id: str
-    text: str
-    mention_type: MentionType
-    span_start: int | None = None
-    span_end: int | None = None
-    confidence: float = Field(default=1.0, ge=0, le=1, description="Extraction confidence 0-1")
-    context: str = ""
-    provenance: Provenance | None = None
-    content_hash: str = Field(default="", description="For dedup")
-
-    @model_validator(mode="after")
-    def _compute_ids(self) -> Mention:
-        if not self.mention_id:
-            self.mention_id = _deterministic_id(self.document_id, self.chunk_id, self.text, self.mention_type.value)
-        if not self.content_hash:
-            self.content_hash = _content_hash(self.document_id, self.chunk_id, self.text, self.mention_type.value)
-        return self
 
 
 class EntityCandidate(BaseModel):
@@ -116,46 +104,6 @@ class CanonicalEntity(BaseModel):
     last_seen: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
-class Assertion(BaseModel):
-    """A qualified S-P-O triple with provenance."""
-
-    assertion_id: str = Field(default="", description="Deterministic hash")
-    subject_text: str
-    subject_mention_id: str = ""
-    predicate: str
-    predicate_canonical: str = ""
-    object_text: str
-    object_mention_id: str = ""
-    qualifiers: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Keys: time, location, condition, manner, source_attribution",
-    )
-    confidence: float = Field(default=1.0, ge=0, le=1)
-    provenance: Provenance | None = None
-    negated: bool = False
-    hedged: bool = False
-    content_hash: str = Field(default="", description="For dedup")
-
-    @model_validator(mode="after")
-    def _compute_ids(self) -> Assertion:
-        if not self.assertion_id:
-            self.assertion_id = _deterministic_id(
-                self.subject_text,
-                self.predicate,
-                self.object_text,
-                self.provenance.chunk_id if self.provenance else "",
-            )
-        if not self.content_hash:
-            self.content_hash = _content_hash(
-                self.subject_text,
-                self.predicate,
-                self.object_text,
-                str(self.negated),
-                str(self.hedged),
-            )
-        return self
-
-
 class AlignmentEdge(BaseModel):
     """Cross-source entity alignment record."""
 
@@ -196,3 +144,20 @@ class SpeakerProfile(BaseModel):
     first_seen: str  # ISO timestamp
     last_seen: str  # ISO timestamp
     members: list[dict] = Field(default_factory=list)  # [{document_id, local_label, segment_count}]
+
+
+__all__ = [
+    # Re-exported from catalyst-contracts-core (Wave 1 unified types)
+    "AlignmentType",
+    "Assertion",
+    "ExtractionMethod",
+    "Mention",
+    "MentionType",
+    "Provenance",
+    # Local catalyst-data persisted models
+    "AlignmentEdge",
+    "CanonicalEntity",
+    "EntityCandidate",
+    "SpeakerEmbedding",
+    "SpeakerProfile",
+]

@@ -20,10 +20,17 @@ from tests.shared.store import BenchmarkStore
 
 
 def _build_mentions_by_chunk(extraction: dict) -> dict[str, list[dict]]:
-    """Index an extraction fixture's mentions by chunk_id."""
+    """Index an extraction fixture's mentions by chunk_id.
+
+    The Wave-1 unified ``Mention`` wire shape carries the chunk_id under
+    ``provenance.chunk_id`` (see ``catalyst_contracts_core.types.Mention``);
+    legacy fixtures sometimes stash it at the top level. Try the new shape
+    first, fall back for back-compat with on-disk fixtures.
+    """
     by_chunk: dict[str, list[dict]] = {}
     for m in extraction.get("mentions", []):
-        cid = m.get("chunk_id", "")
+        prov = m.get("provenance") or {}
+        cid = prov.get("chunk_id") or m.get("chunk_id") or ""
         by_chunk.setdefault(cid, []).append(m)
     return by_chunk
 
@@ -61,12 +68,19 @@ def _ner_consensus(
     """
     from catalyst_exgraph.nodes.spans import find_best_span
 
+    # Wave-1 wire shape: Mention.canonical_type replaces the legacy
+    # ``mention_type`` key. Predicted fixtures (written via
+    # ``Mention.model_dump``) always carry ``canonical_type``; fall back
+    # for legacy on-disk fixtures.
+    def _mtype(m: dict) -> str:
+        return (m.get("canonical_type") or m.get("mention_type") or "").upper().strip()
+
     # Collect votes: (norm_text, norm_type) -> {model: mention}
     votes: dict[tuple[str, str], dict[str, dict]] = {}
     for model_name, mentions in all_model_mentions.items():
         for m in mentions:
             text = m.get("text", "").strip()
-            mtype = m.get("mention_type", "").upper().strip()
+            mtype = _mtype(m)
             if not text:
                 continue
             key = (text.lower().strip(), mtype)
@@ -81,7 +95,7 @@ def _ner_consensus(
 
         type_counts: Counter[str] = Counter()
         for m in model_entries.values():
-            type_counts[m.get("mention_type", "").upper().strip()] += 1
+            type_counts[_mtype(m)] += 1
         best_type = type_counts.most_common(1)[0][0]
 
         first_mention = next(iter(model_entries.values()))
@@ -92,6 +106,10 @@ def _ner_consensus(
         total = ensemble_size if ensemble_size else len(all_model_mentions)
         confidence = round(len(model_entries) / total, 2)
 
+        # GT row shape is the human-editable legacy format (``mention_type``
+        # key, not ``canonical_type``) — that's what the viewer-UI GT editor
+        # and existing on-disk GT files use. Predicted fixtures live in the
+        # new shape; the scorer normalizes both via ``_mention_type``.
         accepted.append(
             {
                 "text": original_text,
@@ -115,12 +133,27 @@ def _spo_consensus(
     A proposition is accepted if >= threshold models agree on
     (normalized_subject, predicate, normalized_object).
     """
+
+    # Wave-1 wire shape: Assertion.subject_text / object_text replace the
+    # legacy ``subject`` / ``object`` keys (the new shape also carries
+    # AMR-rich fields: amr_frame, polarity, modality, qualifiers). Predicted
+    # fixtures (written via ``Assertion.model_dump``) always carry the new
+    # field names; fall back for legacy on-disk fixtures.
+    def _subj(a: dict) -> str:
+        return (a.get("subject_text") or a.get("subject") or "").strip()
+
+    def _obj(a: dict) -> str:
+        val = a.get("object_text")
+        if val is None:
+            val = a.get("object")
+        return (val or "").strip()
+
     votes: dict[tuple[str, str, str], dict[str, dict]] = {}
     for model_name, assertions in all_model_assertions.items():
         for a in assertions:
-            subj = (a.get("subject") or a.get("subject_text") or "").strip()
+            subj = _subj(a)
             pred = a.get("predicate", "").strip()
-            obj = (a.get("object") or a.get("object_text") or "").strip()
+            obj = _obj(a)
             if not (subj and pred and obj):
                 continue
             key = (subj.lower(), pred.lower(), obj.lower())
@@ -134,13 +167,18 @@ def _spo_consensus(
             continue
 
         first_a = next(iter(model_entries.values()))
-        subject = (first_a.get("subject") or first_a.get("subject_text") or "").strip()
+        subject = _subj(first_a)
         predicate = first_a.get("predicate", "").strip()
-        obj_text = (first_a.get("object") or first_a.get("object_text") or "").strip()
+        obj_text = _obj(first_a)
 
         total = ensemble_size if ensemble_size else len(all_model_assertions)
         confidence = round(len(model_entries) / total, 2)
 
+        # GT row shape stays in the legacy ``subject`` / ``object`` keys —
+        # that's the human-editable GT format. The scorer normalizes both
+        # shapes via ``_assertion_subject`` / ``_assertion_object``. AMR
+        # fields aren't surfaced in GT today (the human reviewer doesn't
+        # annotate them) — they only flow through on the predicted side.
         accepted.append(
             {
                 "subject": subject,

@@ -13,7 +13,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from tests.shared.extraction_scoring import compute_model_scores, score_provenance
+from tests.shared.extraction_scoring import (
+    _assertion_object,
+    _assertion_subject,
+    _mention_chunk_id,
+    _mention_type,
+    compute_model_scores,
+    score_provenance,
+)
 
 if TYPE_CHECKING:
     from tests.shared.store import BenchmarkStore
@@ -40,9 +47,16 @@ def build_report_json(
     Returns:
         Report dict ready for JSON serialization.
     """
-    from tests.shared.medallion import load_chunks
+    # Respect a caller-supplied ``chunks`` list (used by unit tests that
+    # don't have a live MinIO/S3 endpoint). When ``chunks`` is ``None`` we
+    # fall back to loading from the medallion bucket the harness already
+    # populated.
+    if chunks is not None:
+        medallion_chunks = chunks
+    else:
+        from tests.shared.medallion import load_chunks
 
-    medallion_chunks = load_chunks()
+        medallion_chunks = load_chunks()
     # ── Models summary ───────────────────────────────────────────────
     models = []
     for r in results:
@@ -102,9 +116,14 @@ def build_report_json(
                     "models": {},
                     "mentions": [],  # per-occurrence provenance for the side-panel detail view
                 }
+            # Wave-1 wire shape: Mention.canonical_type + provenance.chunk_id.
+            # The accessor helpers fall back to the legacy keys so this
+            # builder works against both predicted fixtures (new) and any
+            # remaining legacy on-disk fixtures.
+            mtype = _mention_type(m) or "?"
             entity_rows[text]["models"][r["model"]] = {
-                "type": m.get("mention_type", "?"),
-                "confidence": m.get("confidence", 0),
+                "type": mtype,
+                "confidence": m.get("confidence") or m.get("mean_confidence") or 0,
                 "span_start": m.get("span_start"),
                 "span_end": m.get("span_end"),
             }
@@ -112,15 +131,16 @@ def build_report_json(
             # across (model, chunk). The aggregated `models` map drives the
             # consensus matrix; `mentions` drives EntityJsonPanel's detail view.
             prov = m.get("provenance") or {}
+            chunk_id = _mention_chunk_id(m)
             entity_rows[text]["mentions"].append(
                 {
                     "model": r["model"],
-                    "type": m.get("mention_type", "?"),
-                    "chunk_id": m.get("chunk_id", ""),
+                    "type": mtype,
+                    "chunk_id": chunk_id,
                     "document_id": m.get("document_id", "") or prov.get("source_document_id", ""),
                     "span_start": m.get("span_start"),
                     "span_end": m.get("span_end"),
-                    "confidence": m.get("confidence", 0),
+                    "confidence": m.get("confidence") or m.get("mean_confidence") or 0,
                     "context": m.get("context", ""),
                     "temporal_start_ms": prov.get("temporal_start_ms"),
                     "temporal_end_ms": prov.get("temporal_end_ms"),
@@ -128,7 +148,6 @@ def build_report_json(
                     "source_media_uri": prov.get("source_media_uri"),
                 }
             )
-            chunk_id = m.get("chunk_id", "")
             if chunk_id and not entity_rows[text]["domain"]:
                 entity_rows[text]["domain"] = chunk_domains.get(chunk_id, "unknown")
 
@@ -143,12 +162,16 @@ def build_report_json(
     entities = sorted(entity_rows.values(), key=lambda x: -x["model_count"])
 
     # ── SPO matrix ───────────────────────────────────────────────────
+    # Predicted assertions use the Wave-1 ``catalyst_contracts_core.Assertion``
+    # shape (subject_text / object_text + AMR-rich fields). The accessor
+    # helpers fall back to the legacy ``subject`` / ``object`` keys for any
+    # surviving on-disk fixtures from the SPO era.
     spo_rows: dict[str, dict] = {}
     for r in results:
         for a in r["fixture"].get("assertions", []):
-            subj = a.get("subject_text", a.get("subject", "")).strip()
+            subj = _assertion_subject(a).strip()
             pred = a.get("predicate", "").strip()
-            obj = a.get("object_text", a.get("object", "")).strip()
+            obj = _assertion_object(a).strip()
             if not (subj and pred and obj):
                 continue
             key = f"{subj}|{pred}|{obj}"
@@ -161,6 +184,13 @@ def build_report_json(
                     "object": obj,
                     "domain": chunk_domains.get(chunk_id, "unknown"),
                     "models": [],
+                    # AMR-rich fields surfaced so report consumers (e.g. the
+                    # bench viewer SPA) can show graph-native semantics
+                    # alongside the flat SPO triple.
+                    "amr_frame": a.get("amr_frame"),
+                    "polarity": a.get("polarity", True),
+                    "modality": a.get("modality"),
+                    "qualifiers": a.get("qualifiers") or {},
                 }
             if r["model"] not in spo_rows[key]["models"]:
                 spo_rows[key]["models"].append(r["model"])

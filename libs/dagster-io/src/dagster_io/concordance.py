@@ -195,11 +195,22 @@ class ConcordanceEngine:
 
         uf = _UnionFind()
 
-        # Index mentions by type
+        # Index mentions by type.
+        # Wave 1 (bead llm-g0b): Mention.canonical_type is a free-form str
+        # so label packs can extend the universe. Coerce to MentionType for
+        # the by_type bucket; values outside the enum fall back to OTHER
+        # (they still cluster together by string equality on the original
+        # canonical_type, but the bucket key is normalized).
+        def _coerce_mention_type(value: str) -> MentionType:
+            try:
+                return MentionType(value)
+            except ValueError:
+                return MentionType.OTHER
+
         by_type: dict[MentionType, list[Mention]] = defaultdict(list)
         for m in mentions:
             uf.find(m.mention_id)
-            by_type[m.mention_type].append(m)
+            by_type[_coerce_mention_type(m.canonical_type)].append(m)
 
         for _mtype, typed_mentions in by_type.items():
             # Build lookup structures
@@ -295,11 +306,12 @@ class ConcordanceEngine:
             # Dominant type
             type_counts: dict[MentionType, int] = defaultdict(int)
             for m in cluster_mentions:
-                type_counts[m.mention_type] += 1
+                type_counts[_coerce_mention_type(m.canonical_type)] += 1
             candidate_type = max(type_counts, key=type_counts.get)  # type: ignore[arg-type]
 
-            # Unique source documents
-            source_docs = sorted({m.document_id for m in cluster_mentions})
+            # Unique source documents. Wave 1: document_id moved off Mention
+            # itself onto Mention.provenance.source_document_id.
+            source_docs = sorted({m.provenance.source_document_id for m in cluster_mentions})
 
             # Pick embedding if available
             emb = None

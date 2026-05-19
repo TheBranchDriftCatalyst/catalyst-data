@@ -22,8 +22,13 @@ Usage:
     usage = cap.usage           # {"prompt_tokens": ..., "completion_tokens": ..., "total_tokens": ...}
     error = cap.parsing_error   # raw exception from the recovery path, if any
 
-The capture is thread-local so concurrent SPO doc-tasks (run via
-ThreadPoolExecutor in ``extract_with_shared_clusters``) don't cross-pollinate.
+The capture is thread-local so concurrent SPO doc-tasks (when the legacy
+SPO LLM path was active, fanned out via ``ThreadPoolExecutor``) don't
+cross-pollinate. Wave 1 Step 4 (bead llm-g0b) retired that path —
+the AMR-as-spine pipeline uses ``ExtractionResource.extract_assertions``
+which doesn't open this capture. The module is kept for any
+non-extraction caller still using ``open_capture()`` directly; it is
+otherwise dormant on the new AMR path.
 """
 
 from __future__ import annotations
