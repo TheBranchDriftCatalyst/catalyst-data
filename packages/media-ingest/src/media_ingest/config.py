@@ -1,13 +1,24 @@
 """Dagster configuration for media ingest pipeline."""
 
+import os
+
 from dagster import Config
 
 
 class MediaIngestConfig(Config):
-    """Runtime configuration for media file processing."""
+    """Runtime configuration for media file processing.
 
-    metube_path: str = "/data/metube"
-    tubesync_path: str = "/data/tubesync"
+    Defaults match the prod talos00 deployment (NFS volumes at
+    ``/data/metube`` + ``/data/tubesync``). For local dev the per-asset
+    Config defaults can be overridden via Dagster run config OR — for
+    the discovery roots — via the ``CATALYST_MEDIA_ROOT_METUBE`` /
+    ``CATALYST_MEDIA_ROOT_TUBESYNC`` env vars (same convention the
+    viewer-api uses at media-ingest/viewer/routes/media.py:32 — keeps
+    the path source-of-truth in one place across the two services).
+    """
+
+    metube_path: str = os.environ.get("CATALYST_MEDIA_ROOT_METUBE", "/data/metube")
+    tubesync_path: str = os.environ.get("CATALYST_MEDIA_ROOT_TUBESYNC", "/data/tubesync")
     extensions: str = ".mp4,.mkv,.webm,.mp3,.m4a,.wav,.flac"
     whisper_backend: str = "openvino"  # faster-whisper (CPU) | openvino (Intel GPU) | mlx-whisper (Apple Silicon Metal)
     whisper_model: str = "large-v3"

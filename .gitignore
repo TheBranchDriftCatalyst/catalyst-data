@@ -36,10 +36,15 @@ packages/media-ingest/tests/.output/
 .envrc.local
 **/.envrc
 
-# Local-only secret material consumed by `kustomize build k8s/local`.
-# Examples (*.env.example) ARE committed — copy them to *.env and fill in.
+# Local-only secret material consumed by `kustomize build k8s/local`
+# and the Tiltfile's `read_yaml('k8s/local/dagster-dev-secrets.yaml')`.
+# Examples (*.example) ARE committed — copy them to the un-suffixed
+# name and fill in. The dagster-dev-secrets.yaml file mirrors the prod
+# catalyst-eso ExternalSecret pattern but renders locally without ESO.
 k8s/local/*.env
 !k8s/local/*.env.example
+k8s/local/dagster-dev-secrets.yaml
+!k8s/local/dagster-dev-secrets.yaml.example
 .coverage
 *.executed.ipynb
 .DS_Store

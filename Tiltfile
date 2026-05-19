@@ -42,6 +42,12 @@ print("""
 # ============================================
 PROJECT_NAME = 'catalyst-data'
 _running_standalone = config.main_dir.rstrip('/').endswith('/' + PROJECT_NAME)
+# Project root resolves correctly whether this Tiltfile is the entry
+# point (config.main_dir IS the catalyst-data dir) or include()'d from
+# the workspace aggregator (config.main_dir is the workspace dir, and
+# this project lives at workspace/catalyst-data/). Use PROJECT_DIR
+# anywhere we need to construct absolute paths under catalyst-data.
+PROJECT_DIR = config.main_dir if _running_standalone else os.path.join(config.main_dir, PROJECT_NAME)
 
 
 def _label(base):
@@ -126,35 +132,71 @@ cmd_button(
 # DAGSTER PLATFORM (local dev mode)
 #
 # `task dev` runs all 3 code locations in one process via `dagster dev`.
-# Wired to MinioIOManager via DAGSTER_S3_ENDPOINT_URL=localhost:9000 so
-# the medallion paths are identical to prod — same bucket, same keys,
-# just a different endpoint.
+# Runtime config (S3 endpoints, media discovery paths, chunking knobs,
+# embedding defaults) lives in k8s/local/dagster-dev-config.yaml — the
+# canonical ConfigMap that the future containerized dev rail will mount
+# via envFrom. We read it here via read_yaml() so the local host-Python
+# rail consumes the same source of truth without a kubectl round-trip.
+#
+# Secrets stay in .envrc.cluster (gitignored, refreshed by
+# ./scripts/ops/pull-dev-secrets.sh). The serve_cmd sources that file
+# but the ConfigMap data takes precedence — local k3d MinIO must
+# override the prod values .envrc.cluster ships.
 # ============================================
+
+# Read the local-dev runtime knobs from two k8s manifests living in
+# k8s/local/. Gives Tilt the same source of truth a future containerized
+# rail would mount via envFrom (configMapRef + secretRef), no shell
+# sourcing of dotfiles needed.
+#
+#   dagster-dev-config.yaml  — committed; non-secret runtime config
+#                              (S3 endpoints, media discovery paths,
+#                              chunking knobs, embedding defaults).
+#   dagster-dev-secrets.yaml — gitignored; copy from .yaml.example +
+#                              fill in keys from your secret store
+#                              (LLM_API_KEY, CONGRESS_API_KEY, HF_TOKEN).
+_dagster_dev_config = read_yaml('k8s/local/dagster-dev-config.yaml').get('data', {})
+
+_secrets_path = 'k8s/local/dagster-dev-secrets.yaml'
+if os.path.exists(_secrets_path):
+    _dagster_dev_secrets = read_yaml(_secrets_path).get('stringData', {})
+else:
+    print('WARN: {} missing — copy {}.example and fill in. Runs that hit LLM / Congress / HF APIs will fail until you do.'.format(_secrets_path, _secrets_path))
+    _dagster_dev_secrets = {}
+
+# Resolve relative paths in the ConfigMap (e.g. CATALYST_MEDIA_ROOT_METUBE
+# is checked-in as ``packages/media-ingest/tests/fixtures`` — relative to
+# the repo root). Promote to absolute before piping to serve_env.
+for _rel_var in ('CATALYST_MEDIA_ROOT_METUBE', 'CATALYST_MEDIA_ROOT_TUBESYNC'):
+    _val = _dagster_dev_config.get(_rel_var)
+    if _val and not _val.startswith('/'):
+        _dagster_dev_config[_rel_var] = os.path.join(PROJECT_DIR, _val)
+
+# Default EMBEDDING_BASE_URL to LLM_BASE_URL when absent (config-side
+# convenience — the Definitions in media_ingest/__init__.py reads both).
+_dagster_dev_config.setdefault(
+    'EMBEDDING_BASE_URL',
+    _dagster_dev_config.get('LLM_BASE_URL', ''),
+)
+
+# Merge: secrets last so they win if anything collides (nothing should).
+_dagster_dev_env = dict(_dagster_dev_config)
+_dagster_dev_env.update(_dagster_dev_secrets)
 
 local_resource(
     'dagster-dev',
-    # Source .envrc.cluster so CONGRESS_API_KEY / LLM_API_KEY / HF_TOKEN
-    # flow through to dagster's code-location processes — then immediately
-    # re-export the four DAGSTER_S3_* vars to their *local* k3d values.
-    # The file ships prod-cluster values (DAGSTER_S3_BUCKET=catalyst-data,
-    # ENDPOINT=minio.minio.svc.cluster.local), which the local dev rail
-    # MUST override or every IO write hits the wrong bucket on the prod
-    # MinIO. The script short-circuits cleanly if .envrc.cluster is
-    # missing (fresh checkout that hasn't run pull-dev-secrets.sh yet).
-    serve_cmd=' '.join([
-        'bash -lc',
-        '"[ -f .envrc.cluster ] && source .envrc.cluster ;',
-        'export DAGSTER_S3_ENDPOINT_URL=http://localhost:9000 ;',
-        'export DAGSTER_S3_ACCESS_KEY=minio ;',
-        'export DAGSTER_S3_SECRET_KEY=minio123 ;',
-        'export DAGSTER_S3_BUCKET=dagster ;',
-        'exec task dev"',
-    ]),
+    # serve_env supplies the full merged env to the dagster process.
+    # No shell sourcing — runtime config + secrets are read from the
+    # k8s manifests at Tiltfile load time and passed as a clean dict.
+    serve_cmd='task dev',
+    serve_env=_dagster_dev_env,
     deps=[
         'packages/media-ingest/src',
         'packages/congress-data/src',
         'packages/open-leaks/src',
         'libs/dagster-io/src',
+        'k8s/local/dagster-dev-config.yaml',
+        'k8s/local/dagster-dev-secrets.yaml',
     ],
     resource_deps=['minio-init'],
     auto_init=True,

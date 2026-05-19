@@ -33,3 +33,9 @@ resources:
   # talos prod runs MinIO Operator Tenant in its own namespace, so this
   # local manifest doesn't live in ../base/).
   - minio.yaml
+  # Single source of truth for local-dev runtime config (S3 endpoints,
+  # media discovery paths, chunking knobs, embedding defaults). Read
+  # by the Tiltfile via read_yaml() and piped into the dagster-dev
+  # local_resource's serve_env. Future containerized rail mounts this
+  # directly via envFrom + configMapRef. Secrets stay in .envrc.cluster.
+  - dagster-dev-config.yaml

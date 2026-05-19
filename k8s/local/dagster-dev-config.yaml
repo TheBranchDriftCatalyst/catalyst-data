@@ -1,0 +1,64 @@
+---
+# Local-dev runtime config for Dagster code locations (CD-48tr).
+#
+# Holds the local-development equivalents of the runtime knobs that
+# talos prod ships via ExternalSecret + ConfigMap+envFrom in the
+# per-domain Deployments (see k8s/base/<domain>/deployment.yaml).
+#
+# Source of truth for committed (non-secret) local-dev config. The
+# Tiltfile reads this ConfigMap (via read_yaml(...) at Tiltfile load
+# time, NOT a kubectl shell-out — read_yaml is Starlark-native and
+# avoids a dependency on a running cluster) and passes the data into
+# the dagster-dev local_resource via ``serve_env={...}``.
+#
+# Secrets (LLM_API_KEY, CONGRESS_API_KEY, HF_TOKEN) stay in
+# .envrc.cluster — gitignored, refreshed by
+# ./scripts/ops/pull-dev-secrets.sh from the catalyst-cluster secrets.
+#
+# When containerizing the code locations in a future CD-48tr follow-on,
+# this ConfigMap can be mounted via envFrom directly — same data, same
+# keys, no code change.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-dev-config
+  labels:
+    app.kubernetes.io/name: dagster-dev-config
+    app.kubernetes.io/part-of: catalyst-data
+data:
+  # ── Local k3d MinIO (override .envrc.cluster's prod values) ─────
+  DAGSTER_S3_ENDPOINT_URL: "http://localhost:9000"
+  DAGSTER_S3_ACCESS_KEY: "minio"
+  DAGSTER_S3_SECRET_KEY: "minio123"
+  DAGSTER_S3_BUCKET: "dagster"
+
+  # ── Media discovery — bundle fixtures instead of NFS mount ─────
+  # MediaIngestConfig.metube_path / tubesync_path read these at
+  # class-definition time. The viewer-api uses the same env names at
+  # media-ingest/src/.../viewer/routes/media.py:32 — keeps the path
+  # source-of-truth in one place across services.
+  # NOTE: Tiltfile resolves the relative path against config.main_dir
+  # at load time so the absolute path is what ends up in serve_env.
+  CATALYST_MEDIA_ROOT_METUBE: "packages/media-ingest/tests/fixtures"
+  CATALYST_MEDIA_ROOT_TUBESYNC: "packages/media-ingest/tests/fixtures"
+
+  # ── Whisper backend — Mac default ──────────────────────────────
+  # talos uses openvino (Intel GPU); on Apple Silicon prefer
+  # mlx-whisper (Metal) — but mlx is an optional install
+  # (pyproject.toml::media-ingest[mlx]). faster-whisper is the
+  # pure-CPU fallback that works without extras.
+  WHISPER_BACKEND: "faster-whisper"
+
+  # ── Chunking ───────────────────────────────────────────────────
+  CHUNK_SIZE: "2000"
+  CHUNK_OVERLAP: "200"
+
+  # ── LLM (LiteLLM proxy default — keys come from .envrc.cluster) ─
+  LLM_MODEL: "gpt-4o-mini"
+  LLM_BASE_URL: "http://litellm.talos00/v1"
+
+  # ── Embeddings ─────────────────────────────────────────────────
+  EMBEDDING_PROVIDER: "litellm"
+  EMBEDDING_MODEL: "text-embedding-3-small"
+  # EMBEDDING_BASE_URL + EMBEDDING_API_KEY default to LLM_* in the
+  # Tiltfile (Starlark default-merge logic before serve_env).
