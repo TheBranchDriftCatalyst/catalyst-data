@@ -15,6 +15,11 @@ dependencies = [
     "dagster-io",
     "catalyst-contracts-core",
     "catalyst-exgraph",
+    # AMR-as-spine extraction path — AmrToAssertionNode calls amrlib.
+    # Bundled here because media-ingest runs AMR projection on transcript
+    # chunks. Torch is already a dep for whisper/pyannote so the marginal
+    # cost is just amrlib itself (~50MB Python + lazy t5 checkpoint).
+    "amrlib>=0.8.1",
     "boto3>=1.35",
     "pydantic>=2.9",
     "faster-whisper>=1.2",

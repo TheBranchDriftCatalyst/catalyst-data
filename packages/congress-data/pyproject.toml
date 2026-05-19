@@ -14,6 +14,11 @@ dependencies = [
     "dagster-io",
     "catalyst-contracts-core",
     "catalyst-exgraph",
+    # AMR-as-spine extraction path: amrlib (t5-based parser) is what
+    # AmrToAssertionNode calls into. Direct dep here because this code
+    # location actually runs AMR projection — better to fail at install
+    # resolution than silently at runtime via ImportError on first parse().
+    "amrlib>=0.8.1",
     "pydantic>=2.9",
     "requests>=2.32",
 ]
