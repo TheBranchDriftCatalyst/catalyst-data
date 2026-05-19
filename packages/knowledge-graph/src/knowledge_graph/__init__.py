@@ -36,6 +36,10 @@ _run_status_sensors = make_run_status_sensor("knowledge_graph")
 # references the same partition set media_ingest writes to.
 _media_partitions = DynamicPartitionsDefinition(name="media_document")
 
+# congress_data's bill_partitions — same name so this code location sees the
+# same per-bill partition set written by congress-data assets.
+_bill_partitions = DynamicPartitionsDefinition(name="congress_bill")
+
 # Source assets from other code locations (gold layer inputs)
 # Keys must match the actual asset keys in their respective code locations.
 # Metadata provides source_code_location and layer so the IO manager reads
@@ -54,6 +58,12 @@ _congress_assertions = SourceAsset(
     key="congress_assertions",
     description="Assertions from congress_data code location",
     metadata={"layer": "gold", "source_code_location": "congress_data"},
+)
+_congress_structured_assertions = SourceAsset(
+    key="congress_structured_assertions",
+    description="Structured-projection (Cosponsor/Term/PublicLaw) assertions from congress_data code location",
+    metadata={"layer": "gold", "source_code_location": "congress_data"},
+    partitions_def=_bill_partitions,
 )
 _leak_assertions = SourceAsset(
     key="leak_assertions",
@@ -88,6 +98,7 @@ defs = Definitions(
         _leak_entity_candidates,
         _media_entity_candidates,
         _congress_assertions,
+        _congress_structured_assertions,
         _leak_assertions,
         _media_assertions,
         # Platinum layer assets

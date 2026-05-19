@@ -12,8 +12,6 @@ dependencies = [
     "dagster-aws>=0.29",
     "boto3>=1.35",
     "catalyst-contracts-core",
-    "catalyst-llm-contract-mcp",
-    "catalyst-langgraph-aio",
     # Wave 1, Step 3 (bead llm-g0b): extract_validated() now wraps
     # ExtractionResource.extract_assertions(). The legacy LangGraph
     # driver that lived in dagster_io.extraction has been retired.
@@ -63,13 +61,7 @@ packages = ["src/dagster_io"]
 # unified Mention/Assertion/Provenance shapes; catalyst-exgraph supplies
 # ExtractionResource (the only extraction path). Editable installs so
 # in-repo edits show up without re-installing.
-#
-# catalyst-langgraph-aio and catalyst-llm-contract-mcp still resolve to
-# the local legacy snapshots in libs/_* — those are slated for deletion
-# in Step 5 once everything has been migrated off them.
 [tool.uv.sources]
 catalyst-contracts-core = { path = "../../../catalyst-llm/packages/catalyst-contracts-core", editable = true }
 catalyst-exgraph = { path = "../../../catalyst-llm/packages/catalyst-exgraph", editable = true }
-catalyst-langgraph-aio = { path = "../_catalyst-langgraph-aio", editable = true }
-catalyst-llm-contract-mcp = { path = "../_catalyst-llm-contract-mcp", editable = true }
 

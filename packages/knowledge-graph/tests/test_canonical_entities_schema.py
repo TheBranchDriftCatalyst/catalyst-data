@@ -56,7 +56,7 @@ def test_init_sql_configmap_declares_source_code_locations():
     """The ConfigMap init.sql is the source of truth for fresh PVCs."""
     # tests/test_file.py -> tests -> knowledge-graph -> packages -> repo_root
     repo_root = Path(__file__).resolve().parents[3]
-    init_sql_path = repo_root / "k8s" / "platform" / "postgres-knowledge.yaml"
+    init_sql_path = repo_root / "k8s" / "base" / "platform" / "postgres-knowledge.yaml"
     assert init_sql_path.exists(), f"expected {init_sql_path} to exist"
     init_sql = init_sql_path.read_text()
     assert "source_code_locations TEXT[] NOT NULL DEFAULT '{}'" in init_sql

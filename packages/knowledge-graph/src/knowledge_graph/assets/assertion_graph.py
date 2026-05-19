@@ -67,6 +67,14 @@ def _resolve_entity_id(text: str, name_index: dict[str, str]) -> str | None:
             input_manager_key="optional_io_manager",
         ),
         "congress_assertions": AssetIn(input_manager_key="optional_io_manager"),
+        # AMR-derived assertions fan in alongside the structured-projection
+        # stream (Cosponsor / Term / PublicLaw → Assertion with deterministic
+        # temporal validity). Both are partitioned per-bill, so the
+        # AllPartitionMapping collapses across bills into one flat list.
+        "congress_structured_assertions": AssetIn(
+            partition_mapping=AllPartitionMapping(),
+            input_manager_key="optional_io_manager",
+        ),
         "leak_assertions": AssetIn(input_manager_key="optional_io_manager"),
     },
     op_tags={
@@ -86,9 +94,11 @@ def assertion_graph(
     canonical_entities: list[CanonicalEntity],
     media_assertions,  # dict[str, list[Assertion]] fan-in (or None)
     congress_assertions: list[Assertion] | None = None,
+    congress_structured_assertions=None,  # dict[str, list[Assertion]] fan-in (or None)
     leak_assertions: list[Assertion] | None = None,
 ) -> Output[dict[str, Any]]:
     media_assertions = _flatten_partition_fanin(media_assertions, Assertion)
+    congress_structured_assertions = _flatten_partition_fanin(congress_structured_assertions, Assertion)
     congress_assertions = congress_assertions or []
     leak_assertions = leak_assertions or []
     with trace_operation(
@@ -97,11 +107,16 @@ def assertion_graph(
         {
             "code_location": "knowledge_graph",
             "layer": "platinum",
-            "record_count": len(congress_assertions) + len(leak_assertions) + len(media_assertions),
+            "record_count": (
+                len(congress_assertions)
+                + len(congress_structured_assertions)
+                + len(leak_assertions)
+                + len(media_assertions)
+            ),
             "canonical_entity_count": len(canonical_entities),
         },
     ):
-        all_assertions = congress_assertions + leak_assertions + media_assertions
+        all_assertions = congress_assertions + congress_structured_assertions + leak_assertions + media_assertions
         logger.info(
             "Starting assertion_graph: %d assertions against %d canonical entities",
             len(all_assertions),

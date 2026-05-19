@@ -6,7 +6,17 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest>=8.0", "pytest-cov", "dagster>=1.9", "pydantic>=2.0", "intervaltree>=3.1"]
+test = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "dagster>=1.9",
+    "pydantic>=2.0",
+    "intervaltree>=3.1",
+    # rdflib lives in packages/knowledge-graph but the workspace test harness
+    # isn't a member of that package — declare it here so the n10s/Turtle-star
+    # round-trip tests resolve from the root .venv.
+    "rdflib>=7.1",
+]
 # Bench-side optional deps — DuckDB writer + S3 archive for the audit
 # log (see libs/dagster-io/src/dagster_io/bench/event_store.py, CD-jzkg).
 bench = ["fastapi>=0.110", "uvicorn>=0.27"]
