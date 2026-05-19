@@ -38,14 +38,11 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "media-ingest" / "src"))
 sys.path.insert(0, str(ROOT))
 
-import yaml  # noqa: E402
 from tests.shared.store import BenchmarkStore  # noqa: E402
 
 from dagster_io import TextChunk  # noqa: E402
 from dagster_io.extraction import extract_validated  # noqa: E402
 
-FIXTURE_DIR = ROOT / "packages" / "media-ingest" / "tests" / "fixtures"
-MANIFEST = FIXTURE_DIR / "audio_manifest.yaml"
 MEDALLION_CHUNKS_ROOT = ROOT / ".test-output" / "media-ingest" / "gold" / "media_ingest" / "media" / "media_chunks"
 
 
@@ -113,15 +110,13 @@ def main() -> int:
         print("error: LLM_MODEL env not set", file=sys.stderr)
         return 2
 
-    if not MANIFEST.exists():
-        print(f"error: manifest missing — {MANIFEST}", file=sys.stderr)
-        return 2
+    from dagster_io.manifests import load_media_manifest
 
-    manifest = yaml.safe_load(MANIFEST.read_text()) or {}
-    videos = manifest.get("videos") or []
-    if not videos:
+    manifest = load_media_manifest()
+    if not manifest.videos:
         print("error: no videos in manifest", file=sys.stderr)
         return 2
+    videos = [v.model_dump() for v in manifest.videos]
 
     # Optional --only filter (comma-separated doc_ids); used by harness when narrowing
     only = os.environ.get("BENCH_ONLY_DOC_IDS")

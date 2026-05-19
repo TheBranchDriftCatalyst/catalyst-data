@@ -239,18 +239,16 @@ class TestSilver:
 
 
 def _load_manifest_bill_ids() -> list[str]:
-    """Read packages/congress-data/tests/fixtures/bill_manifest.yaml.
+    """Return the canonical benchmark corpus from the shared loader.
 
-    Returns ``[]`` if the manifest is missing — pytest will then skip the
-    parametrized test rather than erroring at collection time.
+    Returns ``[]`` when the manifest is missing — pytest then skips the
+    parametrized test rather than erroring at collection time. Falls
+    through to ``dagster_io.manifests`` so seed + bench + integration
+    all read the same list.
     """
-    import yaml
+    from dagster_io.manifests import congress_bill_ids
 
-    p = Path(__file__).resolve().parents[1] / "fixtures" / "bill_manifest.yaml"
-    if not p.exists():
-        return []
-    raw = yaml.safe_load(p.read_text()) or {}
-    return list(raw.get("bills", []))
+    return congress_bill_ids()
 
 
 _MANIFEST_BILL_IDS = _load_manifest_bill_ids()

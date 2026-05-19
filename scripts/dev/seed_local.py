@@ -124,24 +124,24 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
     # congress assets — exactly the bug we hit).
     os.environ["DAGSTER_CODE_LOCATION"] = "media_ingest"
 
-    import yaml
     from dagster import AssetKey, DagsterInstance, SourceAsset, materialize
     from media_ingest.assets.chunks import media_chunks
     from media_ingest.partitions import media_partitions
 
     from dagster_io import ChunkingResource, select_io_managers
+    from dagster_io.manifests import load_media_manifest
     from dagster_io.s3_client import S3Client
 
     if regen:
         _maybe_regen("silver/media_ingest/")
         _maybe_regen("gold/media_ingest/")
 
-    manifest = _media_fixtures() / "audio_manifest.yaml"
-    if not manifest.exists():
-        print(f"  ⊘ {manifest} missing — nothing to seed")
+    manifest = load_media_manifest()
+    if not manifest.videos:
+        print("  ⊘ audio_manifest.yaml missing or empty — nothing to seed")
         return {"materialized": 0, "skipped": 0, "errors": 0}
 
-    videos = (yaml.safe_load(manifest.read_text()) or {}).get("videos", [])
+    videos = [v.model_dump() for v in manifest.videos]
 
     # Filter to docs whose media_segment_merge has been materialized to S3
     # (run `task bench:fixtures:regen` to populate it via the Dagster
@@ -301,7 +301,6 @@ def _seed_congress(limit: int, with_gold: bool, regen: bool) -> dict:
         print("  ⊘ skipped: CONGRESS_API_KEY not set (live API call required)")
         return {"materialized": 0, "skipped": limit, "errors": 0}
 
-    import yaml
     from congress_data.assets.bill_tail import (
         bill_actions,
         bill_chunks,
@@ -314,30 +313,24 @@ def _seed_congress(limit: int, with_gold: bool, regen: bool) -> dict:
     from dagster import DagsterInstance, materialize
 
     from dagster_io import ChunkingResource, select_io_managers
+    from dagster_io.manifests import load_congress_manifest
 
     if regen:
         _maybe_regen("silver/congress_data/")
         _maybe_regen("bronze/congress_data/")
         _maybe_regen("gold/congress_data/")
 
-    manifest = _congress_fixtures() / "bill_manifest.yaml"
-    if not manifest.exists():
-        print(f"  ⊘ {manifest} missing — nothing to seed")
-        return {"materialized": 0, "skipped": 0, "errors": 0}
-
-    raw = yaml.safe_load(manifest.read_text()) or {}
+    manifest = load_congress_manifest()
     # Prefer seed_subset (hand-curated variety pick); fall back to first N
     # of the broader bills list. Both keys living in the same manifest keeps
     # ownership in one place — the bench corpus and the dev seed share a
     # single source of truth.
-    seed_subset = raw.get("seed_subset") or []
-    bills = raw.get("bills", []) or []
-    if seed_subset:
-        selected = seed_subset[:limit]
+    if manifest.seed_subset:
+        selected = manifest.seed_subset[:limit]
         print(f"  using seed_subset: {len(selected)} hand-picked variety bills")
     else:
-        selected = bills[:limit]
-        print(f"  no seed_subset key, using first {len(selected)} of {len(bills)} bills")
+        selected = manifest.bills[:limit]
+        print(f"  no seed_subset key, using first {len(selected)} of {len(manifest.bills)} bills")
     if not selected:
         print("  ⊘ bill_manifest.yaml has no bills")
         return {"materialized": 0, "skipped": 0, "errors": 0}
@@ -428,7 +421,11 @@ def _seed_congress(limit: int, with_gold: bool, regen: bool) -> dict:
                 print(f"  ✗ {bill_id}: gold-layer {type(exc).__name__}: {exc}")
         print(f"  gold-layer summary: {gold_materialized} ok, {gold_errors} errors")
 
-    return {"materialized": materialized, "skipped": len(bills) - len(selected), "errors": errors}
+    return {
+        "materialized": materialized,
+        "skipped": len(manifest.bills) - len(selected),
+        "errors": errors,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1690,15 +1690,9 @@ examples:
     # ── Catalyst data corpus footprint ──────────────────────────────────
     # Inventory the audio cache + manifest so the user sees what they're benchmarking against
     # before the slow per-model loop kicks off.
-    manifest_path = ROOT / "packages" / "media-ingest" / "tests" / "fixtures" / "audio_manifest.yaml"
-    manifest_videos: list[dict] = []
-    if manifest_path.exists():
-        try:
-            import yaml as _yaml
+    from dagster_io.manifests import load_media_manifest
 
-            manifest_videos = (_yaml.safe_load(manifest_path.read_text()) or {}).get("videos", []) or []
-        except Exception:
-            manifest_videos = []
+    manifest_videos: list[dict] = [v.model_dump() for v in load_media_manifest().videos]
     cached_audio_doc_ids = [d for d in store.list_pipeline_cache_doc_ids() if d != "model_cache"]
 
     # Auto-materialize media_chunks for any manifest video missing from S3.
