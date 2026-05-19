@@ -826,12 +826,12 @@ class TestRealCorpusWiringSmoke:
         from catalyst_exgraph.protocol import ExtractionResult
 
         from dagster_io.extraction import extract_validated
+        from dagster_io.prompts import resolve_prompt_dir
 
         # Point at the congress label pack we know lives in the repo.
-        monkeypatch.setenv(
-            "PROMPT_REGISTRY_DIR",
-            str(REPO_ROOT / "k8s" / "base" / "congress-data" / "prompts"),
-        )
+        # resolve_prompt_dir(domain=...) returns the matching bundled
+        # k8s/base/<domain>/prompts directory if it exists.
+        monkeypatch.setenv("PROMPT_REGISTRY_DIR", resolve_prompt_dir(domain="congress-data"))
 
         try:
             result = extract_validated(real_chunks, code_location="congress_data")

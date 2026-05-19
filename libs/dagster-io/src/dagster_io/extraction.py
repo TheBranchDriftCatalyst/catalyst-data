@@ -32,27 +32,38 @@ logger = get_logger(__name__)
 
 
 # ── code_location → (prompt_dir, label_pack_id) lookup ────────────────────
-# prompt_dir is read from the env (``PROMPT_REGISTRY_DIR``) when set so the
-# bench harness + k8s code locations can override per-deployment without
-# touching this module. The label_pack_id is the AMR-spine knob.
+# The bench harness, integration tests, and ad-hoc scripts all need the
+# same label-pack mapping that extract_validated uses internally. Exporting
+# the dict + the resolver as public symbols means a new code location is
+# a one-line addition here — not an N-place hunt across the codebase.
 
-_LABEL_PACK_BY_LOCATION: dict[str, str] = {
+LABEL_PACK_BY_LOCATION: dict[str, str] = {
     "congress": "congress",
     "congress_data": "congress",
     "media": "media",
     "media_ingest": "media",
 }
 
+# Legacy alias — keep until the next refactor removes all underscore-prefixed
+# callers. The dict itself is what matters; the alias just preserves the
+# import path that ``from dagster_io.extraction import _LABEL_PACK_BY_LOCATION``
+# would have hit.
+_LABEL_PACK_BY_LOCATION = LABEL_PACK_BY_LOCATION
 
-def _resolve_label_pack(code_location: str) -> str:
+
+def resolve_label_pack(code_location: str) -> str:
     """Pick the AMR label pack id for a given code location.
 
     Unknown / empty locations fall back to ``"generic"`` (which has an
     empty ``amr_frames`` table — ``extract_assertions`` will warn and
     emit zero or all-novel assertions). Set ``code_location`` to one of
-    the keys in ``_LABEL_PACK_BY_LOCATION`` for real output.
+    the keys in ``LABEL_PACK_BY_LOCATION`` for real output.
     """
-    return _LABEL_PACK_BY_LOCATION.get(code_location, "generic")
+    return LABEL_PACK_BY_LOCATION.get(code_location, "generic")
+
+
+# Legacy alias.
+_resolve_label_pack = resolve_label_pack
 
 
 def extract_validated(
@@ -95,8 +106,10 @@ def extract_validated(
 
     from catalyst_exgraph.resource import ExtractionResource
 
-    prompt_dir = os.environ.get("PROMPT_REGISTRY_DIR", "")
-    label_pack_id = _resolve_label_pack(code_location)
+    from dagster_io.prompts import resolve_prompt_dir
+
+    prompt_dir = resolve_prompt_dir()
+    label_pack_id = resolve_label_pack(code_location)
     ner_model = os.environ.get("LLM_MODEL", "gliner")
 
     logger.info(

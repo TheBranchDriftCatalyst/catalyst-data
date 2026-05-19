@@ -21,6 +21,48 @@ logger = logging.getLogger(__name__)
 import yaml
 
 
+def _repo_root() -> Path:
+    """libs/dagster-io/src/dagster_io/prompts.py → catalyst-data."""
+    return Path(__file__).resolve().parents[4]
+
+
+def resolve_prompt_dir(
+    *,
+    domain: str | None = None,
+    fallback: Path | None = None,
+) -> str:
+    """Return the prompt-registry directory for the active deployment.
+
+    Resolution precedence:
+      1. ``PROMPT_REGISTRY_DIR`` env var (set by k8s deployments and the
+         seed/bench Taskfile entries that need an explicit override).
+      2. ``domain``-specific bundled prompts at
+         ``k8s/base/<domain>/prompts`` — e.g. ``congress-data``,
+         ``media-ingest``. This is the layout the prod ConfigMaps mount.
+      3. ``k8s/shared/prompts`` (the cross-domain registry) when no
+         domain is specified.
+      4. ``fallback`` when provided, else empty string.
+
+    Returns:
+        Absolute directory path as a string. Empty string when nothing
+        resolves and no fallback is given — same contract the legacy
+        ``os.environ.get(..., "")`` call sites already handle.
+    """
+    env_dir = os.environ.get("PROMPT_REGISTRY_DIR")
+    if env_dir:
+        return env_dir
+    if domain:
+        candidate = _repo_root() / "k8s" / "base" / domain / "prompts"
+        if candidate.is_dir():
+            return str(candidate)
+    shared = _repo_root() / "k8s" / "shared" / "prompts"
+    if shared.is_dir():
+        return str(shared)
+    if fallback is not None:
+        return str(fallback)
+    return ""
+
+
 @dataclass
 class ParsedPrompt:
     """A parsed .prompt file with metadata and content."""

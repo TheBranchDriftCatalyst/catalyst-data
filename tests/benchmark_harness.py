@@ -48,6 +48,20 @@ from tests.benchmark_config import ALL_MODELS, LOCAL_MODELS, BenchmarkConfig, Mo
 # ── Default encoder/SPO lists — resolved from benchmark_config tags ──────────
 
 
+def _resolve_prompt_dir_for_bench() -> str:
+    """Resolve PROMPT_REGISTRY_DIR for the bench harness invocations.
+
+    Thin wrapper around ``dagster_io.prompts.resolve_prompt_dir`` so the
+    bench picks up the same shared prompt directory as production
+    Dagster code locations. Kept as a wrapper because the harness sets
+    the env var on subprocess invocations and needs a guaranteed
+    non-empty string.
+    """
+    from dagster_io.prompts import resolve_prompt_dir
+
+    return resolve_prompt_dir() or str(ROOT / "k8s" / "shared" / "prompts")
+
+
 def _default_ensemble() -> list[str]:
     """Encoders that vote in Phase 1 NER consensus (encoder or extraction-specialist tags)."""
     return [m.name for m in ALL_MODELS if "encoder" in m.tags or "extraction-specialist" in m.tags]
@@ -929,7 +943,10 @@ def _run_model(
         "LLM_MAX_TOKENS": str(cfg.max_tokens),
         "LLM_CONTEXT_WINDOW": str(cfg.context_window),
         "LLM_TIMEOUT": str(timeout),
-        "PROMPT_REGISTRY_DIR": str(ROOT / "k8s" / "shared" / "prompts"),
+        # Resolve via the shared dagster_io.prompts helper so the bench
+        # harness picks up the same prompt directory as the rest of the
+        # stack — no hardcoded k8s path here.
+        "PROMPT_REGISTRY_DIR": _resolve_prompt_dir_for_bench(),
     }
     saved = {k: os.environ.get(k) for k in overrides}
     os.environ.update(overrides)

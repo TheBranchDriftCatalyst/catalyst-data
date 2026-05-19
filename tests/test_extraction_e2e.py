@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import os
 import time
-from pathlib import Path
 
 import pytest
 
@@ -55,9 +54,11 @@ def extraction_result():
 
     _needs_llm()
 
-    shared_prompts = Path(__file__).resolve().parents[1] / "k8s" / "shared" / "prompts"
-    if shared_prompts.exists():
-        os.environ.setdefault("PROMPT_REGISTRY_DIR", str(shared_prompts.resolve()))
+    from dagster_io.prompts import resolve_prompt_dir
+
+    resolved = resolve_prompt_dir()
+    if resolved:
+        os.environ.setdefault("PROMPT_REGISTRY_DIR", resolved)
 
     from dagster_io import TextChunk
     from dagster_io.extraction import extract_validated
@@ -128,10 +129,7 @@ def extraction_result():
 
     print(f"  Extraction complete: {len(mentions)} mentions, {len(assertions)} assertions in {duration:.1f}s")
     print(f"  Estimated {est_total_tokens:,} tokens, {tokens_per_sec:.1f} tok/s")
-    print(
-        f"  Pipeline: {pipeline_stats.get('pipeline', '?')} — "
-        f"{pipeline_stats.get('errors', 0)} errors"
-    )
+    print(f"  Pipeline: {pipeline_stats.get('pipeline', '?')} — {pipeline_stats.get('errors', 0)} errors")
     _store.save_fixture(f"extraction_{model}", output)
     return output
 
