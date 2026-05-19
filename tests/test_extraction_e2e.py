@@ -80,14 +80,21 @@ def extraction_result():
 
     print(f"  Running validated extraction (model={model}, concurrency=1)...")
     start = time.monotonic()
-    mentions, assertions = extract_validated(
+    result = extract_validated(
         eval_chunks,
         code_location="media_ingest",
         max_concurrency=1,
     )
+    mentions, assertions = result.mentions, result.assertions
     duration = time.monotonic() - start
 
-    pipeline_stats = getattr(extract_validated, "last_stats", {})
+    # Wave 1 Step 3 (bead llm-g0b): ``extract_validated`` returns
+    # ``ExtractionResult`` now — ``.stats`` replaces the deleted
+    # ``last_stats`` side channel. Schema is: chunk_count, duration_s,
+    # mention_count, assertion_count, errors, pipeline ("amr" | "ner_only").
+    # Legacy SPO LLM counters (llm_call_count, mention_retries,
+    # proposition_retries) don't exist on the AMR path — they're elided.
+    pipeline_stats = result.stats
 
     total_input_chars = sum(len(c.text) for c in eval_chunks)
     est_input_tokens = total_input_chars // 4
@@ -109,20 +116,20 @@ def extraction_result():
             "tokens_per_sec": round(tokens_per_sec, 1),
             "mention_count": len(mentions),
             "assertion_count": len(assertions),
-            "mention_retries": pipeline_stats.get("mention_retries", 0),
-            "proposition_retries": pipeline_stats.get("proposition_retries", 0),
+            # SPO-LLM retry counters (mention_retries, proposition_retries,
+            # llm_call_count) are gone on the AMR path. ``errors`` and
+            # ``pipeline`` (= "amr" | "ner_only") still ship via
+            # ExtractionResult.stats.
             "errors": pipeline_stats.get("errors", 0),
-            "llm_call_count": pipeline_stats.get("llm_call_count", 0),
-            "pipeline": pipeline_stats.get("pipeline", {}),
-            "audit_events": pipeline_stats.get("audit_events", []) if os.environ.get("SAVE_AUDIT_LOG") else [],
+            "pipeline": pipeline_stats.get("pipeline", ""),
+            "audit_events": result.audit_events if os.environ.get("SAVE_AUDIT_LOG") else [],
         },
     }
 
     print(f"  Extraction complete: {len(mentions)} mentions, {len(assertions)} assertions in {duration:.1f}s")
     print(f"  Estimated {est_total_tokens:,} tokens, {tokens_per_sec:.1f} tok/s")
     print(
-        f"  Retries: {pipeline_stats.get('mention_retries', 0)} mention, "
-        f"{pipeline_stats.get('proposition_retries', 0)} proposition, "
+        f"  Pipeline: {pipeline_stats.get('pipeline', '?')} — "
         f"{pipeline_stats.get('errors', 0)} errors"
     )
     _store.save_fixture(f"extraction_{model}", output)

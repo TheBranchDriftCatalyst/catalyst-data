@@ -47,11 +47,12 @@ def leak_assertions(
             return Output([], metadata={"assertion_count": 0})
 
         llm_start = time.monotonic()
-        _, all_assertions = extract_validated(
+        result = extract_validated(
             leak_chunks,
             code_location="open_leaks",
             max_concurrency=5,
         )
+        all_assertions = result.assertions
         llm_elapsed = time.monotonic() - llm_start
 
         negated_count = sum(1 for a in all_assertions if a.negated)

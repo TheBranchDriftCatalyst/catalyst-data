@@ -47,11 +47,12 @@ def leak_mentions(
             return Output([], metadata={"mention_count": 0})
 
         llm_start = time.monotonic()
-        all_mentions, _ = extract_validated(
+        result = extract_validated(
             leak_chunks,
             code_location="open_leaks",
             max_concurrency=5,
         )
+        all_mentions = result.mentions
         llm_elapsed = time.monotonic() - llm_start
 
         ASSET_RECORDS_PROCESSED.labels(code_location="open_leaks", asset_key="leak_mentions", layer="gold").inc(

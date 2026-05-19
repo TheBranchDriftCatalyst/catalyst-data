@@ -65,13 +65,18 @@ def _run_video(doc_id: str, store: BenchmarkStore, model: str, run_label: str | 
 
     start = time.monotonic()
     try:
-        mentions, assertions = extract_validated(chunks, code_location="media_ingest", max_concurrency=1)
+        result = extract_validated(chunks, code_location="media_ingest", max_concurrency=1)
+        mentions, assertions = result.mentions, result.assertions
     except Exception as e:
         print(f"  ✗ {doc_id}: extraction error — {type(e).__name__}: {e}", flush=True)
         return None
     duration = time.monotonic() - start
 
-    pipeline_stats = getattr(extract_validated, "last_stats", {})
+    # Wave 1 Step 3 (bead llm-g0b): ``ExtractionResult.stats`` replaces
+    # the deleted ``last_stats`` side channel. SPO-LLM-era counters
+    # (mention_retries, proposition_retries, llm_call_count) don't
+    # exist on AMR — they're dropped from the fixture below.
+    pipeline_stats = result.stats
     total_input_chars = sum(len(c.text) for c in chunks)
     est_input_tokens = total_input_chars // 4
     est_output_tokens = (len(mentions) + len(assertions)) * 50
@@ -95,12 +100,9 @@ def _run_video(doc_id: str, store: BenchmarkStore, model: str, run_label: str | 
             "tokens_per_sec": round(tokens_per_sec, 1),
             "mention_count": len(mentions),
             "assertion_count": len(assertions),
-            "mention_retries": pipeline_stats.get("mention_retries", 0),
-            "proposition_retries": pipeline_stats.get("proposition_retries", 0),
             "errors": pipeline_stats.get("errors", 0),
-            "llm_call_count": pipeline_stats.get("llm_call_count", 0),
-            "pipeline": pipeline_stats.get("pipeline", {}),
-            "audit_events": pipeline_stats.get("audit_events", []) if os.environ.get("SAVE_AUDIT_LOG") else [],
+            "pipeline": pipeline_stats.get("pipeline", ""),
+            "audit_events": result.audit_events if os.environ.get("SAVE_AUDIT_LOG") else [],
         },
     }
 

@@ -60,11 +60,12 @@ def media_mentions(
 
         context.log.info(f"Received {len(media_chunks)} chunks from upstream for LLM extraction")
         llm_start = time.monotonic()
-        all_mentions, _ = extract_validated(
+        result = extract_validated(
             media_chunks,
             code_location="media_ingest",
             max_concurrency=5,
         )
+        all_mentions = result.mentions
         llm_elapsed = time.monotonic() - llm_start
 
         ASSET_RECORDS_PROCESSED.labels(code_location="media_ingest", asset_key="media_mentions", layer="gold").inc(

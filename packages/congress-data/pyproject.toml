@@ -12,6 +12,8 @@ dependencies = [
     "dagster-k8s>=0.29",
     "dagster-postgres>=0.29",
     "dagster-io",
+    "catalyst-contracts-core",
+    "catalyst-exgraph",
     "pydantic>=2.9",
     "requests>=2.32",
 ]
@@ -25,3 +27,11 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/congress_data"]
+
+# Wave 1, Step 4 (bead llm-g0b): wire catalyst-exgraph + catalyst-contracts-core
+# as editable workspace deps so the asset_factory/extraction wrapper resolves the
+# same shared packages as libs/dagster-io. Path is relative to this pyproject.toml
+# (packages/congress-data/pyproject.toml → ../../../catalyst-llm/packages/...).
+[tool.uv.sources]
+catalyst-contracts-core = { path = "../../../catalyst-llm/packages/catalyst-contracts-core", editable = true }
+catalyst-exgraph = { path = "../../../catalyst-llm/packages/catalyst-exgraph", editable = true }

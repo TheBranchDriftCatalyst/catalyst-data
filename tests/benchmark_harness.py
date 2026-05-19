@@ -808,9 +808,12 @@ def _run_model(
       immediately — no SPO work needed.
     - **Synthetic ``ensemble`` model**: read ``extraction_ensemble`` fixture
       saved by Phase A and return it directly.
-    - **LLM-tier** (everything else): run Phase B SPO via
-      ``extract_with_shared_clusters`` over the cached evidence_windows +
-      consensus_mentions.  Same path as v3, just renamed semantically.
+    - **LLM-tier** (everything else): run the AMR-as-spine pipeline via
+      ``extract_validated`` over the (re-flattened) cached docs. Wave 1
+      Step 4 (bead llm-g0b) retired ``extract_with_shared_clusters``;
+      the harness now incurs the full NER → consensus → cluster → pack
+      → AMR-project cost per LLM model (perf regression acknowledged,
+      follow-up bead to file).
 
     If an encoder-tier model is NOT in the Phase A ensemble (i.e. it was
     requested via --models but isn't one of the v4 encoder_cfgs), the legacy
@@ -910,6 +913,13 @@ def _run_model(
     # Per-model env. We mutate os.environ for the duration of the
     # extract_validated call (extract_validated reads LLM_MODEL etc. at
     # call time) and restore it after so the next model starts clean.
+    #
+    # Wave 1 Step 4 (bead llm-g0b): ``CATALYST_BENCH_MODEL`` is gone —
+    # the SPO LLM phase that threaded a per-bench model name through is
+    # retired. Per-bench model selection now happens by passing the
+    # ``ner_model`` kwarg into ``ExtractionResource(...)`` directly. For
+    # backwards compat with the legacy ``extract_validated`` wrapper we
+    # set ``LLM_MODEL`` which the wrapper picks up at call time.
     overrides = {
         "LLM_MODEL": cfg.model,
         "LLM_BASE_URL": base_url,
@@ -920,7 +930,6 @@ def _run_model(
         "LLM_CONTEXT_WINDOW": str(cfg.context_window),
         "LLM_TIMEOUT": str(timeout),
         "PROMPT_REGISTRY_DIR": str(ROOT / "k8s" / "shared" / "prompts"),
-        "CATALYST_BENCH_MODEL": cfg.name,
     }
     saved = {k: os.environ.get(k) for k in overrides}
     os.environ.update(overrides)
@@ -935,46 +944,40 @@ def _run_model(
 
         start = time.monotonic()
 
+        # Wave 1 Step 4 (bead llm-g0b): the AMR-as-spine refactor retired
+        # ``extract_with_shared_clusters`` (the SPO LLM Phase-B path that
+        # fan-out over cached encoder consensus). The new AMR path always
+        # runs NER → consensus → cluster → pack → AMR project in one shot
+        # via ``extract_validated``. This collapses both branches into one
+        # call and accepts a perf regression for the bench fan-out — Phase
+        # A cached cluster sharing is not yet re-implemented on top of
+        # ExtractionResource. Follow-up bead to file.
         if shared_clusters is not None and shared_docs is not None:
-            # ── LLM-tier Phase B: SPO fan-out over cached consensus mentions ──
-            # NER already done in Phase A via ensemble; only run SPO.
-            from dagster_io.extraction import extract_with_shared_clusters
-
-            if not shared_docs:
-                event_store.append(
-                    source="harness",
-                    node_name="model_run",
-                    status="error",
-                    model=cfg.name,
-                    details={"reason": "no_docs_in_phase_a", "hint": "run Phase A first"},
-                )
-                return None
-
-            cap = f"{sample_n}/domain (phase-b)" if sample_n is not None else "full (phase-b)"
+            # Phase-B style fan-out is currently equivalent to running
+            # the full path over the same docs. We still emit a marker
+            # event so downstream report tooling can see the harness
+            # took the "phase-b shape" path (just without the optimisation).
+            event_store.append(
+                source="harness",
+                node_name="model_run",
+                status="info",
+                model=cfg.name,
+                details={
+                    "reason": "phase_b_no_shared_clusters",
+                    "hint": (
+                        "Wave 1 Step 4: extract_with_shared_clusters is "
+                        "gone; running full AMR path (perf regression "
+                        "acknowledged, follow-up bead to file)."
+                    ),
+                },
+            )
+            cap = f"{sample_n}/domain (phase-b-fallback)" if sample_n is not None else "full (phase-b-fallback)"
             print(f"\n  [{cfg.name}] {len(shared_docs)} docs from Phase A (cap={cap})", flush=True)
-
-            try:
-                mentions, assertions = extract_with_shared_clusters(
-                    shared_docs,
-                    shared_clusters,
-                    shared_mentions=shared_mentions,
-                    code_location="media_ingest",
-                    max_concurrency=1,
-                )
-            except Exception as exc:
-                event_store.append(
-                    source="harness",
-                    node_name="model_run",
-                    status="error",
-                    model=cfg.name,
-                    details={"reason": type(exc).__name__, "message": str(exc)[:500]},
-                )
-                return None
-            pipeline_stats = getattr(extract_with_shared_clusters, "last_stats", {})
-            eval_chunk_count = sum(len(d.chunks) for d in shared_docs)
+            # Reconstitute a flat chunk list from the shared docs.
+            eval_chunks: list[TextChunk] = []
+            for d in shared_docs:
+                eval_chunks.extend(d.chunks)
         else:
-            # ── Legacy path: full NER + SPO in one shot ──────────────────────────
-            # Used for: encoder-tier models NOT in Phase A panel, and any fallback.
             medallion_chunks = load_chunks(sample_per_domain=sample_n)
             if not medallion_chunks:
                 event_store.append(
@@ -985,35 +988,37 @@ def _run_model(
                     details={"reason": "no_chunks_in_medallion", "hint": "run task seed first"},
                 )
                 return None
-
             eval_chunks = [TextChunk(**c) for c in medallion_chunks]
             cap = f"{sample_n}/domain" if sample_n is not None else "full"
             print(f"\n  [{cfg.name}] {len(eval_chunks)} chunks (cap={cap})", flush=True)
 
-            try:
-                mentions, assertions = extract_validated(
-                    eval_chunks,
-                    code_location="media_ingest",
-                    max_concurrency=1,
-                )
-            except Exception as exc:
-                event_store.append(
-                    source="harness",
-                    node_name="model_run",
-                    status="error",
-                    model=cfg.name,
-                    details={"reason": type(exc).__name__, "message": str(exc)[:500]},
-                )
-                return None
-            pipeline_stats = getattr(extract_validated, "last_stats", {})
-            eval_chunk_count = len(eval_chunks)
+        try:
+            result = extract_validated(
+                eval_chunks,
+                code_location="media_ingest",
+                max_concurrency=1,
+            )
+            mentions, assertions = result.mentions, result.assertions
+        except Exception as exc:
+            event_store.append(
+                source="harness",
+                node_name="model_run",
+                status="error",
+                model=cfg.name,
+                details={"reason": type(exc).__name__, "message": str(exc)[:500]},
+            )
+            return None
+        # Wave 1 Step 3 (bead llm-g0b): ``ExtractionResult.stats`` replaces
+        # the deleted ``last_stats`` side channel. Schema is
+        # {chunk_count, duration_s, mention_count, assertion_count, errors,
+        # pipeline}. SPO-LLM-era counters (llm_call_count,
+        # mention_retries, proposition_retries) don't exist on AMR.
+        pipeline_stats = result.stats
+        eval_chunk_count = len(eval_chunks)
 
         duration = time.monotonic() - start
-        # eval_chunk_count is set by both branches above; compute stats from it
-        total_input_chars = eval_chunk_count * 1000  # approximate when no eval_chunks list
-        if shared_clusters is None:
-            # Have the real eval_chunks list from legacy path
-            total_input_chars = sum(len(c.text) for c in eval_chunks)
+        # eval_chunks always populated by both branches above post Wave 1 Step 4.
+        total_input_chars = sum(len(c.text) for c in eval_chunks)
         est_input_tokens = total_input_chars // 4
         est_output_tokens = (len(mentions) + len(assertions)) * 50
         est_total_tokens = est_input_tokens + est_output_tokens
@@ -1033,12 +1038,12 @@ def _run_model(
                 "tokens_per_sec": round(tokens_per_sec, 1),
                 "mention_count": len(mentions),
                 "assertion_count": len(assertions),
-                "mention_retries": pipeline_stats.get("mention_retries", 0),
-                "proposition_retries": pipeline_stats.get("proposition_retries", 0),
+                # Wave 1 Step 3 (bead llm-g0b): SPO retry/llm-call counters
+                # don't exist on the AMR path. Keep ``errors`` + ``pipeline``
+                # ("amr" | "ner_only"); the rest are dropped.
                 "errors": pipeline_stats.get("errors", 0),
-                "llm_call_count": pipeline_stats.get("llm_call_count", 0),
-                "pipeline": pipeline_stats.get("pipeline", {}),
-                "audit_events": pipeline_stats.get("audit_events", []) if os.environ.get("SAVE_AUDIT_LOG") else [],
+                "pipeline": pipeline_stats.get("pipeline", ""),
+                "audit_events": result.audit_events if os.environ.get("SAVE_AUDIT_LOG") else [],
             },
         }
 
@@ -2001,9 +2006,10 @@ examples:
             # Phase B routing:
             # - encoder in Phase A panel → _run_model returns pre-saved fixture (no SPO)
             # - synthetic "ensemble" → _run_model returns ensemble fixture (no SPO)
-            # - LLM-tier → _run_model runs SPO fan-out via extract_with_shared_clusters
-            # - --no-consensus → bypass shared clusters; force legacy full-pipeline path
-            # - fallback (no shared clusters) → legacy full-pipeline path
+            # - LLM-tier → _run_model runs the AMR-as-spine pipeline via
+            #   extract_validated (Wave 1 Step 4: shared-cluster fan-out retired)
+            # - --no-consensus → bypass shared clusters; force full-pipeline path
+            # - fallback (no shared clusters) → full-pipeline path
             _use_phase_b = bool(_shared_clusters) and not args.no_consensus
             fixture = _run_model(
                 cfg,

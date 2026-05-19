@@ -259,6 +259,42 @@ docker exec catalyst-data-neo4j-dev cypher-shell -u neo4j -p neo4j-homelab 'MATC
 
 ---
 
+## Deploying to local k3d cluster (alternative to `tilt up`)
+
+The catalyst-data k8s manifests now follow the same base/local/talos00
+overlay pattern as catalyst-llm. The Tilt + docker-compose path above is
+the **preferred** dev surface (faster reloads, MinIO+Neo4j directly on
+the host, no k8s admission overhead), but a k3d deploy is useful when
+you need to validate cluster-shaped behavior (multi-pod gRPC discovery,
+ServiceAccount wiring, Traefik routing) without pushing to talos00.
+
+```bash
+cd ~/catalyst-devspace/workspace/catalyst-data
+
+# One-time: copy + fill the env files, see k8s/local/SETUP.md
+( cd k8s/local && for f in *.env.example; do cp "$f" "${f%.example}"; done )
+$EDITOR k8s/local/*.env
+
+# Add hosts entries for the *.local.lan IngressRoutes:
+sudo tee -a /etc/hosts <<'EOF'
+127.0.0.1 dagster.local.lan neo4j.local.lan media-explorer.local.lan
+127.0.0.1 kg-graphql.local.lan data-hub.local.lan
+EOF
+
+# Cluster + cross-ns prereq:
+/Users/panda/catalyst-devspace/infra/k3d/k3d-up.sh   # idempotent
+kubectl config use-context k3d-catalyst-dev
+kubectl create namespace catalyst-llm                # if not already
+
+# Build + apply:
+kustomize build k8s/local | kubectl apply -f -
+```
+
+Caveats covered in detail in `k8s/local/SETUP.md`: NFS-backed PVs won't
+bind in k3d (use Tilt for media workflows), the LiteLLM ExternalName
+points at the deployed talos00 proxy, and the monitoring CRDs are
+prod-only.
+
 ## Tear-down
 
 ```bash

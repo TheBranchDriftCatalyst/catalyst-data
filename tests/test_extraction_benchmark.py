@@ -130,21 +130,24 @@ class TestGroundTruth:
             chunk_mentions = mentions_by_chunk.get(cid, [])
             chunk_assertions = assertions_by_chunk.get(cid, [])
 
+            # Wave-1 wire shape: Mention.canonical_type replaced the legacy
+            # ``mention_type`` key. Try the new shape first, fall back for
+            # on-disk legacy fixtures.
             clean_mentions = [
                 {
                     "text": m["text"],
-                    "mention_type": m["mention_type"],
+                    "mention_type": m.get("canonical_type") or m.get("mention_type", ""),
                     "span_start": m.get("span_start"),
                     "span_end": m.get("span_end"),
-                    "confidence": m.get("confidence", 1.0),
+                    "confidence": m.get("confidence") or m.get("mean_confidence", 1.0),
                 }
                 for m in chunk_mentions
             ]
             clean_assertions = [
                 {
-                    "subject": a.get("subject_text", a.get("subject", "")),
+                    "subject": a.get("subject_text") or a.get("subject", ""),
                     "predicate": a.get("predicate", ""),
-                    "object": a.get("object_text", a.get("object", "")),
+                    "object": a.get("object_text") or a.get("object", ""),
                     "confidence": a.get("confidence", 1.0),
                     "evidence": a.get("evidence", ""),
                 }

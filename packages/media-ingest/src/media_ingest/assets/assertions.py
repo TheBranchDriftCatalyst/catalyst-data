@@ -74,11 +74,12 @@ def media_assertions(
 
         context.log.info(f"Received {len(media_chunks)} chunks from upstream for LLM extraction")
         llm_start = time.monotonic()
-        _, all_assertions = extract_validated(
+        result = extract_validated(
             media_chunks,
             code_location="media_ingest",
             max_concurrency=5,
         )
+        all_assertions = result.assertions
         llm_elapsed = time.monotonic() - llm_start
 
         negated_count = sum(1 for a in all_assertions if a.negated)

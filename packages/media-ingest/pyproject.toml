@@ -13,6 +13,8 @@ dependencies = [
     "dagster-k8s>=0.29",
     "dagster-postgres>=0.29",
     "dagster-io",
+    "catalyst-contracts-core",
+    "catalyst-exgraph",
     "boto3>=1.35",
     "pydantic>=2.9",
     "faster-whisper>=1.2",
@@ -48,3 +50,10 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/media_ingest"]
+
+# Wave 1, Step 4 (bead llm-g0b): wire catalyst-exgraph + catalyst-contracts-core
+# as editable workspace deps so the asset_factory/extraction wrapper resolves the
+# same shared packages as libs/dagster-io.
+[tool.uv.sources]
+catalyst-contracts-core = { path = "../../../catalyst-llm/packages/catalyst-contracts-core", editable = true }
+catalyst-exgraph = { path = "../../../catalyst-llm/packages/catalyst-exgraph", editable = true }

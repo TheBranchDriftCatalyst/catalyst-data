@@ -273,8 +273,8 @@ flowchart LR
 
     STEP -->|"calls extract_validated()"| GRAPH
     ENV --> RES --> CC --> GRAPH
-    GRAPH -->|"returns (mentions, assertions)"| STEP
-    AUDIT -->|"stashed in last_stats"| IO
+    GRAPH -->|"returns ExtractionResult"| STEP
+    AUDIT -->|"surfaced via result.stats / result.audit_events"| IO
 
     style DAGSTER fill:#1e293b,stroke:#6366f1,color:#a5b4fc
     style LANGGRAPH fill:#1a2e1a,stroke:#22c55e,color:#86efac
