@@ -23,7 +23,6 @@ S3 input keys (medallion convention, see
 """
 
 import json
-import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -50,12 +49,7 @@ def _gold_key(asset_name: str, doc_id: str, ext: str = "jsonl") -> str:
 def _media_s3_client() -> S3Client:
     """Same client config as the viewer's S3 explorer routes — talks to the
     Tilt-managed local MinIO in dev and the cluster Tenant in prod."""
-    return S3Client(
-        endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
-        access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio"),
-        secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123"),
-        bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),
-    )
+    return S3Client.from_env()
 
 
 def _try_load_jsonl(client: S3Client, key: str) -> list[dict[str, Any]]:

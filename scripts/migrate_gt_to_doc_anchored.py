@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -68,12 +67,7 @@ SILVER_CHUNK_PATHS = [
 
 
 def _build_s3_client() -> S3Client:
-    return S3Client(
-        endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
-        access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio"),
-        secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123"),
-        bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),
-    )
+    return S3Client.from_env()
 
 
 # ---------------------------------------------------------------------------

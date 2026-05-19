@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from typing import NamedTuple
+
 import boto3
 from botocore.config import Config
 
@@ -16,7 +19,59 @@ from dagster_io.metrics import (
 logger = get_logger(__name__)
 
 
+# Default MinIO config for local dev (Tilt + `task dev`). The seed,
+# bench, and migration scripts all need the same fallbacks — keep them
+# in ONE place so a deployment-URL change doesn't require chasing down
+# N call sites.
+_DEFAULT_ENDPOINT = "http://localhost:9000"
+_DEFAULT_ACCESS_KEY = "minio"
+_DEFAULT_SECRET_KEY = "minio123"
+_DEFAULT_BUCKET = "dagster"
+
+
+class S3Config(NamedTuple):
+    endpoint_url: str
+    access_key: str
+    secret_key: str
+    bucket: str
+
+
+def resolve_s3_config() -> S3Config:
+    """Resolve the MinIO/S3 connection from environment, with dev defaults.
+
+    Reads ``DAGSTER_S3_ENDPOINT_URL`` / ``_ACCESS_KEY`` / ``_SECRET_KEY``
+    / ``_BUCKET`` and falls back to the local-dev MinIO that ``task dev``
+    spins up. Used by scripts that need to build an S3Client outside of
+    a Dagster resource context (seed, bench, migrations).
+
+    Inside Dagster, the resource config takes precedence — this helper
+    only fills in when no override is supplied.
+    """
+    return S3Config(
+        endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", _DEFAULT_ENDPOINT),
+        access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", _DEFAULT_ACCESS_KEY),
+        secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", _DEFAULT_SECRET_KEY),
+        bucket=os.environ.get("DAGSTER_S3_BUCKET", _DEFAULT_BUCKET),
+    )
+
+
 class S3Client:
+    @classmethod
+    def from_env(cls) -> S3Client:
+        """Build an S3Client from environment variables with dev defaults.
+
+        Convenience wrapper around :func:`resolve_s3_config`. Use this in
+        scripts (seed, bench, migration) so the four env-var lookups
+        happen in one place instead of being copied to every call site.
+        """
+        cfg = resolve_s3_config()
+        return cls(
+            endpoint_url=cfg.endpoint_url,
+            access_key=cfg.access_key,
+            secret_key=cfg.secret_key,
+            bucket=cfg.bucket,
+        )
+
     def __init__(
         self,
         endpoint_url: str,

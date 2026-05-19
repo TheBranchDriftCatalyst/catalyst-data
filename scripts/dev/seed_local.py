@@ -84,12 +84,7 @@ def _maybe_regen(prefix: str) -> None:
     try:
         from dagster_io.s3_client import S3Client
 
-        client = S3Client(
-            endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
-            access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio"),
-            secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123"),
-            bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),
-        )
+        client = S3Client.from_env()
         keys = client.list_all_objects(prefix)
         if keys:
             deleted, _ = client.delete_objects(keys)
@@ -152,12 +147,7 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
     # (run `task bench:fixtures:regen` to populate it via the Dagster
     # transcription + diarization assets — slow on first run, idempotent
     # after). Same lookup the asset would do via its IO manager.
-    s3 = S3Client(
-        endpoint_url=os.environ["DAGSTER_S3_ENDPOINT_URL"],
-        access_key=os.environ["DAGSTER_S3_ACCESS_KEY"],
-        secret_key=os.environ["DAGSTER_S3_SECRET_KEY"],
-        bucket=os.environ["DAGSTER_S3_BUCKET"],
-    )
+    s3 = S3Client.from_env()
 
     def _segment_merge_in_s3(doc_id: str) -> bool:
         key = f"gold/media_ingest/media/media_segment_merge/{doc_id}/_metadata.json"
@@ -211,12 +201,7 @@ def _seed_media(limit: int, with_gold: bool, regen: bool) -> dict:
     # Pre-write segment_merge S3 object so MinioIOManager.load_input finds it.
     from dagster_io.s3_client import S3Client
 
-    s3 = S3Client(
-        endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
-        access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio"),
-        secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123"),
-        bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),
-    )
+    s3 = S3Client.from_env()
 
     # ── media_documents seed ────────────────────────────────────────────────
     # The Media tab in viewer-ui reads silver/media_ingest/media/media_documents/data.jsonl.
@@ -488,12 +473,7 @@ def _seed_leaks(limit: int, with_gold: bool, regen: bool) -> dict:
     # to materialize them (which would pull 1.5GB+ ICIJ zip + live API).
     from dagster_io.s3_client import S3Client
 
-    s3 = S3Client(
-        endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
-        access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio"),
-        secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123"),
-        bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),
-    )
+    s3 = S3Client.from_env()
     icij_offshore_entities_src = SourceAsset(
         key=AssetKey(["icij_offshore_entities"]),
         metadata={"layer": "bronze"},

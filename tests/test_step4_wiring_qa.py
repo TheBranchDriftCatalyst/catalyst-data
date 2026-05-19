@@ -25,9 +25,9 @@ in catalyst-data) — not the wrapper internals (those are owned by Steps 3 + QA
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -210,9 +210,7 @@ class TestPopulatedStatsKeySet:
 
         for expected in self.EXPECTED_KEYS:
             pattern = re.compile(r'^\s*"' + re.escape(expected) + r'"\s*:', re.MULTILINE)
-            assert pattern.search(src), (
-                f"Expected stats key {expected!r} missing from catalyst_exgraph.resource"
-            )
+            assert pattern.search(src), f"Expected stats key {expected!r} missing from catalyst_exgraph.resource"
 
 
 class TestGrepAuditTupleUnpack:
@@ -258,14 +256,10 @@ class TestGrepAuditLastStats:
         # mentioning the deprecation — grep returns the whole line, so
         # check the context word.
         real = [
-            h for h in all_hits
-            if "deprecat" not in h.lower()
-            and "gone" not in h.lower()
-            and "retire" not in h.lower()
+            h for h in all_hits if "deprecat" not in h.lower() and "gone" not in h.lower() and "retire" not in h.lower()
         ]
         assert not real, (
-            f"`last_stats` still used as a real attribute/assignment in "
-            f"{len(real)} location(s):\n" + "\n".join(real)
+            f"`last_stats` still used as a real attribute/assignment in {len(real)} location(s):\n" + "\n".join(real)
         )
 
 
@@ -281,10 +275,12 @@ class TestGrepAuditDeadSymbols:
         hits = _grep_py_sources(r"extract_with_shared_clusters\s*(")
         # All hits should be inside docstring backticks or comments.
         real = [
-            h for h in hits
+            h
+            for h in hits
             if not (
-                "``extract_with_shared_clusters``" in h
-                or "# " in h.split(":", 2)[-1] if len(h.split(":", 2)) >= 3 else False
+                "``extract_with_shared_clusters``" in h or "# " in h.split(":", 2)[-1]
+                if len(h.split(":", 2)) >= 3
+                else False
             )
         ]
         # Stricter: just filter for code-shaped lines (no triple-backtick context).
@@ -305,8 +301,7 @@ class TestGrepAuditDeadSymbols:
                 continue
             real.append(h)
         assert not real, (
-            f"`extract_with_shared_clusters` callsite still present in "
-            f"{len(real)} location(s):\n" + "\n".join(real)
+            f"`extract_with_shared_clusters` callsite still present in {len(real)} location(s):\n" + "\n".join(real)
         )
 
     def test_no_catalyst_bench_model_env_read(self):
@@ -326,19 +321,15 @@ class TestGrepAuditDeadSymbols:
             if any(w in line.lower() for w in ("retired", "gone", "deprecat", "is gone")):
                 continue
             real.append(h)
-        assert not real, (
-            f"`CATALYST_BENCH_MODEL` env read still present in "
-            f"{len(real)} location(s):\n" + "\n".join(real)
+        assert not real, f"`CATALYST_BENCH_MODEL` env read still present in {len(real)} location(s):\n" + "\n".join(
+            real
         )
 
     def test_no_llm_per_call_timeout(self):
         hits = _grep_py_sources(r"LLM_PER_CALL_TIMEOUT")
         # No deprecation context expected — this name shouldn't appear at all.
         real = [h for h in hits if "LLM_PER_CALL_TIMEOUT" in h]
-        assert not real, (
-            f"`LLM_PER_CALL_TIMEOUT` still present in "
-            f"{len(real)} location(s):\n" + "\n".join(real)
-        )
+        assert not real, f"`LLM_PER_CALL_TIMEOUT` still present in {len(real)} location(s):\n" + "\n".join(real)
 
 
 class TestDeletedTestFilesGone:
@@ -383,26 +374,22 @@ class TestProjectionLayersDocCompleteness:
         must be present as a row (left or middle column).
         """
         required_assets = [
-            "bill_documents",          # bronze
-            "congress_chunks",         # silver (per-domain chunker)
-            "{domain}_chunks",         # silver (semantic-seed row)
-            "congress_mentions",       # gold
-            "congress_assertions",     # gold
-            "canonical_entities",      # platinum
+            "bill_documents",  # bronze
+            "congress_chunks",  # silver (per-domain chunker)
+            "{domain}_chunks",  # silver (semantic-seed row)
+            "congress_mentions",  # gold
+            "congress_assertions",  # gold
+            "canonical_entities",  # platinum
         ]
         for asset in required_assets:
-            assert asset in doc, (
-                f"Required asset {asset!r} missing from PROJECTION_LAYERS table"
-            )
+            assert asset in doc, f"Required asset {asset!r} missing from PROJECTION_LAYERS table"
 
     def test_all_medallion_layers_represented(self, doc):
         """The 4 medallion tiers should all appear as values in the
         ``Medallion layer`` column.
         """
         for layer in ("bronze", "silver", "gold", "platinum"):
-            assert f"| {layer} |" in doc, (
-                f"Medallion layer {layer!r} missing from table column"
-            )
+            assert f"| {layer} |" in doc, f"Medallion layer {layer!r} missing from table column"
 
     def test_s3_prefixes_match_medallion(self, doc):
         """For each table row that carries an S3 prefix, the prefix MUST
@@ -447,10 +434,7 @@ class TestProjectionLayersDocCompleteness:
             # Medallion cell may carry a slash-separated dual marker like
             # "— / gold-aux" for transient-or-persisted rows. Accept any
             # candidate tier that appears in the cell.
-            candidates = [
-                t for t in ("bronze", "silver", "gold", "platinum")
-                if t in medallion_cell
-            ]
+            candidates = [t for t in ("bronze", "silver", "gold", "platinum") if t in medallion_cell]
             if not candidates:
                 continue  # purely-transient row
             if not any(s3_first.startswith(c + "/") for c in candidates):
@@ -458,9 +442,7 @@ class TestProjectionLayersDocCompleteness:
                     f"Row layer-cell={medallion_cell!r} but s3_first={s3_first!r} "
                     f"doesn't start with any of {[c + '/' for c in candidates]}"
                 )
-        assert not violations, (
-            "S3 prefixes don't match medallion column:\n" + "\n".join(violations)
-        )
+        assert not violations, "S3 prefixes don't match medallion column:\n" + "\n".join(violations)
 
 
 class TestProjectionLayersDocLangGraphNodes:
@@ -501,9 +483,7 @@ class TestProjectionLayersDocLangGraphNodes:
         """
         module_name, class_name = module_class
         mod = importlib.import_module(module_name)
-        assert hasattr(mod, class_name), (
-            f"Doc references {node_name!r} but {module_name}.{class_name} doesn't exist"
-        )
+        assert hasattr(mod, class_name), f"Doc references {node_name!r} but {module_name}.{class_name} doesn't exist"
 
 
 class TestWorkspaceDepResolution:
@@ -528,10 +508,8 @@ class TestWorkspaceDepResolution:
             import congress_data.partitions  # noqa: F401
         finally:
             # Don't leak path mutation into other tests
-            try:
+            with contextlib.suppress(ValueError):
                 sys.path.remove(str(REPO_ROOT / "packages" / "congress-data" / "src"))
-            except ValueError:
-                pass
 
     def test_media_ingest_assets_import_chain(self):
         sys.path.insert(0, str(REPO_ROOT / "packages" / "media-ingest" / "src"))
@@ -539,10 +517,8 @@ class TestWorkspaceDepResolution:
             from media_ingest.assets.assertions import media_assertions  # noqa: F401
             from media_ingest.assets.mentions import media_mentions  # noqa: F401
         finally:
-            try:
+            with contextlib.suppress(ValueError):
                 sys.path.remove(str(REPO_ROOT / "packages" / "media-ingest" / "src"))
-            except ValueError:
-                pass
 
     def test_open_leaks_assets_import_chain(self):
         sys.path.insert(0, str(REPO_ROOT / "packages" / "open-leaks" / "src"))
@@ -550,20 +526,16 @@ class TestWorkspaceDepResolution:
             from open_leaks.assets.assertions import leak_assertions  # noqa: F401
             from open_leaks.assets.mentions import leak_mentions  # noqa: F401
         finally:
-            try:
+            with contextlib.suppress(ValueError):
                 sys.path.remove(str(REPO_ROOT / "packages" / "open-leaks" / "src"))
-            except ValueError:
-                pass
 
     def test_knowledge_graph_package_imports(self):
         sys.path.insert(0, str(REPO_ROOT / "packages" / "knowledge-graph" / "src"))
         try:
             import knowledge_graph  # noqa: F401
         finally:
-            try:
+            with contextlib.suppress(ValueError):
                 sys.path.remove(str(REPO_ROOT / "packages" / "knowledge-graph" / "src"))
-            except ValueError:
-                pass
 
 
 class TestAssetFactoryImports:
@@ -591,9 +563,7 @@ class TestAssetFactoryImports:
 
         names = {f.name for f in fields(PipelineConfig)}
         required = {"domain", "code_location", "chunks_asset_key"}
-        assert required.issubset(names), (
-            f"PipelineConfig missing required fields: {required - names}"
-        )
+        assert required.issubset(names), f"PipelineConfig missing required fields: {required - names}"
 
 
 # ───────────────────────────────────────────────────────────────────
@@ -802,38 +772,33 @@ class TestRealCorpusWiringSmoke:
         except ImportError:
             pytest.skip("boto3 not installed — wiring smoke skipped")
 
-        endpoint = os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000")
-        access = os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio")
-        secret = os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123")
-        bucket = os.environ.get("DAGSTER_S3_BUCKET", "dagster")
+        from dagster_io.s3_client import resolve_s3_config
+
+        cfg = resolve_s3_config()
 
         try:
             s3 = boto3.client(
                 "s3",
-                endpoint_url=endpoint,
-                aws_access_key_id=access,
-                aws_secret_access_key=secret,
+                endpoint_url=cfg.endpoint_url,
+                aws_access_key_id=cfg.access_key,
+                aws_secret_access_key=cfg.secret_key,
             )
             listing = s3.list_objects_v2(
-                Bucket=bucket,
+                Bucket=cfg.bucket,
                 Prefix="silver/congress_data/bill/bill_chunks/",
                 MaxKeys=20,
             )
         except Exception as e:
-            pytest.skip(f"MinIO unreachable at {endpoint}: {e}")
+            pytest.skip(f"MinIO unreachable at {cfg.endpoint_url}: {e}")
 
-        keys = [
-            x["Key"]
-            for x in listing.get("Contents", [])
-            if x["Key"].endswith("/data.jsonl")
-        ]
+        keys = [x["Key"] for x in listing.get("Contents", []) if x["Key"].endswith("/data.jsonl")]
         if not keys:
             pytest.skip(
-                f"No silver/congress_data/bill/bill_chunks/*/data.jsonl in {bucket} — "
+                f"No silver/congress_data/bill/bill_chunks/*/data.jsonl in {cfg.bucket} — "
                 "materialize bronze+silver via `task dev` first"
             )
 
-        obj = s3.get_object(Bucket=bucket, Key=keys[0])
+        obj = s3.get_object(Bucket=cfg.bucket, Key=keys[0])
         lines = obj["Body"].read().decode().splitlines()
         records = [json.loads(ln) for ln in lines if ln.strip()]
         if not records:

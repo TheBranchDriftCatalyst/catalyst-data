@@ -13,7 +13,6 @@ Reads MinIO connection from the standard ``DAGSTER_S3_*`` env vars (matching
 
 from __future__ import annotations
 
-import os
 import struct
 import wave
 from io import BytesIO
@@ -142,12 +141,7 @@ LEAK_DOCS = [
 
 
 def main() -> None:
-    c = S3Client(
-        endpoint_url=os.environ.get("DAGSTER_S3_ENDPOINT_URL", "http://localhost:9000"),
-        access_key=os.environ.get("DAGSTER_S3_ACCESS_KEY", "minio"),
-        secret_key=os.environ.get("DAGSTER_S3_SECRET_KEY", "minio123"),
-        bucket=os.environ.get("DAGSTER_S3_BUCKET", "dagster"),
-    )
+    c = S3Client.from_env()
 
     fixtures: list[tuple[str, bytes]] = [
         # S3 Explorer fixtures (markdown / image / audio view-modes)
