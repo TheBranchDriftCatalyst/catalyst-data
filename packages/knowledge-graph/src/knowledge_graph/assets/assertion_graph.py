@@ -154,10 +154,12 @@ def assertion_graph(
         pg_count = graph_db.upsert_assertions(linked)
         context.log.info(f"Wrote {pg_count} assertions to PostgreSQL")
 
-        # Write fully-linked assertions to Neo4j as edges
-        fully_linked = [a for a in linked if a.get("subject_canonical_id") and a.get("object_canonical_id")]
-        neo4j_count = graph_db.sync_assertions_to_neo4j(fully_linked)
-        context.log.info(f"Wrote {neo4j_count} assertion edges to Neo4j")
+        # Write every assertion to Neo4j as a :Statement node carrying the
+        # AMR-rich fields (frame, polarity, modality, qualifiers, temporal
+        # validity). Fully-linked assertions also get a legacy :ASSERTS edge
+        # between Entity nodes — see ``sync_assertions_to_neo4j``.
+        neo4j_count = graph_db.sync_assertions_to_neo4j(linked)
+        context.log.info(f"Wrote {neo4j_count} Statement nodes to Neo4j")
 
         ASSET_RECORDS_PROCESSED.labels(
             code_location="knowledge_graph",

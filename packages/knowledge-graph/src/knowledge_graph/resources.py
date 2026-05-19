@@ -37,6 +37,22 @@ _ALIGNMENT_EDGES_MIGRATIONS: tuple[str, ...] = (
 )
 
 
+# Qualifier keys that the AMR projection promotes to first-class properties on
+# Statement nodes. Anything outside this set is kept inside the
+# ``qualifiers_json`` blob only (Neo4j has no native nested-map type).
+#
+# Lives at module scope rather than on ``GraphDBResource`` because pydantic's
+# ``ConfigurableResource`` treats leading-underscore tuple attributes as
+# ``ModelPrivateAttr`` instances, which can't be iterated at write time.
+PROMOTED_QUALIFIER_KEYS: tuple[str, ...] = (
+    "time",
+    "location",
+    "condition",
+    "manner",
+    "source_attribution",
+)
+
+
 def load_entity_overrides(pg_host: str, pg_port: int, pg_database: str, pg_user: str, pg_password: str) -> list[dict]:
     """Load active HITL entity alias overrides from PostgreSQL.
 
@@ -511,8 +527,89 @@ class GraphDBResource(ConfigurableResource):
         finally:
             driver.close()
 
+    @staticmethod
+    def _statement_props_from_assertion(a: dict[str, Any]) -> dict[str, Any]:
+        """Build the Statement-node property map from an Assertion dict.
+
+        Centralized so the per-call Cypher stays declarative and so tests can
+        assert against one well-defined shape.
+
+        Fields that are ``None`` are dropped — Neo4j stores absent properties
+        rather than nulls, and writing ``None`` would cause ``SET s.foo = null``
+        which deletes the property on existing nodes (surprising semantics for
+        a partial update).
+        """
+        polarity = a.get("polarity", True)
+        # Subject / object surface forms — keep the SPO view first-class on the
+        # Statement so consumers don't have to chase relationships for the
+        # human-readable labels.
+        raw: dict[str, Any] = {
+            "subject_text": a.get("subject_text"),
+            "predicate": a.get("predicate"),
+            "predicate_canonical": a.get("predicate_canonical"),
+            "object_text": a.get("object_text"),
+            # AMR provenance
+            "amr_frame": a.get("amr_frame"),
+            "amr_variable": a.get("amr_variable"),
+            "is_novel_predicate": a.get("is_novel_predicate", False),
+            # Modality + polarity
+            "polarity": polarity,
+            "modality": a.get("modality"),
+            "negated": a.get("negated", not polarity),
+            "hedged": a.get("hedged", False),
+            # Temporal validity
+            "t_valid_from": a.get("t_valid_from"),
+            "t_valid_until": a.get("t_valid_until"),
+            "is_atemporal": a.get("is_atemporal", False),
+            # Entity + mention pointers (kept as properties; relationship
+            # wiring is a downstream concern — see assertion_graph asset).
+            "subject_entity_id": a.get("subject_entity_id") or a.get("subject_canonical_id"),
+            "object_entity_id": a.get("object_entity_id") or a.get("object_canonical_id"),
+            "subject_mention_id": a.get("subject_mention_id"),
+            "object_mention_id": a.get("object_mention_id"),
+            # Provenance pointers
+            "sentence_index": a.get("sentence_index"),
+            "sentence_char_start": a.get("sentence_char_start"),
+            "sentence_char_end": a.get("sentence_char_end"),
+            "source_document_id": a.get("source_document_id"),
+            "chunk_id": a.get("chunk_id"),
+            "code_location": a.get("code_location"),
+            # Confidence
+            "confidence": a.get("confidence", 1.0),
+        }
+
+        # AMR role mapping — Neo4j won't store a nested dict directly, but the
+        # ARG → role mapping is small + flat strings, so JSON-encode it.
+        role_mapping = a.get("amr_role_mapping") or {}
+        if role_mapping:
+            raw["amr_role_mapping_json"] = json.dumps(role_mapping)
+
+        # Qualifiers — promote known keys to first-class props (queryable),
+        # and keep the full dict as a JSON blob (round-trip-safe).
+        qualifiers = a.get("qualifiers") or {}
+        if qualifiers:
+            raw["qualifiers_json"] = json.dumps(qualifiers)
+            for key in PROMOTED_QUALIFIER_KEYS:
+                if key in qualifiers:
+                    raw[f"qualifier_{key}"] = qualifiers[key]
+
+        # Drop ``None`` so we don't unset properties on re-runs.
+        return {k: v for k, v in raw.items() if v is not None}
+
     def sync_assertions_to_neo4j(self, assertions: list[dict[str, Any]]) -> int:
-        """Sync assertions to Neo4j as edges between entity nodes."""
+        """Sync assertions to Neo4j as :Statement nodes (+ optional :ASSERTS edges).
+
+        Each assertion produces a ``:Statement`` node keyed on ``assertion_id``
+        that carries the AMR-rich fields (frame, polarity, modality,
+        qualifiers, temporal validity, provenance pointers). When both subject
+        and object canonical entities are known, a legacy ``:ASSERTS``
+        relationship is also written for backward-compat with existing graph
+        queries.
+
+        Conditional labels:
+          * ``:Negated`` is applied when ``polarity == False``.
+          * ``:NovelPredicate`` is applied when ``is_novel_predicate == True``.
+        """
         if not assertions:
             return 0
         logger.info("Syncing %d assertions to Neo4j", len(assertions))
@@ -525,28 +622,50 @@ class GraphDBResource(ConfigurableResource):
             ):
                 with driver.session() as session:
                     for a in assertions:
-                        subj_id = a.get("subject_canonical_id")
-                        obj_id = a.get("object_canonical_id")
-                        if not subj_id or not obj_id:
-                            continue
+                        props = self._statement_props_from_assertion(a)
+                        # 1) MERGE the Statement node and apply conditional labels.
                         session.run(
                             """
-                        MATCH (s:Entity {canonical_id: $subj_id})
-                        MATCH (o:Entity {canonical_id: $obj_id})
-                        MERGE (s)-[r:ASSERTS {assertion_id: $assertion_id}]->(o)
-                        SET r.predicate = $predicate,
-                            r.confidence = $confidence,
-                            r.negated = $negated,
-                            r.hedged = $hedged
-                        """,
-                            subj_id=subj_id,
-                            obj_id=obj_id,
+                            MERGE (st:Statement {assertion_id: $assertion_id})
+                            SET st += $props
+                            WITH st, $polarity AS pol, $is_novel AS novel
+                            FOREACH (_ IN CASE WHEN pol = false THEN [1] ELSE [] END |
+                                SET st:Negated
+                            )
+                            FOREACH (_ IN CASE WHEN novel = true THEN [1] ELSE [] END |
+                                SET st:NovelPredicate
+                            )
+                            """,
                             assertion_id=a["assertion_id"],
-                            predicate=a.get("predicate_canonical", a["predicate"]),
-                            confidence=a.get("confidence", 1.0),
-                            negated=a.get("negated", False),
-                            hedged=a.get("hedged", False),
+                            props=props,
+                            polarity=a.get("polarity", True),
+                            is_novel=a.get("is_novel_predicate", False),
                         )
+
+                        # 2) Legacy :ASSERTS edge — only when both entity ids
+                        #    resolved. Skipped otherwise so partially-linked
+                        #    assertions still land as Statement nodes.
+                        subj_id = a.get("subject_canonical_id") or a.get("subject_entity_id")
+                        obj_id = a.get("object_canonical_id") or a.get("object_entity_id")
+                        if subj_id and obj_id:
+                            session.run(
+                                """
+                                MATCH (s:Entity {canonical_id: $subj_id})
+                                MATCH (o:Entity {canonical_id: $obj_id})
+                                MERGE (s)-[r:ASSERTS {assertion_id: $assertion_id}]->(o)
+                                SET r.predicate = $predicate,
+                                    r.confidence = $confidence,
+                                    r.negated = $negated,
+                                    r.hedged = $hedged
+                                """,
+                                subj_id=subj_id,
+                                obj_id=obj_id,
+                                assertion_id=a["assertion_id"],
+                                predicate=a.get("predicate_canonical", a["predicate"]),
+                                confidence=a.get("confidence", 1.0),
+                                negated=a.get("negated", not a.get("polarity", True)),
+                                hedged=a.get("hedged", False),
+                            )
                         count += 1
                 GRAPH_DB_OPERATIONS.labels(backend="neo4j", operation="sync_assertions").inc(count)
                 logger.info("Neo4j sync_assertions complete count=%d", count)
