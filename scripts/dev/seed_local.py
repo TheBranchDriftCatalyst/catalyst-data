@@ -398,7 +398,50 @@ def _seed_congress(limit: int, with_gold: bool, regen: bool) -> dict:
             print(f"  ✗ {bill_id}: {type(exc).__name__}: {exc}")
 
     if with_gold:
-        print("  --with-gold: congress gold-layer pass not yet implemented (TODO)")
+        # Gold-layer pass: AMR-as-spine extraction (bill_mentions + bill_assertions
+        # via the asset_factory multi_asset) PLUS the structured-projection
+        # stream (congress_structured_assertions, from Cosponsor + PublicLaw).
+        # Pass the real bronze/silver assets so Dagster knows their output
+        # types (TextChunk / Cosponsor / BillDetail); selection= restricts
+        # actual *execution* to the gold-layer ops, while the upstream assets
+        # are loaded from S3 via the IO manager (skipped, not recomputed).
+        from congress_data.assets.gold import bill_gold_assets
+        from congress_data.assets.structured_assertions import congress_structured_assertions
+
+        gold_materialized = 0
+        gold_errors = 0
+        for bill_id in selected:
+            try:
+                result = materialize(
+                    [
+                        *bill_gold_assets,
+                        congress_structured_assertions,
+                        bill_chunks,
+                        bill_cosponsors,
+                        bill_detail,
+                        bill_document,
+                        bill_full_text,
+                        bill_text_versions,
+                    ],
+                    resources=resources,
+                    partition_key=bill_id,
+                    instance=instance,
+                    selection=[
+                        "bill_mentions",
+                        "bill_assertions",
+                        "congress_structured_assertions",
+                    ],
+                )
+                if result.success:
+                    gold_materialized += 1
+                    print(f"  ✓ {bill_id}: bill_mentions + bill_assertions + structured_assertions materialized")
+                else:
+                    gold_errors += 1
+                    print(f"  ✗ {bill_id}: gold-layer materialize returned failure")
+            except Exception as exc:
+                gold_errors += 1
+                print(f"  ✗ {bill_id}: gold-layer {type(exc).__name__}: {exc}")
+        print(f"  gold-layer summary: {gold_materialized} ok, {gold_errors} errors")
 
     return {"materialized": materialized, "skipped": len(bills) - len(selected), "errors": errors}
 

@@ -192,18 +192,34 @@ def public_law_to_assertion(law: PublicLaw) -> Assertion:
 )
 def congress_structured_assertions(
     context: AssetExecutionContext,
-    bill_cosponsors: list[Cosponsor],
-    bill_detail: BillDetail,
+    bill_cosponsors: list,
+    bill_detail,
 ) -> Output[list[Assertion]]:
     """One row per cosponsor + optional PublicLaw row, all temporally
-    stamped from source date fields."""
-    assertions: list[Assertion] = [cosponsor_to_assertion(c) for c in bill_cosponsors]
+    stamped from source date fields.
+
+    Inputs are typed loosely (``list`` / no annotation) because the
+    AppendIOManager + JSON deserializer hand back dicts when no element
+    type-hint is available. We coerce both shapes back to the pydantic
+    models locally — keeps the asset robust to either bronze/silver
+    serialization path.
+    """
+    # Coerce dicts → pydantic objects when needed. The bronze-layer
+    # IO manager returns dicts for downstream loaders that didn't
+    # declare a typed AssetIn (which is most of the codepath).
+    cosponsors_typed: list[Cosponsor] = [
+        c if isinstance(c, Cosponsor) else Cosponsor(**c) for c in (bill_cosponsors or [])
+    ]
+    if not isinstance(bill_detail, BillDetail):
+        bill_detail = BillDetail(**bill_detail)
+
+    assertions: list[Assertion] = [cosponsor_to_assertion(c) for c in cosponsors_typed]
 
     public_law = PublicLaw.from_bill_detail(bill_detail)
     if public_law is not None:
         assertions.append(public_law_to_assertion(public_law))
 
-    n_cosponsors = len(bill_cosponsors)
+    n_cosponsors = len(cosponsors_typed)
     n_laws = 1 if public_law is not None else 0
     context.log.info(
         "congress_structured_assertions: %d cosponsors + %d laws = %d assertions",
