@@ -14,11 +14,27 @@ from dagster_k8s import k8s_job_executor
 
 
 def make_k8s_executor(code_location: str) -> ExecutorDefinition:
-    """Build a k8s_job_executor that spawns a pod per step.
+    """Build a k8s_job_executor that spawns a pod per step — falling back
+    to ``in_process_executor`` when the process isn't running inside a
+    k8s cluster.
 
     Use for code locations with GPU/heavy-compute steps (media-ingest).
-    Env vars are hardcoded from the code-server's os.environ at import time.
+    Env vars are hardcoded from the code-server's os.environ at import
+    time.
+
+    Host-mode detection: ``KUBERNETES_SERVICE_HOST`` is set by the
+    kubelet inside every pod; ``task dev`` on a developer's Mac never
+    sets it. When we can't see that env var, returning the in-process
+    executor avoids the ``kubernetes.config.load_incluster_config``
+    ConfigException ("Service host/port is not set") that
+    ``K8sStepHandler.__init__`` raises during every run's setup —
+    code-location import would succeed but every run would crash
+    before the first step.
     """
+    # In-cluster detection — fall back to in-process for host-mode dev.
+    if not os.environ.get("KUBERNETES_SERVICE_HOST"):
+        return in_process_executor
+
     # Build env list from code-server environment at import time.
     # These get injected into every step pod via container_config.env.
     env = [{"name": "DAGSTER_CODE_LOCATION", "value": code_location}]
