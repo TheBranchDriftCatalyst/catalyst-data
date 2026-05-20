@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import { Input, ScrollArea } from "@thebranchdriftcatalyst/catalyst-ui";
-import { Search, MessageSquareQuote, Layers, List } from "lucide-react";
+import { Search, MessageSquareQuote, Layers, List, Eye, EyeOff } from "lucide-react";
 import type { Assertion, AnnotationStatus } from "@/types/media";
 import { AssertionCard, AnnotationControls, type StatusFilter } from "./domain";
 import { lookupFrame } from "@/data/amrFrames";
@@ -18,6 +18,11 @@ interface AssertionPanelProps {
   onReject?: (targetId: string) => void;
   onBulkApprove?: (items: { targetType: "assertion"; targetId: string }[]) => void;
   onBulkReject?: (items: { targetType: "assertion"; targetId: string }[]) => void;
+  /** Start with the low-signal filter ON (hide rows where the frame
+   *  is NOVEL AND the subject is empty — pure AMR noise). Pass true
+   *  for the AMR-primitives tab; false (default) for the Record /
+   *  Claims tabs where every row is grounded. */
+  lowSignalDefault?: boolean;
   className?: string;
 }
 
@@ -38,6 +43,7 @@ export default function AssertionPanel({
   onReject,
   onBulkApprove,
   onBulkReject,
+  lowSignalDefault = false,
   className = "",
 }: AssertionPanelProps) {
   const [sortBy, setSortBy] = useState<SortField>("confidence");
@@ -46,12 +52,27 @@ export default function AssertionPanel({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [groupBy, setGroupBy] = useState<"none" | "frame">("none");
   const [collapsedFrames, setCollapsedFrames] = useState<Set<string>>(new Set());
+  // When lowSignalDefault is true, the filter starts active (hiding
+  // empty-subject + NOVEL rows). Reviewer toggles to "show all" to see
+  // the raw AMR output.
+  const [showLowSignal, setShowLowSignal] = useState(!lowSignalDefault);
 
   // Assertions with stable IDs
   const assertionsWithIds = useMemo(
     () => assertions.map((a, i) => ({ assertion: a, targetId: assertionTargetId(a, i) })),
     [assertions],
   );
+
+  /** A row is "low-signal" when the AMR projection produced a NOVEL
+   *  frame AND failed to resolve any subject — pure noise from a
+   *  reviewer's standpoint. One-axis-bad rows (named subject + novel
+   *  frame, or known frame + empty subject) are kept because they're
+   *  often the actual interesting cases. */
+  const isLowSignal = useCallback((a: Assertion) => {
+    const novelFrame = a.is_novel_predicate;
+    const emptySubject = !a.subject_text || a.subject_text.trim() === "";
+    return novelFrame && emptySubject;
+  }, []);
 
   // Apply text filter, status filter, and sort
   const sorted = useMemo(() => {
@@ -69,6 +90,10 @@ export default function AssertionPanel({
 
     if (statusFilter !== "all" && getStatus) {
       filtered = filtered.filter(({ targetId }) => getStatus(targetId) === statusFilter);
+    }
+
+    if (!showLowSignal) {
+      filtered = filtered.filter(({ assertion: a }) => !isLowSignal(a));
     }
 
     return [...filtered].sort((a, b) => {
@@ -89,7 +114,24 @@ export default function AssertionPanel({
       }
       return sortAsc ? cmp : -cmp;
     });
-  }, [assertionsWithIds, sortBy, sortAsc, filterText, statusFilter, getStatus]);
+  }, [
+    assertionsWithIds,
+    sortBy,
+    sortAsc,
+    filterText,
+    statusFilter,
+    getStatus,
+    showLowSignal,
+    isLowSignal,
+  ]);
+
+  // Count of low-signal rows actually present (regardless of toggle
+  // state) so the footer can show "(N low-signal hidden)" when the
+  // filter is active.
+  const lowSignalCount = useMemo(
+    () => assertions.filter(isLowSignal).length,
+    [assertions, isLowSignal],
+  );
 
   // Visible target IDs for bulk actions
   const visibleTargetIds = useMemo(() => sorted.map((s) => s.targetId), [sorted]);
@@ -192,10 +234,40 @@ export default function AssertionPanel({
         >
           Predicate{sortIcon("predicate")}
         </button>
+        {/* Low-signal toggle — only meaningful when there ARE
+            low-signal rows in the input. Renders muted otherwise. */}
+        {lowSignalCount > 0 && (
+          <button
+            className={cn(
+              "ml-auto inline-flex items-center gap-1 transition-colors",
+              showLowSignal ? "text-amber-300" : "text-zinc-500 hover:text-zinc-300",
+            )}
+            title={
+              showLowSignal
+                ? `Hide ${lowSignalCount} low-signal rows (NOVEL frame + empty subject)`
+                : `Show ${lowSignalCount} low-signal rows currently hidden`
+            }
+            data-testid="assertion-low-signal-toggle"
+            onClick={() => setShowLowSignal((v) => !v)}
+          >
+            {showLowSignal ? (
+              <>
+                <Eye className="h-3 w-3" />
+                showing noise
+              </>
+            ) : (
+              <>
+                <EyeOff className="h-3 w-3" />
+                hiding {lowSignalCount}
+              </>
+            )}
+          </button>
+        )}
         {/* Group-by toggle — current state acts as the button label */}
         <button
           className={cn(
-            "ml-auto inline-flex items-center gap-1 transition-colors",
+            "inline-flex items-center gap-1 transition-colors",
+            lowSignalCount > 0 ? "" : "ml-auto",
             groupBy === "frame" ? "text-violet-300" : "text-zinc-500 hover:text-zinc-300",
           )}
           title={groupBy === "frame" ? "Switch to flat view" : "Group by AMR frame (collapsible)"}
@@ -278,6 +350,9 @@ export default function AssertionPanel({
       {/* Summary footer */}
       <div className="px-3 py-2 text-[10px] text-zinc-600 border-t border-white/5 flex-shrink-0">
         {sorted.length} of {assertions.length} assertions
+        {!showLowSignal && lowSignalCount > 0 && (
+          <span className="text-amber-500/70"> · {lowSignalCount} low-signal hidden</span>
+        )}
       </div>
     </div>
   );

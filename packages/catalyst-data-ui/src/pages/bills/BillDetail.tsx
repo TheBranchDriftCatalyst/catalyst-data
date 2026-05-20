@@ -13,6 +13,9 @@ import {
   Database,
   ExternalLink,
   AlertCircle,
+  Info,
+  Layers,
+  Sparkles,
 } from "lucide-react";
 import {
   Badge,
@@ -205,23 +208,26 @@ export default function BillDetail() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <Tabs defaultValue="overview" className="flex-1">
+        {/* Tabs — order reflects trust-level + what a reader wants
+            first: record facts (deterministic) → claims (LLM-
+            synthesised) → AMR primitives (debug surface) → chunks. */}
+        <Tabs defaultValue="record" className="flex-1">
           <TabsList className="border-b border-white/5 bg-transparent rounded-none p-0 h-auto justify-start">
             <TabTrigger value="overview" icon={FileText} label="Overview" />
             <TabTrigger
-              value="assertions"
-              icon={MessageSquareQuote}
-              label="Assertions"
-              count={assertions.length}
-              loading={assertionsQuery.isLoading}
-            />
-            <TabTrigger
-              value="structured"
+              value="record"
               icon={Scale}
-              label="Structured"
+              label="Record"
               count={structured.length}
               loading={structuredQuery.isLoading}
+            />
+            <TabTrigger value="claims" icon={MessageSquareQuote} label="Claims" count={0} />
+            <TabTrigger
+              value="primitives"
+              icon={Layers}
+              label="AMR primitives"
+              count={assertions.length}
+              loading={assertionsQuery.isLoading}
             />
             <TabTrigger
               value="chunks"
@@ -236,11 +242,12 @@ export default function BillDetail() {
             <OverviewTab content={bill.content ?? ""} sections={bill.sections ?? {}} />
           </TabsContent>
 
-          <TabsContent value="assertions" className="mt-4">
+          <TabsContent value="record" className="mt-4 space-y-2">
+            <TabHelp text="Facts about the bill record: sponsorship, dates, became-law status. Deterministic projection from congress.gov — these should be ~100% accurate." />
             <Card interactive={false}>
               <CardContent className="p-0">
                 <AssertionPanel
-                  assertions={assertions}
+                  assertions={structured}
                   onAssertionSelect={handleAssertionSelect}
                   selectedAssertionId={selectedAssertionId}
                   className="max-h-[600px]"
@@ -249,13 +256,20 @@ export default function BillDetail() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="structured" className="mt-4">
+          <TabsContent value="claims" className="mt-4 space-y-2">
+            <TabHelp text="What the bill says: high-level legal claims synthesised by the LLM against a closed predicate vocab (requires, prohibits, defines, …). Primary content view." />
+            <ClaimsPlaceholder />
+          </TabsContent>
+
+          <TabsContent value="primitives" className="mt-4 space-y-2">
+            <TabHelp text="Raw PropBank frames the AMR parser found in the bill text. Noisy — empty-subject + NOVEL rows hidden by default. Use as supporting evidence for synthesised claims." />
             <Card interactive={false}>
               <CardContent className="p-0">
                 <AssertionPanel
-                  assertions={structured}
+                  assertions={assertions}
                   onAssertionSelect={handleAssertionSelect}
                   selectedAssertionId={selectedAssertionId}
+                  lowSignalDefault
                   className="max-h-[600px]"
                 />
               </CardContent>
@@ -401,6 +415,35 @@ function ChunksTab({
         );
       })}
     </>
+  );
+}
+
+function TabHelp({ text }: { text: string }) {
+  return (
+    <div className="flex items-start gap-2 px-3 py-1.5 text-[10px] text-zinc-500 italic leading-relaxed">
+      <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function ClaimsPlaceholder() {
+  return (
+    <Card interactive={false}>
+      <CardContent className="py-10 flex flex-col items-center text-center gap-3">
+        <div className="rounded-full bg-violet-950/40 p-3">
+          <Sparkles className="h-5 w-5 text-violet-300" />
+        </div>
+        <h3 className="text-sm font-medium text-zinc-200">No synthesised claims yet</h3>
+        <p className="text-xs text-zinc-500 max-w-md leading-relaxed">
+          The <span className="font-mono text-zinc-400">bill_claims</span> Dagster asset hasn't been
+          materialised for this partition. Run it to produce a handful of high-level legal claims
+          composed from the AMR primitives + bill text. See the{" "}
+          <span className="font-mono text-zinc-400">AMR primitives</span> tab for the raw input the
+          synthesis step would consume.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
