@@ -4,23 +4,24 @@ import os
 
 from dagster import Config
 
+from dagster_io.paths import METUBE_DIR, TUBESYNC_DIR
+
 
 class MediaIngestConfig(Config):
     """Runtime configuration for media file processing.
 
-    Defaults match the prod talos00 deployment (NFS volumes at
-    ``/data/metube`` + ``/data/tubesync``). For local dev the per-asset
-    Config defaults can be overridden via Dagster run config OR — for
-    the discovery roots — via the ``CATALYST_MEDIA_ROOT_METUBE`` /
-    ``CATALYST_MEDIA_ROOT_TUBESYNC`` env vars (same convention the
-    viewer-api uses at media-ingest/viewer/routes/media.py:32 — keeps
-    the path source-of-truth in one place across the two services).
+    Filesystem paths derive from ``CATALYST_DATA_ROOT`` (see
+    ``dagster_io.paths``). Same layout prod and dev — only the root
+    differs (``/data`` in k8s, ``$PROJECT_DIR/.dev-data`` on the host
+    via Tilt).
     """
 
-    metube_path: str = os.environ.get("CATALYST_MEDIA_ROOT_METUBE", "/data/metube")
-    tubesync_path: str = os.environ.get("CATALYST_MEDIA_ROOT_TUBESYNC", "/data/tubesync")
+    metube_path: str = METUBE_DIR
+    tubesync_path: str = TUBESYNC_DIR
     extensions: str = ".mp4,.mkv,.webm,.mp3,.m4a,.wav,.flac"
-    whisper_backend: str = "openvino"  # faster-whisper (CPU) | openvino (Intel GPU) | mlx-whisper (Apple Silicon Metal)
+    whisper_backend: str = os.environ.get(
+        "WHISPER_BACKEND", "openvino"
+    )  # faster-whisper (CPU) | openvino (Intel GPU) | mlx-whisper (Apple Silicon Metal)
     whisper_model: str = "large-v3"
     whisper_device: str = "auto"
     whisper_compute_type: str = "int8"

@@ -20,6 +20,7 @@ from dagster_io import SpeakerEmbedding
 from dagster_io.logging import get_logger
 from dagster_io.metrics import ASSET_RECORDS_PROCESSED, MODEL_LOAD_DURATION
 from dagster_io.observability import get_tracer, trace_operation
+from dagster_io.paths import WHISPER_MODEL_CACHE
 from media_ingest.assets.diarization import DIARIZATION_K8S_CONFIG
 from media_ingest.assets.transcription import extract_audio_to_wav
 from media_ingest.partitions import media_partitions
@@ -44,7 +45,7 @@ def _load_embedding_model():
     from dagster_io.model_cache import cached_model_path
 
     # Use node-local cache for HuggingFace model downloads
-    local_cache = cached_model_path("/data/whisper-models")
+    local_cache = cached_model_path(WHISPER_MODEL_CACHE)
     os.environ.setdefault("HF_HOME", local_cache)
 
     t0 = time.monotonic()

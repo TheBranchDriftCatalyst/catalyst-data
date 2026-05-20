@@ -108,7 +108,10 @@ def extract_validated(
 
     from dagster_io.prompts import resolve_prompt_dir
 
-    prompt_dir = resolve_prompt_dir()
+    # code_location uses snake_case (``media_ingest``) but the k8s
+    # ConfigMap dirs are kebab-cased (``media-ingest``) — translate so
+    # the per-domain fallback in resolve_prompt_dir can find them.
+    prompt_dir = resolve_prompt_dir(domain=code_location.replace("_", "-"))
     label_pack_id = resolve_label_pack(code_location)
     ner_model = os.environ.get("LLM_MODEL", "gliner")
 

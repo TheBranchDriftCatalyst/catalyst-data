@@ -45,6 +45,12 @@ k8s/local/*.env
 !k8s/local/*.env.example
 k8s/local/dagster-dev-secrets.yaml
 !k8s/local/dagster-dev-secrets.yaml.example
+
+# Local dev mirror of the prod NFS data root (see CATALYST_DATA_ROOT).
+# Tilt provisions this with symlinks to test fixtures + a writable
+# whisper model cache.
+.dev-data/
+
 .coverage
 *.executed.ipynb
 .DS_Store

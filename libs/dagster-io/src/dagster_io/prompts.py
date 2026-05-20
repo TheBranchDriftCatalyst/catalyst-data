@@ -34,11 +34,16 @@ def resolve_prompt_dir(
     """Return the prompt-registry directory for the active deployment.
 
     Resolution precedence:
-      1. ``PROMPT_REGISTRY_DIR`` env var (set by k8s deployments and the
-         seed/bench Taskfile entries that need an explicit override).
-      2. ``domain``-specific bundled prompts at
+      1. ``domain``-specific bundled prompts at
          ``k8s/base/<domain>/prompts`` — e.g. ``congress-data``,
-         ``media-ingest``. This is the layout the prod ConfigMaps mount.
+         ``media-ingest``. When this exists, it wins: in dev the three
+         code locations share one process so a single env var can't
+         serve them, and in prod the containerised code locations don't
+         carry the source tree at ``/app/prompts`` so this branch is a
+         no-op and the env (step 2) wins instead.
+      2. ``PROMPT_REGISTRY_DIR`` env var (set by per-domain k8s
+         containers and Taskfile entries that need an explicit
+         override).
       3. ``k8s/shared/prompts`` (the cross-domain registry) when no
          domain is specified.
       4. ``fallback`` when provided, else empty string.
@@ -48,13 +53,13 @@ def resolve_prompt_dir(
         resolves and no fallback is given — same contract the legacy
         ``os.environ.get(..., "")`` call sites already handle.
     """
-    env_dir = os.environ.get("PROMPT_REGISTRY_DIR")
-    if env_dir:
-        return env_dir
     if domain:
         candidate = _repo_root() / "k8s" / "base" / domain / "prompts"
         if candidate.is_dir():
             return str(candidate)
+    env_dir = os.environ.get("PROMPT_REGISTRY_DIR")
+    if env_dir:
+        return env_dir
     shared = _repo_root() / "k8s" / "shared" / "prompts"
     if shared.is_dir():
         return str(shared)

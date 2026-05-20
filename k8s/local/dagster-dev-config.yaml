@@ -32,21 +32,19 @@ data:
   DAGSTER_S3_SECRET_KEY: "minio123"
   DAGSTER_S3_BUCKET: "dagster"
 
-  # ── Media discovery — bundle fixtures instead of NFS mount ─────
-  # MediaIngestConfig.metube_path / tubesync_path read these at
-  # class-definition time. The viewer-api uses the same env names at
-  # media-ingest/src/.../viewer/routes/media.py:32 — keeps the path
-  # source-of-truth in one place across services.
-  # NOTE: Tiltfile resolves the relative path against config.main_dir
-  # at load time so the absolute path is what ends up in serve_env.
-  CATALYST_MEDIA_ROOT_METUBE: "packages/media-ingest/tests/fixtures"
-  CATALYST_MEDIA_ROOT_TUBESYNC: "packages/media-ingest/tests/fixtures"
+  # ── Catalyst data root ─────────────────────────────────────────
+  # Single switch that mirrors the prod NFS layout on the dev host.
+  # Prod: CATALYST_DATA_ROOT=/data (NFS PVC); dev: a writable local
+  # mirror with the same {metube,tubesync,whisper-models} subdirs.
+  # Tilt resolves this relative path to absolute and provisions the
+  # subdirs (symlinking test fixtures into metube/tubesync) at startup.
+  CATALYST_DATA_ROOT: ".dev-data"
 
-  # ── Prompt registry (AMR label packs + LLM prompts) ───────────
-  # ExtractionResource looks up label packs at <PROMPT_REGISTRY_DIR>/<pack>/.
-  # The Tiltfile resolves this relative path against PROJECT_DIR before
-  # piping to serve_env, same pattern as the media discovery roots.
-  PROMPT_REGISTRY_DIR: "k8s/base/congress-data/prompts"
+  # ── Prompt registry ────────────────────────────────────────────
+  # No PROMPT_REGISTRY_DIR here — in prod each container sets its own
+  # (one container = one domain). Dev runs all three code locations
+  # in one process; resolve_prompt_dir() falls back to
+  # k8s/base/<domain>/prompts per call via the domain argument.
 
   # ── Whisper backend — Mac default ──────────────────────────────
   # talos uses openvino (Intel GPU); on Apple Silicon prefer

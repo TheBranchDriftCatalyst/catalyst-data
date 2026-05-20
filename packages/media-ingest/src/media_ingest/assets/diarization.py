@@ -21,6 +21,7 @@ from dagster_io.metrics import (
     DIARIZATION_REALTIME_FACTOR,
 )
 from dagster_io.observability import get_tracer, trace_operation
+from dagster_io.paths import WHISPER_MODEL_CACHE
 from media_ingest.assets.discovery import NFS_VOLUMES_CONFIG
 from media_ingest.assets.transcription import extract_audio_to_wav
 from media_ingest.config import MediaIngestConfig
@@ -28,8 +29,6 @@ from media_ingest.partitions import media_partitions
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
-
-WHISPER_MODEL_CACHE = os.environ.get("WHISPER_MODEL_CACHE", "/data/whisper-models")
 
 # Diarization runs on Intel XPU (GPU) when available, needs HF token
 DIARIZATION_K8S_CONFIG = {

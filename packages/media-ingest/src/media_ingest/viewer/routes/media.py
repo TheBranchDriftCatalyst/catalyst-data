@@ -24,13 +24,15 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/viewer/media", tags=["viewer-media"])
 
-# Allowed NFS source roots. In dev (no NFS mount) the seed sets
-# CATALYST_MEDIA_ROOT_METUBE to the fixture dir so the same source path
-# convention (`/data/metube/<file>` in the document model) resolves to
-# the on-disk mp4 without the SPA needing to know about the override.
+# Allowed NFS source roots. Both prod and dev use the same layout
+# under ``CATALYST_DATA_ROOT``; in dev Tilt symlinks the test fixtures
+# into ``$PROJECT_DIR/.dev-data/metube`` (and tubesync) so the same
+# ``/data/metube/<file>`` source-path convention resolves locally.
+from dagster_io.paths import METUBE_DIR, TUBESYNC_DIR
+
 _MEDIA_ROOTS: dict[str, str] = {
-    "metube": os.environ.get("CATALYST_MEDIA_ROOT_METUBE", "/data/metube"),
-    "tubesync": os.environ.get("CATALYST_MEDIA_ROOT_TUBESYNC", "/data/tubesync"),
+    "metube": METUBE_DIR,
+    "tubesync": TUBESYNC_DIR,
 }
 
 # Supported media extensions

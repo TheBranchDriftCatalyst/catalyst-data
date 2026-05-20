@@ -1,4 +1,4 @@
-# Tiltfile — Catalyst Data dev mode (single S3 backend, local MinIO container)
+# Tiltfile — Catalyst Data dev mode (single S3 backend, local MinIO container).
 #
 # Usage:
 #   tilt up                    # local dev (this file — default)
@@ -164,13 +164,28 @@ else:
     print('WARN: {} missing — copy {}.example and fill in. Runs that hit LLM / Congress / HF APIs will fail until you do.'.format(_secrets_path, _secrets_path))
     _dagster_dev_secrets = {}
 
-# Resolve relative paths in the ConfigMap (e.g. CATALYST_MEDIA_ROOT_METUBE
-# is checked-in as ``packages/media-ingest/tests/fixtures`` — relative to
-# the repo root). Promote to absolute before piping to serve_env.
-for _rel_var in ('CATALYST_MEDIA_ROOT_METUBE', 'CATALYST_MEDIA_ROOT_TUBESYNC', 'PROMPT_REGISTRY_DIR'):
+# Resolve relative paths in the ConfigMap (e.g. CATALYST_DATA_ROOT is
+# checked-in as ``.dev-data`` — relative to the project root). Promote
+# to absolute before piping to serve_env.
+for _rel_var in ('CATALYST_DATA_ROOT',):
     _val = _dagster_dev_config.get(_rel_var)
     if _val and not _val.startswith('/'):
         _dagster_dev_config[_rel_var] = os.path.join(PROJECT_DIR, _val)
+
+# Provision the dev mirror of the prod NFS layout under CATALYST_DATA_ROOT:
+#   .dev-data/metube         → symlink to packages/media-ingest/tests/fixtures
+#   .dev-data/tubesync       → symlink to packages/media-ingest/tests/fixtures
+#   .dev-data/whisper-models → writable dir for HF/faster-whisper downloads
+# Idempotent: rerun-safe; only creates what's missing.
+_data_root = _dagster_dev_config.get('CATALYST_DATA_ROOT')
+if _data_root:
+    _fixtures = os.path.join(PROJECT_DIR, 'packages/media-ingest/tests/fixtures')
+    local(
+        'mkdir -p "{root}/whisper-models" && '
+        'ln -sfn "{fixtures}" "{root}/metube" && '
+        'ln -sfn "{fixtures}" "{root}/tubesync"'.format(root=_data_root, fixtures=_fixtures),
+        quiet=True,
+    )
 
 # Default EMBEDDING_BASE_URL to LLM_BASE_URL when absent (config-side
 # convenience — the Definitions in media_ingest/__init__.py reads both).

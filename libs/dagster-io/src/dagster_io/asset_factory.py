@@ -33,6 +33,7 @@ from dagster import (
 )
 
 from dagster_io.asset_factories import LLM_ASSET_K8S_CONFIG
+from dagster_io.chunking import TextChunk
 from dagster_io.extraction import extract_validated
 from dagster_io.llm import EmbeddingResource
 from dagster_io.logging import get_logger
@@ -115,7 +116,7 @@ def extraction_assets(config: PipelineConfig) -> list[AssetsDefinition]:
     )
     def _extraction_multi_asset(
         context: AssetExecutionContext,
-        chunks: list,
+        chunks: list[TextChunk],
     ):
         chunk_count = len(chunks)
         partition_key = context.partition_key if _cfg.partitions_def else None
@@ -231,7 +232,7 @@ def extraction_assets(config: PipelineConfig) -> list[AssetsDefinition]:
         def _embedding_asset(
             context: AssetExecutionContext,
             embeddings: EmbeddingResource,
-            chunks: list,
+            chunks: list[TextChunk],
         ) -> Output[list[dict[str, Any]]]:
             chunk_count = len(chunks)
             partition_key = context.partition_key if _cfg.partitions_def else None

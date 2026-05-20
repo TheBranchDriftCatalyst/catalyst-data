@@ -43,12 +43,14 @@ CHUNKS_PREFIX = f"{_GOLD_PREFIX}/media_chunks"
 MENTIONS_PREFIX = f"{_GOLD_PREFIX}/media_mentions"
 ASSERTIONS_PREFIX = f"{_GOLD_PREFIX}/media_assertions"
 
-# NFS media source roots (overridable via env for dev — see
-# packages/media-ingest/src/media_ingest/viewer/routes/media.py for the
-# matching pair that serves the bytes).
+# Media source roots — derive from the single ``CATALYST_DATA_ROOT``
+# knob (see ``dagster_io.paths``). Same in prod and dev, only the root
+# differs.
+from dagster_io.paths import METUBE_DIR, TUBESYNC_DIR
+
 _MEDIA_ROOTS: dict[str, str] = {
-    "metube": os.environ.get("CATALYST_MEDIA_ROOT_METUBE", "/data/metube"),
-    "tubesync": os.environ.get("CATALYST_MEDIA_ROOT_TUBESYNC", "/data/tubesync"),
+    "metube": METUBE_DIR,
+    "tubesync": TUBESYNC_DIR,
 }
 
 
