@@ -11,21 +11,51 @@ Adding a new domain is one entry in ``DOMAINS`` below.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import APIRouter, HTTPException
 
 from dagster_io.logging import get_logger
 from media_ingest.viewer.services.documents_service import DocumentsService
+from media_ingest.viewer.services.partitioned_assets import PartitionedAssetService
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class PartitionedAssetSpec:
+    """One partitioned asset exposed under the per-domain partitioned-resource
+    route (e.g. ``/viewer/api/congress/bills/<partition>/<name>``).
+
+    ``name`` is both the URL segment and the JSON key on the combined detail
+    response. ``layer`` × ``asset`` × ``group`` × ``code_location`` resolve
+    to the S3 prefix. ``format`` picks the on-disk reader (jsonl | json |
+    events). One spec per domain should be marked ``is_primary`` — the
+    factory uses that one to enumerate partitions for the list endpoint.
+    """
+
+    name: str
+    layer: str  # bronze | silver | gold | platinum
+    asset: str
+    group: str | None = None  # falls back to DomainConfig.group when None
+    code_location: str | None = None  # falls back to DomainConfig.code_location
+    format: str = "jsonl"  # jsonl | json | events
+    is_primary: bool = False
 
 
 @dataclass(frozen=True)
 class DomainConfig:
     """One row in the domain registry. Keep this lean — domain-specific
     enrichment (e.g. media's media_url + thumbnail_url) plugs in via the
-    optional ``enrich`` callback so we don't pollute the generic shape."""
+    optional ``enrich`` callback so we don't pollute the generic shape.
+
+    ``partitioned`` enables the richer per-partition viewer surface for
+    domains where one "document" really means one Dagster partition (e.g.
+    a congress bill keyed by ``{congress}-{bill_type}-{number}``). The
+    factory mounts ``/viewer/api/<slug>/<partitioned_resource>`` for the
+    partition list and ``/viewer/api/<slug>/<partitioned_resource>/<key>/<spec.name>``
+    for each individual asset payload.
+    """
 
     slug: str  # URL slug used in /viewer/api/<slug>/documents
     code_location: str
@@ -33,10 +63,19 @@ class DomainConfig:
     asset: str = "documents"
     label: str = ""  # human-readable; defaults to slug when empty
     enrich: Callable[[dict], dict] | None = None
+    partitioned: tuple[PartitionedAssetSpec, ...] = field(default_factory=tuple)
+    # URL segment for the partitioned-resource route ("bills", "videos",
+    # etc.). Empty string disables the partitioned surface for this domain.
+    partitioned_resource: str = ""
 
 
 # Per-process service cache so each domain's S3DataService is built once.
 _services: dict[str, DocumentsService] = {}
+
+# Cache of PartitionedAssetService instances, keyed by (slug, spec.name).
+# Each spec maps to one service that knows how to list partitions + load
+# a single partition's payload for that asset.
+_partitioned_services: dict[tuple[str, str], PartitionedAssetService] = {}
 
 
 def _service(cfg: DomainConfig) -> DocumentsService:
@@ -47,8 +86,42 @@ def _service(cfg: DomainConfig) -> DocumentsService:
     return svc
 
 
+def _partitioned_service(cfg: DomainConfig, spec: PartitionedAssetSpec) -> PartitionedAssetService:
+    key = (cfg.slug, spec.name)
+    svc = _partitioned_services.get(key)
+    if svc is None:
+        svc = PartitionedAssetService(
+            layer=spec.layer,
+            code_location=spec.code_location or cfg.code_location,
+            group=spec.group or cfg.group,
+            asset=spec.asset,
+            format=spec.format,
+        )
+        _partitioned_services[key] = svc
+    return svc
+
+
+def _spec_by_name(cfg: DomainConfig, name: str) -> PartitionedAssetSpec | None:
+    for spec in cfg.partitioned:
+        if spec.name == name:
+            return spec
+    return None
+
+
+def _primary_spec(cfg: DomainConfig) -> PartitionedAssetSpec | None:
+    for spec in cfg.partitioned:
+        if spec.is_primary:
+            return spec
+    return cfg.partitioned[0] if cfg.partitioned else None
+
+
 def make_documents_router(cfg: DomainConfig) -> APIRouter:
-    """Build a FastAPI router for one domain's generic document endpoints."""
+    """Build a FastAPI router for one domain's document endpoints.
+
+    Always mounts the generic ``/documents`` list+detail surface. When
+    ``cfg.partitioned`` is non-empty, additionally mounts the
+    partitioned-resource surface at ``/<cfg.partitioned_resource>``.
+    """
     router = APIRouter(prefix=f"/viewer/api/{cfg.slug}", tags=[f"{cfg.slug}-documents"])
 
     @router.get("/documents")
@@ -72,7 +145,96 @@ def make_documents_router(cfg: DomainConfig) -> APIRouter:
             doc = cfg.enrich(doc)
         return doc
 
+    # ── Partitioned-resource surface (e.g. /viewer/api/congress/bills) ──
+    if cfg.partitioned and cfg.partitioned_resource:
+        _mount_partitioned_routes(router, cfg)
+
     return router
+
+
+def _mount_partitioned_routes(router: APIRouter, cfg: DomainConfig) -> None:
+    """Mount the bill-list + per-partition asset routes for one domain.
+
+    Endpoints (with ``resource = cfg.partitioned_resource``):
+
+    - ``GET /<resource>`` — partition keys + a summary dict per partition,
+      sourced from the primary spec's ``data.json`` (silver bill_document
+      for congress). Light-touch — fetches one ``data.json`` per partition
+      but the underlying service caches for 60s.
+    - ``GET /<resource>/{partition}`` — full detail = the primary spec's
+      payload (the silver document itself).
+    - ``GET /<resource>/{partition}/<spec.name>`` — that spec's payload.
+    """
+    resource = cfg.partitioned_resource
+    primary = _primary_spec(cfg)
+    if primary is None:
+        return
+
+    @router.get(f"/{resource}")
+    def list_partitions() -> list[dict]:
+        svc = _partitioned_service(cfg, primary)
+        partitions = svc.list_partitions()
+        summaries: list[dict] = []
+        for pkey in partitions:
+            row: dict = {"partition": pkey}
+            if primary.format == "json":
+                # Fold the primary doc directly into the row so consumers
+                # see title/metadata without a second roundtrip.
+                payload = svc.load(pkey)
+                if isinstance(payload, dict):
+                    row.update(
+                        {
+                            "title": payload.get("title"),
+                            "metadata": payload.get("metadata", {}),
+                            "domain": payload.get("domain"),
+                            "document_type": payload.get("document_type"),
+                            "source": payload.get("source"),
+                        }
+                    )
+            summaries.append(row)
+        return summaries
+
+    @router.get(f"/{resource}/{{partition}}")
+    def get_partition_detail(partition: str) -> dict:
+        svc = _partitioned_service(cfg, primary)
+        payload = svc.load(partition)
+        if payload is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(f"Partition '{partition}' not found in {cfg.slug}/{resource} ({primary.asset})"),
+            )
+        if isinstance(payload, dict):
+            return {"partition": partition, **payload}
+        # Primary should be a single dict (json). Fall back to wrapping.
+        return {"partition": partition, "rows": payload}
+
+    @router.get(f"/{resource}/{{partition}}/{{name}}")
+    def get_partition_asset(partition: str, name: str) -> dict:
+        spec = _spec_by_name(cfg, name)
+        if spec is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Unknown asset '{name}' for {cfg.slug}/{resource}. Available: {[s.name for s in cfg.partitioned]}"
+                ),
+            )
+        svc = _partitioned_service(cfg, spec)
+        payload = svc.load(partition)
+        # Always wrap so the response shape is predictable per asset format.
+        if spec.format == "json":
+            if not isinstance(payload, dict):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No {name} data for partition '{partition}'",
+                )
+            return {"partition": partition, "asset": name, "data": payload}
+        rows = payload if isinstance(payload, list) else []
+        return {
+            "partition": partition,
+            "asset": name,
+            "count": len(rows),
+            "rows": rows,
+        }
 
 
 domains_registry_router = APIRouter(prefix="/viewer/api/domains", tags=["domains"])
@@ -151,6 +313,50 @@ DOMAINS: list[DomainConfig] = [
         group="congress",
         asset="congress_documents",
         label="congress-wtf",
+        partitioned_resource="bills",
+        partitioned=(
+            # Primary: the silver per-bill document drives partition
+            # enumeration + provides title/metadata for the list view.
+            PartitionedAssetSpec(
+                name="detail",
+                layer="silver",
+                asset="bill_document",
+                group="bill",
+                format="json",
+                is_primary=True,
+            ),
+            PartitionedAssetSpec(
+                name="chunks",
+                layer="silver",
+                asset="bill_chunks",
+                group="bill",
+                format="jsonl",
+            ),
+            PartitionedAssetSpec(
+                name="assertions",
+                layer="gold",
+                asset="bill_assertions",
+                group="bill",
+                format="jsonl",
+            ),
+            PartitionedAssetSpec(
+                name="mentions",
+                layer="gold",
+                asset="bill_mentions",
+                group="bill",
+                format="jsonl",
+            ),
+            # Structured assertions (cosponsor dates, public-law signed
+            # dates) live under the ``congress`` group, NOT ``bill`` —
+            # the override on ``group`` keeps the prefix correct.
+            PartitionedAssetSpec(
+                name="structured",
+                layer="gold",
+                asset="congress_structured_assertions",
+                group="congress",
+                format="events",
+            ),
+        ),
     ),
     DomainConfig(
         slug="leaks",
