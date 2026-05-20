@@ -84,7 +84,9 @@ export default function DetailsPanel() {
 
       <ScrollArea className="flex-1">
         <div className="p-3">
-          {selection.kind === "assertion" && <AssertionDetails assertion={selection.assertion} />}
+          {selection.kind === "assertion" && (
+            <AssertionDetails assertion={selection.assertion} chunks={selection.context?.chunks} />
+          )}
           {selection.kind === "mention" && <MentionDetails mention={selection.mention} />}
           {selection.kind === "chunk" && <ChunkDetails chunk={selection.chunk} />}
         </div>
@@ -95,7 +97,7 @@ export default function DetailsPanel() {
 
 // ── Assertion drilldown ─────────────────────────────────────────────────────
 
-function AssertionDetails({ assertion }: { assertion: Assertion }) {
+function AssertionDetails({ assertion, chunks }: { assertion: Assertion; chunks?: BillChunk[] }) {
   // Frame lookup — prefer the explicit AMR frame, fall back to the
   // predicate so structured assertions (co_sponsors, member_of) still
   // get a gloss from our domain dictionary.
@@ -103,6 +105,13 @@ function AssertionDetails({ assertion }: { assertion: Assertion }) {
   const method: MethodDisplay =
     METHOD_DISPLAY[assertion.provenance?.extraction_method ?? ""] ?? FALLBACK_METHOD;
   const MethodIcon = method.icon;
+
+  // Source chunk + highlighted sentence (only when both the chunks
+  // list AND the assertion's provenance pointer are present).
+  const sourceChunk =
+    chunks && assertion.provenance?.chunk_id
+      ? chunks.find((c) => c.chunk_id === assertion.provenance.chunk_id)
+      : null;
 
   return (
     <div className="space-y-4 text-xs">
@@ -267,6 +276,18 @@ function AssertionDetails({ assertion }: { assertion: Assertion }) {
         </div>
       </Section>
 
+      {/* Source chunk — inline preview with the source sentence
+          highlighted (when char offsets are present). */}
+      {sourceChunk && (
+        <Section title={`Source chunk · ${sourceChunk.index + 1} / ${sourceChunk.total_chunks}`}>
+          <HighlightedChunkText
+            text={sourceChunk.text}
+            start={assertion.sentence_char_start}
+            end={assertion.sentence_char_end}
+          />
+        </Section>
+      )}
+
       {/* Confidence + IDs */}
       <Section title="IDs & confidence">
         <div className="space-y-1 text-[10px] font-mono">
@@ -396,5 +417,41 @@ function Row({
       <span className="text-zinc-500 w-20 flex-shrink-0">{label}</span>
       <span className="text-zinc-300 truncate">{value}</span>
     </div>
+  );
+}
+
+/** Render chunk text with the assertion's source sentence wrapped in a
+ *  highlight span. Falls back to plain text when the offsets are
+ *  missing or out of bounds — never silently breaks. */
+function HighlightedChunkText({
+  text,
+  start,
+  end,
+}: {
+  text: string;
+  start: number | null;
+  end: number | null;
+}) {
+  const inBounds =
+    typeof start === "number" &&
+    typeof end === "number" &&
+    start >= 0 &&
+    end > start &&
+    end <= text.length;
+  if (!inBounds) {
+    return (
+      <pre className="text-[11px] text-zinc-300 whitespace-pre-wrap leading-relaxed font-mono bg-black/30 rounded p-2 max-h-[300px] overflow-auto">
+        {text}
+      </pre>
+    );
+  }
+  return (
+    <pre className="text-[11px] text-zinc-300 whitespace-pre-wrap leading-relaxed font-mono bg-black/30 rounded p-2 max-h-[300px] overflow-auto">
+      {text.slice(0, start as number)}
+      <mark className="bg-cyan-500/20 text-cyan-200 rounded px-0.5">
+        {text.slice(start as number, end as number)}
+      </mark>
+      {text.slice(end as number)}
+    </pre>
   );
 }

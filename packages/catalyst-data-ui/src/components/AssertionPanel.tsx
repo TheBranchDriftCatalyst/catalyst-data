@@ -1,8 +1,9 @@
 import { useState, useMemo, useCallback } from "react";
 import { Input, ScrollArea } from "@thebranchdriftcatalyst/catalyst-ui";
-import { Search, MessageSquareQuote } from "lucide-react";
+import { Search, MessageSquareQuote, Layers, List } from "lucide-react";
 import type { Assertion, AnnotationStatus } from "@/types/media";
 import { AssertionCard, AnnotationControls, type StatusFilter } from "./domain";
+import { lookupFrame } from "@/data/amrFrames";
 import { cn } from "@/lib/utils";
 
 interface AssertionPanelProps {
@@ -43,6 +44,8 @@ export default function AssertionPanel({
   const [sortAsc, setSortAsc] = useState(false);
   const [filterText, setFilterText] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [groupBy, setGroupBy] = useState<"none" | "frame">("none");
+  const [collapsedFrames, setCollapsedFrames] = useState<Set<string>>(new Set());
 
   // Assertions with stable IDs
   const assertionsWithIds = useMemo(
@@ -60,7 +63,7 @@ export default function AssertionPanel({
         ({ assertion: a }) =>
           a.subject_text.toLowerCase().includes(q) ||
           a.predicate.toLowerCase().includes(q) ||
-          a.object_text.toLowerCase().includes(q),
+          (a.object_text ?? "").toLowerCase().includes(q),
       );
     }
 
@@ -75,7 +78,10 @@ export default function AssertionPanel({
           cmp = a.assertion.confidence - b.assertion.confidence;
           break;
         case "predicate":
-          cmp = a.assertion.predicate_canonical.localeCompare(b.assertion.predicate_canonical);
+          // predicate is already canonical (label-pack vocab) on the new
+          // contracts-core shape — the legacy split into predicate vs
+          // predicate_canonical was retired in commit 6b78435.
+          cmp = a.assertion.predicate.localeCompare(b.assertion.predicate);
           break;
         case "subject":
           cmp = a.assertion.subject_text.localeCompare(b.assertion.subject_text);
@@ -172,7 +178,7 @@ export default function AssertionPanel({
         />
       )}
 
-      {/* Sort bar */}
+      {/* Sort + group bar */}
       <div className="flex items-center gap-3 px-3 py-1.5 border-b border-white/5 text-[10px] text-zinc-500">
         <button
           className="hover:text-zinc-300 transition-colors"
@@ -186,8 +192,30 @@ export default function AssertionPanel({
         >
           Predicate{sortIcon("predicate")}
         </button>
+        {/* Group-by toggle — current state acts as the button label */}
         <button
-          className="hover:text-zinc-300 transition-colors ml-auto"
+          className={cn(
+            "ml-auto inline-flex items-center gap-1 transition-colors",
+            groupBy === "frame" ? "text-violet-300" : "text-zinc-500 hover:text-zinc-300",
+          )}
+          title={groupBy === "frame" ? "Switch to flat view" : "Group by AMR frame (collapsible)"}
+          data-testid="assertion-group-toggle"
+          onClick={() => setGroupBy(groupBy === "frame" ? "none" : "frame")}
+        >
+          {groupBy === "frame" ? (
+            <>
+              <Layers className="h-3 w-3" />
+              by frame
+            </>
+          ) : (
+            <>
+              <List className="h-3 w-3" />
+              flat
+            </>
+          )}
+        </button>
+        <button
+          className="hover:text-zinc-300 transition-colors"
           onClick={() => handleSort("confidence")}
         >
           Confidence{sortIcon("confidence")}
@@ -196,40 +224,159 @@ export default function AssertionPanel({
 
       {/* Card list */}
       <ScrollArea className="flex-1">
-        <div className="divide-y divide-white/[0.03]">
-          {sorted.map(({ assertion, targetId }) => {
-            const aid =
-              assertion.assertion_id ??
-              `${assertion.subject_text}_${assertion.predicate}_${assertion.object_text}`;
-            return (
-              <AssertionCard
-                key={targetId}
-                assertion={assertion}
-                targetId={targetId}
-                status={getStatus ? getStatus(targetId) : "pending"}
-                onApprove={onApprove}
-                onReject={onReject}
-                onSeek={onSeek}
-                onClick={() => {
-                  if (onAssertionSelect) {
-                    onAssertionSelect(selectedAssertionId === aid ? null : aid);
+        {groupBy === "frame" ? (
+          <GroupedList
+            rows={sorted}
+            getStatus={getStatus}
+            onApprove={onApprove}
+            onReject={onReject}
+            onSeek={onSeek}
+            onAssertionSelect={onAssertionSelect}
+            selectedAssertionId={selectedAssertionId}
+            collapsed={collapsedFrames}
+            onToggle={(key) =>
+              setCollapsedFrames((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              })
+            }
+          />
+        ) : (
+          <div className="divide-y divide-white/[0.03]">
+            {sorted.map(({ assertion, targetId }) => {
+              const aid =
+                assertion.assertion_id ??
+                `${assertion.subject_text}_${assertion.predicate}_${assertion.object_text}`;
+              return (
+                <AssertionCard
+                  key={targetId}
+                  assertion={assertion}
+                  targetId={targetId}
+                  status={getStatus ? getStatus(targetId) : "pending"}
+                  onApprove={onApprove}
+                  onReject={onReject}
+                  onSeek={onSeek}
+                  onClick={() => {
+                    if (onAssertionSelect) {
+                      onAssertionSelect(selectedAssertionId === aid ? null : aid);
+                    }
+                  }}
+                  className={
+                    selectedAssertionId === aid
+                      ? "bg-white/[0.08] ring-1 ring-inset ring-white/10"
+                      : ""
                   }
-                }}
-                className={
-                  selectedAssertionId === aid
-                    ? "bg-white/[0.08] ring-1 ring-inset ring-white/10"
-                    : ""
-                }
-              />
-            );
-          })}
-        </div>
+                />
+              );
+            })}
+          </div>
+        )}
       </ScrollArea>
 
       {/* Summary footer */}
       <div className="px-3 py-2 text-[10px] text-zinc-600 border-t border-white/5 flex-shrink-0">
         {sorted.length} of {assertions.length} assertions
       </div>
+    </div>
+  );
+}
+
+// ── GroupedList ─────────────────────────────────────────────────────────────
+
+interface RowWithId {
+  assertion: Assertion;
+  targetId: string;
+}
+
+interface GroupedListProps {
+  rows: RowWithId[];
+  getStatus?: (targetId: string) => AnnotationStatus;
+  onApprove?: (targetId: string) => void;
+  onReject?: (targetId: string) => void;
+  onSeek?: (timeInSeconds: number) => void;
+  onAssertionSelect?: (assertionId: string | null) => void;
+  selectedAssertionId?: string | null;
+  collapsed: Set<string>;
+  onToggle: (key: string) => void;
+}
+
+function GroupedList({
+  rows,
+  getStatus,
+  onApprove,
+  onReject,
+  onSeek,
+  onAssertionSelect,
+  selectedAssertionId,
+  collapsed,
+  onToggle,
+}: GroupedListProps) {
+  // Bucket rows by AMR frame (fall back to predicate when frame is
+  // absent — e.g. for structured assertions). Stable insertion order
+  // means groups appear in the same order as the sorted list.
+  const groups = new Map<string, RowWithId[]>();
+  for (const row of rows) {
+    const key = row.assertion.amr_frame ?? row.assertion.predicate;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
+  }
+
+  return (
+    <div className="divide-y divide-white/[0.03]">
+      {Array.from(groups.entries()).map(([key, items]) => {
+        const isCollapsed = collapsed.has(key);
+        const frame = lookupFrame(key);
+        return (
+          <div key={key}>
+            <button
+              data-testid={`group-header-${key}`}
+              className="w-full sticky top-0 z-10 bg-surface-1 border-b border-white/5 px-3 py-1.5 flex items-center gap-2 text-left hover:bg-white/[0.02] transition-colors"
+              onClick={() => onToggle(key)}
+            >
+              <span className="text-[9px] text-zinc-600 font-mono w-3">
+                {isCollapsed ? "▶" : "▼"}
+              </span>
+              <span className="text-[11px] font-mono text-violet-300">{key}</span>
+              <span className="text-[10px] text-zinc-500 tabular-nums">×{items.length}</span>
+              {frame && (
+                <span className="text-[10px] text-zinc-500 italic truncate">{frame.gloss}</span>
+              )}
+            </button>
+            {!isCollapsed && (
+              <div className="divide-y divide-white/[0.03]">
+                {items.map(({ assertion, targetId }) => {
+                  const aid =
+                    assertion.assertion_id ??
+                    `${assertion.subject_text}_${assertion.predicate}_${assertion.object_text}`;
+                  return (
+                    <AssertionCard
+                      key={targetId}
+                      assertion={assertion}
+                      targetId={targetId}
+                      status={getStatus ? getStatus(targetId) : "pending"}
+                      onApprove={onApprove}
+                      onReject={onReject}
+                      onSeek={onSeek}
+                      onClick={() => {
+                        if (onAssertionSelect) {
+                          onAssertionSelect(selectedAssertionId === aid ? null : aid);
+                        }
+                      }}
+                      className={
+                        selectedAssertionId === aid
+                          ? "bg-white/[0.08] ring-1 ring-inset ring-white/10"
+                          : ""
+                      }
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
