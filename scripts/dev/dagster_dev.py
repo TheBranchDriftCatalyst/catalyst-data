@@ -67,8 +67,13 @@ def _resolve_relative_paths(env: dict[str, str]) -> None:
 def _provision_data_root(env: dict[str, str]) -> None:
     """Create dev-time mirror of the prod /data layout under CATALYST_DATA_ROOT.
 
-    Idempotent. Symlinks fixtures into metube/tubesync so discovery
-    works; whisper-models is a writable dir for HF/faster-whisper.
+    Idempotent. Symlinks fixtures into tubesync only — the test
+    corpus is tubesync-sourced (all doc IDs are `media-tubesync-*`),
+    so symlinking the same fixtures dir into BOTH metube and tubesync
+    makes discovery double-count every file. metube is left as an
+    empty dir so the discovery code finds the path but yields nothing.
+
+    whisper-models is a writable dir for HF/faster-whisper downloads.
     """
     data_root = env.get("CATALYST_DATA_ROOT")
     if not data_root:
@@ -76,13 +81,14 @@ def _provision_data_root(env: dict[str, str]) -> None:
     root = Path(data_root)
     fixtures = REPO_ROOT / "packages/media-ingest/tests/fixtures"
     (root / "whisper-models").mkdir(parents=True, exist_ok=True)
-    for sub in ("metube", "tubesync"):
-        link = root / sub
-        if link.is_symlink():
-            link.unlink()
-        elif link.exists():
-            continue  # don't clobber a real dir (e.g. mounted volume)
-        link.symlink_to(fixtures)
+    (root / "metube").mkdir(exist_ok=True)  # empty placeholder
+
+    tubesync = root / "tubesync"
+    if tubesync.is_symlink():
+        tubesync.unlink()
+    elif tubesync.exists() and not tubesync.is_symlink():
+        return  # don't clobber a real mount
+    tubesync.symlink_to(fixtures)
 
 
 def _build_env() -> dict[str, str]:
