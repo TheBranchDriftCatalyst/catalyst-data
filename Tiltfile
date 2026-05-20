@@ -131,80 +131,22 @@ cmd_button(
 # ============================================
 # DAGSTER PLATFORM (local dev mode)
 #
-# `task dev` runs all 3 code locations in one process via `dagster dev`.
-# Runtime config (S3 endpoints, media discovery paths, chunking knobs,
-# embedding defaults) lives in k8s/local/dagster-dev-config.yaml — the
-# canonical ConfigMap that the future containerized dev rail will mount
-# via envFrom. We read it here via read_yaml() so the local host-Python
-# rail consumes the same source of truth without a kubectl round-trip.
-#
-# Secrets stay in .envrc.cluster (gitignored, refreshed by
-# ./scripts/ops/pull-dev-secrets.sh). The serve_cmd sources that file
-# but the ConfigMap data takes precedence — local k3d MinIO must
-# override the prod values .envrc.cluster ships.
-# ============================================
-
-# Read the local-dev runtime knobs from two k8s manifests living in
-# k8s/local/. Gives Tilt the same source of truth a future containerized
-# rail would mount via envFrom (configMapRef + secretRef), no shell
-# sourcing of dotfiles needed.
+# `dagster dev` runs all 3 code locations in one process. The wrapper
+# script at scripts/dev/dagster_dev.py reads the two k8s manifests in
+# k8s/local/ at *process* start, merges them into env, provisions the
+# CATALYST_DATA_ROOT mirror, then execs dagster. Doing it in the script
+# (not via serve_env=dict here) is intentional: Tilt evaluates the
+# Tiltfile once and freezes serve_env for the session, so YAML edits
+# wouldn't reach the live process without bouncing tilt. The wrapper
+# re-reads on every restart — `tilt trigger dagster-dev` is enough.
 #
 #   dagster-dev-config.yaml  — committed; non-secret runtime config
-#                              (S3 endpoints, media discovery paths,
-#                              chunking knobs, embedding defaults).
-#   dagster-dev-secrets.yaml — gitignored; copy from .yaml.example +
-#                              fill in keys from your secret store
-#                              (LLM_API_KEY, CONGRESS_API_KEY, HF_TOKEN).
-_dagster_dev_config = read_yaml('k8s/local/dagster-dev-config.yaml').get('data', {})
-
-_secrets_path = 'k8s/local/dagster-dev-secrets.yaml'
-if os.path.exists(_secrets_path):
-    _dagster_dev_secrets = read_yaml(_secrets_path).get('stringData', {})
-else:
-    print('WARN: {} missing — copy {}.example and fill in. Runs that hit LLM / Congress / HF APIs will fail until you do.'.format(_secrets_path, _secrets_path))
-    _dagster_dev_secrets = {}
-
-# Resolve relative paths in the ConfigMap (e.g. CATALYST_DATA_ROOT is
-# checked-in as ``.dev-data`` — relative to the project root). Promote
-# to absolute before piping to serve_env.
-for _rel_var in ('CATALYST_DATA_ROOT',):
-    _val = _dagster_dev_config.get(_rel_var)
-    if _val and not _val.startswith('/'):
-        _dagster_dev_config[_rel_var] = os.path.join(PROJECT_DIR, _val)
-
-# Provision the dev mirror of the prod NFS layout under CATALYST_DATA_ROOT:
-#   .dev-data/metube         → symlink to packages/media-ingest/tests/fixtures
-#   .dev-data/tubesync       → symlink to packages/media-ingest/tests/fixtures
-#   .dev-data/whisper-models → writable dir for HF/faster-whisper downloads
-# Idempotent: rerun-safe; only creates what's missing.
-_data_root = _dagster_dev_config.get('CATALYST_DATA_ROOT')
-if _data_root:
-    _fixtures = os.path.join(PROJECT_DIR, 'packages/media-ingest/tests/fixtures')
-    local(
-        'mkdir -p "{root}/whisper-models" && '
-        'ln -sfn "{fixtures}" "{root}/metube" && '
-        'ln -sfn "{fixtures}" "{root}/tubesync"'.format(root=_data_root, fixtures=_fixtures),
-        quiet=True,
-    )
-
-# Default EMBEDDING_BASE_URL to LLM_BASE_URL when absent (config-side
-# convenience — the Definitions in media_ingest/__init__.py reads both).
-_dagster_dev_config.setdefault(
-    'EMBEDDING_BASE_URL',
-    _dagster_dev_config.get('LLM_BASE_URL', ''),
-)
-
-# Merge: secrets last so they win if anything collides (nothing should).
-_dagster_dev_env = dict(_dagster_dev_config)
-_dagster_dev_env.update(_dagster_dev_secrets)
+#   dagster-dev-secrets.yaml — gitignored; copy from .yaml.example
+# ============================================
 
 local_resource(
     'dagster-dev',
-    # serve_env supplies the full merged env to the dagster process.
-    # No shell sourcing — runtime config + secrets are read from the
-    # k8s manifests at Tiltfile load time and passed as a clean dict.
-    serve_cmd='task dev',
-    serve_env=_dagster_dev_env,
+    serve_cmd='uv run -- python scripts/dev/dagster_dev.py',
     deps=[
         'packages/media-ingest/src',
         'packages/congress-data/src',
@@ -212,6 +154,7 @@ local_resource(
         'libs/dagster-io/src',
         'k8s/local/dagster-dev-config.yaml',
         'k8s/local/dagster-dev-secrets.yaml',
+        'scripts/dev/dagster_dev.py',
     ],
     resource_deps=['minio-init'],
     auto_init=True,
