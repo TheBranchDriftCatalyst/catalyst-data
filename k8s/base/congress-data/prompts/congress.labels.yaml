@@ -496,3 +496,39 @@ consensus:
   # encoders (NuExtract, regex) contribute 1.0 per emission.
   scored_voters: [gliner, universalner]
   binary_voters: [nuextract, regex]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Claim synthesis — LLM-composed legal claims from bill text + AMR primitives
+# ─────────────────────────────────────────────────────────────────────────────
+# Consumed by the bill_claims Dagster asset. The asset reads:
+#   - the bill_document silver row (title + full text)
+#   - the bill_assertions gold rows (grounded AMR primitives — the cleaner
+#     output after the grounded-SPO guard)
+# and prompts the LLM to compose 5–15 high-level legal claims using ONLY the
+# predicate vocab below.
+claim_synthesis:
+  prompt_id: claim_synthesis           # → loads claim_synthesis.prompt
+  predicates:
+    - requires            # bill requires X to do Y (mandate)
+    - prohibits           # bill prohibits X from doing Y (criminalises/bars)
+    - defines             # bill defines term X as Y (statutory definition)
+    - establishes         # bill creates/sets up X (body, program, offence)
+    - applies_to          # bill applies to X (scope/jurisdiction)
+    - amends              # bill amends statute X (cross-ref existing law)
+    - repeals             # bill repeals provision X
+    - authorizes          # bill authorises action X (permits, not mandates)
+    - appropriates        # bill appropriates funds for X (budget)
+    - designates          # bill designates X as Y (naming/classification)
+    - permits             # bill permits X to do Y (carve-out)
+    - exempts             # bill exempts X from Y (immunity/exclusion)
+  qualifier_keys:
+    - deadline            # e.g. "within 48 hours"
+    - scope               # e.g. "platforms with > 1M users"
+    - condition           # e.g. "upon written request"
+    - penalty             # e.g. "fine up to $500,000"
+    - jurisdiction        # e.g. "federal courts"
+  output_count:
+    min: 5
+    max: 15
+  default_confidence: 0.85

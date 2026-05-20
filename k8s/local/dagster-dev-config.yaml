@@ -58,7 +58,11 @@ data:
   CHUNK_OVERLAP: "200"
 
   # ── LLM (LiteLLM proxy default — keys come from .envrc.cluster) ─
-  LLM_MODEL: "gpt-4o-mini"
+  # LiteLLM proxy at talos00 doesn't have gpt-4o-mini registered today;
+  # the closest fast-tier equivalent is Anthropic's Haiku, which the
+  # proxy ships as claude-haiku-4-5-20251001. Switch back to a 4o-tier
+  # name if/when the proxy gains it.
+  LLM_MODEL: "claude-haiku-4-5-20251001"
   LLM_BASE_URL: "http://litellm.talos00/v1"
 
   # ── Embeddings ─────────────────────────────────────────────────

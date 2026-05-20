@@ -269,7 +269,12 @@ class LLMResource(ConfigurableResource):
             logger.error("LLM complete_json failed model=%s", self.model, exc_info=True)
             raise
 
-    def with_structured_output(self, schema: type[BaseModel]) -> Any:
+    def with_structured_output(
+        self,
+        schema: type[BaseModel],
+        *,
+        method: str | None = None,
+    ) -> Any:
         """Return a LangChain runnable that outputs a Pydantic model.
 
         Usage::
@@ -279,8 +284,22 @@ class LLMResource(ConfigurableResource):
 
             chain = llm.with_structured_output(Entities)
             result = chain.invoke([HumanMessage(content="Extract entities...")])
+
+        ``method`` overrides LangChain's default binding strategy.
+        Pass ``"json_mode"`` for Anthropic / Claude models behind
+        LiteLLM, which otherwise wrap the structured response in a
+        single-arg tool-call envelope (``{"parameter": "<stringified JSON>"}``)
+        that Pydantic validation rejects. ``"function_calling"`` (the
+        default for OpenAI) is fine for gpt-4o-family.
         """
-        logger.debug("LLM with_structured_output model=%s schema=%s", self.model, schema.__name__)
+        logger.debug(
+            "LLM with_structured_output model=%s schema=%s method=%s",
+            self.model,
+            schema.__name__,
+            method,
+        )
+        if method is not None:
+            return self._chat_model.with_structured_output(schema, method=method)
         return self._chat_model.with_structured_output(schema)
 
     def invoke_batch(

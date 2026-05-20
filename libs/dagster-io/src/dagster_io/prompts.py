@@ -113,7 +113,12 @@ def parse_prompt_file(path: Path, prompt_id: str | None = None) -> ParsedPrompt:
     )
 
 
-def load_prompt(prompt_id: str, fallback: str) -> str:
+def load_prompt(
+    prompt_id: str,
+    fallback: str,
+    *,
+    registry_dir: str | None = None,
+) -> str:
     """Load a prompt from the registry directory by ID.
 
     Parameters
@@ -121,19 +126,24 @@ def load_prompt(prompt_id: str, fallback: str) -> str:
     prompt_id:
         Slash-separated identifier that maps to a file path under the
         registry directory.  For example, ``"ner/basic"`` resolves to
-        ``<PROMPT_REGISTRY_DIR>/ner/basic.prompt``.
+        ``<registry_dir>/ner/basic.prompt``.
     fallback:
-        Returned immediately when ``PROMPT_REGISTRY_DIR`` is not set or the
-        file does not exist.  This keeps local development zero-cost.
-
-    Returns
-    -------
-    str
-        The system prompt body (everything after YAML frontmatter).
+        Returned immediately when no registry dir resolves or the file
+        does not exist.  This keeps local development zero-cost.
+    registry_dir:
+        Explicit directory override. When passed, takes precedence over
+        the ``PROMPT_REGISTRY_DIR`` env var. Use this from assets that
+        already called ``resolve_prompt_dir(domain=...)`` — the domain-
+        scoped path is more reliable than the global env var in the
+        single-process multi-code-location dev rail.
     """
-    registry_dir = os.environ.get("PROMPT_REGISTRY_DIR")
+    registry_dir = registry_dir or os.environ.get("PROMPT_REGISTRY_DIR")
     if not registry_dir:
-        logger.warning("PROMPT_REGISTRY_DIR not set, using fallback for prompt %r", prompt_id)
+        logger.warning(
+            "No prompt registry dir resolved (registry_dir + PROMPT_REGISTRY_DIR "
+            "both empty), using fallback for prompt %r",
+            prompt_id,
+        )
         return fallback
 
     prompt_path = Path(registry_dir) / f"{prompt_id}.prompt"

@@ -356,6 +356,18 @@ DOMAINS: list[DomainConfig] = [
                 group="congress",
                 format="events",
             ),
+            # LLM-synthesised legal claims — richer LegalRuleML-style
+            # shape (actor + operator + action + typed conditions +
+            # exceptions + penalty). Different wire shape from the
+            # other gold assertion streams; the SPA has its own
+            # ClaimCard renderer.
+            PartitionedAssetSpec(
+                name="claims",
+                layer="gold",
+                asset="bill_claims",
+                group="bill",
+                format="jsonl",
+            ),
         ),
     ),
     DomainConfig(

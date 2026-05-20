@@ -16,6 +16,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { Assertion, Mention } from "@/types/contracts";
 import type { BillChunk, BillDetail } from "@/types/bills";
+import type { BillClaim } from "@/types/billClaims";
 
 /** Where the selected row came from — used to render breadcrumbs +
  *  "open source" links back to the originating partition/document. */
@@ -39,7 +40,8 @@ export type Selection =
   | { kind: "none" }
   | { kind: "assertion"; assertion: Assertion; context?: SelectionContextInfo }
   | { kind: "mention"; mention: Mention; context?: SelectionContextInfo }
-  | { kind: "chunk"; chunk: BillChunk; context?: SelectionContextInfo };
+  | { kind: "chunk"; chunk: BillChunk; context?: SelectionContextInfo }
+  | { kind: "claim"; claim: BillClaim; context?: SelectionContextInfo };
 
 interface SelectionState {
   selection: Selection;
@@ -47,6 +49,7 @@ interface SelectionState {
   selectAssertion: (assertion: Assertion, context?: SelectionContextInfo) => void;
   selectMention: (mention: Mention, context?: SelectionContextInfo) => void;
   selectChunk: (chunk: BillChunk, context?: SelectionContextInfo) => void;
+  selectClaim: (claim: BillClaim, context?: SelectionContextInfo) => void;
   clear: () => void;
   /** Convenience: ``true`` when the panel should be open. */
   isOpen: boolean;
@@ -72,6 +75,11 @@ export function SelectionProvider({ children }: { children: ReactNode }) {
       setSelection({ kind: "chunk", chunk, context }),
     [],
   );
+  const selectClaim = useCallback(
+    (claim: BillClaim, context?: SelectionContextInfo) =>
+      setSelection({ kind: "claim", claim, context }),
+    [],
+  );
   const clear = useCallback(() => setSelection({ kind: "none" }), []);
 
   const value = useMemo<SelectionState>(
@@ -81,10 +89,11 @@ export function SelectionProvider({ children }: { children: ReactNode }) {
       selectAssertion,
       selectMention,
       selectChunk,
+      selectClaim,
       clear,
       isOpen: selection.kind !== "none",
     }),
-    [selection, selectAssertion, selectMention, selectChunk, clear],
+    [selection, selectAssertion, selectMention, selectChunk, selectClaim, clear],
   );
 
   return <SelectionStateContext.Provider value={value}>{children}</SelectionStateContext.Provider>;

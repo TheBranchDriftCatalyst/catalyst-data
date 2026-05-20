@@ -29,7 +29,10 @@ import { Badge, Button, ScrollArea } from "@thebranchdriftcatalyst/catalyst-ui";
 import { useSelection } from "@/contexts/SelectionContext";
 import type { Assertion, Mention } from "@/types/contracts";
 import type { BillChunk } from "@/types/bills";
+import type { BillClaim, ClaimOperator } from "@/types/billClaims";
+import { operatorClass } from "@/types/billClaims";
 import { lookupFrame } from "@/data/amrFrames";
+import { ShieldCheck, ShieldX, ShieldQuestion, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** Extraction-method → display config. Kept aligned with AssertionCard
@@ -69,6 +72,7 @@ export default function DetailsPanel() {
           {selection.kind === "assertion" && "Assertion"}
           {selection.kind === "mention" && "Mention"}
           {selection.kind === "chunk" && "Chunk"}
+          {selection.kind === "claim" && "Legal claim"}
         </div>
         <Button
           variant="ghost"
@@ -89,6 +93,7 @@ export default function DetailsPanel() {
           )}
           {selection.kind === "mention" && <MentionDetails mention={selection.mention} />}
           {selection.kind === "chunk" && <ChunkDetails chunk={selection.chunk} />}
+          {selection.kind === "claim" && <ClaimDetails claim={selection.claim} />}
         </div>
       </ScrollArea>
     </aside>
@@ -392,6 +397,158 @@ function ChunkDetails({ chunk }: { chunk: BillChunk }) {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+// ── Claim drilldown ─────────────────────────────────────────────────────────
+
+const CLAIM_OP_ICONS: Partial<Record<ClaimOperator, { Icon: typeof ShieldCheck; tone: string }>> = {
+  requires: { Icon: ShieldCheck, tone: "text-emerald-300" },
+  prohibits: { Icon: ShieldX, tone: "text-red-300" },
+  permits: { Icon: ShieldQuestion, tone: "text-amber-300" },
+};
+
+function ClaimDetails({ claim }: { claim: BillClaim }) {
+  const klass = operatorClass(claim.operator);
+  const deontic = CLAIM_OP_ICONS[claim.operator];
+
+  return (
+    <div className="space-y-4 text-xs">
+      {/* Header: operator + actor → action */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-[10px] font-mono font-semibold tracking-wider uppercase gap-1",
+              klass === "deontic"
+                ? deontic
+                  ? deontic.tone
+                  : "text-zinc-300"
+                : "text-violet-300 border-violet-800/50",
+            )}
+            title={`${klass} operator`}
+          >
+            {deontic && <deontic.Icon className="h-2.5 w-2.5" />}
+            {claim.operator}
+          </Badge>
+          <span className="text-[10px] text-zinc-500">{klass}</span>
+          {claim.review_needed && (
+            <Badge
+              variant="outline"
+              className="text-[10px] text-amber-300 border-amber-800/60 gap-1 ml-auto"
+              title={claim.review_reason ?? "LLM flagged for human review"}
+            >
+              <AlertTriangle className="h-2.5 w-2.5" />
+              review
+            </Badge>
+          )}
+        </div>
+        <div className="space-y-1">
+          <div className="text-[9px] uppercase tracking-wider text-zinc-500 font-mono">
+            Actor → Action
+          </div>
+          <p className="text-sm text-zinc-100 leading-snug font-medium">{claim.actor}</p>
+          <div className="flex items-baseline gap-1.5">
+            <ArrowRight className="h-3 w-3 text-zinc-600 self-center flex-shrink-0" />
+            <p className="text-xs text-zinc-300 leading-relaxed">{claim.action}</p>
+          </div>
+          {claim.object && (
+            <div className="pl-4 text-[11px] text-zinc-400 italic">obj: {claim.object}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Conditions (typed) */}
+      {claim.conditions.length > 0 && (
+        <Section title="Conditions">
+          <ul className="space-y-1.5">
+            {claim.conditions.map((c, i) => (
+              <li key={i} className="text-[11px] flex gap-2">
+                <span className="text-zinc-500 font-mono w-16 flex-shrink-0 uppercase tracking-wider text-[9px] pt-0.5">
+                  {c.type}
+                </span>
+                <span className="text-zinc-300 leading-relaxed">{c.text}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {/* Exceptions */}
+      {claim.exceptions.length > 0 && (
+        <Section title={`Exceptions (${claim.exceptions.length})`}>
+          <ul className="space-y-1 text-[11px] text-zinc-300 list-disc list-inside marker:text-orange-500/60">
+            {claim.exceptions.map((e, i) => (
+              <li key={i} className="leading-snug">
+                {e}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {/* Penalty */}
+      {claim.penalty && (
+        <Section title="Penalty">
+          <p className="text-[11px] text-red-300/90 leading-snug">{claim.penalty}</p>
+        </Section>
+      )}
+
+      {/* Temporal */}
+      {claim.temporal_window && (
+        <Section title="Temporal validity">
+          <div className="text-[10px] font-mono space-y-0.5">
+            {claim.temporal_window.is_atemporal && (
+              <div className="text-emerald-300">atemporal — applies once enacted, no window</div>
+            )}
+            {claim.temporal_window.valid_from && (
+              <Row icon={CalendarRange} label="from" value={claim.temporal_window.valid_from} />
+            )}
+            {claim.temporal_window.valid_until && (
+              <Row icon={CalendarRange} label="until" value={claim.temporal_window.valid_until} />
+            )}
+          </div>
+        </Section>
+      )}
+
+      {/* Source */}
+      <Section title="Source sentence (verbatim)">
+        <p className="text-[11px] text-zinc-300 leading-relaxed italic border-l-2 border-cyan-700/40 pl-2">
+          "{claim.sentence_text}"
+        </p>
+        {claim.source_chunk_id && (
+          <p className="text-[9px] font-mono text-zinc-600 mt-1.5">
+            chunk: {claim.source_chunk_id}
+          </p>
+        )}
+      </Section>
+
+      {/* Review note */}
+      {claim.review_needed && claim.review_reason && (
+        <Section title="Review reason">
+          <p className="text-[11px] text-amber-200/80 leading-snug">{claim.review_reason}</p>
+        </Section>
+      )}
+
+      {/* Provenance + IDs */}
+      <Section title="Provenance">
+        <div className="space-y-1 text-[10px] font-mono">
+          <Row
+            icon={Sparkles}
+            label="extracted by"
+            value={
+              claim.provenance?.extraction_model ?? claim.provenance?.extraction_method ?? "LLM"
+            }
+          />
+          {claim.provenance?.timestamp && (
+            <Row icon={Clock} label="when" value={claim.provenance.timestamp} />
+          )}
+          <Row icon={Hash} label="confidence" value={(claim.confidence * 100).toFixed(0) + "%"} />
+          <Row icon={Hash} label="claim_id" value={claim.claim_id} />
+        </div>
+      </Section>
+    </div>
+  );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (

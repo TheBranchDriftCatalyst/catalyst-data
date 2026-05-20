@@ -34,6 +34,7 @@ from dagster_io import (
     select_io_managers,
 )
 from dagster_io.executor import make_in_process_executor
+from dagster_io.llm import LLMResource
 
 _executor = make_in_process_executor("congress_data")
 _run_status_sensors = make_run_status_sensor("congress_data")
@@ -41,6 +42,8 @@ _run_status_sensors = make_run_status_sensor("congress_data")
 # ── Head assets (unpartitioned) ──────────────────────────────────────────────
 
 # ── Bill tail assets (partitioned on congress_bill — bronze/silver) ──────────
+# ── LLM-synthesised legal claims (LegalRuleML-style) ────────────────────────
+from congress_data.assets.bill_claims import bill_claims
 from congress_data.assets.bill_tail import (
     bill_actions,
     bill_amendments,
@@ -103,6 +106,7 @@ defs = Definitions(
         bill_chunks,
         *bill_gold_assets,
         congress_structured_assertions,
+        bill_claims,
         # TAIL per-member (partitioned on congress_member)
         member_detail,
         member_committee_assignments,
@@ -132,6 +136,14 @@ defs = Definitions(
         "chunking": ChunkingResource(
             chunk_size=EnvVar.int("CHUNK_SIZE"),
             chunk_overlap=EnvVar.int("CHUNK_OVERLAP"),
+        ),
+        # LLM resource for the bill_claims synthesis asset. Picks up
+        # LLM_MODEL / LLM_BASE_URL / LLM_API_KEY from the dev ConfigMap
+        # + secrets — same wiring shape that media-ingest + open-leaks use.
+        "llm": LLMResource(
+            base_url=EnvVar("LLM_BASE_URL"),
+            api_key=EnvVar("LLM_API_KEY"),
+            model=EnvVar("LLM_MODEL"),
         ),
         "embeddings": EmbeddingResource(
             provider=EnvVar("EMBEDDING_PROVIDER"),

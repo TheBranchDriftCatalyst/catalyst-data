@@ -31,7 +31,9 @@ import {
 import { fetchBill, fetchBillAsset } from "@/api/client";
 import type { BillChunk } from "@/types/bills";
 import type { Assertion } from "@/types/contracts";
+import type { BillClaim } from "@/types/billClaims";
 import AssertionPanel from "@/components/AssertionPanel";
+import ClaimCard from "@/components/domain/ClaimCard";
 import { useSelection } from "@/contexts/SelectionContext";
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
@@ -81,14 +83,22 @@ export default function BillDetail() {
     enabled,
   });
 
+  const claimsQuery = useQuery({
+    queryKey: ["bill", "congress", partitionKey, "claims"],
+    queryFn: () => fetchBillAsset<BillClaim>("congress", partitionKey, "claims"),
+    enabled,
+    retry: false, // 404 when bill_claims hasn't been materialised — that's the placeholder case, no need to retry
+  });
+
   // Selection plumbing — must run unconditionally before any early
   // returns to satisfy react-hooks/rules-of-hooks.
-  const { selection, selectAssertion, selectChunk, clear } = useSelection();
+  const { selection, selectAssertion, selectChunk, selectClaim, clear } = useSelection();
   const bill = billQuery.data;
   const chunksRowsRaw = chunksQuery.data?.rows;
   const chunks = useMemo<BillChunk[]>(() => chunksRowsRaw ?? [], [chunksRowsRaw]);
   const assertions = assertionsQuery.data?.rows ?? [];
   const structured = structuredQuery.data?.rows ?? [];
+  const claims = claimsQuery.data?.rows ?? [];
   const selectionContext = useMemo(
     () => ({ partition: partitionKey, domain: "congress", bill, chunks }),
     [partitionKey, bill, chunks],
@@ -221,7 +231,13 @@ export default function BillDetail() {
               count={structured.length}
               loading={structuredQuery.isLoading}
             />
-            <TabTrigger value="claims" icon={MessageSquareQuote} label="Claims" count={0} />
+            <TabTrigger
+              value="claims"
+              icon={MessageSquareQuote}
+              label="Claims"
+              count={claims.length}
+              loading={claimsQuery.isLoading}
+            />
             <TabTrigger
               value="primitives"
               icon={Layers}
@@ -258,7 +274,13 @@ export default function BillDetail() {
 
           <TabsContent value="claims" className="mt-4 space-y-2">
             <TabHelp text="What the bill says: high-level legal claims synthesised by the LLM against a closed predicate vocab (requires, prohibits, defines, …). Primary content view." />
-            <ClaimsPlaceholder />
+            <ClaimsTab
+              claims={claims}
+              loading={claimsQuery.isLoading}
+              error={claimsQuery.isError}
+              onClaimSelect={(c) => selectClaim(c, selectionContext)}
+              selectedClaimId={selection.kind === "claim" ? selection.claim.claim_id : null}
+            />
           </TabsContent>
 
           <TabsContent value="primitives" className="mt-4 space-y-2">
@@ -427,23 +449,116 @@ function TabHelp({ text }: { text: string }) {
   );
 }
 
-function ClaimsPlaceholder() {
+function ClaimsTab({
+  claims,
+  loading,
+  error,
+  onClaimSelect,
+  selectedClaimId,
+}: {
+  claims: BillClaim[];
+  loading: boolean;
+  error: boolean;
+  onClaimSelect?: (claim: BillClaim) => void;
+  selectedClaimId?: string | null;
+}) {
+  if (loading) {
+    return (
+      <Card interactive={false}>
+        <CardContent className="py-10 text-center text-xs text-zinc-500">
+          Loading synthesised claims…
+        </CardContent>
+      </Card>
+    );
+  }
+  if (error || claims.length === 0) {
+    return (
+      <Card interactive={false}>
+        <CardContent className="py-10 flex flex-col items-center text-center gap-3">
+          <div className="rounded-full bg-violet-950/40 p-3">
+            <Sparkles className="h-5 w-5 text-violet-300" />
+          </div>
+          <h3 className="text-sm font-medium text-zinc-200">No synthesised claims yet</h3>
+          <p className="text-xs text-zinc-500 max-w-md leading-relaxed">
+            The <span className="font-mono text-zinc-400">bill_claims</span> Dagster asset hasn't
+            been materialised for this partition. Run it from the Dagster UI to produce 5–15
+            high-level legal claims composed from the AMR primitives + bill text.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+  // Bucket by operator class — show deontic claims first (most
+  // legally load-bearing), then structural.
+  const deonticOps = new Set(["requires", "prohibits", "permits"]);
+  const deontic = claims.filter((c) => deonticOps.has(c.operator));
+  const structural = claims.filter((c) => !deonticOps.has(c.operator));
   return (
     <Card interactive={false}>
-      <CardContent className="py-10 flex flex-col items-center text-center gap-3">
-        <div className="rounded-full bg-violet-950/40 p-3">
-          <Sparkles className="h-5 w-5 text-violet-300" />
-        </div>
-        <h3 className="text-sm font-medium text-zinc-200">No synthesised claims yet</h3>
-        <p className="text-xs text-zinc-500 max-w-md leading-relaxed">
-          The <span className="font-mono text-zinc-400">bill_claims</span> Dagster asset hasn't been
-          materialised for this partition. Run it to produce a handful of high-level legal claims
-          composed from the AMR primitives + bill text. See the{" "}
-          <span className="font-mono text-zinc-400">AMR primitives</span> tab for the raw input the
-          synthesis step would consume.
-        </p>
+      <CardContent className="p-0 max-h-[700px] overflow-auto">
+        {deontic.length > 0 && (
+          <>
+            <SectionBar
+              label="Deontic — operative obligations / prohibitions / permissions"
+              count={deontic.length}
+              tone="emerald"
+            />
+            <div className="divide-y divide-white/[0.03]">
+              {deontic.map((c) => (
+                <ClaimCard
+                  key={c.claim_id}
+                  claim={c}
+                  selected={selectedClaimId === c.claim_id}
+                  onClick={onClaimSelect}
+                />
+              ))}
+            </div>
+          </>
+        )}
+        {structural.length > 0 && (
+          <>
+            <SectionBar
+              label="Structural — definitions, scope, cross-references"
+              count={structural.length}
+              tone="violet"
+            />
+            <div className="divide-y divide-white/[0.03]">
+              {structural.map((c) => (
+                <ClaimCard
+                  key={c.claim_id}
+                  claim={c}
+                  selected={selectedClaimId === c.claim_id}
+                  onClick={onClaimSelect}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+function SectionBar({
+  label,
+  count,
+  tone,
+}: {
+  label: string;
+  count: number;
+  tone: "emerald" | "violet";
+}) {
+  return (
+    <div
+      className={cn(
+        "px-3 py-1.5 text-[10px] uppercase tracking-wider font-mono border-b border-white/5",
+        tone === "emerald"
+          ? "text-emerald-300/80 bg-emerald-950/10"
+          : "text-violet-300/80 bg-violet-950/10",
+      )}
+    >
+      {label} <span className="text-zinc-500">· {count}</span>
+    </div>
   );
 }
 
