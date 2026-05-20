@@ -1152,6 +1152,66 @@ for a runnable end-to-end demo.
 
 That direction is consistent with current LLM-based KG construction work, entity linking/alignment advances, and geospatial KG practice around GeoSPARQL, H3, and large-scale geo knowledge integration. ([ACL Anthology][1])
 
+---
+
+## 20. Drift log
+
+Append-only record of architectural shifts. The body of this doc is
+not rewritten when shapes move; instead each refactor lands a short
+dated entry below. A reader can scan this section to see how the
+system has actually evolved against the original framing, without
+having to git-blame the rest of the doc.
+
+Rules: one entry per refactor wave, ~10–15 lines, present tense at
+the time of writing. Don't edit older entries — they're the history
+record. If a previous entry's claim is reversed, note it in the new
+entry, not by mutating the old one.
+
+### 2026-05 — AMR-as-spine unification + contracts-core ownership
+
+- **Wire shapes centralised in `catalyst-contracts-core`.** `Mention`,
+  `Assertion`, `Provenance` are now owned by that package alone.
+  `dagster_io.models` re-exports them; local-only types there are
+  `EntityCandidate`, `CanonicalEntity`, `AlignmentEdge`,
+  `SpeakerProfile`, `SpeakerEmbedding`. Bench harness + Dagster
+  pipeline + Neo4j writer all consume the same Pydantic classes.
+- **SPO path deleted (commit `8218564`).** `PropositionCandidate` +
+  the legacy SPO extraction graph are gone — AMR projection is the
+  only proposition source, no fallback, no parallel model.
+  `AmrAssertion` was the transient bridge during the refactor; it's
+  been collapsed into the unified `Assertion`, which is **AMR-aware
+  by default**: `amr_frame`, `amr_variable`, `amr_role_mapping`,
+  `polarity`, `modality`, `is_novel_predicate` as typed top-level
+  fields. The "qualifiers handle negation/modality" framing in §4.2
+  is superseded — those are first-class now, not bag-of-qualifiers.
+- **Pipeline shape grew to 6 stages.** §19's pseudocode block shows
+  3 stages (NER → AMR parse → assertion). Reality:
+  `chunk → ner_ensemble → consensus → cluster → pack → amr_parse →
+  amr_project`. The middle pair (`cluster`, `pack`) are transient
+  (no IOManager round-trip) and feed evidence-window inputs to AMR
+  projection with resolved entity refs.
+- **`LabelPack` is the per-domain config primitive.** One YAML per
+  domain at `catalyst-data/k8s/base/<domain>/prompts/<domain>.labels.yaml`.
+  Carries `canonical_types` (Tier-1 ontology), per-encoder NER
+  specifications (GLiNER labels, NuExtract template, UniversalNER
+  queries, regex patterns), `amr_frames` (PropBank frames + per-frame
+  `role_overrides` + `extended_predicates`), and `consensus`
+  thresholds. In-tree packs: `congress`, `media`. `open-leaks` has
+  prompts but no labels.yaml yet — gap.
+- **Temporal + geospatial fields landed without stampers.**
+  `Assertion` carries `t_valid_from`, `t_valid_until`, `is_atemporal`,
+  `h3_cells`, `geometry_geojson` on the wire today. None are populated
+  — the stampers are follow-up beads (`llm-mln` for temporal,
+  unfiled for H3 geo). Documented so contributors don't add parallel
+  fields when they wire the stampers.
+- **§19 is now lossy.** Type names in the cross-reference table
+  (`AmrAssertion`, `ConsensusMention`, `PropositionCandidate`) refer
+  to deleted code. The text still reads correctly as direction;
+  treat field-level claims there as historical and verify against
+  `catalyst-contracts-core/types.py` for current shape. A full audit
+  delta lives at
+  `catalyst-llm/packages/catalyst-exgraph/docs/reseearch/congress/ontology-delta-2026-05.md`.
+
 [1]: https://aclanthology.org/2024.emnlp-main.548.pdf?utm_source=chatgpt.com "Extract, Define, Canonicalize: An LLM-based Framework ..."
 [2]: https://aclanthology.org/2024.findings-emnlp.560.pdf?utm_source=chatgpt.com "A Survey on Open Information Extraction from Rule-based ..."
 [3]: https://arxiv.org/html/2502.08660v1?utm_source=chatgpt.com "Semantic Role Labeling: A Systematical Survey"
