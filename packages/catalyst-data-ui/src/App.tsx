@@ -11,6 +11,8 @@ import S3Explorer from "@/pages/S3Explorer";
 import BenchmarkReport from "@/pages/BenchmarkReport";
 import { StateInspector } from "@/pages/StateInspector";
 import { BenchmarkRunner } from "@/pages/BenchmarkRunner";
+import BillList from "@/pages/bills/BillList";
+import BillDetail from "@/pages/bills/BillDetail";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -66,6 +68,11 @@ function AppShell({
              *  generic route is only hit by congress-wtf + open-leaks). */}
             <Route path="/documents/:domain/:id" element={<DomainDocumentDetail />} />
             <Route path="/player/:documentId" element={<PlayerPage />} />
+            {/* Congress bill viewer — partitioned-resource surface backed by
+             *  /viewer/api/congress/bills*. Replaces the JSON-tree fallback
+             *  for real (non-fixture) congress bills. */}
+            <Route path="/bills" element={<BillList />} />
+            <Route path="/bills/:partition" element={<BillDetail />} />
             <Route path="/s3" element={<S3Explorer />} />
             <Route path="/benchmarks" element={<BenchmarkReport />} />
             <Route path="/benchmarks/state" element={<StateInspector />} />

@@ -24,6 +24,7 @@ import {
   ExternalLink,
   FileText,
   HardDrive,
+  Landmark,
   Play,
   Tv2,
   Workflow,
@@ -41,6 +42,7 @@ interface NavItem {
 
 const ITEMS: NavItem[] = [
   { to: "/documents", label: "Documents", icon: FileText, prefix: true },
+  { to: "/bills", label: "Bills", icon: Landmark, prefix: true },
   { to: "/s3", label: "S3 Explorer", icon: Database },
   { to: "/benchmarks", label: "Benchmarks", icon: BarChart3, prefix: true },
   { to: "/benchmarks/state", label: "State Inspector", icon: Workflow },

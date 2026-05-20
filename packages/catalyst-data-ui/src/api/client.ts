@@ -8,6 +8,7 @@ import type {
   Annotation,
 } from "@/types/media";
 import type { Document, Domain } from "@/types/document";
+import type { BillListItem, BillDetail, BillRowsResponse } from "@/types/bills";
 
 const API_BASE = "/viewer/api";
 
@@ -38,6 +39,35 @@ export function fetchDomainDocuments(domainSlug: string): Promise<Document[]> {
 export function fetchDomainDocument(domainSlug: string, id: string): Promise<Document> {
   return apiFetch<Document>(
     `/${encodeURIComponent(domainSlug)}/documents/${encodeURIComponent(id)}`,
+  );
+}
+
+// ── Partitioned-resource API (congress bills today; future: media-videos, etc.)
+
+/** Light-touch bill list — partition + folded silver document
+ *  metadata so cards can render without N+1 fetches. */
+export function fetchBills(domainSlug: string): Promise<BillListItem[]> {
+  return apiFetch<BillListItem[]>(`/${encodeURIComponent(domainSlug)}/bills`);
+}
+
+/** Full silver bill_document for one partition. */
+export function fetchBill(domainSlug: string, partition: string): Promise<BillDetail> {
+  return apiFetch<BillDetail>(
+    `/${encodeURIComponent(domainSlug)}/bills/${encodeURIComponent(partition)}`,
+  );
+}
+
+/** One named partitioned-asset payload — passes through whatever
+ *  `BillRowsResponse<TRow>` shape the spec format produces. The
+ *  caller picks `TRow` to match their spec (Assertion, BillChunk,
+ *  etc.). */
+export function fetchBillAsset<TRow>(
+  domainSlug: string,
+  partition: string,
+  name: string,
+): Promise<BillRowsResponse<TRow>> {
+  return apiFetch<BillRowsResponse<TRow>>(
+    `/${encodeURIComponent(domainSlug)}/bills/${encodeURIComponent(partition)}/${encodeURIComponent(name)}`,
   );
 }
 
