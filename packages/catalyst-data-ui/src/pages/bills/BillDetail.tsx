@@ -29,6 +29,8 @@ import { fetchBill, fetchBillAsset } from "@/api/client";
 import type { BillChunk } from "@/types/bills";
 import type { Assertion } from "@/types/contracts";
 import AssertionPanel from "@/components/AssertionPanel";
+import { useSelection } from "@/contexts/SelectionContext";
+import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 
 /** Per-bill viewer surface backed by the partitioned-resource API.
@@ -76,10 +78,22 @@ export default function BillDetail() {
     enabled,
   });
 
+  // Selection plumbing — must run unconditionally before any early
+  // returns to satisfy react-hooks/rules-of-hooks.
+  const { selection, selectAssertion, selectChunk, clear } = useSelection();
+  const bill = billQuery.data;
+  const chunksRowsRaw = chunksQuery.data?.rows;
+  const chunks = useMemo<BillChunk[]>(() => chunksRowsRaw ?? [], [chunksRowsRaw]);
+  const assertions = assertionsQuery.data?.rows ?? [];
+  const structured = structuredQuery.data?.rows ?? [];
+  const selectionContext = useMemo(
+    () => ({ partition: partitionKey, domain: "congress", bill, chunks }),
+    [partitionKey, bill, chunks],
+  );
+
   if (!partition) {
     return <ErrorBlock title="Missing partition param" />;
   }
-
   if (billQuery.isLoading) {
     return (
       <div className="p-6 text-zinc-500 text-sm" data-testid="bill-detail-loading">
@@ -87,15 +101,25 @@ export default function BillDetail() {
       </div>
     );
   }
-  if (billQuery.isError || !billQuery.data) {
+  if (billQuery.isError || !bill) {
     return <ErrorBlock title="Failed to load bill" message={(billQuery.error as Error)?.message} />;
   }
 
-  const bill = billQuery.data;
   const meta = bill.metadata ?? {};
-  const assertions = assertionsQuery.data?.rows ?? [];
-  const structured = structuredQuery.data?.rows ?? [];
-  const chunks = chunksQuery.data?.rows ?? [];
+  // Currently-selected assertion id (drives the highlight ring on the
+  // card). Null when nothing assertion-shaped is selected.
+  const selectedAssertionId =
+    selection.kind === "assertion" ? selection.assertion.assertion_id : null;
+
+  const handleAssertionSelect = (id: string | null) => {
+    if (!id) {
+      clear();
+      return;
+    }
+    const all = [...assertions, ...structured];
+    const found = all.find((a) => a.assertion_id === id);
+    if (found) selectAssertion(found, selectionContext);
+  };
 
   // S3 Explorer deep-link to the silver row's containing folder.
   const silverPrefix = `silver/congress_data/bill/bill_document/${partition}/`;
@@ -215,7 +239,12 @@ export default function BillDetail() {
           <TabsContent value="assertions" className="mt-4">
             <Card interactive={false}>
               <CardContent className="p-0">
-                <AssertionPanel assertions={assertions} className="max-h-[600px]" />
+                <AssertionPanel
+                  assertions={assertions}
+                  onAssertionSelect={handleAssertionSelect}
+                  selectedAssertionId={selectedAssertionId}
+                  className="max-h-[600px]"
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -223,13 +252,22 @@ export default function BillDetail() {
           <TabsContent value="structured" className="mt-4">
             <Card interactive={false}>
               <CardContent className="p-0">
-                <AssertionPanel assertions={structured} className="max-h-[600px]" />
+                <AssertionPanel
+                  assertions={structured}
+                  onAssertionSelect={handleAssertionSelect}
+                  selectedAssertionId={selectedAssertionId}
+                  className="max-h-[600px]"
+                />
               </CardContent>
             </Card>
           </TabsContent>
 
           <TabsContent value="chunks" className="mt-4 space-y-3">
-            <ChunksTab chunks={chunks} />
+            <ChunksTab
+              chunks={chunks}
+              onChunkSelect={(c) => selectChunk(c, selectionContext)}
+              selectedChunkId={selection.kind === "chunk" ? selection.chunk.chunk_id : null}
+            />
           </TabsContent>
         </Tabs>
       </div>
@@ -321,25 +359,49 @@ function OverviewTab({
   );
 }
 
-function ChunksTab({ chunks }: { chunks: BillChunk[] }) {
+function ChunksTab({
+  chunks,
+  onChunkSelect,
+  selectedChunkId,
+}: {
+  chunks: BillChunk[];
+  onChunkSelect?: (chunk: BillChunk) => void;
+  selectedChunkId?: string | null;
+}) {
   if (chunks.length === 0) {
     return <div className="text-zinc-500 text-sm italic">No chunks materialised.</div>;
   }
-  return chunks.map((chunk) => (
-    <Card key={chunk.chunk_id} interactive={false}>
-      <CardContent className="p-3 space-y-2">
-        <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-500">
-          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4">
-            chunk {chunk.index + 1} / {chunk.total_chunks}
-          </Badge>
-          <span className="text-zinc-600 truncate">{chunk.chunk_id}</span>
-        </div>
-        <div className="text-[11px] text-zinc-300 whitespace-pre-wrap leading-relaxed font-mono">
-          {chunk.text}
-        </div>
-      </CardContent>
-    </Card>
-  ));
+  return (
+    <>
+      {chunks.map((chunk) => {
+        const selected = chunk.chunk_id === selectedChunkId;
+        return (
+          <Card
+            key={chunk.chunk_id}
+            interactive={false}
+            data-testid={`chunk-card-${chunk.chunk_id}`}
+            className={cn(
+              "cursor-pointer hover:bg-white/[0.02] transition-colors",
+              selected && "ring-1 ring-cyan-500/60 bg-white/[0.03]",
+            )}
+            onClick={() => onChunkSelect?.(chunk)}
+          >
+            <CardContent className="p-3 space-y-2">
+              <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-500">
+                <Badge variant="outline" className="text-[9px] px-1 py-0 h-4">
+                  chunk {chunk.index + 1} / {chunk.total_chunks}
+                </Badge>
+                <span className="text-zinc-600 truncate">{chunk.chunk_id}</span>
+              </div>
+              <div className="text-[11px] text-zinc-300 whitespace-pre-wrap leading-relaxed font-mono">
+                {chunk.text}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </>
+  );
 }
 
 function ErrorBlock({ title, message }: { title: string; message?: string }) {

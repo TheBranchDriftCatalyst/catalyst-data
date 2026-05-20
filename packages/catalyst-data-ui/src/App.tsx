@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, TooltipProvider } from "@thebranchdriftcatalyst/catalyst-ui";
 import Sidebar from "@/components/Sidebar";
 import { TopNav } from "@/components/TopNav";
+import DetailsPanel from "@/components/DetailsPanel";
+import { SelectionProvider, useSelection } from "@/contexts/SelectionContext";
+import { useEffect } from "react";
 import Documents from "@/pages/documents/Documents";
 import DomainDocumentDetail from "@/pages/documents/_shared/DomainDocumentDetail";
 import PlayerPage from "@/pages/Player";
@@ -42,6 +45,24 @@ function AppShell({
 }) {
   const { pathname } = useLocation();
   const showSidebar = shouldShowSidebar(pathname);
+  const { clear, isOpen } = useSelection();
+
+  // Esc closes the details panel. Lives at shell scope so it works no
+  // matter which page produced the selection.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clear();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isOpen, clear]);
+
+  // Selection state is route-scoped — switching pages clears it so a
+  // stale assertion from /bills doesn't haunt the /player panel.
+  useEffect(() => {
+    clear();
+  }, [pathname, clear]);
 
   return (
     <div className="flex flex-col h-screen bg-surface-0 text-zinc-100 overflow-hidden">
@@ -84,6 +105,7 @@ function AppShell({
             />
           </Routes>
         </main>
+        <DetailsPanel />
       </div>
     </div>
   );
@@ -96,12 +118,14 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <TooltipProvider delayDuration={200}>
-          <BrowserRouter basename="/viewer">
-            <AppShell
-              sidebarCollapsed={sidebarCollapsed}
-              onSidebarToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-            />
-          </BrowserRouter>
+          <SelectionProvider>
+            <BrowserRouter basename="/viewer">
+              <AppShell
+                sidebarCollapsed={sidebarCollapsed}
+                onSidebarToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+              />
+            </BrowserRouter>
+          </SelectionProvider>
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>
