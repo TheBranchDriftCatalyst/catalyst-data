@@ -66,11 +66,20 @@ data:
   #   - o3-mini                      (reasoning, slow, mid-priced)
   # Pick gpt-5.5 — flagship intelligence + 1M context window.
   # The omnibus appropriations bill (117-hr-2617) tokenises to ~1.05M;
-  # o3-mini (200K context) and Anthropic Haiku (200K) both refused.
-  # gpt-5.5 fits + is SOTA-tier on legal-text composition.
-  # Switch to gpt-5.4-mini for cost-sensitive iterative work once
-  # talos00 has applied the litellm ConfigMap.
+  # o3-mini (200K context) and Haiku (200K) both refused. gpt-5.5 fits
+  # + is SOTA-tier on legal-text composition. Switch to gpt-5.4-mini
+  # for cost-sensitive iterative work once talos00 has applied the
+  # litellm ConfigMap.
   LLM_MODEL: "gpt-5.5"
+
+  # bill_claims chunking knobs. Tune these per LLM_MODEL — bigger
+  # context models can pack more bill text per call (fewer calls per
+  # bill, lower per-bill cost). See assets/bill_claims.py header for
+  # the recommended pairing per model. Leave unset for the gpt-5.5
+  # defaults baked into the asset.
+  # BILL_CLAIMS_TOKEN_BUDGET:           "700000"   # input tokens per call
+  # BILL_CLAIMS_SINGLE_CALL_THRESHOLD:  "200000"   # skip chunking under this
+  # BILL_CLAIMS_CHARS_PER_TOKEN:        "4"        # estimation ratio
   LLM_BASE_URL: "http://litellm.talos00/v1"
 
   # ── Embeddings ─────────────────────────────────────────────────

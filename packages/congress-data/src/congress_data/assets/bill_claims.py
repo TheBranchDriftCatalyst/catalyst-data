@@ -28,6 +28,7 @@ Design references in
 
 import hashlib
 import json
+import os
 from datetime import UTC, datetime
 
 from dagster import AssetExecutionContext, AssetIn, Output, asset
@@ -56,20 +57,27 @@ _AMR_PRIMITIVES_CAP = 80
 
 # ── Chunked synthesis (for bills that exceed single-call context) ───────
 #
-# Token budget per LLM call. gpt-5.5's hard input cap is ~922K; we leave
-# ~220K headroom for prompt overhead (system prompt + AMR primitives) +
-# output generation room (up to 32K output tokens). Bills under this
-# size go through the single-call path; over, we bin-pack chunks into
-# the minimum number of windows.
-_TOKEN_BUDGET_PER_WINDOW = 700_000
-
-# Rough char-to-token ratio for English text (gpt-tokenizer averages
-# ~4 chars/token on legal prose; PropBank-rich text trends a bit higher).
-# Used for budgeting only — never as a hard limit.
-_CHARS_PER_TOKEN = 4
-
-# Below this estimated bill-text size, skip windowing entirely.
-_SINGLE_CALL_THRESHOLD_TOKENS = 200_000
+# Token budgets are configurable via env so the same asset code adapts
+# to different LLM context windows without a code edit:
+#
+#   BILL_CLAIMS_TOKEN_BUDGET           — input-tokens budget per LLM call.
+#                                        Bin-packing target. Default 700K
+#                                        (leaves headroom under gpt-5.5's
+#                                        922K hard cap for prompt + output).
+#   BILL_CLAIMS_SINGLE_CALL_THRESHOLD  — bills shorter than this skip the
+#                                        chunked path entirely. Default 200K.
+#   BILL_CLAIMS_CHARS_PER_TOKEN        — char→token ratio for budget
+#                                        estimation. Default 4 (typical
+#                                        English legal prose).
+#
+# Tune for different models:
+#   gpt-5.5         → budget=700_000   single_threshold=200_000
+#   gpt-5.4-mini    → budget=700_000   single_threshold=200_000   (same 1M context)
+#   claude-haiku    → budget=160_000   single_threshold=100_000   (200K context)
+#   o3-mini         → budget=160_000   single_threshold=100_000   (200K context)
+_TOKEN_BUDGET_PER_WINDOW = int(os.environ.get("BILL_CLAIMS_TOKEN_BUDGET", "700000"))
+_CHARS_PER_TOKEN = int(os.environ.get("BILL_CLAIMS_CHARS_PER_TOKEN", "4"))
+_SINGLE_CALL_THRESHOLD_TOKENS = int(os.environ.get("BILL_CLAIMS_SINGLE_CALL_THRESHOLD", "200000"))
 
 
 def _estimate_tokens(text: str) -> int:
