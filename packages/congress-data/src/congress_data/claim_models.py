@@ -243,12 +243,27 @@ class BillClaim(BaseModel):
 
 class BillClaimsResult(BaseModel):
     """LLM structured-output wrapper. The asset asks the LLM to emit
-    ``claims: list[BillClaim]`` and unwraps the list."""
+    ``claims: list[BillClaim]`` and unwraps the list.
+
+    No hard ``max_length`` — the right number of claims scales with
+    the bill (a procedural resolution has 1–3; an omnibus appropriations
+    bill can have hundreds). The prompt + bill_size context tells the
+    LLM what's appropriate; the ceiling here is just a sanity guard
+    against runaway output. The LLM's own context window is the real
+    upper bound."""
 
     model_config = {"extra": "forbid"}
 
     claims: list[BillClaim] = Field(
-        description="5–15 high-level legal claims composed from the bill.",
+        description=(
+            "Adaptive count — one claim per substantive provision in "
+            "the bill. Procedural resolutions emit 1–3; substantive "
+            "bills emit 10–30; omnibus bills can emit 100+."
+        ),
         min_length=1,
-        max_length=20,  # hard cap — prompt asks for 15
+        # 500 is a sanity ceiling, not a recommended target. The prompt
+        # asks the LLM to scale claim count to bill substance. Hitting
+        # this cap on a non-omnibus bill means the LLM is being too
+        # granular and the result needs review.
+        max_length=500,
     )

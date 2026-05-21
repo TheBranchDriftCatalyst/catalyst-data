@@ -257,19 +257,27 @@ def _parse_xml(xml_content: str, config: ChunkConfig | None = None) -> tuple[str
 
     # Walk direct children of legis-body
     # Structure: legis-body > (section | title > (subtitle > section | section))
+    #
+    # OMNIBUS BILLS — use ``<division>`` (Division A, Division B, ...) at
+    # the top level instead of ``<title>``. Pre-2026 versions of this
+    # chunker missed the ``division`` tag entirely; the Consolidated
+    # Appropriations Act 2023 (117-hr-2617) chunked to 10 tiny
+    # boilerplate sections instead of the 1000+ inside each division.
+    # Treating ``division`` as a container alongside title/subtitle/
+    # chapter/part fixes that.
     for child in legis_body:
         tag = child.tag
 
         if tag == "section":
             candidates.extend(_xml_section_to_chunks(child, config=config))
 
-        elif tag in ("title", "subtitle", "chapter", "part"):
+        elif tag in ("division", "title", "subtitle", "chapter", "part"):
             # These are container elements — process their child sections
             container_enum, container_header = _xml_get_header(child)
             container_label = f"{tag.upper()} {container_enum}: {container_header}"
 
             # Check if this container has direct section children
-            has_sections = any(c.tag in ("section", "subtitle", "chapter", "part") for c in child)
+            has_sections = any(c.tag in ("section", "division", "title", "subtitle", "chapter", "part") for c in child)
 
             if has_sections:
                 # Process each child section/sub-container recursively
@@ -280,8 +288,11 @@ def _parse_xml(xml_content: str, config: ChunkConfig | None = None) -> tuple[str
                         for c in section_chunks:
                             c.metadata["parent_title"] = container_label
                         candidates.extend(section_chunks)
-                    elif subchild.tag in ("subtitle", "chapter", "part"):
-                        # Recurse into nested containers
+                    elif subchild.tag in ("division", "title", "subtitle", "chapter", "part"):
+                        # Recurse into nested containers. ``.//section``
+                        # is an XPath descendant query, so it picks up
+                        # sections at any depth under this container
+                        # (handles division > title > subtitle > section).
                         sub_enum, sub_header = _xml_get_header(subchild)
                         sub_label = f"{subchild.tag.upper()} {sub_enum}: {sub_header}"
                         for subsec in subchild.findall(".//section"):

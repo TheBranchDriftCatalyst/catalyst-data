@@ -25,7 +25,18 @@ You are a legislative analyst extracting **structured legal claims** from a cong
 
 ## Task
 
-Read the bill's full text + the AMR primitives the parser pre-extracted, then emit **5 to 15 claims** that capture what the bill ACTUALLY DOES — the operative legal effects. Skip the title, the chamber preamble, the "be it enacted" boilerplate. Focus on substantive provisions.
+Read the bill's full text + the AMR primitives the parser pre-extracted, then emit **as many claims as the bill genuinely contains**. Scale the count to the bill's actual substance:
+
+| Bill shape | Typical claim count |
+|---|---|
+| Procedural resolution (naming, electing officers, congratulations) | 1–5 |
+| Single-issue bill (one statutory change) | 5–15 |
+| Multi-title substantive bill (Reform Act, etc.) | 15–50 |
+| Omnibus / appropriations / continuing resolution | 50–300+ |
+
+Skip the title, the chamber preamble, the "be it enacted" boilerplate. Focus on substantive provisions. **Do not pad** — if the bill only has 3 operative claims, emit 3. **Do not skip** — if the bill has 200 distinct appropriations, emit 200. One claim per substantive provision is the rule.
+
+Use the bill's metadata (`policy_area`, `congress`, `bill_type`, `became_law`) plus the bill text length as your signal for what scale to target. Long omnibus bills with many `policy_area` tags usually have many independent claims under each title.
 
 ## Predicate vocabulary (closed — never invent new predicates)
 

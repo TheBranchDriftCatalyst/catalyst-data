@@ -528,7 +528,13 @@ claim_synthesis:
     - condition           # e.g. "upon written request"
     - penalty             # e.g. "fine up to $500,000"
     - jurisdiction        # e.g. "federal courts"
+  # Advisory bounds — the LLM scales claim count to bill substance
+  # (procedural res = 1–5; substantive = 5–50; omnibus = 50–300+).
+  # The actual ceiling lives in the BillClaimsResult.max_length=500
+  # sanity guard; these numbers steer the prompt's guidance table.
   output_count:
-    min: 5
-    max: 15
+    min: 1
+    typical_substantive: 15
+    typical_omnibus: 100
+    sanity_max: 500
   default_confidence: 0.85

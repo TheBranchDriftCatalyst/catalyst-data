@@ -54,6 +54,82 @@ _EXTRACTION_MODEL = "bill_claims_v1"
 # large bill. The top-N by confidence (or first N) is enough grounding.
 _AMR_PRIMITIVES_CAP = 80
 
+# ── Chunked synthesis (for bills that exceed single-call context) ───────
+#
+# Token budget per LLM call. gpt-5.5's hard input cap is ~922K; we leave
+# ~220K headroom for prompt overhead (system prompt + AMR primitives) +
+# output generation room (up to 32K output tokens). Bills under this
+# size go through the single-call path; over, we bin-pack chunks into
+# the minimum number of windows.
+_TOKEN_BUDGET_PER_WINDOW = 700_000
+
+# Rough char-to-token ratio for English text (gpt-tokenizer averages
+# ~4 chars/token on legal prose; PropBank-rich text trends a bit higher).
+# Used for budgeting only — never as a hard limit.
+_CHARS_PER_TOKEN = 4
+
+# Below this estimated bill-text size, skip windowing entirely.
+_SINGLE_CALL_THRESHOLD_TOKENS = 200_000
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough char-based token estimate. Cheap; ±15% on legal prose.
+    Use the LLM-side tokenizer when you need exact counts; this is for
+    budgeting heuristics only."""
+    return len(text) // _CHARS_PER_TOKEN
+
+
+def _pack_chunks_into_windows(
+    chunks: list[TextChunk],
+    *,
+    budget_tokens: int = _TOKEN_BUDGET_PER_WINDOW,
+) -> list[list[TextChunk]]:
+    """First-Fit-Decreasing bin-packing of chunks into token-budget
+    windows. Minimises call count by stuffing each window as full as
+    possible without exceeding the budget.
+
+    Output order: windows are sorted internally by the original chunk
+    index so the LLM sees coherent reading order inside each window.
+    """
+    sized = sorted(
+        ((c, _estimate_tokens(c.text)) for c in chunks),
+        key=lambda x: x[1],
+        reverse=True,
+    )
+    windows: list[list[TextChunk]] = []
+    window_tokens: list[int] = []
+    for chunk, tokens in sized:
+        placed = False
+        for i, wt in enumerate(window_tokens):
+            if wt + tokens <= budget_tokens:
+                windows[i].append(chunk)
+                window_tokens[i] = wt + tokens
+                placed = True
+                break
+        if not placed:
+            windows.append([chunk])
+            window_tokens.append(tokens)
+    # Sort each window by original chunk index so the LLM reads
+    # sentences in order within the window.
+    for w in windows:
+        w.sort(key=lambda c: c.index)
+    return windows
+
+
+def _dedupe_claims(claims: list[BillClaim]) -> list[BillClaim]:
+    """Dedupe by (actor, operator, action) — same legal claim mentioned
+    in two windows (e.g. a definition referenced in multiple titles)
+    collapses to one row. Stable: keeps the first occurrence."""
+    seen: set[tuple[str, str, str]] = set()
+    out: list[BillClaim] = []
+    for c in claims:
+        key = (c.actor.strip().lower(), c.operator.value, c.action.strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
 
 def _stable_claim_id(actor: str, operator: str, action: str, chunk_id: str) -> str:
     """Stable hash of (actor, operator, action, chunk_id). 16 hex chars."""
@@ -113,10 +189,19 @@ def _build_user_message(
     bill: Document,
     partition: str,
     amr_primitives: list[ContractAssertion],
-    chunks: list[TextChunk],
+    *,
+    text_override: str | None = None,
+    window_info: str | None = None,
 ) -> str:
     """User message passed to the LLM. Two grounding inputs in clearly
-    labelled sections so the prompt can reference them."""
+    labelled sections so the prompt can reference them.
+
+    ``text_override`` lets the chunked path pass a window of bill text
+    (concatenated chunks) instead of the full bill content. ``window_info``
+    annotates which window we're on (e.g. "window 2 of 3") so the LLM
+    knows it's seeing a partial view and shouldn't try to extract
+    cross-window structural claims.
+    """
     meta = bill.metadata or {}
     metadata_lines = "\n".join(
         f"  {k}: {v}"
@@ -132,16 +217,28 @@ def _build_user_message(
         }.items()
         if v not in (None, "")
     )
+    text = text_override if text_override is not None else (bill.content or "")
+    window_note = f"\n*({window_info} — a partial view; claims should be local to this text)*\n" if window_info else ""
     return (
         f"## BILL\n\n"
         f"{metadata_lines}\n\n"
-        f"### Full text\n\n"
-        f"{bill.content or '(no full text materialised)'}\n\n"
+        f"### Full text{window_note}\n\n"
+        f"{text or '(no text materialised)'}\n\n"
         f"## AMR_PRIMITIVES\n\n"
         f"(Top {min(len(amr_primitives), _AMR_PRIMITIVES_CAP)} of {len(amr_primitives)} "
         f"primitives — JSONL, one per line. Use as grounding; do not copy verbatim.)\n\n"
         f"{_build_amr_primitives_block(amr_primitives)}\n"
     )
+
+
+def _filter_primitives_for_window(
+    primitives: list[ContractAssertion],
+    window_chunk_ids: set[str],
+) -> list[ContractAssertion]:
+    """For the chunked path, only pass AMR primitives whose source
+    chunk is in the current window. Otherwise the LLM tries to ground
+    claims to text it doesn't have."""
+    return [a for a in primitives if a.provenance and a.provenance.chunk_id in window_chunk_ids]
 
 
 def _stamp_claim(
@@ -225,20 +322,87 @@ def bill_claims(
             registry_dir=prompt_dir or None,
         )
 
-        user_msg = _build_user_message(bill_document, partition, bill_assertions, bill_chunks)
-
-        # Structured-output call — LangChain handles the JSON-schema
-        # binding from our Pydantic BillClaimsResult so the LLM is
-        # constrained to the closed predicate vocab + nested types.
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        # Anthropic/Claude via LiteLLM wraps tool-call output in a
-        # {"parameter": "<stringified JSON>"} envelope that breaks
-        # Pydantic validation. json_mode avoids the wrapper and
-        # returns the raw object. OpenAI's gpt-4o-family handles
-        # function-calling fine but json_mode also works for them.
+        # Structured-output binding. Use json_mode (instead of the
+        # function_calling default) because LiteLLM proxies wrap tool-
+        # call output in a {"parameter": "<stringified JSON>"}
+        # envelope on some providers that breaks Pydantic validation.
         chain = llm.with_structured_output(BillClaimsResult, method="json_mode")
-        result: BillClaimsResult = chain.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_msg)])
+
+        # ── Budgeting: single-call vs chunked path ────────────────
+        bill_text = bill_document.content or ""
+        text_tokens = _estimate_tokens(bill_text)
+        context.log.info(
+            "bill_claims: bill text ~%d tokens; single-call threshold=%d",
+            text_tokens,
+            _SINGLE_CALL_THRESHOLD_TOKENS,
+        )
+
+        all_claims: list[BillClaim] = []
+        windows_count = 1
+
+        if text_tokens <= _SINGLE_CALL_THRESHOLD_TOKENS:
+            # Single-call fast path — the common case.
+            user_msg = _build_user_message(
+                bill_document,
+                partition,
+                bill_assertions,
+            )
+            result: BillClaimsResult = chain.invoke(
+                [SystemMessage(content=system_prompt), HumanMessage(content=user_msg)]
+            )
+            all_claims.extend(result.claims)
+        else:
+            # Chunked path — bin-pack chunks into the minimum number
+            # of windows that each fit under _TOKEN_BUDGET_PER_WINDOW.
+            # One LLM call per window; merge + dedupe at the end.
+            windows = _pack_chunks_into_windows(bill_chunks)
+            windows_count = len(windows)
+            context.log.info(
+                "bill_claims: chunked path — %d windows (each <= %d tokens)",
+                windows_count,
+                _TOKEN_BUDGET_PER_WINDOW,
+            )
+            for i, window_chunks in enumerate(windows, 1):
+                window_chunk_ids = {c.chunk_id for c in window_chunks}
+                window_text = "\n\n".join(c.text for c in window_chunks)
+                window_primitives = _filter_primitives_for_window(
+                    bill_assertions,
+                    window_chunk_ids,
+                )
+                user_msg = _build_user_message(
+                    bill_document,
+                    partition,
+                    window_primitives,
+                    text_override=window_text,
+                    window_info=f"window {i} of {windows_count}",
+                )
+                context.log.info(
+                    "bill_claims: window %d/%d — %d chunks, %d primitives, ~%d tokens",
+                    i,
+                    windows_count,
+                    len(window_chunks),
+                    len(window_primitives),
+                    _estimate_tokens(window_text),
+                )
+                window_result: BillClaimsResult = chain.invoke(
+                    [SystemMessage(content=system_prompt), HumanMessage(content=user_msg)]
+                )
+                all_claims.extend(window_result.claims)
+
+        # Dedup-by-stable-key: definitions / scoping claims that span
+        # multiple windows often emit twice. Collapse to one.
+        pre_dedup = len(all_claims)
+        all_claims = _dedupe_claims(all_claims)
+        # Synthesize a single result for downstream code that expects it.
+        result = BillClaimsResult(claims=all_claims)
+        context.log.info(
+            "bill_claims: %d windows -> %d claims (deduped from %d)",
+            windows_count,
+            len(all_claims),
+            pre_dedup,
+        )
 
         # Stamp identifiers + provenance + source-chunk back-reference.
         stamped = [_stamp_claim(c, bill_document, bill_chunks, code_location="congress_data") for c in result.claims]
@@ -273,5 +437,7 @@ def bill_claims(
                 "review_needed_count": review_count,
                 "model": llm.model,
                 "extraction_model": _EXTRACTION_MODEL,
+                "llm_calls": windows_count,
+                "bill_text_tokens": text_tokens,
             },
         )
