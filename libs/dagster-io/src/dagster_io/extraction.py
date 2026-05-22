@@ -113,19 +113,30 @@ def extract_validated(
     # the per-domain fallback in resolve_prompt_dir can find them.
     prompt_dir = resolve_prompt_dir(domain=code_location.replace("_", "-"))
     label_pack_id = resolve_label_pack(code_location)
-    ner_model = os.environ.get("LLM_MODEL", "gliner")
+
+    # NER controls are deliberately decoupled from LLM_MODEL. Earlier
+    # versions defaulted ner_model to LLM_MODEL, which silently routed
+    # mention extraction through ChatGPT whenever LLM_MODEL was set for
+    # the bill_claims synthesis asset (the symptom: ~1,700 completions
+    # on the IRA reconciliation bill). Mention extraction belongs on the
+    # local NER ensemble — never on a language model.
+    ner_model = os.environ.get("NER_MODEL", "gliner")
+    ensemble_raw = os.environ.get("NER_ENSEMBLE", "gliner,nuextract,universalner,regex")
+    ner_ensemble = [m.strip() for m in ensemble_raw.split(",") if m.strip()] or None
 
     logger.info(
-        "extract_validated: %d chunks, code_location=%s, label_pack=%s, ner_model=%s, concurrency=%d",
+        "extract_validated: %d chunks, code_location=%s, label_pack=%s, ner_model=%s, ner_ensemble=%s, concurrency=%d",
         len(chunks),
         code_location,
         label_pack_id,
         ner_model,
+        ner_ensemble,
         max_concurrency,
     )
 
     resource = ExtractionResource(
         ner_model=ner_model,
+        ner_ensemble=ner_ensemble,
         prompt_dir=prompt_dir,
         label_pack_id=label_pack_id,
         max_concurrency=max_concurrency,

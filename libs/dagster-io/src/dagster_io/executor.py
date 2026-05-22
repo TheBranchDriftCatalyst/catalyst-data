@@ -43,6 +43,8 @@ def make_k8s_executor(code_location: str) -> ExecutorDefinition:
         "LLM_MODEL",
         "LLM_BASE_URL",
         "LLM_API_KEY",
+        "NER_MODEL",
+        "NER_ENSEMBLE",
         "EMBEDDING_MODEL",
         "EMBEDDING_BASE_URL",
         "EMBEDDING_DIMENSIONS",

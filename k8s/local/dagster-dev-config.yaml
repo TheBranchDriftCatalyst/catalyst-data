@@ -58,19 +58,29 @@ data:
   CHUNK_OVERLAP: "200"
 
   # ── LLM (LiteLLM proxy default — keys come from .envrc.cluster) ─
-  # Pick the SOTA-tier model at dev-friendly pricing. The local
-  # LiteLLM proxy registry today has:
-  #   - claude-opus-4-7              (SOTA reasoning, $$$ — overkill for iter)
-  #   - claude-haiku-4-5-20251001    (fast + cheap, NOT SOTA-tier)
-  #   - gpt-5.5                      (flagship, dev-priced — best balance)
-  #   - o3-mini                      (reasoning, slow, mid-priced)
-  # Pick gpt-5.5 — flagship intelligence + 1M context window.
+  # LLM_MODEL controls the bill_claims **claim synthesis** asset ONLY.
+  # It MUST NOT leak into the NER ensemble — mention extraction runs
+  # on the local NER voters (see NER_MODEL / NER_ENSEMBLE below).
+  # Picking gpt-5.5: flagship intelligence + 1M context window.
   # The omnibus appropriations bill (117-hr-2617) tokenises to ~1.05M;
   # o3-mini (200K context) and Haiku (200K) both refused. gpt-5.5 fits
   # + is SOTA-tier on legal-text composition. Switch to gpt-5.4-mini
   # for cost-sensitive iterative work once talos00 has applied the
-  # litellm ConfigMap.
+  # litellm ConfigMap. Available proxy models today:
+  #   - claude-opus-4-7              (SOTA reasoning, $$$ — overkill for iter)
+  #   - claude-haiku-4-5-20251001    (fast + cheap, NOT SOTA-tier)
+  #   - gpt-5.5                      (flagship, dev-priced — best balance)
+  #   - o3-mini                      (reasoning, slow, mid-priced)
   LLM_MODEL: "gpt-5.5"
+
+  # ── NER ensemble (mention extraction — separate from LLM) ──────
+  # Multi-voter ensemble: each encoder runs on every chunk, results
+  # merged via majority consensus (see catalyst_exgraph.consensus).
+  # NEVER include an LLM model name here — that path raises ValueError
+  # in catalyst_exgraph.resource._resolve_client. LLM use is reserved
+  # for bill_claims synthesis only.
+  NER_MODEL: "gliner"
+  NER_ENSEMBLE: "gliner,nuextract,universalner,regex"
 
   # bill_claims chunking knobs. Tune these per LLM_MODEL — bigger
   # context models can pack more bill text per call (fewer calls per
