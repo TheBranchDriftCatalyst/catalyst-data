@@ -59,3 +59,15 @@ k8s/local/dagster-dev-secrets.yaml
 .playwright-mcp/
 .claude/
 scripts/lib/
+.tmp_dagster_home_*/
+
+# Dolt-backed beads server runtime state (process files + local DB checkout).
+# The issues themselves live in .beads/issues.jsonl (committed); everything
+# under .beads/dolt/ is a per-machine dolt checkout, and the dolt-server.*
+# files are process bookkeeping.
+.beads/dolt/
+.beads/dolt-server.*
+.beads/dolt-config.log
+
+# One-off analysis/report outputs (bloat reports, stat dumps, etc.).
+reports/
