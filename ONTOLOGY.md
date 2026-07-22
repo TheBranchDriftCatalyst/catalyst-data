@@ -118,6 +118,8 @@ For your pipeline, SRL gives you:
 
 If your endgame is a proposition graph, SRL or frame-semantic structure should be treated as first-class.
 
+| TODO: add a 
+
 ### 3.3 AMR is even better when you need graph-native semantics
 
 Abstract Meaning Representation encodes sentence meaning as a rooted directed graph. A recent survey on AMR applications makes the case that AMR remains one of the most useful symbolic intermediate forms for tasks that require explicit semantic structure beyond plain spans or labels. ([ACL Anthology][4])
