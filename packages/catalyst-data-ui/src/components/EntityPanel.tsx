@@ -98,9 +98,18 @@ function getTypeConfig(type: string) {
   return TYPE_CONFIG[type.toUpperCase()] ?? DEFAULT_CONFIG;
 }
 
-/** Produce a stable target ID for a mention. */
+/** Produce a stable target ID for a mention.
+ *
+ *  Prefers the contracts-core ``mention_id`` (stable hash baked in at
+ *  extraction time). Falls back to a synthesized id for legacy rows that
+ *  predate the unified Mention shape — the legacy field names live on
+ *  ``provenance`` now (`source_document_id` / `chunk_id`).
+ */
 function mentionTargetId(m: Mention, index: number): string {
-  return `mention_${m.document_id}_${m.chunk_id}_${m.mention_type}_${m.text}_${index}`;
+  if (m.mention_id) return m.mention_id;
+  const docId = m.provenance.source_document_id;
+  const chunkId = m.provenance.chunk_id;
+  return `mention_${docId}_${chunkId}_${m.canonical_type}_${m.text}_${index}`;
 }
 
 export default function EntityPanel({
@@ -129,7 +138,7 @@ export default function EntityPanel({
     const entityMap = new Map<string, AggregatedEntity>();
 
     mentions.forEach((m, i) => {
-      const key = `${m.mention_type}:${m.text.toLowerCase().trim()}`;
+      const key = `${m.canonical_type}:${m.text.toLowerCase().trim()}`;
       const existing = entityMap.get(key);
 
       if (!existing) {
@@ -168,7 +177,7 @@ export default function EntityPanel({
     const typeMap = new Map<string, AggregatedEntity[]>();
 
     for (const entity of aggregated) {
-      const type = entity.mention.mention_type;
+      const type = entity.mention.canonical_type;
       if (!typeMap.has(type)) {
         typeMap.set(type, []);
       }

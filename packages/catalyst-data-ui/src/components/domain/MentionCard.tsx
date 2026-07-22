@@ -69,7 +69,7 @@ export default function MentionCard({
 }: MentionCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(mention.text);
-  const typeStyle = getTypeColor(mention.mention_type);
+  const typeStyle = getTypeColor(mention.canonical_type);
 
   const handleSaveEdit = useCallback(() => {
     if (editValue.trim() && editValue !== mention.text) {
@@ -165,7 +165,7 @@ export default function MentionCard({
           typeStyle.bg,
         )}
       >
-        {mention.mention_type}
+        {mention.canonical_type}
       </Badge>
 
       {/* Count badge */}

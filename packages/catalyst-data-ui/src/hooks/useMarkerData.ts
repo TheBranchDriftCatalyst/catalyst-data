@@ -95,7 +95,10 @@ function getMentionTimestamp(
   }
 
   // 2. Text-based search within transcript segments
-  const chunkId = prov?.chunk_id ?? mention.chunk_id;
+  // chunk_id moved off Mention onto Provenance in the contracts-core
+  // unification (commit 6b78435). Keep the optional-chained read in case
+  // older fixtures still inline it; the canonical source is provenance.
+  const chunkId = prov?.chunk_id ?? (mention as unknown as { chunk_id?: string }).chunk_id;
   const chunkIdx = chunkId ? parseChunkIndex(chunkId) : null;
   return findSegmentByText(mention.text, segments, chunkIdx);
 }
@@ -120,11 +123,14 @@ function getAssertionTimestamp(
   }
 
   // 2. Text-based search — try subject_text first (most specific), then object
+  // object_text is null for intransitive predicates; only search when present.
   const chunkIdx = prov.chunk_id ? parseChunkIndex(prov.chunk_id) : null;
-  return (
-    findSegmentByText(assertion.subject_text, segments, chunkIdx) ??
-    findSegmentByText(assertion.object_text, segments, chunkIdx)
-  );
+  const subjectMatch = findSegmentByText(assertion.subject_text, segments, chunkIdx);
+  if (subjectMatch) return subjectMatch;
+  if (assertion.object_text) {
+    return findSegmentByText(assertion.object_text, segments, chunkIdx);
+  }
+  return null;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────
@@ -171,7 +177,7 @@ export function useMarkerData({
           label: `${a.subject_text} ${a.predicate} ${a.object_text}`,
           color: assertionColor(a.confidence),
           type: "assertion",
-          category: a.predicate_canonical || a.predicate,
+          category: a.predicate,
         });
       }
       return markers;
@@ -188,13 +194,13 @@ export function useMarkerData({
       if (!ts) continue;
 
       markers.push({
-        id: `mention-${m.chunk_id}-${i}`,
+        id: `mention-${m.provenance.chunk_id}-${i}`,
         timestamp: ts.start,
         endTimestamp: ts.end !== ts.start ? ts.end : undefined,
-        label: `${m.text} (${m.mention_type})`,
-        color: entityColor(m.mention_type),
+        label: `${m.text} (${m.canonical_type})`,
+        color: entityColor(m.canonical_type),
         type: "entity",
-        category: m.mention_type,
+        category: m.canonical_type,
       });
     }
 
@@ -213,7 +219,7 @@ export function useMarkerData({
           label: `${a.subject_text} ${a.predicate} ${a.object_text}`,
           color: assertionColor(a.confidence),
           type: "assertion",
-          category: a.predicate_canonical || a.predicate,
+          category: a.predicate,
         });
       }
     }

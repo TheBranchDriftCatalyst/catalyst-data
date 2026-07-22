@@ -1,5 +1,20 @@
 import type { Document } from "./document";
 
+// Re-export the canonical wire shapes from contracts.ts so existing
+// importers (`import type { Mention, Assertion, Provenance } from
+// "@/types/media"`) keep working. New code should import directly from
+// `@/types/contracts`. The legacy media-only shapes that used to live
+// here were dropped when the AMR-as-spine refactor landed — see
+// catalyst-llm commit 6b78435 for the canonical Python definitions.
+export type {
+  Assertion,
+  ExtractionMethod,
+  Mention,
+  MentionTypeHint,
+  Provenance,
+} from "./contracts";
+export { hasTemporalWindow, isAmrProjected, isStructured } from "./contracts";
+
 /** Media-ingest specialization of the generic `Document`. Adds backend-
  *  resolved streaming URLs plus the rich `metadata` shape produced by
  *  ffprobe during ingest. Compatible with any code that consumed the old
@@ -74,44 +89,6 @@ export interface ChunkInfo {
     speaker_count?: number;
     [k: string]: unknown;
   };
-}
-
-export interface Mention {
-  text: string;
-  mention_type: string;
-  context: string;
-  span_start: number;
-  span_end: number;
-  document_id: string;
-  chunk_id: string;
-  provenance?: Provenance | null;
-}
-
-export interface Provenance {
-  source_document_id: string;
-  chunk_id: string;
-  span_start?: number | null;
-  span_end?: number | null;
-  temporal_start_ms?: number | null;
-  temporal_end_ms?: number | null;
-  speaker_label?: string | null;
-  source_media_uri?: string | null;
-  extraction_method?: string;
-  extraction_model?: string;
-  confidence?: number;
-}
-
-export interface Assertion {
-  assertion_id?: string;
-  subject_text: string;
-  predicate: string;
-  predicate_canonical: string;
-  object_text: string;
-  confidence: number;
-  negated: boolean;
-  hedged: boolean;
-  qualifiers: Record<string, string>;
-  provenance?: Provenance | null;
 }
 
 /** Marker on the video timeline representing an entity mention or assertion. */

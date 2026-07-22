@@ -28,16 +28,16 @@ export function useInlineAnnotations(
     const result = new Map<number, InlineAnnotation[]>();
     if (!mentions || mentions.length === 0 || segments.length === 0) return result;
 
-    // ── 1. Deduplicate mentions by text + mention_type ──────────────
+    // ── 1. Deduplicate mentions by text + canonical_type ────────────
     const uniqueMap = new Map<string, { text: string; mentionType: string; confidence: number }>();
     for (const m of mentions) {
-      const key = `${m.text.toLowerCase()}::${m.mention_type}`;
+      const key = `${m.text.toLowerCase()}::${m.canonical_type}`;
       const existing = uniqueMap.get(key);
       const conf = m.provenance?.confidence ?? 0;
       if (!existing || conf > existing.confidence) {
         uniqueMap.set(key, {
           text: m.text,
-          mentionType: m.mention_type,
+          mentionType: m.canonical_type,
           confidence: conf,
         });
       }
