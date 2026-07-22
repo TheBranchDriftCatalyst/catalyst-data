@@ -1,0 +1,20 @@
+# catalyst-data — PROD/OPS spoke (scaffold)
+#
+# Placeholder. When this project has prod deployments worth observing
+# via Tilt, populate this file using the catalyst-llm spoke as a template:
+#   ~/catalyst-devspace/workspace/catalyst-llm/tilt-ops/Tiltfile
+#
+# Then uncomment the matching include() in:
+#   ~/catalyst-devspace/tilt-ops/Tiltfile
+
+load('../../../tilt-ops/common.tiltfile', 'print_prod_spoke_banner')
+
+NAMESPACE = 'catalyst-data'
+CONTEXT = 'admin@catalyst-cluster'
+
+allow_k8s_contexts(CONTEXT)
+
+print_prod_spoke_banner('catalyst-data (scaffold)', CONTEXT)
+
+# No resources yet — add prod_resource(...) calls when the project has
+# something to observe.
