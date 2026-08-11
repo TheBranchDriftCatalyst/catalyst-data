@@ -1,4 +1,8 @@
 ---
+# Media Explorer — HTTPS + Authentik forward-auth SSO on media-explorer.talos00
+# (TALOS-xgrl.14). Single UI route, gated by the `authentik` forward-auth
+# middleware; SSO via the forward_single provider in talos-homelab
+# sister-apps-blueprint.yaml. TLS: default TLSStore serves *.talos00 via SNI.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -13,16 +17,40 @@ metadata:
     gethomepage.dev/description: "Media Browser"
     gethomepage.dev/group: "Data Services"
     gethomepage.dev/icon: "si-mediafire"
-    gethomepage.dev/href: "http://media-explorer.talos00"
+    gethomepage.dev/href: "https://media-explorer.talos00"
     gethomepage.dev/siteMonitor: "http://media-ingest.catalyst-data.svc.cluster.local:9090/metrics"
     gethomepage.dev/pod-selector: "app=media-ingest"
     gethomepage.dev/weight: "3"
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`media-explorer.talos00`)
+      kind: Rule
+      middlewares:
+        - name: authentik
+          namespace: authentik
+      services:
+        - name: media-ingest
+          port: 8080
+  tls: {}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: media-explorer-http
+  labels:
+    app: media-ingest
+    app.kubernetes.io/part-of: catalyst-data
 spec:
   entryPoints:
     - web
   routes:
     - match: Host(`media-explorer.talos00`)
       kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik
       services:
         - name: media-ingest
           port: 8080

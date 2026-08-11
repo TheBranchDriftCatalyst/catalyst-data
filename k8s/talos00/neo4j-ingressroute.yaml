@@ -1,7 +1,11 @@
 ---
-# HTTP ingress for Neo4j Browser SPA (port 7474).
-# The browser loads from here, then its client-side JS opens a Bolt
-# connection to neo4j.talos00:7687 — see IngressRouteTCP below.
+# HTTP(S) ingress for Neo4j Browser SPA (port 7474) — HTTPS + Authentik
+# forward-auth SSO on neo4j.talos00 (TALOS-xgrl.14). The browser SPA loads from
+# here (gated by the `authentik` forward-auth middleware; SSO via the
+# forward_single provider in talos-homelab sister-apps-blueprint.yaml), then its
+# client-side JS opens a Bolt connection to neo4j.talos00:7687 — see
+# IngressRouteTCP below, which is LEFT UNTOUCHED (native Bolt auth, no forward-auth
+# possible on a raw TCP route). TLS: default TLSStore serves *.talos00 via SNI.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -16,25 +20,50 @@ metadata:
     gethomepage.dev/description: "Graph Database UI"
     gethomepage.dev/group: "Databases"
     gethomepage.dev/icon: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/neo4j.png"
-    gethomepage.dev/href: "http://neo4j.talos00"
+    gethomepage.dev/href: "https://neo4j.talos00"
     gethomepage.dev/siteMonitor: "http://neo4j.catalyst-data.svc.cluster.local:7474"
     gethomepage.dev/pod-selector: "app=neo4j"
     gethomepage.dev/weight: "1"
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`neo4j.talos00`)
+      kind: Rule
+      middlewares:
+        - name: authentik
+          namespace: authentik
+      services:
+        - name: neo4j
+          port: 7474
+  tls: {}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: neo4j-browser-http
+  labels:
+    app: neo4j
+    app.kubernetes.io/part-of: catalyst-data
 spec:
   entryPoints:
     - web
   routes:
     - match: Host(`neo4j.talos00`)
       kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik
       services:
         - name: neo4j
           port: 7474
 ---
-# TCP ingress for Neo4j Bolt protocol (port 7687).
+# TCP ingress for Neo4j Bolt protocol (port 7687). UNCHANGED — native Bolt basic
+# auth (neo4j/neo4j-homelab), LAN-only trust model. Forward-auth cannot apply to a
+# raw HostSNI/TCP route, so this stays exactly as-is.
 # Requires the 'bolt' entrypoint on Traefik (added in talos-homelab
 # infrastructure/base/traefik/helmrelease.yaml). HostSNI(`*`) is required
 # for non-TLS TCP routing — matches any incoming connection on :7687.
-# LAN-only trust model: auth is Neo4j's own basic auth (neo4j/neo4j-homelab).
 apiVersion: traefik.io/v1alpha1
 kind: IngressRouteTCP
 metadata:
