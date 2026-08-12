@@ -12,6 +12,32 @@ kind: Kustomization
 
 namespace: catalyst-data
 
+# HIATUS (2026-08-12): stack scaled to 0 while the project is parked.
+# Remove this block to bring everything back up.
+replicas:
+  - name: catalyst-data-homepage
+    count: 0
+  - name: congress-data
+    count: 0
+  - name: dagster-daemon
+    count: 0
+  - name: dagster-postgres
+    count: 0
+  - name: dagster-webserver
+    count: 0
+  - name: knowledge-graph
+    count: 0
+  - name: knowledge-graph-api
+    count: 0
+  - name: media-ingest
+    count: 0
+  - name: neo4j
+    count: 0
+  - name: open-leaks
+    count: 0
+  - name: postgres-knowledge
+    count: 0
+
 resources:
   - ../base
   # Secrets (consumed by base deployments — ExternalSecrets fed by 1Password
