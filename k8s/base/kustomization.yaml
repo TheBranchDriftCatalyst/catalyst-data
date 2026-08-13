@@ -25,7 +25,11 @@ resources:
   # Knowledge graph infrastructure
   - platform/postgres-knowledge.yaml
   - platform/neo4j.yaml
-  - platform/neo4j-n10s-init.yaml
+  # HIATUS (2026-08-13): n10s init Job disabled while the stack is scaled to 0
+  # (talos00 overlay `replicas:` block) — with neo4j down the Job crashloops
+  # forever, and Argo CD re-creates it every time its TTL reaps the old one.
+  # Re-enable together with the replicas block when un-hiatusing.
+  # - platform/neo4j-n10s-init.yaml
   # Code locations (deployments + services only — ingress is overlay-only)
   - congress-data/deployment.yaml
   - congress-data/service.yaml
