@@ -29,8 +29,8 @@ spec:
             - sh
             - -c
             - |
-              echo "Waiting for dagster-postgres:5432..."
-              until nc -z dagster-postgres 5432; do
+              echo "Waiting for dagster-postgres-rw:5432..."
+              until nc -z dagster-postgres-rw 5432; do
                 sleep 2
               done
               echo "Postgres is ready."
@@ -63,14 +63,22 @@ spec:
               value: "json"
             - name: DAGSTER_HOME
               value: /opt/dagster/dagster_home
+            # CloudNativePG read-write endpoint (TALOS-zjh0). Credentials come from
+            # the CNPG-generated dagster-postgres-app secret, not a literal.
             - name: DAGSTER_POSTGRES_HOST
-              value: dagster-postgres
+              value: dagster-postgres-rw.catalyst-data.svc.cluster.local
             - name: DAGSTER_POSTGRES_PORT
               value: "5432"
             - name: DAGSTER_POSTGRES_USER
-              value: dagster
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-postgres-app
+                  key: username
             - name: DAGSTER_POSTGRES_PASSWORD
-              value: dagster-homelab
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-postgres-app
+                  key: password
             - name: DAGSTER_POSTGRES_DB
               value: dagster
             - name: AWS_ACCESS_KEY_ID
@@ -154,8 +162,8 @@ spec:
             - sh
             - -c
             - |
-              echo "Waiting for dagster-postgres:5432..."
-              until nc -z dagster-postgres 5432; do
+              echo "Waiting for dagster-postgres-rw:5432..."
+              until nc -z dagster-postgres-rw 5432; do
                 sleep 2
               done
               echo "Postgres is ready."
@@ -181,14 +189,22 @@ spec:
               value: "json"
             - name: DAGSTER_HOME
               value: /opt/dagster/dagster_home
+            # CloudNativePG read-write endpoint (TALOS-zjh0). Credentials come from
+            # the CNPG-generated dagster-postgres-app secret, not a literal.
             - name: DAGSTER_POSTGRES_HOST
-              value: dagster-postgres
+              value: dagster-postgres-rw.catalyst-data.svc.cluster.local
             - name: DAGSTER_POSTGRES_PORT
               value: "5432"
             - name: DAGSTER_POSTGRES_USER
-              value: dagster
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-postgres-app
+                  key: username
             - name: DAGSTER_POSTGRES_PASSWORD
-              value: dagster-homelab
+              valueFrom:
+                secretKeyRef:
+                  name: dagster-postgres-app
+                  key: password
             - name: DAGSTER_POSTGRES_DB
               value: dagster
             - name: AWS_ACCESS_KEY_ID

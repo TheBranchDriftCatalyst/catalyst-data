@@ -1,0 +1,118 @@
+---
+# CloudNativePG replacement for the hand-rolled `dagster-postgres` Deployment
+# (TALOS-zjh0, epic TALOS-k62s).
+#
+# WHY THIS EXISTS
+# Same story as postgres-knowledge: a single Deployment on PVC `dagster-postgres`,
+# a `local-path` PV pinned by nodeAffinity to talos06, one of the recovery PVs
+# hand-written after the 2026-05-09 UPS incident (hence a 1Ti claim for 493 MB).
+# This is Dagster's run/event store — losing it loses every run record, asset
+# materialisation and schedule tick the platform has ever produced.
+#
+# NO pgvector HERE, DELIBERATELY.
+# The old Deployment ran postgres:16-alpine, not pgvector/pgvector:pg16, and the
+# database confirms it: pg_extension contains plpgsql and nothing else. Dagster is
+# an orchestrator — its schema is runs, event_logs, asset_keys and friends, with
+# no vector column anywhere. So this is a stock CNPG cluster and the extension
+# question that complicates postgres-knowledge simply does not arise.
+#
+# The `standard` operand variant is still used, purely so both clusters in this
+# namespace run the same image and get upgraded together. Nothing here needs it.
+#
+# THIS LIVES IN THE talos00 OVERLAY, NOT base/ — see cnpg-postgres-knowledge.yaml
+# for the reasoning.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: dagster-postgres
+  labels:
+    app.kubernetes.io/name: dagster-postgres
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  # velero.io/exclude-from-backup is stamped by the cluster-wide Kyverno policy.
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4-standard-trixie
+  imagePullPolicy: IfNotPresent
+  storage:
+    # Measured 2026-08-22: 437 MB database / 493 MB datadir, dominated by
+    # event_logs (323779 rows). Dagster's event store grows steadily once the
+    # platform is unparked, so this gets more headroom than postgres-knowledge.
+    size: 10Gi
+    storageClass: fatboy-nfs-appdata # node-independent, reclaimPolicy Retain
+  monitoring:
+    enablePodMonitor: false # covered by the cluster-wide cnpg-clusters PodMonitor
+  bootstrap:
+    initdb:
+      # Placeholder database — the real one, `dagster`, is a Database CR below.
+      # Kept symmetrical with postgres-knowledge so both clusters read the same.
+      database: dagsterapp
+      owner: dagster
+      # No `secret:` → CNPG generates dagster-postgres-app, replacing the
+      # plaintext `dagster-homelab` that was checked into git.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi # Dagster's event_logs queries are heavier than the KG store's
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: dagster-postgres
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: dagster
+  labels:
+    app.kubernetes.io/name: dagster-postgres
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  cluster:
+    name: dagster-postgres
+  name: dagster
+  owner: dagster
+  ensure: present
+  # Never drop the run history because a CR was deleted.
+  databaseReclaimPolicy: retain
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: dagster-postgres
+  labels:
+    app.kubernetes.io/name: dagster-postgres
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  retentionPolicy: "30d"
+  configuration:
+    destinationPath: s3://cnpg-backups/dagster-postgres
+    endpointURL: http://minio-hl.minio.svc:9000
+    s3Credentials:
+      accessKeyId:
+        name: cnpg-minio-backup
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: cnpg-minio-backup
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: dagster-postgres-daily
+  labels:
+    app.kubernetes.io/name: dagster-postgres
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  # 02:00 daily — postgres-knowledge runs at 02:10 so the two do not overlap.
+  schedule: "0 0 2 * * *"
+  immediate: true
+  backupOwnerReference: self
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  cluster:
+    name: dagster-postgres

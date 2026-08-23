@@ -1,4 +1,11 @@
 ---
+# SUPERSEDED 2026-08-22 by the CloudNativePG cluster in
+# k8s/talos00/cnpg-dagster-postgres.yaml (TALOS-zjh0, epic TALOS-k62s).
+#
+# THIS IS THE ROLLBACK, NOT LIVE CONFIG. Held at 0 replicas by the talos00
+# overlay; PVC `dagster-postgres` still holds the pre-migration PostgreSQL 16
+# datadir on its talos06-pinned local-path PV. Left in place deliberately so the
+# migration can be reversed. Deleting them is a separate, user-gated step.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

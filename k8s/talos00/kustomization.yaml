@@ -40,6 +40,13 @@ replicas:
 
 resources:
   - ../base
+  # CloudNativePG clusters (TALOS-zjh0) — replace the hand-rolled postgres
+  # Deployments in ../base/platform/. Overlay-only because they depend on the
+  # postgresql.cnpg.io + barmancloud.cnpg.io CRDs and on MinIO, none of which
+  # exist in the k3d local overlay. The old Deployments and their local-path
+  # PVCs stay in base, scaled to 0 by the replicas block above, as the rollback.
+  - cnpg-postgres-knowledge.yaml
+  - cnpg-dagster-postgres.yaml
   # Secrets (consumed by base deployments — ExternalSecrets fed by 1Password
   # via ESO ClusterSecretStore. Local overlay generates equivalents from a
   # gitignored .env file.)

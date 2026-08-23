@@ -1,0 +1,166 @@
+---
+# CloudNativePG replacement for the hand-rolled `postgres-knowledge` Deployment
+# (TALOS-zjh0, epic TALOS-k62s).
+#
+# WHY THIS EXISTS
+# The old Deployment ran pgvector/pgvector:pg16 against PVC `postgres-knowledge`,
+# a `local-path` PV pinned by nodeAffinity to talos06 — one of the recovery PVs
+# hand-written after the 2026-05-09 UPS incident, which is why it carries a 1Ti
+# claim for 207 MB of data. Node-pinned storage with no replica, no WAL archive
+# and no backup is the exact class of thing EPIC 0 exists to remove.
+#
+# THE pgvector QUESTION, ANSWERED
+# This database genuinely uses pgvector: canonical_entities.embedding is
+# vector(768) with an ivfflat index, and pg_trgm backs the entity-name search
+# index. So the operand image is NOT interchangeable.
+#
+# We do NOT use CNPG ImageVolume extensions (spec.postgresql.extensions). That
+# path needs PostgreSQL 18 *and* the Kubernetes ImageVolume feature gate, and the
+# gate is OFF on this cluster — verified empirically, an image volume is silently
+# pruned from the pod spec and `kubernetes_feature_enabled{name="ImageVolume"}`
+# reports 0 at k8s 1.34. Turning it on means a Talos machine-config change and a
+# rolling reboot of all five nodes, which is precisely what EPIC 0 is trying to
+# make safe in the first place.
+#
+# Instead: the CNPG `standard` operand variant already ships pgvector and pg_trgm
+# in the image. Verified in 18.4-standard-trixie: vector.control declares
+# default_version 0.8.6 (source was 0.8.2) and vector.so is present. No custom
+# image to build, no feature gate, no ImageVolume.
+#
+# PostgreSQL 16 -> 18 is a major version jump, which is fine and deliberate: the
+# migration is a logical pg_dump -Fc / pg_restore, not a datadir copy.
+#
+# THIS LIVES IN THE talos00 OVERLAY, NOT base/, because it depends on CRDs
+# (postgresql.cnpg.io, barmancloud.cnpg.io) and on MinIO — same reason
+# servicemonitor.yaml and prometheusrule.yaml are overlay-only.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres-knowledge
+  labels:
+    app.kubernetes.io/name: postgres-knowledge
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  # velero.io/exclude-from-backup is stamped by the cluster-wide Kyverno policy
+  # (talos-homelab TALOS-7jxm) — CNPG owns its own backups, Velero stays off its
+  # pods and PVCs. Nothing to hand-write here.
+  instances: 1
+  # `standard` (not `minimal`) is load-bearing: it is the variant that carries
+  # pgvector. Do not "simplify" this to :18.4 or a minimal tag — the cluster will
+  # come up and then fail the moment anything touches a vector column.
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4-standard-trixie
+  imagePullPolicy: IfNotPresent
+  storage:
+    # Measured 2026-08-22: 105 MB database / 207 MB datadir. The 1Ti on the old
+    # PVC is an artifact of the UPS-incident recovery PV, not a real requirement.
+    size: 5Gi
+    # instances:1 on `local-path` is what this migration is undoing, so it is not
+    # an option here. fatboy-nfs-appdata is node-independent and carries
+    # reclaimPolicy: Retain (local-path, the cluster default class, is Delete).
+    # The alternative — instances:3 on local-path — would put three Postgres pods
+    # on a five-node homelab for a namespace that is parked at 0/0.
+    storageClass: fatboy-nfs-appdata
+  monitoring:
+    enablePodMonitor: false # covered by the cluster-wide cnpg-clusters PodMonitor (TALOS-7u3)
+  bootstrap:
+    initdb:
+      # Placeholder database, same pattern as talos-homelab's arr-postgres: its
+      # only job is to exist so CNPG generates the postgres-knowledge-app secret
+      # and the `kg` role. The real database, knowledge_graph, is declared as a
+      # Database CR below so its extensions can be managed declaratively too.
+      database: kgapp
+      owner: kg
+      # No `secret:` → CNPG generates postgres-knowledge-app with a random
+      # password. This replaces the plaintext `kg-homelab` that was checked into
+      # git in every consumer Deployment.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  # Object-store backups → MinIO. Config lives in the ObjectStore CR below; the
+  # in-tree barmanObjectStore stanza was removed in CNPG 1.30.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: postgres-knowledge
+---
+# The real tenant database. Declared as a Database CR rather than created by
+# initdb so that `extensions` below is reconciled by the operator — the old
+# deployment installed them from a docker-entrypoint-initdb.d ConfigMap, which
+# only ever ran once, on an empty datadir.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: knowledge-graph
+  labels:
+    app.kubernetes.io/name: postgres-knowledge
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  cluster:
+    name: postgres-knowledge
+  name: knowledge_graph
+  owner: kg
+  ensure: present
+  # Deleting the CR must never drop the database that holds the entire knowledge
+  # graph. Dropping is a deliberate, manual act.
+  databaseReclaimPolicy: retain
+  extensions:
+    # CREATE EXTENSION vector requires superuser and the operand image to carry
+    # the extension; both are satisfied above. The operator owns this, so no
+    # init-SQL Job and no enableSuperuserAccess.
+    - name: vector
+      ensure: present
+    - name: pg_trgm
+      ensure: present
+---
+# Barman Cloud plugin ObjectStore — same bucket and credentials as every other
+# cluster in the fleet, own prefix. The cnpg-minio-backup secret arrives in this
+# namespace via reflector from minio/cnpg-minio-backup (talos-homelab
+# infrastructure/base/minio/cnpg-backup/externalsecret.yaml; catalyst-data was
+# added to its reflection-auto-namespaces list for this migration).
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: postgres-knowledge
+  labels:
+    app.kubernetes.io/name: postgres-knowledge
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  retentionPolicy: "30d" # prune backups + WALs older than 30 days
+  configuration:
+    destinationPath: s3://cnpg-backups/postgres-knowledge
+    endpointURL: http://minio-hl.minio.svc:9000
+    s3Credentials:
+      accessKeyId:
+        name: cnpg-minio-backup
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: cnpg-minio-backup
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+# Daily base backup. Continuous WAL archiving is driven by the Cluster's
+# barman-cloud plugin above; this is the periodic base backup those WAL segments
+# replay on top of. Retention is enforced by the ObjectStore's retentionPolicy.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: postgres-knowledge-daily
+  labels:
+    app.kubernetes.io/name: postgres-knowledge
+    app.kubernetes.io/part-of: catalyst-data
+spec:
+  # CNPG cron is 6-field (seconds first): sec min hour dom mon dow. 02:10 daily —
+  # offset from dagster-postgres so the two do not archive at the same instant.
+  schedule: "0 10 2 * * *"
+  immediate: true # take one right away so a backup exists before the first tick
+  backupOwnerReference: self
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  cluster:
+    name: postgres-knowledge

@@ -1,4 +1,19 @@
 ---
+# SUPERSEDED 2026-08-22 by the CloudNativePG cluster in
+# k8s/talos00/cnpg-postgres-knowledge.yaml (TALOS-zjh0, epic TALOS-k62s).
+#
+# THIS IS THE ROLLBACK, NOT LIVE CONFIG. The Deployment below is held at 0
+# replicas by the talos00 overlay's replicas block, and PVC `postgres-knowledge`
+# still holds the pre-migration PostgreSQL 16 datadir on its talos06-pinned
+# local-path PV. Both are deliberately left in place so the migration can be
+# reversed by scaling this back to 1 and repointing the consumers.
+#
+# Deleting them is a separate, user-gated step. Do not prune this file as
+# "dead config" — it is the safety net.
+#
+# The init.sql ConfigMap below is likewise historical: extensions on the CNPG
+# cluster are declared on its Database CR, not run from
+# docker-entrypoint-initdb.d.
 apiVersion: v1
 kind: ConfigMap
 metadata:
