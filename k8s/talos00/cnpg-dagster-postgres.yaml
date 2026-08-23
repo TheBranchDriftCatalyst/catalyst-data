@@ -47,6 +47,10 @@ spec:
       # Kept symmetrical with postgres-knowledge so both clusters read the same.
       database: dagsterapp
       owner: dagster
+      # Match the source (postgres:16-alpine ran en_US.utf8); CNPG's initdb
+      # default is C. See cnpg-postgres-knowledge.yaml for the reasoning.
+      localeCollate: en_US.utf8
+      localeCType: en_US.utf8
       # No `secret:` → CNPG generates dagster-postgres-app, replacing the
       # plaintext `dagster-homelab` that was checked into git.
   resources:

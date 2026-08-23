@@ -70,6 +70,13 @@ spec:
       # Database CR below so its extensions can be managed declaratively too.
       database: kgapp
       owner: kg
+      # Match the source database's collation. The old pgvector:pg16 container
+      # inherited en_US.utf8 from the Debian postgres image; CNPG's initdb
+      # defaults to C, which sorts text differently. Left unset, every ORDER BY
+      # on canonical_name and every pg_trgm comparison would quietly change
+      # behaviour on migration. en_US.utf8 is present in the standard operand.
+      localeCollate: en_US.utf8
+      localeCType: en_US.utf8
       # No `secret:` → CNPG generates postgres-knowledge-app with a random
       # password. This replaces the plaintext `kg-homelab` that was checked into
       # git in every consumer Deployment.
