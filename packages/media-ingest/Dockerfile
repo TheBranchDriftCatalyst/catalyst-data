@@ -11,7 +11,7 @@
 #       -t ghcr.io/thebranchdriftcatalyst/media-ingest-base:latest .
 
 # ---------- stage 0: build React SPA ----------
-FROM node:22-slim AS ui-builder
+FROM node:22.23.3-slim AS ui-builder
 WORKDIR /ui
 COPY packages/catalyst-data-ui/package.json packages/catalyst-data-ui/package-lock.json ./
 RUN npm ci

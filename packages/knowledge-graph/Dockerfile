@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # ---------- stage 1: build ----------
-FROM python:3.12-slim AS builder
+FROM python:3.15-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --no-deps --reinstall-package knowledge-graph .
 
 # ---------- stage 2: runtime ----------
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 WORKDIR /app
 
