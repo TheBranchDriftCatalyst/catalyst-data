@@ -6,11 +6,11 @@ build-backend = "hatchling.build"
 name = "congress-data"
 version = "0.1.0"
 description = "Congress.gov data pipeline — Dagster code location"
-requires-python = ">=3.12"
+requires-python = ">=3.15.0"
 dependencies = [
-    "dagster>=1.13",
-    "dagster-k8s>=0.29",
-    "dagster-postgres>=0.29",
+    "dagster>=1.13.26",
+    "dagster-k8s>=0.29.26",
+    "dagster-postgres>=0.29.26",
     "dagster-io",
     "catalyst-contracts-core",
     "catalyst-exgraph",
@@ -19,15 +19,15 @@ dependencies = [
     # location actually runs AMR projection — better to fail at install
     # resolution than silently at runtime via ImportError on first parse().
     "amrlib>=0.8.1",
-    "pydantic>=2.9",
-    "requests>=2.32",
+    "pydantic>=2.14.1",
+    "requests>=2.34.2",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "dagster-webserver>=1.13",
-    "pytest>=8.3",
-    "ruff>=0.9",
+    "dagster-webserver>=1.13.26",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
 ]
 
 [tool.hatch.build.targets.wheel]
