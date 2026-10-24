@@ -3,7 +3,7 @@
 # Build context is the repo root (see .github/workflows/build-image.yaml).
 
 # ---------- stage 1: build ----------
-FROM node:24-slim AS builder
+FROM node:24.22.1-slim AS builder
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ COPY packages/knowledge-graph-api/src/ src/
 RUN npm run build
 
 # ---------- stage 2: runtime ----------
-FROM node:24-slim
+FROM node:24.22.1-slim
 
 ENV NODE_ENV=production
 
