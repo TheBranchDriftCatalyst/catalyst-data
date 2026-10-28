@@ -2,30 +2,30 @@
 name = "catalyst-data-tests"
 version = "0.1.0"
 description = "Test harness for catalyst-data Dagster pipelines"
-requires-python = ">=3.12"
+requires-python = ">=3.15.2"
 dependencies = []
 
 [project.optional-dependencies]
 test = [
-    "pytest>=8.0",
+    "pytest>=9.2.0",
     "pytest-cov",
-    "dagster>=1.9",
-    "pydantic>=2.0",
-    "intervaltree>=3.1",
+    "dagster>=1.13.27",
+    "pydantic>=2.14.1",
+    "intervaltree>=3.2.1",
     # rdflib lives in packages/knowledge-graph but the workspace test harness
     # isn't a member of that package — declare it here so the n10s/Turtle-star
     # round-trip tests resolve from the root .venv.
-    "rdflib>=7.1",
+    "rdflib>=7.6.0",
 ]
 # Bench-side optional deps — DuckDB writer + S3 archive for the audit
 # log (see libs/dagster-io/src/dagster_io/bench/event_store.py, CD-jzkg).
-bench = ["fastapi>=0.110", "uvicorn>=0.27"]
+bench = ["fastapi>=0.162.0", "uvicorn>=0.54.0"]
 # local-embed: sentence-transformers + MPS for Qwen3-Embedding-8B
 # (M5 Max / Apple Silicon). See dagster-io[local-embed] for the full dep set.
-local-embed = ["sentence-transformers>=3.0", "torch>=2.4", "transformers>=4.45", "pyarrow>=17.0"]
+local-embed = ["sentence-transformers>=3.0", "torch>=2.14.1", "transformers>=5.21.0", "pyarrow>=17.0"]
 # unsloth: local fine-tuning consumer for Phase 3 SFT/DPO JSONL — see
 # scripts/training/unsloth_finetune.py + CD-sduv. Heavy + GPU-only; opt-in only.
-unsloth = ["unsloth>=2024.10", "trl>=0.11", "transformers>=4.45", "peft>=0.13", "bitsandbytes>=0.43", "datasets>=3.0"]
+unsloth = ["unsloth>=2026.10.9", "trl>=0.29.1", "transformers>=5.21.0", "peft>=0.21.2", "bitsandbytes>=0.50.2", "datasets>=3.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/congress-data/tests", "packages/media-ingest/tests", "packages/open-leaks/tests"]

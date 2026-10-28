@@ -11,17 +11,17 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@apollo/server": "^5.5.0",
-    "@neo4j/graphql": "^7.5.1",
+    "@apollo/server": "^5.5.1",
+    "@neo4j/graphql": "^7.6.5",
     "@neo4j/introspector": "^5.0.1",
-    "dotenv": "^16.4.7",
-    "graphql": "^16.13.2",
-    "neo4j-driver": "^6.0.1"
+    "dotenv": "^16.6.1",
+    "graphql": "^16.14.2",
+    "neo4j-driver": "^6.2.0"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "~5.7.0"
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3"
   },
   "overrides": {
     "@neo4j/introspector": {
@@ -29,6 +29,6 @@
     }
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.20.2"
   }
 }

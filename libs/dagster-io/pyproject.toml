@@ -6,51 +6,51 @@ build-backend = "hatchling.build"
 name = "dagster-io"
 version = "0.2.0"
 description = "Shared IO manager, LLM resources, and utilities for Dagster pipelines"
-requires-python = ">=3.12"
+requires-python = ">=3.15.2"
 dependencies = [
-    "dagster>=1.13",
-    "dagster-aws>=0.29",
-    "boto3>=1.35",
+    "dagster>=1.13.27",
+    "dagster-aws>=0.29.27",
+    "boto3>=1.43.120",
     "catalyst-contracts-core",
     # Wave 1, Step 3 (bead llm-g0b): extract_validated() now wraps
     # ExtractionResource.extract_assertions(). The legacy LangGraph
     # driver that lived in dagster_io.extraction has been retired.
     "catalyst-exgraph",
-    "pydantic>=2.9",
-    "langchain-core>=0.3",
-    "langchain-openai>=0.3",
-    "langchain-text-splitters>=0.3",
-    "pyyaml>=6.0",
-    "prometheus-client>=0.21",
-    "opentelemetry-api>=1.30",
-    "opentelemetry-sdk>=1.30",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.30",
+    "pydantic>=2.14.1",
+    "langchain-core>=0.3.86",
+    "langchain-openai>=0.3.35",
+    "langchain-text-splitters>=0.3.11",
+    "pyyaml>=6.0.3",
+    "prometheus-client>=0.26.0",
+    "opentelemetry-api>=1.45.1",
+    "opentelemetry-sdk>=1.45.1",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.45.1",
     # DuckDB backs the bench audit log (CD-jzkg, Phase 1 dual-write).
     # In-process, no daemon. ~30 MB wheel — fine in dev; bench is dev-only.
-    "duckdb>=1.5",
+    "duckdb>=1.5.6",
 ]
 
 [project.optional-dependencies]
 huggingface = [
-    "langchain-huggingface>=0.3",
+    "langchain-huggingface>=0.3.1",
     "sentence-transformers>=3.3",
 ]
 local-embed = [
     "sentence-transformers>=3.0",
-    "torch>=2.4",
-    "transformers>=4.45",
+    "torch>=2.14.1",
+    "transformers>=5.21.0",
     "pyarrow>=17.0",
 ]
 tokencount = [
-    "tiktoken>=0.7",
+    "tiktoken>=0.14.0",
 ]
 dev = [
-    "pytest>=8.3",
-    "ruff>=0.9",
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
     "pyarrow>=17.0",
     # Wave 1 / Step 3 (bead llm-g0b, QA-3): property-based tests over
     # extract_validated + the unified Mention/Assertion re-exports.
-    "hypothesis>=6.0",
+    "hypothesis>=6.170.12",
 ]
 
 [tool.hatch.build.targets.wheel]
